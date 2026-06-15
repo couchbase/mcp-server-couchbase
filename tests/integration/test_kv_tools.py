@@ -479,3 +479,44 @@ async def test_delete_document_fails_if_not_exists() -> None:
         assert payload is False, (
             "Delete should return False when document doesn't exist"
         )
+
+
+@pytest.mark.asyncio
+async def test_upsert_to_nonexistent_bucket_raises_error() -> None:
+    """Bug #1: KV write tools should re-raise exceptions, not swallow them.
+
+    Upsert to a bucket that doesn't exist should raise an error, not return False.
+    This exposes the bug where all KV write tools catch Exception and return False,
+    masking real failures (connection errors, auth errors, bucket not found, etc.).
+    """
+    scope = get_test_scope()
+    collection = get_test_collection()
+    doc_id = f"test_doc_{uuid.uuid4().hex[:8]}"
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": "definitely-does-not-exist-xyz123",
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": {"test": "data"},
+            },
+        )
+
+        # If the bug exists, this returns False (exception swallowed).
+        # If the bug is fixed, this should be an error response.
+        payload = extract_payload(response)
+        is_error = getattr(response, "isError", None) or getattr(
+            response, "is_error", False
+        )
+
+        # The CORRECT behavior: error response, NOT False return
+        assert is_error is True, (
+            f"Upsert to non-existent bucket must raise an error, not return False. "
+            f"Got payload={payload}, isError={is_error}. "
+            f"This exposes Bug #1: KV tools swallow exceptions."
+        )
+
+

@@ -24,10 +24,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
         with:
           version: "latest"
 
@@ -46,16 +46,23 @@ jobs:
   # Integration Tests - All Transport Modes
   # ============================================
   integration-tests:
-    name: Integration (${{ matrix.transport }} transport)
+    name: Integration (${{ matrix.transport }} / cb-${{ matrix.cb_version }} / ${{ matrix.server_binary }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         transport: ["stdio", "http"]
+        cb_version: ["8.0.0", "7.6.11"]
+        server_binary: ["source", "docker", "pypi"]
+        exclude:
+          - transport: stdio
+            server_binary: docker
+          - transport: stdio
+            server_binary: pypi
 
     services:
       couchbase:
-        image: couchbase:enterprise-8.0.0
+        image: couchbase:enterprise-${{ matrix.cb_version }}
         ports:
           - 8091:8091
           - 8092:8092
@@ -74,10 +81,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
         with:
           version: "latest"
 
@@ -197,52 +204,96 @@ jobs:
           uv run pytest tests/integration -v --tb=short
 
       # ============================================
-      # HTTP Transport Tests
+      # HTTP Transport Tests - Binary build steps
+      # ============================================
+      - name: Build Docker image
+        if: matrix.transport == 'http' && matrix.server_binary == 'docker'
+        run: docker build -t mcp-server-test:latest .
+
+      - name: Build and install PyPI wheel
+        if: matrix.transport == 'http' && matrix.server_binary == 'pypi'
+        run: |
+          uv build
+          python3 -m venv /tmp/pypi-test-venv
+          /tmp/pypi-test-venv/bin/pip install --quiet dist/couchbase_mcp_server-*.whl
+
+      # ============================================
+      # HTTP Transport Tests - Start server
       # ============================================
       - name: Start MCP server (HTTP)
         if: matrix.transport == 'http'
         env:
-          CB_CONNECTION_STRING: couchbase://localhost
-          CB_MCP_TRANSPORT: http
-          CB_MCP_HOST: 127.0.0.1
           CB_MCP_PORT: 8000
+          CB_MCP_READ_ONLY_MODE: "false"
           PYTHONPATH: src
         run: |
-          echo "Starting MCP server with HTTP transport..."
-          uv run python -m mcp_server &
-          SERVER_PID=$!
-          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+          echo "Starting MCP server (${{ matrix.server_binary }}) with HTTP transport..."
 
-          # Wait for server to be ready (check if port is listening)
+          if [[ "${{ matrix.server_binary }}" == "source" ]]; then
+            CB_CONNECTION_STRING=couchbase://localhost \
+            CB_MCP_TRANSPORT=http \
+            CB_MCP_HOST=127.0.0.1 \
+            CB_MCP_PORT=$CB_MCP_PORT \
+            CB_MCP_READ_ONLY_MODE=$CB_MCP_READ_ONLY_MODE \
+            PYTHONPATH=$PYTHONPATH \
+              uv run python -m mcp_server &
+            echo "SERVER_PID=$!" >> $GITHUB_ENV
+
+          elif [[ "${{ matrix.server_binary }}" == "docker" ]]; then
+            docker run -d --network host \
+              --name mcp-server-http \
+              -e CB_CONNECTION_STRING=couchbase://127.0.0.1 \
+              -e CB_USERNAME=$CB_USERNAME \
+              -e CB_PASSWORD=$CB_PASSWORD \
+              -e CB_MCP_TRANSPORT=http \
+              -e CB_MCP_HOST=0.0.0.0 \
+              -e CB_MCP_PORT=$CB_MCP_PORT \
+              -e CB_MCP_READ_ONLY_MODE=$CB_MCP_READ_ONLY_MODE \
+              mcp-server-test:latest
+
+          elif [[ "${{ matrix.server_binary }}" == "pypi" ]]; then
+            CB_CONNECTION_STRING=couchbase://localhost \
+            CB_MCP_TRANSPORT=http \
+            CB_MCP_HOST=127.0.0.1 \
+            CB_MCP_PORT=$CB_MCP_PORT \
+            CB_MCP_READ_ONLY_MODE=$CB_MCP_READ_ONLY_MODE \
+              /tmp/pypi-test-venv/bin/couchbase-mcp-server &
+            echo "SERVER_PID=$!" >> $GITHUB_ENV
+          fi
+
           echo "Waiting for HTTP server to be ready..."
           for i in {1..30}; do
-            if nc -z 127.0.0.1 8000 2>/dev/null; then
-              echo "HTTP server is ready"
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/mcp 2>/dev/null || echo "000")
+            if [[ -n "$code" && "$code" != "000" ]]; then
+              echo "HTTP server is ready (HTTP $code after ${i}s)"
               break
             fi
             echo "Waiting for HTTP server... ($i/30)"
             sleep 1
           done
+          # Uvicorn can accept connections before FastMCP's session manager
+          # finishes initializing — give it a moment to fully settle.
+          sleep 3
 
       - name: Run HTTP transport tests
         if: matrix.transport == 'http'
         env:
           CB_CONNECTION_STRING: couchbase://localhost
           CB_MCP_TRANSPORT: http
-          CB_MCP_HOST: 127.0.0.1
-          CB_MCP_PORT: 8000
           MCP_SERVER_URL: http://127.0.0.1:8000/mcp
           CB_MCP_TEST_SCOPE: inventory
           CB_MCP_TEST_COLLECTION: airline
           PYTHONPATH: src
         run: |
-          echo "Running tests with HTTP transport..."
+          echo "Running tests with HTTP transport (${{ matrix.server_binary }})..."
           uv run pytest tests/integration -v --tb=short
 
       - name: Stop HTTP server
         if: matrix.transport == 'http' && always()
         run: |
-          if [ -n "$SERVER_PID" ]; then
+          if [[ "${{ matrix.server_binary }}" == "docker" ]]; then
+            docker rm -f mcp-server-http 2>/dev/null || true
+          elif [ -n "${SERVER_PID:-}" ]; then
             kill $SERVER_PID 2>/dev/null || true
           fi
 

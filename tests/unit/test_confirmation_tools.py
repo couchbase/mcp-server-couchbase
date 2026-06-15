@@ -358,3 +358,83 @@ class TestWrapWithConfirmation:
         result = await wrapped(fake_ctx, "doc-123")
         assert result is True
         assert captured_document_id == "doc-123"
+
+    @pytest.mark.asyncio
+    async def test_missing_session_falls_back_to_execution(self):
+        """When the request_context has no session, the wrapper should
+        treat the client as elicitation-incapable and execute the tool
+        without prompting."""
+
+        def sample_tool(ctx: Context) -> bool:
+            return True
+
+        wrapped = wrap_with_confirmation(sample_tool)
+
+        # Build a context whose request_context has NO `session` attribute.
+        class FakeContext:
+            def __init__(self):
+                self.request_context = SimpleNamespace(
+                    lifespan_context=SimpleNamespace(),
+                    session=None,
+                )
+
+            async def elicit(self, message, schema):
+                raise AssertionError(
+                    "elicit must not be called when session is None"
+                )
+
+        result = await wrapped(ctx=FakeContext())
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_session_without_capability_check_falls_back(self):
+        """A session object that lacks check_client_capability should be
+        treated as not advertising elicitation support."""
+
+        async def sample_tool(ctx: Context) -> bool:
+            return True
+
+        wrapped = wrap_with_confirmation(sample_tool)
+
+        # Session present but missing the capability-check method.
+        class FakeContext:
+            def __init__(self):
+                self.request_context = SimpleNamespace(
+                    lifespan_context=SimpleNamespace(),
+                    session=SimpleNamespace(),  # no check_client_capability
+                )
+
+            async def elicit(self, message, schema):
+                raise AssertionError(
+                    "elicit must not be called when capability check is unavailable"
+                )
+
+        result = await wrapped(ctx=FakeContext())
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_async_tool_is_awaited(self):
+        """Async tool functions should be awaited by the wrapper, not just called."""
+        called = False
+
+        async def async_sample_tool(ctx: Context) -> bool:
+            nonlocal called
+            called = True
+            return True
+
+        wrapped = wrap_with_confirmation(async_sample_tool)
+
+        async def accept_elicit(message, schema):
+            return SimpleNamespace(
+                action="accept",
+                data=SimpleNamespace(confirm=True),
+            )
+
+        fake_ctx = self._make_context(
+            supports_elicitation=True,
+            elicit_callback=accept_elicit,
+        )
+
+        result = await wrapped(ctx=fake_ctx)
+        assert result is True
+        assert called is True

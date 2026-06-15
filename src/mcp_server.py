@@ -9,11 +9,14 @@ from contextlib import asynccontextmanager
 import click
 from fastmcp import FastMCP
 from fastmcp.tools import FunctionTool
+from pydantic import AnyHttpUrl, ValidationError
 
 # Reusable tools and utilities from the cb_mcp package
+from cb_mcp.auth import build_oauth
 from cb_mcp.tool_registration import prepare_tools_for_registration
 from cb_mcp.tools import TOOL_ANNOTATIONS
 from cb_mcp.utils import (
+    ALLOWED_OAUTH_ALGORITHMS,
     ALLOWED_TRANSPORTS,
     DEFAULT_ERROR_LOG_FILE,
     DEFAULT_HOST,
@@ -22,12 +25,14 @@ from cb_mcp.utils import (
     DEFAULT_LOG_LEVEL,
     DEFAULT_LOG_MAX_BYTES,
     DEFAULT_LOG_SINKS,
+    DEFAULT_OAUTH_ALGORITHM,
     DEFAULT_PORT,
     DEFAULT_READ_ONLY_MODE,
     DEFAULT_TRANSPORT,
     MCP_SERVER_NAME,
     NETWORK_TRANSPORTS,
     NETWORK_TRANSPORTS_SDK_MAPPING,
+    STREAMABLE_HTTP_TRANSPORT,
     AppContext,
     configure_logging,
     get_resolved_logging_config,
@@ -100,7 +105,7 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     ],
     type=click.Choice(ALLOWED_TRANSPORTS),
     default=DEFAULT_TRANSPORT,
-    help="Transport mode for the server (stdio, http or sse).",
+    help="Transport mode for the server (stdio, http or sse). Default is stdio. OAuth is only honored with http (streamable-http).",
 )
 @click.option(
     "--host",
@@ -184,6 +189,47 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     help="Number of rotated log files to keep. Applies to both file handlers. "
     "Set to 0 to disable rotation (log file grows without bound).",
 )
+@click.option(
+    "--oauth-jwks-uri",
+    envvar="CB_MCP_OAUTH_JWT_JWKS_URI",
+    default=None,
+    help="JWKS endpoint of the upstream identity provider, used to verify "
+    "bearer JWT signatures (e.g. https://auth.example.com/.well-known/jwks.json). "
+    "Required to enable OAuth (along with --oauth-issuer and --oauth-audience). "
+    "Only honored when --transport=http.",
+)
+@click.option(
+    "--oauth-issuer",
+    envvar="CB_MCP_OAUTH_JWT_ISSUER",
+    default=None,
+    help="Expected JWT 'iss' claim value. Also advertised as the authorization "
+    "server in the protected-resource metadata when --oauth-mcp-base-url is set. "
+    "Required to enable OAuth.",
+)
+@click.option(
+    "--oauth-audience",
+    envvar="CB_MCP_OAUTH_JWT_AUDIENCE",
+    default=None,
+    help="Expected JWT 'aud' claim value. Required to enable OAuth.",
+)
+@click.option(
+    "--oauth-algorithm",
+    envvar="CB_MCP_OAUTH_JWT_ALGORITHM",
+    type=click.Choice(ALLOWED_OAUTH_ALGORITHMS),
+    default=DEFAULT_OAUTH_ALGORITHM,
+    show_default=True,
+    help="JWT signing algorithm. One of RS256/384/512, ES256/384/512, PS256/384/512.",
+)
+@click.option(
+    "--oauth-mcp-base-url",
+    envvar="CB_MCP_OAUTH_MCP_BASE_URL",
+    default=None,
+    help="Public base URL of this MCP server (e.g. https://api.yourcompany.com). "
+    "When set, the server publishes RFC 9728 Protected Resource Metadata at "
+    "<base_url>/.well-known/oauth-protected-resource so PRM-aware clients can "
+    "discover the authorization server and perform DCR directly against it. "
+    "Optional — omit to run as a JWT-validating resource server only.",
+)
 @click.version_option(package_name="couchbase-mcp-server")
 @click.pass_context
 def main(
@@ -201,6 +247,11 @@ def main(
     port,
     disabled_tools,
     confirmation_required_tools,
+    oauth_jwks_uri,
+    oauth_issuer,
+    oauth_audience,
+    oauth_algorithm,
+    oauth_mcp_base_url,
     log_level,
     log_sinks,
     log_file,
@@ -223,6 +274,15 @@ def main(
         invalid_sinks=invalid_sinks,
     )
 
+    auth = _resolve_oauth(
+        transport=transport,
+        jwks_uri=oauth_jwks_uri,
+        issuer=oauth_issuer,
+        audience=oauth_audience,
+        algorithm=oauth_algorithm,
+        base_url=oauth_mcp_base_url,
+    )
+
     (
         final_tools,
         configured_confirmation_tool_names,
@@ -231,6 +291,7 @@ def main(
         read_only_mode=read_only_mode,
         disabled_tools=disabled_tools,
         confirmation_required_tools=confirmation_required_tools,
+        enforce_scopes=auth is not None,
     )
 
     # CLI-resolved configuration lives on AppContext, not in a module global.
@@ -287,7 +348,7 @@ def main(
     # Map user-friendly transport names to SDK transport names
     sdk_transport = NETWORK_TRANSPORTS_SDK_MAPPING.get(transport, transport)
 
-    mcp = FastMCP(MCP_SERVER_NAME, lifespan=app_lifespan)
+    mcp = FastMCP(MCP_SERVER_NAME, lifespan=app_lifespan, auth=auth)
 
     logger.info(
         f"Registering {len(final_tools)} tool(s) with modes (read_only_mode={read_only_mode}, "
@@ -304,6 +365,91 @@ def main(
 
     run_kwargs = {"host": host, "port": port} if transport in NETWORK_TRANSPORTS else {}
     mcp.run(transport=sdk_transport, show_banner=False, **run_kwargs)  # type: ignore
+
+
+def _resolve_oauth(
+    *,
+    transport: str,
+    jwks_uri: str | None,
+    issuer: str | None,
+    audience: str | None,
+    algorithm: str,
+    base_url: str | None,
+):
+    """Resolve CLI/env OAuth settings into a FastMCP ``AuthProvider`` or ``None``.
+
+    Contract:
+      - OAuth is honored only when ``transport`` is the streamable-http
+        transport. For any other transport (stdio, sse), OAuth settings —
+        if any are provided — are ignored with a warning, and ``None`` is
+        returned.
+      - If none of the three required JWT settings are provided, OAuth is
+        opt-in via absence: returns ``None`` silently.
+      - If the user provides some but not all of (jwks_uri, issuer,
+        audience), raise ``click.UsageError`` so misconfiguration fails
+        loud instead of silently disabling auth.
+      - ``algorithm`` always has a default and isn't part of the
+        all-or-nothing check.
+      - When ``base_url`` is set, ``issuer`` is published in PRM as an
+        authorization server and must be a valid http(s) URL. We validate
+        that here (rather than letting the Pydantic ``AnyHttpUrl`` coercion
+        inside ``build_oauth`` raise a raw traceback) so the user gets a
+        clear ``click.UsageError``. Token-only mode does not require a URL
+        issuer, matching ``JWTVerifier``'s plain-string ``iss`` handling.
+    """
+    jwt_fields = {
+        "--oauth-jwks-uri / CB_MCP_OAUTH_JWT_JWKS_URI": jwks_uri,
+        "--oauth-issuer / CB_MCP_OAUTH_JWT_ISSUER": issuer,
+        "--oauth-audience / CB_MCP_OAUTH_JWT_AUDIENCE": audience,
+    }
+    provided = {k: v for k, v in jwt_fields.items() if v}
+    any_provided = bool(provided)
+    any_oauth_setting = any_provided or bool(base_url)
+
+    if transport != STREAMABLE_HTTP_TRANSPORT:
+        if any_oauth_setting:
+            logger.warning(
+                "OAuth settings provided but transport=%s; OAuth is only honored "
+                "for streamable-http (--transport=http). Ignoring OAuth config.",
+                transport,
+            )
+        return None
+
+    if not any_provided:
+        if base_url:
+            logger.warning(
+                "CB_MCP_OAUTH_MCP_BASE_URL set without any JWT settings; "
+                "ignoring (PRM publication requires a configured token verifier)."
+            )
+        logger.info("OAuth disabled (no CB_MCP_OAUTH_JWT_* settings provided).")
+        return None
+
+    if len(provided) != len(jwt_fields):
+        missing = sorted(set(jwt_fields) - set(provided))
+        raise click.UsageError(
+            "Incomplete OAuth configuration. To enable OAuth, set all of: "
+            + ", ".join(jwt_fields)
+            + f". Missing: {missing}."
+        )
+
+    if base_url:
+        try:
+            AnyHttpUrl(issuer)
+        except ValidationError as e:
+            raise click.UsageError(
+                f"--oauth-issuer / CB_MCP_OAUTH_JWT_ISSUER must be a valid "
+                f"http(s) URL when --oauth-mcp-base-url is set, because the "
+                f"issuer is published in Protected Resource Metadata as an "
+                f"authorization server. Got: {issuer!r}."
+            ) from e
+
+    return build_oauth(
+        jwks_uri=jwks_uri,
+        issuer=issuer,
+        audience=audience,
+        algorithm=algorithm,
+        base_url=base_url,
+    )
 
 
 if __name__ == "__main__":

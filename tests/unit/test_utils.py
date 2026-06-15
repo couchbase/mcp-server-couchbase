@@ -11,6 +11,9 @@ Tests for:
 
 from __future__ import annotations
 
+import threading
+
+import httpx
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -36,7 +39,9 @@ from cb_mcp.utils.index_utils import (
     _build_query_params,
     _determine_ssl_verification,
     _extract_hosts_from_connection_string,
+    _get_capella_root_ca_path,
     clean_index_definition,
+    fetch_indexes_from_rest_api,
     parse_major_version,
     process_index_data_from_query,
     process_index_data_from_rest_api,
@@ -964,6 +969,64 @@ class TestContextModule:
         # Cache stayed empty so a subsequent attempt can retry.
         assert provider._cluster is None
 
+    def test_static_cluster_provider_coalesces_concurrent_first_calls(self) -> None:
+        """The threading.Lock in StaticClusterProvider must coalesce concurrent
+        first-call attempts so we don't open multiple cluster connections when
+        several tool handlers race to be the first caller.
+        """
+        mock_cluster = MagicMock()
+        mock_settings = {
+            "connection_string": "couchbase://localhost",
+            "username": "admin",
+            "password": "password",
+        }
+
+        # Events let us hold the first connect attempt inside the lock so
+        # the other threads actually contend on it.
+        connect_started = threading.Event()
+        connect_allowed = threading.Event()
+
+        def slow_connect(*args, **kwargs):
+            connect_started.set()
+            # Block until the test releases us — guarantees that other
+            # threads queue up behind the lock during this window.
+            connect_allowed.wait(timeout=2.0)
+            return mock_cluster
+
+        with patch(
+            "providers.static.connect_to_couchbase_cluster",
+            side_effect=slow_connect,
+        ) as mock_connect:
+            provider = StaticClusterProvider(settings=mock_settings)
+
+            results: list = []
+            results_lock = threading.Lock()
+
+            def worker():
+                cluster = provider.get_cluster(MagicMock())
+                with results_lock:
+                    results.append(cluster)
+
+            threads = [threading.Thread(target=worker) for _ in range(5)]
+            for t in threads:
+                t.start()
+
+            # Wait for the first thread to enter slow_connect, then release.
+            assert connect_started.wait(timeout=2.0), (
+                "no thread reached the connect callback"
+            )
+            connect_allowed.set()
+
+            for t in threads:
+                t.join(timeout=5.0)
+
+        # Every thread saw the same cluster reference.
+        assert len(results) == 5
+        assert all(r is mock_cluster for r in results)
+        # The crucial assertion: the lock coalesced the racers into one
+        # actual connection attempt — without it this would be 5.
+        mock_connect.assert_called_once()
+
     def test_static_cluster_provider_close_releases_cluster(self) -> None:
         """close() calls cluster.close() and clears the cache."""
         mock_cluster = MagicMock()
@@ -1253,3 +1316,314 @@ class TestListIndexesVersionRouting:
         mock_rest.assert_called_once()
         assert len(result) == 1
         assert result[0]["name"] == "idx1"
+
+
+class TestExtractHostsFallback:
+    """_extract_hosts_from_connection_string fallback when urlparse can't
+    populate netloc (e.g., scheme-less or oddly formatted inputs)."""
+
+    def test_bare_host_no_scheme(self) -> None:
+        """A bare host string with no scheme has no netloc; the fallback
+        path should still return the host."""
+        # urlparse treats "host.example.com" as a path, not a netloc.
+        hosts = _extract_hosts_from_connection_string("host.example.com")
+        assert hosts == ["host.example.com"]
+
+    def test_bare_host_with_port_no_scheme(self) -> None:
+        """Bare host:port (no scheme) should still strip the port."""
+        hosts = _extract_hosts_from_connection_string("host.example.com:8091")
+        assert hosts == ["host.example.com"]
+
+    def test_bare_multiple_hosts_no_scheme(self) -> None:
+        """Comma-separated bare hosts should be split apart."""
+        hosts = _extract_hosts_from_connection_string("h1,h2,h3")
+        assert hosts == ["h1", "h2", "h3"]
+
+
+class TestDetermineSSLCapella:
+    """_determine_ssl_verification Capella branch."""
+
+    def test_capella_returns_bundled_ca_when_present(self) -> None:
+        """For *.cloud.couchbase.com hosts, the Capella CA bundle should
+        be returned when the file is present on disk."""
+        capella_conn = "couchbases://cb.abc123.cloud.couchbase.com"
+
+        with (
+            patch(
+                "cb_mcp.utils.index_utils._get_capella_root_ca_path",
+                return_value="/fake/capella_root_ca.pem",
+            ),
+            patch(
+                "cb_mcp.utils.index_utils.os.path.exists",
+                return_value=True,
+            ),
+        ):
+            result = _determine_ssl_verification(capella_conn, None)
+
+        assert result == "/fake/capella_root_ca.pem"
+
+    def test_capella_falls_back_to_system_bundle_when_missing(self) -> None:
+        """If the bundled Capella CA cannot be located on disk, fall back
+        to the system CA bundle (verify=True) so connections still work."""
+        capella_conn = "couchbases://cb.abc123.cloud.couchbase.com"
+
+        with (
+            patch(
+                "cb_mcp.utils.index_utils._get_capella_root_ca_path",
+                return_value="/missing/capella_root_ca.pem",
+            ),
+            patch(
+                "cb_mcp.utils.index_utils.os.path.exists",
+                return_value=False,
+            ),
+        ):
+            result = _determine_ssl_verification(capella_conn, None)
+
+        assert result is True
+
+    def test_capella_ignores_user_ca_path(self) -> None:
+        """A Capella host should pick the bundled Capella CA over a
+        user-supplied CA path — Capella certs are pinned."""
+        capella_conn = "couchbases://cb.abc123.cloud.couchbase.com"
+
+        with (
+            patch(
+                "cb_mcp.utils.index_utils._get_capella_root_ca_path",
+                return_value="/fake/capella_root_ca.pem",
+            ),
+            patch(
+                "cb_mcp.utils.index_utils.os.path.exists",
+                return_value=True,
+            ),
+        ):
+            result = _determine_ssl_verification(
+                capella_conn, "/user/supplied/ca.pem"
+            )
+
+        assert result == "/fake/capella_root_ca.pem"
+
+
+class TestGetCapellaRootCAPath:
+    """_get_capella_root_ca_path resource resolution."""
+
+    def test_uses_importlib_resources_when_available(self) -> None:
+        """The installed-package path uses importlib.resources.files()."""
+        fake_path = MagicMock()
+        fake_path.__str__ = lambda self: "/site-packages/cb_mcp/certs/capella_root_ca.pem"
+
+        with patch("cb_mcp.utils.index_utils.files") as mock_files:
+            mock_files.return_value.joinpath.return_value = fake_path
+            result = _get_capella_root_ca_path()
+
+        assert result == "/site-packages/cb_mcp/certs/capella_root_ca.pem"
+        mock_files.assert_called_once_with("cb_mcp.certs")
+
+    def test_falls_back_to_dev_path_when_importlib_fails(self) -> None:
+        """When importlib.resources raises, the fallback returns a path
+        derived from this module's location and logs a fallback message
+        when the file exists."""
+        with (
+            patch(
+                "cb_mcp.utils.index_utils.files",
+                side_effect=FileNotFoundError("no resource"),
+            ),
+            patch(
+                "cb_mcp.utils.index_utils.os.path.exists",
+                return_value=True,
+            ),
+        ):
+            result = _get_capella_root_ca_path()
+
+        # Path must end with the expected filename and the certs/ dir.
+        assert result.endswith("certs/capella_root_ca.pem")
+
+    def test_returns_fallback_path_even_when_file_missing(self) -> None:
+        """If both the resource lookup AND the fallback file are missing,
+        the fallback path is still returned (with a warning logged)."""
+        with (
+            patch(
+                "cb_mcp.utils.index_utils.files",
+                side_effect=ImportError("no module"),
+            ),
+            patch(
+                "cb_mcp.utils.index_utils.os.path.exists",
+                return_value=False,
+            ),
+        ):
+            result = _get_capella_root_ca_path()
+
+        assert result.endswith("certs/capella_root_ca.pem")
+
+
+class TestFetchIndexesFromRestApi:
+    """Unit tests for fetch_indexes_from_rest_api (mocked httpx)."""
+
+    @staticmethod
+    def _ok_response(payload: dict | None = None) -> MagicMock:
+        """Build a mock httpx.Response that mimics .raise_for_status / .json."""
+        response = MagicMock()
+        response.raise_for_status = MagicMock()
+        response.json.return_value = payload or {"status": []}
+        return response
+
+    def _patch_client(self, get_side_effect):
+        """Patch httpx.Client so .get() returns the supplied side effect."""
+        mock_client_cm = MagicMock()
+        mock_client = MagicMock()
+        mock_client.get = MagicMock(side_effect=get_side_effect)
+        mock_client_cm.__enter__.return_value = mock_client
+        mock_client_cm.__exit__.return_value = False
+        return patch(
+            "cb_mcp.utils.index_utils.httpx.Client", return_value=mock_client_cm
+        ), mock_client
+
+    def test_single_host_success(self) -> None:
+        """A single-host success path should return indexes from response.status."""
+        indexes = [{"indexName": "idx1", "bucket": "b", "definition": "CREATE..."}]
+        client_patch, mock_client = self._patch_client(
+            [self._ok_response({"status": indexes})]
+        )
+
+        with client_patch:
+            result = fetch_indexes_from_rest_api(
+                "couchbase://host1",
+                "u",
+                "p",
+            )
+
+        assert result == indexes
+        mock_client.get.assert_called_once()
+        # URL must point at HTTP (non-TLS) on the cleartext index-status port.
+        called_url = mock_client.get.call_args[0][0]
+        assert called_url == "http://host1:9102/getIndexStatus"
+
+    def test_tls_uses_https_and_secure_port(self) -> None:
+        """TLS connection strings should select https + the secure port (19102)."""
+        client_patch, mock_client = self._patch_client(
+            [self._ok_response({"status": []})]
+        )
+
+        with client_patch:
+            fetch_indexes_from_rest_api(
+                "couchbases://host1",
+                "u",
+                "p",
+            )
+
+        called_url = mock_client.get.call_args[0][0]
+        assert called_url == "https://host1:19102/getIndexStatus"
+
+    def test_filter_params_forwarded(self) -> None:
+        """Bucket/scope/collection/index filters must be sent as query params."""
+        client_patch, mock_client = self._patch_client(
+            [self._ok_response({"status": []})]
+        )
+
+        with client_patch:
+            fetch_indexes_from_rest_api(
+                "couchbase://host1",
+                "u",
+                "p",
+                bucket_name="b",
+                scope_name="s",
+                collection_name="c",
+                index_name="idx",
+            )
+
+        sent_params = mock_client.get.call_args[1]["params"]
+        assert sent_params == {
+            "bucket": "b",
+            "scope": "s",
+            "collection": "c",
+            "index": "idx",
+        }
+
+    def test_basic_auth_forwarded(self) -> None:
+        """Username/password must be forwarded as HTTP basic auth."""
+        client_patch, mock_client = self._patch_client(
+            [self._ok_response({"status": []})]
+        )
+
+        with client_patch:
+            fetch_indexes_from_rest_api(
+                "couchbase://host1",
+                "admin",
+                "secret",
+            )
+
+        assert mock_client.get.call_args[1]["auth"] == ("admin", "secret")
+
+    def test_multi_host_failover(self) -> None:
+        """If the first host fails, the second one should be tried."""
+        first_error = httpx.ConnectError("connection refused")
+        success_response = self._ok_response({"status": [{"indexName": "idx1"}]})
+
+        client_patch, mock_client = self._patch_client(
+            [first_error, success_response]
+        )
+
+        with client_patch:
+            result = fetch_indexes_from_rest_api(
+                "couchbase://host1,host2",
+                "u",
+                "p",
+            )
+
+        assert len(result) == 1
+        # Both hosts attempted in order.
+        assert mock_client.get.call_count == 2
+        urls = [call.args[0] for call in mock_client.get.call_args_list]
+        assert "host1" in urls[0]
+        assert "host2" in urls[1]
+
+    def test_all_hosts_fail_raises_runtime_error(self) -> None:
+        """When every host raises, the helper must raise RuntimeError with
+        the list of attempted hosts in the message."""
+        error = httpx.ConnectError("connection refused")
+        client_patch, _ = self._patch_client([error, error])
+
+        with client_patch, pytest.raises(RuntimeError, match="host1.*host2"):
+            fetch_indexes_from_rest_api(
+                "couchbase://host1,host2",
+                "u",
+                "p",
+            )
+
+    def test_unexpected_exception_continues_to_next_host(self) -> None:
+        """Non-HTTPError exceptions on one host should not abort failover —
+        the next host should still be tried."""
+        unexpected = ValueError("weird parser bug")
+        success = self._ok_response({"status": []})
+
+        client_patch, mock_client = self._patch_client([unexpected, success])
+
+        with client_patch:
+            result = fetch_indexes_from_rest_api(
+                "couchbase://host1,host2",
+                "u",
+                "p",
+            )
+
+        assert result == []
+        assert mock_client.get.call_count == 2
+
+    def test_http_error_status_continues_to_next_host(self) -> None:
+        """raise_for_status() failures (e.g., 500) should be treated as a
+        host failure and not stop the failover loop."""
+        bad_response = MagicMock()
+        bad_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "500", request=MagicMock(), response=MagicMock()
+        )
+        success = self._ok_response({"status": []})
+
+        client_patch, mock_client = self._patch_client([bad_response, success])
+
+        with client_patch:
+            result = fetch_indexes_from_rest_api(
+                "couchbase://host1,host2",
+                "u",
+                "p",
+            )
+
+        assert result == []
+        assert mock_client.get.call_count == 2

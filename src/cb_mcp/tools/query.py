@@ -9,10 +9,11 @@ import re
 from typing import Any
 
 from fastmcp import Context
+from fastmcp.server.dependencies import get_access_token
 from lark_sqlpp import modifies_data, modifies_structure, parse_sqlpp
 
 from ..utils.connection import connect_to_bucket
-from ..utils.constants import MCP_SERVER_NAME
+from ..utils.constants import MCP_SERVER_NAME, SCOPE_WRITE
 from ..utils.context import get_cluster_connection
 from ..utils.query_utils import (
     evaluate_query_plan,
@@ -53,12 +54,20 @@ def _is_explain_statement(query: str) -> bool:
 
 
 def run_sql_plus_plus_query(
-    ctx: Context, bucket_name: str, scope_name: str, query: str
+    ctx: Context,
+    bucket_name: str,
+    scope_name: str,
+    query: str,
+    named_parameters: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Run a SQL++ query on a scope and return the results as a list of JSON objects.
 
     The query will be run on the specified scope in the specified bucket.
     The query should use collection names directly without bucket/scope prefixes, as the scope context is automatically set.
+
+    Use ``named_parameters`` to bind values to ``$name`` placeholders in the
+    query instead of concatenating user input into the statement. This prevents
+    SQL++ injection
 
     Example:
         query = "SELECT * FROM users WHERE age > 18"
@@ -72,37 +81,53 @@ def run_sql_plus_plus_query(
     read_only_mode = app_context.read_only_mode
     read_only_query_mode = app_context.read_only_query_mode
 
-    # Block query writes if either read_only_mode OR read_only_query_mode is True
-    # READ_ONLY_MODE takes precedence and blocks all writes (KV and Query)
-    # READ_ONLY_QUERY_MODE (deprecated) only blocks query writes
-    block_query_writes = read_only_mode or read_only_query_mode
+    # SQL++ writes are blocked under any of three conditions:
+    #   1. read_only_mode is True (blanket lockdown of all writes)
+    #   2. read_only_query_mode is True (deprecated query-only lockdown)
+    #   3. The caller's JWT carries SCOPE_READ but NOT SCOPE_WRITE.
+    # Case 3 closes the gap where a token holding only couchbase-mcp:read
+    # could otherwise mutate data through SQL++ because the per-tool scope
+    # wrapper classifies SQL++ as a read tool. Without this check, the
+    # JWT scope guarantee would be weaker than the spec promises.
+    # When no token is present (stdio / OAuth disabled), `lacks_write_scope`
+    # is False so the historical config-only behavior is preserved.
+    token = get_access_token()
+    lacks_write_scope = token is not None and SCOPE_WRITE not in (token.scopes or [])
+    block_query_writes = read_only_mode or read_only_query_mode or lacks_write_scope
 
     try:
         scope = bucket.scope(scope_name)
 
         results = []
-        # If read-only mode is enabled, check if the query is a data or structure modification query
         # EXPLAIN statements are always safe to execute and should bypass write checks.
         if block_query_writes and not _is_explain_statement(query):
             parsed_query = parse_sqlpp(query)
             data_modification_query = modifies_data(parsed_query)
             structure_modification_query = modifies_structure(parsed_query)
 
-            if data_modification_query:
-                logger.error("Data modification query is not allowed in read-only mode")
-                raise ValueError(
-                    "Data modification query is not allowed in read-only mode"
-                )
-            if structure_modification_query:
-                logger.error(
-                    "Structure modification query is not allowed in read-only mode"
-                )
-                raise ValueError(
-                    "Structure modification query is not allowed in read-only mode"
-                )
+            if data_modification_query or structure_modification_query:
+                kind = "data" if data_modification_query else "structure"
+                if lacks_write_scope and not (read_only_mode or read_only_query_mode):
+                    # lacks_write_scope implies token is not None here.
+                    held_scopes = sorted(set(token.scopes or []))
+                    msg = (
+                        f"SQL++ {kind} modification requires the "
+                        f"'{SCOPE_WRITE}' scope; token scopes are {held_scopes}."
+                    )
+                    logger.warning(msg)
+                    raise PermissionError(msg)
+                msg = f"{kind.capitalize()} modification query is not allowed in read-only mode"
+                logger.error(msg)
+                raise ValueError(msg)
 
-        # Run the query if it is not a data or structure modification query
-        result = scope.query(query)
+        # Run the query if it is not a data or structure modification query.
+        # Forward named parameters only when provided so existing callers that
+        # pass none keep the exact previous behaviour.
+        result = (
+            scope.query(query, named_parameters=named_parameters)
+            if named_parameters is not None
+            else scope.query(query)
+        )
         for row in result:
             results.append(row)
         return results

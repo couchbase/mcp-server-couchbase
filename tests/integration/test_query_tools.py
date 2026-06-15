@@ -16,6 +16,7 @@ from conftest import (
     extract_payload,
     get_test_collection,
     get_test_scope,
+    is_error_response,
     require_test_bucket,
 )
 
@@ -191,3 +192,30 @@ async def test_explain_sql_plus_plus_query_with_query() -> None:
         query_context = payload.get("query_context", {})
         assert query_context.get("bucket_name") == bucket
         assert query_context.get("scope_name") == scope
+
+
+@pytest.mark.asyncio
+async def test_explain_sql_plus_plus_query_rejects_empty_query() -> None:
+    """An empty or whitespace-only query must surface a clear error response.
+
+    The input validation in explain_sql_plus_plus_query raises ValueError
+    before any work is done. This test verifies the error reaches the MCP
+    client (not just the server-side logs)
+    """
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "explain_sql_plus_plus_query",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "query": "   \n\t  ",
+            },
+        )
+
+        assert is_error_response(response), (
+            "Empty query must produce an error response, "
+            f"got payload: {extract_payload(response)}"
+        )

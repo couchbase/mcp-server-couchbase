@@ -23,6 +23,7 @@ from .connection import (
 from .constants import (
     ALLOWED_LOG_LEVELS,
     ALLOWED_LOG_SINKS,
+    ALLOWED_OAUTH_ALGORITHMS,
     ALLOWED_TRANSPORTS,
     DEFAULT_ERROR_LOG_FILE,
     DEFAULT_HOST,
@@ -32,12 +33,16 @@ from .constants import (
     DEFAULT_LOG_LEVEL,
     DEFAULT_LOG_MAX_BYTES,
     DEFAULT_LOG_SINKS,
+    DEFAULT_OAUTH_ALGORITHM,
     DEFAULT_PORT,
     DEFAULT_READ_ONLY_MODE,
     DEFAULT_TRANSPORT,
     MCP_SERVER_NAME,
     NETWORK_TRANSPORTS,
     NETWORK_TRANSPORTS_SDK_MAPPING,
+    SCOPE_READ,
+    SCOPE_WRITE,
+    STREAMABLE_HTTP_TRANSPORT,
 )
 
 # Context utilities
@@ -67,6 +72,9 @@ from .logging import (
     parse_log_level,
     parse_log_sinks,
 )
+
+# OAuth scope enforcement
+from .scope_enforcement import required_scopes_for_tool, wrap_with_scope_check
 
 # Note: Individual modules create their own hierarchical loggers using:
 # logger = logging.getLogger(f"{MCP_SERVER_NAME}.module.name")
@@ -117,4 +125,14 @@ __all__ = [
     "wrap_with_confirmation",
     # Environment diagnostics
     "log_environment_info",
+    "STREAMABLE_HTTP_TRANSPORT",
+    "SCOPE_READ",
+    "SCOPE_WRITE",
+    "ALLOWED_OAUTH_ALGORITHMS",
+    "DEFAULT_OAUTH_ALGORITHM",
+    # Elicitation
+    "wrap_with_confirmation",
+    # OAuth scope enforcement
+    "required_scopes_for_tool",
+    "wrap_with_scope_check",
 ]

@@ -1,0 +1,17 @@
+[run]
+parallel = True
+patch = subprocess
+source =
+    src
+omit =
+    */tests/*
+    */__pycache__/*
+
+[paths]
+source =
+    src
+    */site-packages
+
+[report]
+show_missing = True
+skip_covered = False

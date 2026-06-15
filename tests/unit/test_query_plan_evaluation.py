@@ -62,3 +62,36 @@ def test_extract_plan_from_explain_results_with_documented_shape() -> None:
     results = [{"plan": plan, "text": "EXPLAIN"}]
 
     assert extract_plan_from_explain_results(results) == plan
+
+
+def test_extract_plan_from_explain_results_empty_list_returns_none() -> None:
+    """Empty results list should return None rather than IndexError."""
+    assert extract_plan_from_explain_results([]) is None
+
+
+def test_extract_plan_from_explain_results_none_returns_none() -> None:
+    """None input should return None defensively."""
+    assert extract_plan_from_explain_results(None) is None
+
+
+def test_evaluate_query_plan_detects_non_covering_index() -> None:
+    """IndexScan + Fetch should be flagged as a non-covering index opportunity."""
+    plan = {
+        "#operator": "Sequence",
+        "~children": [
+            {
+                "#operator": "IndexScan3",
+                "index": "idx_users_status",
+                "keyspace": "users",
+            },
+            {"#operator": "Fetch", "keyspace": "users"},
+        ],
+    }
+
+    evaluation = evaluate_query_plan(plan)
+
+    assert evaluation["summary"] == "Plan has optimization opportunities."
+    issues = {finding["issue"] for finding in evaluation["findings"]}
+    assert "non_covering_index" in issues
+    # No primary scan present — only the non-covering finding should fire.
+    assert "primary_index_scan" not in issues

@@ -21,12 +21,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.event.workflow_run.head_branch }}
 
       - name: Wait for PyPI release to complete
-        uses: fountainhead/action-wait-for-check@v1.2.0
+        uses: fountainhead/action-wait-for-check@5a908a24814494009c4bb27c242ea38c93c593be # v1.2.0
         id: wait-for-pypi
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -127,11 +127,35 @@ jobs:
 
           echo ""
           echo "All version checks passed!"
-          echo "version=$ROOT_VERSION" >> $GITHUB_OUTPUT
+          echo "version=$ROOT_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Install MCP Publisher
+        # Pin the version (no "latest") and cryptographically verify the download
+        # against its upstream Sigstore signature before running it. The binary runs
+        # with the registry publishing (OIDC) token, so an unverified/moving artifact
+        # would be a token-exfiltration path. We verify the keyless signature was
+        # produced by modelcontextprotocol/registry's own release.yml workflow at the
+        # pinned tag (Fulcio identity + GitHub OIDC issuer), which proves provenance
+        # rather than just matching a self-derived hash -- and needs no per-version
+        # checksum maintenance. cosign exits non-zero (job fails closed) on any
+        # mismatch. To upgrade, bump MCP_PUBLISHER_VERSION only.
+        env:
+          MCP_PUBLISHER_VERSION: v1.7.9
+          MCP_PUBLISHER_ASSET: mcp-publisher_linux_amd64.tar.gz
         run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          set -euo pipefail
+          base="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          curl -fsSL -o "$MCP_PUBLISHER_ASSET" "${base}/${MCP_PUBLISHER_ASSET}"
+          curl -fsSL -o "${MCP_PUBLISHER_ASSET}.sigstore.json" "${base}/${MCP_PUBLISHER_ASSET}.sigstore.json"
+          cosign verify-blob \
+            --bundle "${MCP_PUBLISHER_ASSET}.sigstore.json" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            "$MCP_PUBLISHER_ASSET"
+          tar xzf "$MCP_PUBLISHER_ASSET" mcp-publisher
 
       - name: Login to MCP Registry
         run: ./mcp-publisher login github-oidc

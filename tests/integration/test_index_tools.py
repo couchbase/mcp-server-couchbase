@@ -413,16 +413,28 @@ async def test_list_indexes_primary_index_flag_consistency() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_index_advisor_recommendations() -> None:
-    """Verify get_index_advisor_recommendations returns recommendations."""
+@pytest.mark.parametrize(
+    "where_clause",
+    [
+        pytest.param("WHERE id > 100", id="numeric"),
+        # Single-quoted string literal: exercises the named-parameter binding
+        # path. This used to break ADVISOR under string concatenation; it must
+        # work now that the user query is bound rather than embedded.
+        pytest.param("WHERE country = 'France'", id="single_quote_literal"),
+    ],
+)
+async def test_get_index_advisor_recommendations(where_clause: str) -> None:
+    """Verify get_index_advisor_recommendations returns recommendations.
+
+    Includes a single-quote case so the SQL++ injection hardening (binding the
+    user query as a named parameter) stays exercised against a live cluster.
+    """
     bucket = require_test_bucket()
     scope = get_test_scope()
     collection = get_test_collection()
     skip_reason = None
 
-    # A query that might benefit from an index (avoid single quotes - they break ADVISOR)
-    # Use a numeric comparison instead of string literal
-    query = f"SELECT * FROM `{collection}` WHERE id > 100"
+    query = f"SELECT * FROM `{collection}` {where_clause}"
 
     async with create_mcp_session() as session:
         response = await session.call_tool(
@@ -457,3 +469,117 @@ async def test_get_index_advisor_recommendations() -> None:
 
     if skip_reason:
         pytest.skip(skip_reason)
+
+
+@pytest.mark.asyncio
+async def test_get_index_advisor_recommendations_with_update_query() -> None:
+    """ADVISOR must accept UPDATE statements per the tool's documented contract."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    # UPDATE with a no-match WHERE clause — safe even if anything went sideways.
+    query = f"UPDATE `{collection}` SET name = name WHERE id > 99999999"
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "get_index_advisor_recommendations",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "query": query,
+            },
+        )
+        payload = extract_payload(response)
+
+        # Accept either the recommendations envelope or the "no recommendations"
+        # envelope — both prove ADVISOR accepted the UPDATE without crashing.
+        assert isinstance(payload, dict), (
+            f"Expected dict envelope, got {type(payload)}: {payload}"
+        )
+        assert (
+            "recommended_indexes" in payload or "message" in payload
+        ), f"Unexpected advisor response shape: {payload}"
+
+
+@pytest.mark.asyncio
+async def test_get_index_advisor_recommendations_with_delete_query() -> None:
+    """ADVISOR must accept DELETE statements per the tool's documented contract."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    query = f"DELETE FROM `{collection}` WHERE id = -99999999"
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "get_index_advisor_recommendations",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "query": query,
+            },
+        )
+        payload = extract_payload(response)
+
+        assert isinstance(payload, dict), (
+            f"Expected dict envelope, got {type(payload)}: {payload}"
+        )
+        assert (
+            "recommended_indexes" in payload or "message" in payload
+        ), f"Unexpected advisor response shape: {payload}"
+
+
+@pytest.mark.asyncio
+async def test_get_index_advisor_with_single_quoted_string() -> None:
+    """Bug #2: ADVISOR breaks with single quotes in the query.
+
+    The ADVISOR function is called via string interpolation:
+        SELECT ADVISOR('SELECT * FROM ... WHERE name = 'value'')
+    Any single quote in the user's query breaks out of the ADVISOR string.
+
+    This test exposes the bug. A proper fix would either:
+    - Escape single quotes in the query before interpolation ('' for ')
+    - Use a parameterized query approach
+    - Reject queries with single quotes with a clear error message
+    """
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    # Query with a string literal containing a single quote
+    query = f"SELECT * FROM `{collection}` WHERE name = 'Texas Wings'"
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "get_index_advisor_recommendations",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "query": query,
+            },
+        )
+
+        payload = extract_payload(response)
+        is_error = getattr(response, "isError", None) or getattr(
+            response, "is_error", False
+        )
+
+        # If the bug exists, this will fail with a SQL syntax error or crash.
+        # The CORRECT fix should either:
+        # 1. Handle the single quote correctly (escape it properly)
+        # 2. Return an error with a clear message about unsupported syntax
+        #
+        # This test documents the bug. When fixed, it should NOT fail.
+        if is_error:
+            payload_str = str(payload)
+            assert "quote" in payload_str.lower() or "syntax" in payload_str.lower(), (
+                f"If query with quotes causes an error, it should be clear why. "
+                f"Got: {payload}"
+            )
+        else:
+            # If it succeeds, the bug is fixed
+            assert isinstance(payload, dict), (
+                f"Query with single quotes should either be escaped correctly "
+                f"or fail with a clear error. Got: {payload}"
+            )

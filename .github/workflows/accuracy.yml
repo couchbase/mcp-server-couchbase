@@ -64,10 +64,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
         with:
           version: "latest"
 
@@ -160,14 +160,32 @@ jobs:
       #   3. else "gh-run-<run_number>" as a fallback
       # Exported as CB_ACCURACY_RUN_ID so the next step inherits it directly.
       - name: Resolve accuracy run id
+        env:
+          INPUT_RUN_ID: ${{ inputs.run_id }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
-          if [ -n "${{ inputs.run_id }}" ]; then
-            RUN_ID="${{ inputs.run_id }}"
-          elif [ "${{ github.ref_type }}" = "tag" ]; then
-            RUN_ID="release-${{ github.ref_name }}"
+          set -euo pipefail
+          if [ -n "$INPUT_RUN_ID" ]; then
+            RUN_ID="$INPUT_RUN_ID"
+          elif [ "$REF_TYPE" = "tag" ]; then
+            RUN_ID="release-$REF_NAME"
           else
-            RUN_ID="gh-run-${{ github.run_number }}"
+            RUN_ID="gh-run-$RUN_NUMBER"
           fi
+
+          # RUN_ID is written to $GITHUB_ENV and later used as a results
+          # filename/identifier. workflow_dispatch inputs are untrusted and can
+          # contain newlines/control chars, which would allow env-file injection
+          # (smuggling extra "KEY=value" lines into $GITHUB_ENV) and malformed
+          # filenames. Restrict to a safe character set and fail closed. The
+          # bash =~ test anchors the whole string, so a newline causes a reject.
+          if [[ ! "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::Invalid run id. Allowed characters: A-Z a-z 0-9 . _ -"
+            exit 1
+          fi
+
           echo "CB_ACCURACY_RUN_ID=$RUN_ID" >> "$GITHUB_ENV"
           echo "Using accuracy run id: $RUN_ID"
 
@@ -185,6 +203,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           CB_ACCURACY_OPENAI_MODEL: ${{ inputs.model }}
           CB_ACCURACY_RESULTS_DIR: ${{ github.workspace }}/accuracy-results
+          CB_ACCURACY_TEST_FILTER: ${{ inputs.test_filter }}
         run: |
           if [ -z "${OPENAI_API_KEY}" ]; then
             echo "::error::OPENAI_API_KEY secret is not set. Add it under repo Settings → Secrets."
@@ -192,15 +211,15 @@ jobs:
           fi
           mkdir -p "$CB_ACCURACY_RESULTS_DIR"
 
-          if [ -n "${{ inputs.test_filter }}" ]; then
-            uv run pytest tests/accuracy -m accuracy -v --tb=short -k "${{ inputs.test_filter }}"
+          if [ -n "$CB_ACCURACY_TEST_FILTER" ]; then
+            uv run pytest tests/accuracy -m accuracy -v --tb=short -k "$CB_ACCURACY_TEST_FILTER"
           else
             uv run pytest tests/accuracy -m accuracy -v --tb=short
           fi
 
       - name: Upload accuracy run JSON
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: accuracy-results-${{ github.run_number }}
           path: accuracy-results/

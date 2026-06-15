@@ -19,6 +19,7 @@ from conftest import (
     ensure_list,
     extract_payload,
     get_test_scope,
+    is_error_response,
     require_test_bucket,
 )
 
@@ -139,3 +140,39 @@ async def test_get_cluster_health_and_services_with_bucket() -> None:
         assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
         assert payload.get("status") == "success", f"Expected success status: {payload}"
         assert "data" in payload, "Expected 'data' key with health info"
+
+
+
+@pytest.mark.asyncio
+async def test_get_scopes_in_nonexistent_bucket_returns_error() -> None:
+    """A bucket that doesn't exist must surface a clean error response."""
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "get_scopes_in_bucket",
+            arguments={"bucket_name": "definitely-does-not-exist-xyz123"},
+        )
+
+        assert is_error_response(response), (
+            "Non-existent bucket must produce an error response, "
+            f"got payload: {extract_payload(response)}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_collections_in_nonexistent_scope_returns_empty() -> None:
+    """A scope that doesn't exist returns an empty list, NOT an error."""
+    bucket = require_test_bucket()
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "get_collections_in_scope",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": "no-such-scope-xyz123",
+            },
+        )
+        payload = ensure_list(extract_payload(response))
+
+        assert payload == [], (
+            f"Expected empty list for non-existent scope, got: {payload}"
+        )
