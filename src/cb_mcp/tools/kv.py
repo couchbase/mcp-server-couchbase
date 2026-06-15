@@ -38,7 +38,7 @@ def get_document_by_id(
         result = collection.get(document_id)
         return result.content_as[dict]
     except Exception as e:
-        logger.error(f"Error getting document {document_id}: {e}")
+        logger.error(f"Error getting document: {e}")
         raise
 
 
@@ -63,10 +63,10 @@ def upsert_document_by_id(
     try:
         collection = bucket.scope(scope_name).collection(collection_name)
         collection.upsert(document_id, document_content)
-        logger.info(f"Successfully upserted document {document_id}")
+        logger.info("Successfully upserted document")
         return True
     except Exception as e:
-        logger.error(f"Error upserting document {document_id}: {e}")
+        logger.error(f"Error upserting document: {e}")
         return False
 
 
@@ -84,10 +84,10 @@ def delete_document_by_id(
     try:
         collection = bucket.scope(scope_name).collection(collection_name)
         collection.remove(document_id)
-        logger.info(f"Successfully deleted document {document_id}")
+        logger.info("Successfully deleted document")
         return True
     except Exception as e:
-        logger.error(f"Error deleting document {document_id}: {e}")
+        logger.error(f"Error deleting document: {e}")
         return False
 
 
@@ -110,10 +110,10 @@ def insert_document_by_id(
     try:
         collection = bucket.scope(scope_name).collection(collection_name)
         collection.insert(document_id, document_content)
-        logger.info(f"Successfully inserted document {document_id}")
+        logger.info("Successfully inserted document")
         return True
     except Exception as e:
-        logger.error(f"Error inserting document {document_id}: {e}")
+        logger.error(f"Error inserting document: {e}")
         return False
 
 
@@ -136,8 +136,8 @@ def replace_document_by_id(
     try:
         collection = bucket.scope(scope_name).collection(collection_name)
         collection.replace(document_id, document_content)
-        logger.info(f"Successfully replaced document {document_id}")
+        logger.info("Successfully replaced document")
         return True
     except Exception as e:
-        logger.error(f"Error replacing document {document_id}: {e}")
+        logger.error(f"Error replacing document: {e}")
         return False
