@@ -34,9 +34,9 @@ class TestValidateLogLevel:
 
     def test_invalid_level_returns_default_plus_original_token(self):
         resolved, invalid = validate_log_level(None, None, "BOGUS")  # type: ignore[arg-type]
-        # DEFAULT_LOG_LEVEL is stored lowercase for help-text consistency;
-        # configure_logging uppercases it before passing to logger.setLevel.
-        assert resolved == "info"
+        # Invalid input falls back to DEFAULT_LOG_LEVEL ("INFO") and returns the
+        # original token so configure_logging can surface an error record.
+        assert resolved == "INFO"
         assert invalid == "BOGUS"
 
     def test_ignores_ctx_and_param_arguments(self):

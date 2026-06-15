@@ -14,9 +14,25 @@ import asyncio
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
+import cb_mcp.utils.logging as logmod
 import mcp_server
+
+
+@pytest.fixture(autouse=True)
+def mock_sdk_configure_logging():
+    """Couchbase SDK ``configure_logging`` is one-shot per process.
+
+    ``mcp_server.main`` calls it for real via ``configure_logging``; without
+    this patch the second test in the process raises
+    ``InvalidArgumentException`` ("Another logger has already been
+    initialized"). Patch the ``couchbase`` symbol as imported into our logging
+    module, matching the fixture in test_configure_logging.py.
+    """
+    with patch.object(logmod.couchbase, "configure_logging"):
+        yield
 
 
 def _capture_lifespan(args: list[str], env: dict[str, str]):
@@ -35,9 +51,7 @@ def _capture_lifespan(args: list[str], env: dict[str, str]):
 
     runner = CliRunner()
     with patch("mcp_server.FastMCP", side_effect=capture):
-        result = runner.invoke(
-            mcp_server.main, args, env=env, catch_exceptions=False
-        )
+        result = runner.invoke(mcp_server.main, args, env=env, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
     return captured["lifespan"], fake_instance
@@ -64,10 +78,7 @@ def test_command_line_flag_overrides_env_var() -> None:
 
     async def drive() -> None:
         async with lifespan_fn(fake_mcp) as app_context:
-            assert (
-                app_context.settings["connection_string"]
-                == "couchbase://from-flag"
-            )
+            assert app_context.settings["connection_string"] == "couchbase://from-flag"
 
     asyncio.run(drive())
 
@@ -85,9 +96,6 @@ def test_env_var_used_when_flag_absent() -> None:
 
     async def drive() -> None:
         async with lifespan_fn(fake_mcp) as app_context:
-            assert (
-                app_context.settings["connection_string"]
-                == "couchbase://from-env"
-            )
+            assert app_context.settings["connection_string"] == "couchbase://from-env"
 
     asyncio.run(drive())
