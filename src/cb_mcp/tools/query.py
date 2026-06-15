@@ -31,13 +31,23 @@ def get_schema_for_collection(
     """
     schema = {"collection_name": collection_name, "schema": []}
     try:
+        logger.debug(
+            f"Inferring schema for {bucket_name}.{scope_name}.{collection_name}"
+        )
         query = f"INFER `{collection_name}`"
         result = run_sql_plus_plus_query(ctx, bucket_name, scope_name, query)
         # Result is a list of list of schemas. We convert it to a list of schemas.
         if result:
             schema["schema"] = result[0]
+        logger.info(
+            f"Retrieved schema for {bucket_name}.{scope_name}.{collection_name}"
+        )
     except Exception as e:
-        logger.error(f"Error getting schema: {e}")
+        logger.error(
+            f"Error getting schema for "
+            f"{bucket_name}.{scope_name}.{collection_name}: {e}",
+            exc_info=True,
+        )
         raise
     return schema
 
@@ -97,6 +107,10 @@ def run_sql_plus_plus_query(
 
     try:
         scope = bucket.scope(scope_name)
+        logger.debug(
+            f"Executing SQL++ query in {bucket_name}.{scope_name} "
+            f"(write_blocked={block_query_writes}): {query}"
+        )
 
         results = []
         # EXPLAIN statements are always safe to execute and should bypass write checks.
@@ -130,6 +144,9 @@ def run_sql_plus_plus_query(
         )
         for row in result:
             results.append(row)
+        logger.info(
+            f"SQL++ query in {bucket_name}.{scope_name} returned {len(results)} row(s)"
+        )
         return results
     except Exception as e:
         logger.error(f"Error running query: {e!s}", exc_info=True)
@@ -183,12 +200,14 @@ def run_cluster_query(ctx: Context, query: str, **kwargs: Any) -> list[dict[str,
     results = []
 
     try:
+        logger.debug(f"Executing cluster query: {query}")
         result = cluster.query(query, **kwargs)
         for row in result:
             results.append(row)
+        logger.info(f"Cluster query returned {len(results)} row(s)")
         return results
     except Exception as e:
-        logger.error(f"Error running query: {e}")
+        logger.error(f"Error running cluster query: {e}", exc_info=True)
         raise
 
 

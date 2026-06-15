@@ -86,6 +86,7 @@ def test_cluster_connection(
             "message": "Successfully connected to Couchbase cluster",
         }
     except Exception as e:
+        logger.error(f"Connection test failed: {e}", exc_info=True)
         return {
             "status": "error",
             "cluster_connected": False,
@@ -105,21 +106,29 @@ def get_scopes_and_collections_in_bucket(
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
+        logger.debug(f"Listing scopes and collections in bucket '{bucket_name}'")
         scopes_collections = {}
         collection_manager = bucket.collections()
         scopes = collection_manager.get_all_scopes()
         for scope in scopes:
             collection_names = [c.name for c in scope.collections]
             scopes_collections[scope.name] = collection_names
+        logger.info(
+            f"Found {len(scopes_collections)} scope(s) in bucket '{bucket_name}'"
+        )
         return scopes_collections
     except Exception as e:
-        logger.error(f"Error getting scopes and collections: {e}")
+        logger.error(
+            f"Error getting scopes and collections in bucket '{bucket_name}': {e}",
+            exc_info=True,
+        )
         raise
 
 
 def get_buckets_in_cluster(ctx: Context) -> list[str]:
     """Get the names of all the accessible buckets in the cluster."""
     cluster = get_cluster_connection(ctx)
+    logger.debug("Listing all buckets in cluster")
     bucket_manager = cluster.buckets()
     buckets_with_settings = bucket_manager.get_all_buckets()
 
@@ -127,6 +136,7 @@ def get_buckets_in_cluster(ctx: Context) -> list[str]:
     for bucket in buckets_with_settings:
         buckets.append(bucket.name)
 
+    logger.info(f"Found {len(buckets)} bucket(s) in cluster")
     return buckets
 
 
@@ -135,10 +145,15 @@ def get_scopes_in_bucket(ctx: Context, bucket_name: str) -> list[str]:
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
+        logger.debug(f"Listing scopes in bucket '{bucket_name}'")
         scopes = bucket.collections().get_all_scopes()
-        return [scope.name for scope in scopes]
+        scope_names = [scope.name for scope in scopes]
+        logger.info(f"Found {len(scope_names)} scope(s) in bucket '{bucket_name}'")
+        return scope_names
     except Exception as e:
-        logger.error(f"Error getting scopes in the bucket {bucket_name}: {e}")
+        logger.error(
+            f"Error getting scopes in bucket '{bucket_name}': {e}", exc_info=True
+        )
         raise
 
 
@@ -148,11 +163,16 @@ def get_collections_in_scope(
     """Get the names of all collections in the given scope and bucket."""
 
     # Get the collections in the scope using system:all_keyspaces collection
+    logger.debug(f"Listing collections in {bucket_name}.{scope_name}")
     query = "SELECT DISTINCT(name) as collection_name FROM system:all_keyspaces where `bucket`=$bucket_name and `scope`=$scope_name"
     results = run_cluster_query(
         ctx, query, bucket_name=bucket_name, scope_name=scope_name
     )
-    return [result["collection_name"] for result in results]
+    collection_names = [result["collection_name"] for result in results]
+    logger.info(
+        f"Found {len(collection_names)} collection(s) in {bucket_name}.{scope_name}"
+    )
+    return collection_names
 
 
 def get_cluster_health_and_services(
@@ -176,20 +196,23 @@ def get_cluster_health_and_services(
 
         if bucket_name:
             # Ping services from the perspective of the bucket
+            logger.debug(f"Pinging cluster services via bucket '{bucket_name}'")
             bucket = connect_to_bucket(cluster, bucket_name)
             ping_result = bucket.ping()
             result = ping_result.as_json()
         else:
             # Ping services from the perspective of the cluster
+            logger.debug("Pinging cluster services")
             ping_result = cluster.ping()
             result = ping_result.as_json()
 
+        logger.info("Retrieved cluster health and services information")
         return {
             "status": "success",
             "data": json.loads(result),
         }
     except Exception as e:
-        logger.error(f"Error getting cluster health: {e}")
+        logger.error(f"Error getting cluster health: {e}", exc_info=True)
         return {
             "status": "error",
             "error": str(e),

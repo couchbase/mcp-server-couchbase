@@ -338,7 +338,7 @@ def main(
         try:
             yield app_context
         except Exception as e:
-            logger.error(f"Error in app lifespan: {e}")
+            logger.error(f"Error in app lifespan: {e}", exc_info=True)
             raise
         finally:
             if app_context.cluster_provider:
