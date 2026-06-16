@@ -8,6 +8,7 @@ SDK records as well.
 """
 
 import logging
+import os
 import sys
 from dataclasses import dataclass
 from logging.handlers import RotatingFileHandler
@@ -19,11 +20,16 @@ from .constants import (
     ALLOWED_LOG_LEVELS,
     ALLOWED_LOG_SINKS,
     DEFAULT_LOG_DATEFMT,
+    DEFAULT_LOG_FILE,
     DEFAULT_LOG_FORMAT,
     DEFAULT_LOG_LEVEL,
     DEFAULT_LOG_SINKS,
     MCP_SERVER_NAME,
 )
+
+# When the file sink is active, one rotating file is written per log level so
+# operators can isolate, e.g., just the errors. Ordered low → high.
+_PER_LEVEL_FILE_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
 # Sentinel above CRITICAL used to disable the MCP logger when --log-level=OFF.
 # ``Logger.isEnabledFor(level)`` short-circuits before a LogRecord is built when
@@ -42,16 +48,15 @@ class ResolvedLoggingConfig:
     consumer keeping its own view in sync with the CLI flags.
 
     The fields reflect what's *active*: ``sinks`` lists only the destinations
-    that received handler attachments, and ``log_file`` / ``error_log_file``
-    are ``None`` whenever the file sink isn't part of that set. Under
-    ``level="OFF"`` the function attaches no handlers, so ``sinks`` is empty
-    and both paths are ``None``.
+    that received handler attachments, and ``log_files`` maps each active log
+    level to the file it is written to (``{"INFO": "mcp_server.info.log", ...}``).
+    ``log_files`` is ``None`` whenever the file sink isn't part of that set —
+    including under ``level="OFF"``, where no handlers are attached at all.
     """
 
     level: str
     sinks: tuple[str, ...]
-    log_file: str | None
-    error_log_file: str | None
+    log_files: dict[str, str] | None
     log_max_bytes: int
     log_backup_count: int
 
@@ -60,8 +65,7 @@ class ResolvedLoggingConfig:
         return {
             "level": self.level,
             "sinks": list(self.sinks),
-            "log_file": self.log_file,
-            "error_log_file": self.error_log_file,
+            "log_files": dict(self.log_files) if self.log_files else None,
             "max_bytes": self.log_max_bytes,
             "backup_count": self.log_backup_count,
         }
@@ -80,14 +84,85 @@ def get_resolved_logging_config() -> ResolvedLoggingConfig | None:
     return _resolved_config
 
 
-def _below_error(record: logging.LogRecord) -> bool:
-    """Filter predicate: keep records strictly below ERROR.
+def _exact_level_filter(levelno: int):
+    """Return a filter that keeps only records whose level is exactly ``levelno``.
 
-    Used on the main file handler when an error file is also configured: the
-    main file captures DEBUG/INFO/WARNING, the error file captures
-    ERROR/CRITICAL, with no overlap.
+    One file per level means each handler must accept just its own level, so a
+    WARNING never lands in the INFO file and vice versa.
     """
-    return record.levelno < logging.ERROR
+
+    def _filter(record: logging.LogRecord) -> bool:
+        return record.levelno == levelno
+
+    return _filter
+
+
+def _per_level_path(base_path: str, level_name: str) -> str:
+    """Insert the level name before the extension of ``base_path``.
+
+    ``mcp_server.log`` + ``INFO`` -> ``mcp_server.info.log``.
+    """
+    root, ext = os.path.splitext(base_path)
+    return f"{root}.{level_name.lower()}{ext}"
+
+
+def _attach_per_level_file_handlers(
+    logger: logging.Logger,
+    formatter: logging.Formatter,
+    log_file: str,
+    log_max_bytes: int,
+    log_backup_count: int,
+) -> tuple[dict[str, str], list[str]]:
+    """Attach one rotating file handler per active level to ``logger``.
+
+    All per-level files derive from the single ``log_file`` base path by
+    inserting the level name (``mcp_server.log`` -> ``mcp_server.info.log``,
+    ``mcp_server.error.log``, ...). Returns ``(attached, errors)`` where
+    ``attached`` maps each level that got a handler to its file path, and
+    ``errors`` collects human-readable problems (a missing base path that fell
+    back to the default, or a file that couldn't be opened) for the caller to
+    log once all handlers are wired and visible.
+
+    A missing ``log_file`` falls back to the package default rather than
+    dropping file logging entirely. Only levels at or above the logger's
+    threshold get a file — opening an empty debug file under an INFO threshold
+    would just be noise.
+    """
+    errors: list[str] = []
+    if not log_file:
+        errors.append(
+            "File logging enabled but no --log-file/CB_MCP_LOG_FILE configured; "
+            f"falling back to default '{DEFAULT_LOG_FILE}'."
+        )
+        log_file = DEFAULT_LOG_FILE
+
+    attached: dict[str, str] = {}
+    for lvl_name in _PER_LEVEL_FILE_LEVELS:
+        lvl_no = logging.getLevelName(lvl_name)
+        if lvl_no < logger.level:
+            continue
+        path = _per_level_path(log_file, lvl_name)
+        try:
+            handler = RotatingFileHandler(
+                path,
+                maxBytes=log_max_bytes,
+                backupCount=log_backup_count,
+                encoding="utf-8",
+            )
+        except OSError as e:
+            # e.g. no write permission for the path / its directory.
+            errors.append(f"Cannot write {lvl_name} log file '{path}': {e}")
+            continue
+        handler.setFormatter(formatter)
+        if lvl_name == "ERROR":
+            # The ERROR file is the catch-all for ERROR and above, so CRITICAL
+            # records land here too rather than in a separate file.
+            handler.setLevel(logging.ERROR)
+        else:
+            handler.addFilter(_exact_level_filter(lvl_no))
+        logger.addHandler(handler)
+        attached[lvl_name] = path
+    return attached, errors
 
 
 def parse_log_level(value: str) -> tuple[str, str | None]:
@@ -137,7 +212,6 @@ def configure_logging(
     level: str,
     sinks: set[str],
     log_file: str,
-    error_log_file: str,
     log_max_bytes: int,
     log_backup_count: int,
     invalid_sinks: list[str] | None = None,
@@ -145,12 +219,22 @@ def configure_logging(
 ) -> None:
     """Configure the root MCP logger and the Couchbase SDK logs.
 
-    The ``sinks`` set is authoritative: ``"stderr"`` attaches a stderr
-    handler; ``"file"`` always attaches **two** rotating file handlers — a
-    main log (DEBUG/INFO/WARNING) and an error log (ERROR/CRITICAL) — with
-    no overlap. ``log_file`` and ``error_log_file`` are required; the CLI
-    layer supplies ``DEFAULT_LOG_FILE`` / ``DEFAULT_ERROR_LOG_FILE`` when
-    the user omits the flags, so callers always pass concrete paths here.
+    The ``sinks`` set is authoritative: ``"stderr"`` attaches a stderr handler.
+    ``"file"`` attaches **one rotating file handler per active log level**
+    (DEBUG/INFO/WARNING/ERROR at or above the configured threshold). Every
+    per-level file derives from the single ``log_file`` base path by inserting
+    the level name (``mcp_server.log`` -> ``mcp_server.info.log``,
+    ``mcp_server.error.log``, ...). The DEBUG/INFO/WARNING files are filtered to
+    exactly their level; the ERROR file captures ERROR **and** CRITICAL (there
+    is no separate CRITICAL file).
+
+    File-sink edge cases:
+      * If ``"file"`` is requested but ``log_file`` is missing, an error is
+        logged and the default base path is used instead.
+      * If a level's file can't be opened (e.g. no write permission), an error
+        is logged for that path and the other levels still attach.
+      * If the file sink is *not* requested, a warning is logged noting that
+        support log files are not being generated.
 
     Setting ``level="OFF"`` suppresses output regardless of sinks.
     """
@@ -183,8 +267,7 @@ def configure_logging(
         _resolved_config = ResolvedLoggingConfig(
             level=level_name,
             sinks=(),
-            log_file=None,
-            error_log_file=None,
+            log_files=None,
             log_max_bytes=log_max_bytes,
             log_backup_count=log_backup_count,
         )
@@ -195,36 +278,45 @@ def configure_logging(
     formatter = logging.Formatter(DEFAULT_LOG_FORMAT, datefmt=DEFAULT_LOG_DATEFMT)
 
     effective_sinks = set(sinks)
+    file_sink_active = "file" in effective_sinks
 
     if "stderr" in effective_sinks:
         stderr_handler = logging.StreamHandler(sys.stderr)
         stderr_handler.setFormatter(formatter)
         logger.addHandler(stderr_handler)
 
-    # File logging is always a two-file split when enabled. The caller (CLI
-    # or direct) is responsible for providing both paths; Click defaults
-    # supply DEFAULT_LOG_FILE / DEFAULT_ERROR_LOG_FILE when the flags are
-    # omitted, so we don't need an in-function fallback.
-    if "file" in effective_sinks:
-        file_handler = RotatingFileHandler(
-            log_file,
-            maxBytes=log_max_bytes,
-            backupCount=log_backup_count,
-            encoding="utf-8",
-        )
-        file_handler.setFormatter(formatter)
-        file_handler.addFilter(_below_error)
-        logger.addHandler(file_handler)
+    # Deferred so these surface after handlers (incl. stderr) are wired and are
+    # therefore actually visible.
+    file_warnings: list[str] = []
+    file_errors: list[str] = []
+    attached_files: dict[str, str] = {}
 
-        error_handler = RotatingFileHandler(
-            error_log_file,
-            maxBytes=log_max_bytes,
-            backupCount=log_backup_count,
-            encoding="utf-8",
+    if file_sink_active:
+        attached_files, file_errors = _attach_per_level_file_handlers(
+            logger,
+            formatter,
+            log_file,
+            log_max_bytes,
+            log_backup_count,
         )
-        error_handler.setFormatter(formatter)
-        error_handler.setLevel(logging.ERROR)
-        logger.addHandler(error_handler)
+        # Make sure file errors are actually visible. ERROR-level records are
+        # only captured by a stderr handler or the ERROR file; if neither is
+        # present (no stderr sink AND the ERROR file itself failed to attach),
+        # the "Cannot write" records would be silently dropped. Add a stderr
+        # handler in that case so the failure is reported clearly — this covers
+        # both total failure and partial failure (only the ERROR file failed).
+        no_error_handler = "ERROR" not in attached_files
+        if file_errors and no_error_handler and "stderr" not in effective_sinks:
+            fallback_handler = logging.StreamHandler(sys.stderr)
+            fallback_handler.setFormatter(formatter)
+            logger.addHandler(fallback_handler)
+    else:
+        # Requirement: warn when file logging isn't explicitly enabled so the
+        # operator knows support logs aren't being persisted.
+        file_warnings.append(
+            "File logging is disabled. Log files required for product support "
+            "are not being generated."
+        )
 
     couchbase.configure_logging(MCP_SERVER_NAME, logger.level)
 
@@ -246,17 +338,19 @@ def configure_logging(
             ",".join(sorted(effective_sinks)),
         )
 
-    # Show file paths in the summary only when the file sink is active; the
-    # values are populated by Click defaults regardless, but printing them
-    # for a stderr-only run would falsely suggest files are being written.
-    file_sink_active = "file" in effective_sinks
+    for message in file_errors:
+        logger.error(message)
+    for message in file_warnings:
+        logger.warning(message)
+
+    # Show the per-level files in the summary only when the file sink is active;
+    # for a stderr-only run printing paths would falsely suggest files exist.
     logger.info(
-        "Logging configured: level=%s, sinks=%s, log_file=%s, error_log_file=%s, "
+        "Logging configured: level=%s, sinks=%s, log_files=%s, "
         "max_bytes=%d, backup_count=%d",
         level_name,
         ",".join(sorted(effective_sinks)),
-        log_file if file_sink_active else "-",
-        error_log_file if file_sink_active else "-",
+        attached_files if file_sink_active else "-",
         log_max_bytes,
         log_backup_count,
     )
@@ -266,8 +360,9 @@ def configure_logging(
     _resolved_config = ResolvedLoggingConfig(
         level=level_name,
         sinks=tuple(sorted(effective_sinks)),
-        log_file=log_file if file_sink_active else None,
-        error_log_file=error_log_file if file_sink_active else None,
+        log_files=dict(attached_files)
+        if (file_sink_active and attached_files)
+        else None,
         log_max_bytes=log_max_bytes,
         log_backup_count=log_backup_count,
     )

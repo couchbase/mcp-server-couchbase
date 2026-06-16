@@ -416,6 +416,15 @@ async def create_logging_test_session(
     if env_overrides:
         env.update(env_overrides)
 
+    # Ensure the subprocess imports the current source, not a stale
+    # site-packages install that may lack new CLI flags.
+    src_path = str(PROJECT_ROOT.parent / "src")
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    if existing_pythonpath:
+        env["PYTHONPATH"] = f"{src_path}{os.pathsep}{existing_pythonpath}"
+    else:
+        env["PYTHONPATH"] = src_path
+
     params = StdioServerParameters(
         command=sys.executable,
         args=["-m", "mcp_server", *(extra_args or [])],

@@ -16,57 +16,66 @@ CI without secrets.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from conftest import create_logging_test_session, extract_payload
 
 
 @pytest.mark.asyncio
-async def test_default_file_sinks_create_both_files(tmp_path) -> None:
-    """``--log-sinks file`` with no paths creates the two default files in CWD."""
+async def test_default_file_sinks_create_per_level_files(tmp_path) -> None:
+    """``--log-sinks file`` with no path creates per-level files in CWD.
+
+    At the default INFO level the active levels are INFO/WARNING/ERROR, each in
+    its own ``mcp_server.<level>.log`` derived from the default ``--log-file``
+    base (``mcp_server.log`` -> ``mcp_server.error.log`` etc.).
+    """
     async with create_logging_test_session(
         extra_args=["--log-sinks", "file"],
         cwd=tmp_path,
     ):
         pass
 
-    main = tmp_path / "mcp_server.log"
-    err = tmp_path / "mcp_server.error.log"
-    assert main.exists(), "default main log not created in CWD"
-    assert err.exists(), "default error log not created in CWD"
-    assert "Logging configured" in main.read_text()
+    info_file = tmp_path / "mcp_server.info.log"
+    err_file = tmp_path / "mcp_server.error.log"
+    assert info_file.exists(), "default INFO log not created in CWD"
+    assert err_file.exists(), "default ERROR log not created in CWD"
+    # The startup summary is an INFO record, so it lands in the INFO file.
+    assert "Logging configured" in info_file.read_text()
+    # No combined/base file is written under the per-level model.
+    assert not (tmp_path / "mcp_server.log").exists()
 
 
 @pytest.mark.asyncio
 async def test_custom_log_file_paths_honoured(tmp_path) -> None:
-    """Explicit ``--log-file`` / ``--error-log-file`` paths are honoured verbatim."""
-    main_path = tmp_path / "subdir-main.log"
-    err_path = tmp_path / "subdir-err.log"
+    """An explicit ``--log-file`` base is honoured; all per-level files derive
+    from it (including the ERROR file)."""
+    base_path = tmp_path / "subdir-main.log"
     async with create_logging_test_session(
         extra_args=[
             "--log-sinks",
             "file",
             "--log-file",
-            str(main_path),
-            "--error-log-file",
-            str(err_path),
+            str(base_path),
         ],
     ):
         pass
 
-    assert main_path.exists()
-    assert err_path.exists()
-    # The default-named files shouldn't have been created instead.
-    assert not (tmp_path / "mcp_server.log").exists()
-    assert not (tmp_path / "mcp_server.error.log").exists()
+    # All level files derive from the base path by inserting the level name.
+    assert (tmp_path / "subdir-main.info.log").exists()
+    assert (tmp_path / "subdir-main.error.log").exists()
+    # The base path itself is never written, nor the default-named files.
+    assert not base_path.exists()
+    assert not (tmp_path / "mcp_server.info.log").exists()
 
 
 @pytest.mark.asyncio
 async def test_debug_level_writes_env_info_record(tmp_path) -> None:
-    """At DEBUG, ``log_environment_info`` writes a JSON record to the log file."""
-    main_path = tmp_path / "main.log"
+    """At DEBUG, ``log_environment_info`` writes a JSON record to the DEBUG file."""
+    base_path = tmp_path / "main.log"
     async with create_logging_test_session(
         extra_args=[
             "--log-level",
@@ -74,14 +83,13 @@ async def test_debug_level_writes_env_info_record(tmp_path) -> None:
             "--log-sinks",
             "file",
             "--log-file",
-            str(main_path),
-            "--error-log-file",
-            str(tmp_path / "err.log"),
+            str(base_path),
         ],
     ):
         pass
 
-    content = main_path.read_text()
+    # The env-info record is emitted at DEBUG, so it lands in the DEBUG file.
+    content = (tmp_path / "main.debug.log").read_text()
     # The diagnostic record starts with "Environment | " followed by a JSON object.
     assert "Environment | " in content, "env-info DEBUG record missing from log file"
     # Extract and parse the JSON payload to confirm it's well-formed.
@@ -96,22 +104,21 @@ async def test_debug_level_writes_env_info_record(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_env_var_log_level_equivalent_to_flag(tmp_path) -> None:
     """``CB_MCP_LOG_LEVEL`` env var has the same effect as ``--log-level``."""
-    main_path = tmp_path / "main.log"
+    base_path = tmp_path / "main.log"
     async with create_logging_test_session(
         extra_args=[
             "--log-sinks",
             "file",
             "--log-file",
-            str(main_path),
-            "--error-log-file",
-            str(tmp_path / "err.log"),
+            str(base_path),
         ],
         env_overrides={"CB_MCP_LOG_LEVEL": "DEBUG"},
     ):
         pass
 
-    content = main_path.read_text()
-    # Same env-info DEBUG record indicates the env-var path resolved to DEBUG.
+    # Same env-info DEBUG record (in the DEBUG file) confirms the env-var path
+    # resolved to DEBUG.
+    content = (tmp_path / "main.debug.log").read_text()
     assert "Environment | " in content
 
 
@@ -141,29 +148,28 @@ async def test_off_level_silences_couchbase_records_on_stderr(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_append_on_restart_preserves_history(tmp_path) -> None:
-    """Two sequential server starts append to the same log file."""
-    main_path = tmp_path / "main.log"
-    err_path = tmp_path / "err.log"
+    """Two sequential server starts append to the same per-level log file."""
+    base_path = tmp_path / "main.log"
+    # The startup summary is an INFO record, so assert against the INFO file.
+    info_path = tmp_path / "main.info.log"
     args = [
         "--log-sinks",
         "file",
         "--log-file",
-        str(main_path),
-        "--error-log-file",
-        str(err_path),
+        str(base_path),
     ]
     async with create_logging_test_session(extra_args=args):
         pass
-    first_size = main_path.stat().st_size
-    first_text = main_path.read_text()
+    first_size = info_path.stat().st_size
+    first_text = info_path.read_text()
     assert first_size > 0
 
     async with create_logging_test_session(extra_args=args):
         pass
-    second_text = main_path.read_text()
+    second_text = info_path.read_text()
 
     # File grew (history preserved) and the first run's records are still there.
-    assert main_path.stat().st_size > first_size, (
+    assert info_path.stat().st_size > first_size, (
         "log file did not grow on restart — was it truncated instead of appended?"
     )
     assert first_text in second_text, "first-run records were overwritten on restart"
@@ -179,7 +185,7 @@ async def test_logging_block_exposed_via_mcp_tool(tmp_path) -> None:
     entrypoint stashes the resolved snapshot on the lifespan context, the tool
     reads it, and the MCP client sees it in the response payload.
     """
-    main_path = tmp_path / "main.log"
+    base_path = tmp_path / "main.log"
     async with create_logging_test_session(
         extra_args=[
             "--log-level",
@@ -187,9 +193,7 @@ async def test_logging_block_exposed_via_mcp_tool(tmp_path) -> None:
             "--log-sinks",
             "file",
             "--log-file",
-            str(main_path),
-            "--error-log-file",
-            str(tmp_path / "err.log"),
+            str(base_path),
         ],
     ) as session:
         response = await session.call_tool(
@@ -201,9 +205,13 @@ async def test_logging_block_exposed_via_mcp_tool(tmp_path) -> None:
     logging_block = payload["logging"]
     assert logging_block["level"] == "DEBUG"
     assert sorted(logging_block["sinks"]) == ["file"]
-    assert logging_block["log_file"] == str(main_path)
+    # All per-level files (including ERROR) derive from the single --log-file base.
+    log_files = logging_block["log_files"]
+    assert log_files["INFO"] == str(tmp_path / "main.info.log")
+    assert log_files["DEBUG"] == str(tmp_path / "main.debug.log")
+    assert log_files["ERROR"] == str(tmp_path / "main.error.log")
     assert logging_block["max_bytes"] == 1048576
-    assert logging_block["backup_count"] == 100
+    assert logging_block["backup_count"] == 1
 
 
 def test_empty_log_file_rejected_at_startup() -> None:
@@ -214,12 +222,15 @@ def test_empty_log_file_rejected_at_startup() -> None:
     diagnostic. We need to read the exit code and stderr to confirm the
     rejection happened cleanly at the Click validator boundary.
     """
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2] / "src")
     result = subprocess.run(
         [sys.executable, "-m", "mcp_server", "--log-file", ""],
         capture_output=True,
         text=True,
         timeout=10,
         check=False,
+        env=env,
     )
     assert result.returncode != 0, (
         f"server should have rejected empty --log-file, but exited 0\n"
@@ -238,16 +249,19 @@ def test_help_renders_without_crashing() -> None:
     crash any user who runs ``--help``. Also asserts ``show_default=True`` is
     still wired — the bracket format would disappear if it ever regressed.
     """
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2] / "src")
     result = subprocess.run(
         [sys.executable, "-m", "mcp_server", "--help"],
         capture_output=True,
         text=True,
         timeout=10,
         check=False,
+        env=env,
     )
     assert result.returncode == 0, f"--help crashed:\n{result.stderr}"
     # Key options are documented.
-    for option in ("--log-level", "--log-sinks", "--log-file", "--error-log-file"):
+    for option in ("--log-level", "--log-sinks", "--log-file"):
         assert option in result.stdout, f"{option} missing from --help"
     # ``show_default=True`` produces a ``[default: ...]`` bracket per option.
     assert "[default:" in result.stdout, (
@@ -262,12 +276,11 @@ async def test_log_file_rotates_when_max_bytes_exceeded(tmp_path) -> None:
 
     Drives a deterministic amount of log volume by calling a chatty tool many
     times under ``--log-level DEBUG`` (each call triggers SDK and MCP records).
-    The byte budget is set deliberately small (2 KiB) so a handful of calls
-    is enough to trigger rotation, but the loop count is generous so the test
-    isn't sensitive to small record-size shifts.
+    The byte budget is set deliberately small (1 KiB) so a handful of calls
+    is enough to trigger rotation of the per-level DEBUG file, but the loop
+    count is generous so the test isn't sensitive to small record-size shifts.
     """
-    main_path = tmp_path / "main.log"
-    err_path = tmp_path / "err.log"
+    base_path = tmp_path / "main.log"
     async with create_logging_test_session(
         extra_args=[
             "--log-level",
@@ -275,24 +288,26 @@ async def test_log_file_rotates_when_max_bytes_exceeded(tmp_path) -> None:
             "--log-sinks",
             "file",
             "--log-file",
-            str(main_path),
-            "--error-log-file",
-            str(err_path),
+            str(base_path),
             "--log-max-bytes",
-            "2048",
-            "--log-backup-count",
-            "3",
+            "1024",
         ],
     ) as session:
-        # Each tool call generates ~hundreds of bytes of records at DEBUG.
-        # 30 iterations is generous given the 2 KiB cap.
-        for _ in range(30):
+        # Each tool call generates ~tens of bytes of DEBUG records; 40 iterations
+        # is generous given the 1 KiB cap on the per-level DEBUG file. Backup
+        # count is fixed at 1 (not configurable), so a single .1 rollover is
+        # what we expect.
+        for _ in range(40):
             await session.call_tool("get_server_configuration_status", arguments={})
 
-    rotated = tmp_path / "main.log.1"
+    # DEBUG is the highest-volume level (SDK + env-info + entry logs), so its
+    # per-level file is the one expected to roll over first.
+    debug_path = tmp_path / "main.debug.log"
+    rotated = tmp_path / "main.debug.log.1"
     assert rotated.exists(), (
-        f"rotation never triggered after 30 tool calls at 2 KiB/file. "
-        f"main.log size: {main_path.stat().st_size}"
+        f"rotation never triggered after 40 tool calls at 1 KiB/file. "
+        f"main.debug.log size: "
+        f"{debug_path.stat().st_size if debug_path.exists() else 'missing'}"
     )
 
 
@@ -306,7 +321,6 @@ async def test_combined_invalid_inputs_degrade_gracefully(tmp_path) -> None:
     server must still start.
     """
     main_path = tmp_path / "main.log"
-    err_path = tmp_path / "err.log"
     async with create_logging_test_session(
         extra_args=[
             "--log-level",
@@ -317,15 +331,13 @@ async def test_combined_invalid_inputs_degrade_gracefully(tmp_path) -> None:
             "stderr,file,foo_sink",
             "--log-file",
             str(main_path),
-            "--error-log-file",
-            str(err_path),
         ],
     ):
         pass
 
-    # Both deferred error records should appear in the error file (ERROR
-    # records always land in the error file under the split contract).
-    err_text = err_path.read_text()
+    # Both deferred error records should appear in the ERROR file (ERROR records
+    # land there; it derives from the base path: main.log -> main.error.log).
+    err_text = (tmp_path / "main.error.log").read_text()
     assert "BOGUS_LEVEL" in err_text, (
         f"invalid level fallback missing from error log:\n{err_text}"
     )

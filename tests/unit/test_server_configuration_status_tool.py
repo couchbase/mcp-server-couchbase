@@ -75,8 +75,12 @@ def test_logging_block_passed_through_from_lifespan_context():
     logging_snapshot = {
         "level": "DEBUG",
         "sinks": ["file", "stderr"],
-        "log_file": "/var/log/mcp.log",
-        "error_log_file": "/var/log/mcp.error.log",
+        "log_files": {
+            "DEBUG": "/var/log/mcp.debug.log",
+            "INFO": "/var/log/mcp.info.log",
+            "WARNING": "/var/log/mcp.warning.log",
+            "ERROR": "/var/log/mcp.error.log",
+        },
         "max_bytes": 1048576,
         "backup_count": 5,
     }

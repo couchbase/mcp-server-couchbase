@@ -42,7 +42,7 @@ def validate_log_sinks(
 
 
 def validate_log_path(ctx: click.Context, param: click.Parameter, value: str) -> str:
-    """Click callback for ``--log-file`` / ``--error-log-file``.
+    """Click callback for ``--log-file`` (the base path for per-level files).
 
     Trims whitespace and rejects empty strings via :exc:`click.BadParameter`.
     Unlike level/sink validation, an empty path is structurally invalid (we

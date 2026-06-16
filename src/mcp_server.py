@@ -18,7 +18,6 @@ from cb_mcp.tools import TOOL_ANNOTATIONS
 from cb_mcp.utils import (
     ALLOWED_OAUTH_ALGORITHMS,
     ALLOWED_TRANSPORTS,
-    DEFAULT_ERROR_LOG_FILE,
     DEFAULT_HOST,
     DEFAULT_LOG_BACKUP_COUNT,
     DEFAULT_LOG_FILE,
@@ -150,25 +149,19 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     default=DEFAULT_LOG_SINKS,
     callback=validate_log_sinks,
     help="Comma-separated list of log sinks. Allowed values: stderr, file. "
-    "Include 'file' (with --log-file and/or --error-log-file) to write to "
-    "files; include 'stderr' to write to the console.",
+    "Include 'file' (optionally with --log-file) to write per-level files; "
+    "include 'stderr' to write to the console.",
 )
 @click.option(
     "--log-file",
     envvar="CB_MCP_LOG_FILE",
     default=DEFAULT_LOG_FILE,
     callback=validate_log_path,
-    help="Path to the main rotating log file (DEBUG/INFO/WARNING). Only "
-    "active when 'file' is in --log-sinks.",
-)
-@click.option(
-    "--error-log-file",
-    envvar="CB_MCP_ERROR_LOG_FILE",
-    default=DEFAULT_ERROR_LOG_FILE,
-    callback=validate_log_path,
-    help="Path to the rotating error log file (ERROR/CRITICAL). Only "
-    "active when 'file' is in --log-sinks. Records are split with the "
-    "main log; no duplication between files.",
+    help="Base path for the per-level log files. One rotating file is written "
+    "per level, derived by inserting the level name: e.g. mcp_server.log -> "
+    "mcp_server.debug.log, mcp_server.info.log, mcp_server.warning.log, "
+    "mcp_server.error.log (the error file also captures CRITICAL). Only active "
+    "when 'file' is in --log-sinks.",
 )
 @click.option(
     "--log-max-bytes",
@@ -176,18 +169,8 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     # 0 means 'never rotate' (Python logging behaviour); negative is rejected.
     type=click.IntRange(min=0),
     default=DEFAULT_LOG_MAX_BYTES,
-    help="Maximum size in bytes per rotated log file. Applies to both file "
-    "handlers. Set to 0 to disable rotation.",
-)
-@click.option(
-    "--log-backup-count",
-    envvar="CB_MCP_LOG_BACKUP_COUNT",
-    # 0 disables rotation entirely — RotatingFileHandler skips its rename
-    # logic when backupCount=0, so the file just grows. Negative is rejected.
-    type=click.IntRange(min=0),
-    default=DEFAULT_LOG_BACKUP_COUNT,
-    help="Number of rotated log files to keep. Applies to both file handlers. "
-    "Set to 0 to disable rotation (log file grows without bound).",
+    help="Maximum size in bytes per per-level log file before it rotates. "
+    "Set to 0 to disable rotation.",
 )
 @click.option(
     "--oauth-jwks-uri",
@@ -255,9 +238,7 @@ def main(
     log_level,
     log_sinks,
     log_file,
-    error_log_file,
     log_max_bytes,
-    log_backup_count,
 ):
     """Couchbase MCP Server"""
 
@@ -267,9 +248,9 @@ def main(
         level=resolved_level,
         sinks=parsed_sinks,
         log_file=log_file,
-        error_log_file=error_log_file,
         log_max_bytes=log_max_bytes,
-        log_backup_count=log_backup_count,
+        # Backup count isn't user-configurable in 1.0; always the default.
+        log_backup_count=DEFAULT_LOG_BACKUP_COUNT,
         invalid_level=invalid_level,
         invalid_sinks=invalid_sinks,
     )

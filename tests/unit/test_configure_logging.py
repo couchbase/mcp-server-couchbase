@@ -49,13 +49,12 @@ def mock_sdk_configure_logging():
         yield mock
 
 
-def _call(level="INFO", sinks=None, log_file="m.log", error_log_file="e.log", **kwargs):
+def _call(level="INFO", sinks=None, log_file="m.log", **kwargs):
     """Helper that fills in the boilerplate arguments."""
     configure_logging(
         level=level,
         sinks=sinks if sinks is not None else {"stderr"},
         log_file=log_file,
-        error_log_file=error_log_file,
         log_max_bytes=kwargs.pop("log_max_bytes", 1024),
         log_backup_count=kwargs.pop("log_backup_count", 1),
         **kwargs,
@@ -82,94 +81,159 @@ class TestStderrSinkHandlerAttachment:
         assert logger.level == logging.DEBUG
 
 
-class TestFileSinkSplitContract:
-    """File sink always attaches both main + error file handlers."""
+class TestPerLevelFileSink:
+    """File sink attaches one rotating file handler per active log level."""
 
-    def test_attaches_two_rotating_file_handlers(self, tmp_path):
-        _call(
-            sinks={"file"},
-            log_file=str(tmp_path / "main.log"),
-            error_log_file=str(tmp_path / "err.log"),
-        )
+    def test_attaches_one_file_per_active_level_at_info(self, tmp_path):
+        # At INFO threshold the active level files are INFO/WARNING/ERROR
+        # (CRITICAL shares the ERROR file, so it gets no file of its own).
+        _call(level="INFO", sinks={"file"}, log_file=str(tmp_path / "main.log"))
         logger = logging.getLogger(MCP_SERVER_NAME)
         rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
-        assert len(rotating) == 2
+        assert len(rotating) == 3
 
-    def test_main_handler_filters_out_error_and_above(self, tmp_path):
-        """The main file must not contain ERROR/CRITICAL records.
-
-        We attach the _below_error filter on the main file handler; this test
-        asserts that the filter is wired by directly probing it.
-        """
-        _call(
-            sinks={"file"},
-            log_file=str(tmp_path / "main.log"),
-            error_log_file=str(tmp_path / "err.log"),
-        )
+    def test_attaches_one_file_per_active_level_at_debug(self, tmp_path):
+        # At DEBUG threshold the active level files are DEBUG/INFO/WARNING/ERROR.
+        _call(level="DEBUG", sinks={"file"}, log_file=str(tmp_path / "main.log"))
         logger = logging.getLogger(MCP_SERVER_NAME)
         rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
-        # Find the one with a filter — that's the main handler.
-        main = next(h for h in rotating if h.filters)
-        warning_record = logging.LogRecord(
-            "x", logging.WARNING, "f", 1, "w", None, None
-        )
-        error_record = logging.LogRecord("x", logging.ERROR, "f", 1, "e", None, None)
-        # ``Handler.filter()`` returns the record (truthy) on accept, False on
-        # reject — not a strict True/False, so check truthiness rather than
-        # identity to ``True``.
-        assert main.filter(warning_record), "WARNING should pass the main-file filter"
-        assert not main.filter(error_record), (
-            "ERROR should be filtered off the main file"
-        )
+        assert len(rotating) == 4
 
-    def test_error_handler_level_set_to_error(self, tmp_path):
-        _call(
-            sinks={"file"},
-            log_file=str(tmp_path / "main.log"),
-            error_log_file=str(tmp_path / "err.log"),
-        )
+    def test_levels_below_threshold_get_no_file(self, tmp_path):
+        # At WARNING threshold, DEBUG/INFO files must not be created.
+        _call(level="WARNING", sinks={"file"}, log_file=str(tmp_path / "main.log"))
         logger = logging.getLogger(MCP_SERVER_NAME)
         rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
-        error = next(h for h in rotating if h.level == logging.ERROR)
-        assert error.level == logging.ERROR
+        assert len(rotating) == 2  # WARNING/ERROR (CRITICAL folds into ERROR)
+        snap = get_resolved_logging_config()
+        assert snap is not None
+        assert set(snap.log_files or {}) == {"WARNING", "ERROR"}
 
-    def test_records_split_no_duplication_between_files(self, tmp_path):
-        """End-to-end emission test: WARNING goes only to main, ERROR only to error."""
-        main_path = tmp_path / "main.log"
-        err_path = tmp_path / "err.log"
-        _call(
-            level="DEBUG",
-            sinks={"file"},
-            log_file=str(main_path),
-            error_log_file=str(err_path),
-        )
+    def test_critical_records_routed_to_error_file(self, tmp_path):
+        """There is no CRITICAL file; CRITICAL records land in the ERROR file
+        (the error file is derived from the base path: main.log -> main.error.log)."""
+        _call(level="DEBUG", sinks={"file"}, log_file=str(tmp_path / "main.log"))
+        # No dedicated critical file is tracked.
+        snap = get_resolved_logging_config()
+        assert snap is not None
+        assert "CRITICAL" not in (snap.log_files or {})
+
         log = logging.getLogger(f"{MCP_SERVER_NAME}.test")
+        log.critical("a-critical")
+        for h in logging.getLogger(MCP_SERVER_NAME).handlers:
+            h.flush()
+        assert "a-critical" in (tmp_path / "main.error.log").read_text()
+        assert not (tmp_path / "main.critical.log").exists()
+
+    def test_each_handler_filters_to_exactly_its_level(self, tmp_path):
+        _call(level="DEBUG", sinks={"file"}, log_file=str(tmp_path / "main.log"))
+        logger = logging.getLogger(MCP_SERVER_NAME)
+        rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
+        info_rec = logging.LogRecord("x", logging.INFO, "f", 1, "i", None, None)
+        warn_rec = logging.LogRecord("x", logging.WARNING, "f", 1, "w", None, None)
+
+        def _would_emit(handler, record):
+            # A handler emits a record only if it clears both the handler level
+            # (setLevel, used by the ERROR file) and its filters (exact-level,
+            # used by the others).
+            return record.levelno >= handler.level and handler.filter(record)
+
+        # Exactly one handler emits INFO, and it does not emit WARNING.
+        accepting_info = [h for h in rotating if _would_emit(h, info_rec)]
+        assert len(accepting_info) == 1
+        assert not _would_emit(accepting_info[0], warn_rec)
+
+    def test_all_files_including_error_derived_from_base_path(self, tmp_path):
+        _call(level="DEBUG", sinks={"file"}, log_file=str(tmp_path / "mcp_server.log"))
+        snap = get_resolved_logging_config()
+        assert snap is not None
+        assert snap.log_files["DEBUG"] == str(tmp_path / "mcp_server.debug.log")
+        assert snap.log_files["INFO"] == str(tmp_path / "mcp_server.info.log")
+        assert snap.log_files["WARNING"] == str(tmp_path / "mcp_server.warning.log")
+        # The ERROR file is derived from the same base, not a separate path.
+        assert snap.log_files["ERROR"] == str(tmp_path / "mcp_server.error.log")
+
+    def test_records_routed_to_their_own_level_file(self, tmp_path):
+        """End-to-end: each level's record lands only in its own file."""
+        _call(level="DEBUG", sinks={"file"}, log_file=str(tmp_path / "mcp_server.log"))
+        log = logging.getLogger(f"{MCP_SERVER_NAME}.test")
+        log.info("an-info")
         log.warning("a-warning")
         log.error("an-error")
 
-        # Force handlers to flush.
         for h in logging.getLogger(MCP_SERVER_NAME).handlers:
             h.flush()
 
-        main_text = main_path.read_text()
-        err_text = err_path.read_text()
-        assert "a-warning" in main_text
-        assert "a-warning" not in err_text
-        assert "an-error" in err_text
-        assert "an-error" not in main_text
+        info_text = (tmp_path / "mcp_server.info.log").read_text()
+        warn_text = (tmp_path / "mcp_server.warning.log").read_text()
+        err_text = (tmp_path / "mcp_server.error.log").read_text()
+        assert "an-info" in info_text and "a-warning" not in info_text
+        assert "a-warning" in warn_text and "an-error" not in warn_text
+        assert "an-error" in err_text and "an-info" not in err_text
 
 
 class TestStderrAndFileTogether:
-    """sinks={'stderr', 'file'} produces three handlers total."""
+    """sinks={'stderr', 'file'} attaches stderr plus one file per active level."""
 
-    def test_three_handlers_attached(self, tmp_path):
+    def test_stderr_plus_per_level_files(self, tmp_path):
+        # INFO threshold: stderr + INFO/WARNING/ERROR files = 4 handlers
+        # (CRITICAL shares the ERROR file).
         _call(
+            level="INFO",
             sinks={"stderr", "file"},
             log_file=str(tmp_path / "m.log"),
-            error_log_file=str(tmp_path / "e.log"),
         )
         logger = logging.getLogger(MCP_SERVER_NAME)
-        assert len(logger.handlers) == 3
+        assert len(logger.handlers) == 4
+
+
+class TestFileSinkEdgeCases:
+    """Permission failures, missing paths, and the disabled-file warning."""
+
+    def test_missing_path_falls_back_to_default_with_error(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        # Empty log_file with the file sink: error logged, default path used.
+        monkeypatch.chdir(tmp_path)
+        _call(level="INFO", sinks={"stderr", "file"}, log_file="")
+        err = capsys.readouterr().err
+        assert "no --log-file" in err
+        assert "falling back to default" in err
+        snap = get_resolved_logging_config()
+        assert snap is not None and snap.log_files  # fallback files attached
+
+    def test_unwritable_path_logged_as_error(self, tmp_path, capsys):
+        # A base path under a non-existent directory can't be opened; the file
+        # sink is the only sink, so a stderr fallback must surface the error.
+        missing_dir = tmp_path / "nope"
+        _call(level="INFO", sinks={"file"}, log_file=str(missing_dir / "main.log"))
+        err = capsys.readouterr().err
+        assert "Cannot write" in err
+        snap = get_resolved_logging_config()
+        # Nothing could attach, so no per-level files recorded.
+        assert snap is not None and not snap.log_files
+
+    def test_partial_failure_error_surfaces_on_stderr(self, tmp_path, capsys):
+        """If one level's file fails but others succeed, and stderr isn't a sink,
+        the 'Cannot write' error must still be visible (a stderr fallback is
+        added when no ERROR-capable handler attached). We force the ERROR file
+        to fail by pre-creating a *directory* at its derived path."""
+        # base main.log -> ERROR file derives to main.error.log; make that a dir.
+        (tmp_path / "main.error.log").mkdir()
+        _call(level="INFO", sinks={"file"}, log_file=str(tmp_path / "main.log"))
+        err = capsys.readouterr().err
+        assert "Cannot write ERROR log file" in err
+        snap = get_resolved_logging_config()
+        assert snap is not None
+        # INFO/WARNING attached; ERROR did not.
+        assert "INFO" in (snap.log_files or {})
+        assert "ERROR" not in (snap.log_files or {})
+
+    def test_warning_when_file_sink_not_enabled(self, capsys):
+        _call(level="INFO", sinks={"stderr"})
+        err = capsys.readouterr().err
+        assert "File logging is disabled" in err
+        assert "product support" in err
 
 
 class TestOffMode:
@@ -196,8 +260,7 @@ class TestOffMode:
         assert snap is not None
         assert snap.level == "OFF"
         assert snap.sinks == ()
-        assert snap.log_file is None
-        assert snap.error_log_file is None
+        assert snap.log_files is None
 
 
 class TestLenientLevelFallback:
@@ -236,27 +299,17 @@ class TestSnapshot:
         assert isinstance(snap, ResolvedLoggingConfig)
         assert snap.level == "DEBUG"
         assert snap.sinks == ("stderr",)
-        assert snap.log_file is None
-        assert snap.error_log_file is None
+        assert snap.log_files is None
 
     def test_file_paths_visible_only_when_file_sink_active(self, tmp_path):
-        # User passed paths but only stderr sink; paths should NOT appear in snapshot.
-        _call(
-            sinks={"stderr"},
-            log_file=str(tmp_path / "m.log"),
-            error_log_file=str(tmp_path / "e.log"),
-        )
+        # User passed a path but only stderr sink; paths should NOT appear in snapshot.
+        _call(sinks={"stderr"}, log_file=str(tmp_path / "m.log"))
         snap = get_resolved_logging_config()
         assert snap is not None
-        assert snap.log_file is None
-        assert snap.error_log_file is None
+        assert snap.log_files is None
 
     def test_sinks_sorted_for_deterministic_output(self, tmp_path):
-        _call(
-            sinks={"stderr", "file"},
-            log_file=str(tmp_path / "m.log"),
-            error_log_file=str(tmp_path / "e.log"),
-        )
+        _call(sinks={"stderr", "file"}, log_file=str(tmp_path / "m.log"))
         snap = get_resolved_logging_config()
         assert snap is not None
         assert snap.sinks == ("file", "stderr")  # sorted alphabetically
@@ -269,8 +322,7 @@ class TestAsDict:
         cfg = ResolvedLoggingConfig(
             level="DEBUG",
             sinks=("stderr",),
-            log_file=None,
-            error_log_file=None,
+            log_files=None,
             log_max_bytes=42,
             log_backup_count=3,
         )
@@ -279,8 +331,7 @@ class TestAsDict:
         assert set(d.keys()) == {
             "level",
             "sinks",
-            "log_file",
-            "error_log_file",
+            "log_files",
             "max_bytes",
             "backup_count",
         }
@@ -289,13 +340,13 @@ class TestAsDict:
         cfg = ResolvedLoggingConfig(
             level="INFO",
             sinks=("file", "stderr"),
-            log_file="m.log",
-            error_log_file="e.log",
+            log_files={"INFO": "m.info.log", "ERROR": "e.log"},
             log_max_bytes=1,
             log_backup_count=1,
         )
         d = cfg.as_dict()
         assert d["sinks"] == ["file", "stderr"]
+        assert d["log_files"] == {"INFO": "m.info.log", "ERROR": "e.log"}
 
 
 class TestIdempotency:

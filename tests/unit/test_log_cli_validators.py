@@ -65,7 +65,7 @@ class TestValidateLogSinks:
 
 
 class TestValidateLogPath:
-    """Click callback for --log-file / --error-log-file. Loudly rejects empty."""
+    """Click callback for --log-file (per-level base path). Loudly rejects empty."""
 
     def test_passes_non_empty_path_through(self):
         assert validate_log_path(None, None, "/tmp/foo.log") == "/tmp/foo.log"  # type: ignore[arg-type]
