@@ -67,7 +67,6 @@ class ResolvedLoggingConfig:
             "sinks": list(self.sinks),
             "log_files": dict(self.log_files) if self.log_files else None,
             "max_bytes": self.log_max_bytes,
-            "backup_count": self.log_backup_count,
         }
 
 
@@ -346,13 +345,11 @@ def configure_logging(
     # Show the per-level files in the summary only when the file sink is active;
     # for a stderr-only run printing paths would falsely suggest files exist.
     logger.info(
-        "Logging configured: level=%s, sinks=%s, log_files=%s, "
-        "max_bytes=%d, backup_count=%d",
+        "Logging configured: level=%s, sinks=%s, log_files=%s, max_bytes=%d",
         level_name,
         ",".join(sorted(effective_sinks)),
         attached_files if file_sink_active else "-",
         log_max_bytes,
-        log_backup_count,
     )
 
     # Record the snapshot so the server-config MCP tool and env-info diagnostic

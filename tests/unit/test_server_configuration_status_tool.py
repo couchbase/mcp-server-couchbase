@@ -82,7 +82,6 @@ def test_logging_block_passed_through_from_lifespan_context():
             "ERROR": "/var/log/mcp.error.log",
         },
         "max_bytes": 1048576,
-        "backup_count": 5,
     }
     payload = get_server_configuration_status(
         _make_ctx(logging_config=logging_snapshot)

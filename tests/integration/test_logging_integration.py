@@ -211,7 +211,7 @@ async def test_logging_block_exposed_via_mcp_tool(tmp_path) -> None:
     assert log_files["DEBUG"] == str(tmp_path / "main.debug.log")
     assert log_files["ERROR"] == str(tmp_path / "main.error.log")
     assert logging_block["max_bytes"] == 1048576
-    assert logging_block["backup_count"] == 1
+    assert "backup_count" not in logging_block
 
 
 def test_empty_log_file_rejected_at_startup() -> None:

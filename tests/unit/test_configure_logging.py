@@ -327,14 +327,14 @@ class TestAsDict:
             log_backup_count=3,
         )
         d = cfg.as_dict()
-        # JSON-friendly key names (max_bytes / backup_count without log_ prefix).
+        # JSON-friendly key names
         assert set(d.keys()) == {
             "level",
             "sinks",
             "log_files",
             "max_bytes",
-            "backup_count",
         }
+        assert "backup_count" not in d
 
     def test_sinks_serialised_as_list(self):
         cfg = ResolvedLoggingConfig(
