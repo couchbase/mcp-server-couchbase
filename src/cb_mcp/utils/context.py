@@ -22,14 +22,11 @@ class AppContext:
             reaching for a module global.
         read_only_mode: When True, all write operations (KV and Query) are
             disabled and KV write tools are not loaded.
-        read_only_query_mode: When True, query-based write operations are
-            disabled. DEPRECATED: use ``read_only_mode`` instead.
     """
 
     cluster_provider: ClusterProvider | None = None
     settings: Mapping[str, Any] = field(default_factory=dict)
     read_only_mode: bool = True
-    read_only_query_mode: bool = True
 
 
 def get_cluster_provider(ctx: Context):

@@ -33,7 +33,6 @@ def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
     configuration = {
         **provider_config,
         "read_only_mode": settings.get("read_only_mode", True),
-        "read_only_query_mode": settings.get("read_only_query_mode", True),
         "disabled_tools": sorted(settings.get("disabled_tools", set())),
         "confirmation_required_tools": sorted(
             settings.get("confirmation_required_tools", set())

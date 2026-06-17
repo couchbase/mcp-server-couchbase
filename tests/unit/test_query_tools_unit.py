@@ -27,8 +27,8 @@ from cb_mcp.tools.query import (
 )
 
 
-def _make_ctx(*, read_only_mode: bool = True, read_only_query_mode: bool = True):
-    """Build a fake Context wired with read-only flags and a cluster stub.
+def _make_ctx(*, read_only_mode: bool = True):
+    """Build a fake Context wired with the read-only flag and a cluster stub.
 
     The cluster's `scope().query()` returns an iterable of rows so the tool
     body's `for row in result` loop works without a real SDK.
@@ -46,7 +46,6 @@ def _make_ctx(*, read_only_mode: bool = True, read_only_query_mode: bool = True)
                     get_cluster=lambda c: cluster,
                 ),
                 read_only_mode=read_only_mode,
-                read_only_query_mode=read_only_query_mode,
             )
         )
     )
@@ -60,9 +59,7 @@ class TestRunSqlPlusPlusQueryReadOnly:
         """UPDATE in read-only mode must raise ValueError before hitting the cluster."""
         ctx, _, scope = _make_ctx(read_only_mode=True)
 
-        with pytest.raises(
-            ValueError, match="Data modification query is not allowed"
-        ):
+        with pytest.raises(ValueError, match="Data modification query is not allowed"):
             run_sql_plus_plus_query(
                 ctx, "b", "s", "UPDATE users SET age = 25 WHERE id = 1"
             )
@@ -77,9 +74,7 @@ class TestRunSqlPlusPlusQueryReadOnly:
         with pytest.raises(
             ValueError, match="Structure modification query is not allowed"
         ):
-            run_sql_plus_plus_query(
-                ctx, "b", "s", "CREATE INDEX idx ON users(name)"
-            )
+            run_sql_plus_plus_query(ctx, "b", "s", "CREATE INDEX idx ON users(name)")
 
         scope.query.assert_not_called()
 
@@ -96,32 +91,12 @@ class TestRunSqlPlusPlusQueryReadOnly:
         assert result == [{"plan": "..."}]
         scope.query.assert_called_once()
 
-    def test_read_only_query_mode_blocks_writes_even_when_read_only_mode_false(
-        self,
-    ) -> None:
-        """Deprecated `read_only_query_mode` must still block writes when the
-        umbrella `read_only_mode` is off — they OR together."""
-        ctx, _, scope = _make_ctx(
-            read_only_mode=False, read_only_query_mode=True
-        )
-
-        with pytest.raises(
-            ValueError, match="Data modification query is not allowed"
-        ):
-            run_sql_plus_plus_query(ctx, "b", "s", "DELETE FROM users")
-
-        scope.query.assert_not_called()
-
-    def test_writes_allowed_when_both_flags_false(self) -> None:
-        """With both read-only flags off, DML must pass through."""
-        ctx, _, scope = _make_ctx(
-            read_only_mode=False, read_only_query_mode=False
-        )
+    def test_writes_allowed_when_read_only_mode_false(self) -> None:
+        """With read-only mode off, DML must pass through."""
+        ctx, _, scope = _make_ctx(read_only_mode=False)
         scope.query.return_value = iter([])
 
-        result = run_sql_plus_plus_query(
-            ctx, "b", "s", "UPDATE users SET age = 25"
-        )
+        result = run_sql_plus_plus_query(ctx, "b", "s", "UPDATE users SET age = 25")
         assert result == []
         scope.query.assert_called_once()
 
@@ -130,9 +105,7 @@ class TestRunSqlPlusPlusQueryReadOnly:
         ctx, _, scope = _make_ctx(read_only_mode=True)
         scope.query.return_value = iter([{"id": 1}, {"id": 2}])
 
-        result = run_sql_plus_plus_query(
-            ctx, "b", "s", "SELECT * FROM users"
-        )
+        result = run_sql_plus_plus_query(ctx, "b", "s", "SELECT * FROM users")
         assert result == [{"id": 1}, {"id": 2}]
 
     def test_cluster_query_failure_propagates(self) -> None:
@@ -170,9 +143,7 @@ class TestExplainSqlPlusPlusQuery:
         ctx, _, scope = _make_ctx(read_only_mode=True)
         scope.query.return_value = iter([{"plan": {"#operator": "Sequence"}}])
 
-        result = explain_sql_plus_plus_query(
-            ctx, "b", "s", "EXPLAIN SELECT 1"
-        )
+        result = explain_sql_plus_plus_query(ctx, "b", "s", "EXPLAIN SELECT 1")
         assert result["explain_statement"] == "EXPLAIN SELECT 1"
 
 

@@ -34,7 +34,7 @@ DEFAULT_LOG_LEVEL = "INFO"
 # OAuth Scopes
 # Tokens carrying SCOPE_READ may call read-only tools (including SQL++ query,
 # which is classified read-only at startup and runtime-gated by
-# read_only_query_mode). Tokens carrying SCOPE_WRITE may call KV mutation
+# read_only_mode). Tokens carrying SCOPE_WRITE may call KV mutation
 # tools only. Both scopes are required for full access; the model is
 # deliberately strict — SCOPE_WRITE alone cannot reach read tools or SQL++.
 SCOPE_READ = "couchbase-mcp:read"

@@ -79,13 +79,11 @@ def run_sql_plus_plus_query(
 
     app_context = ctx.request_context.lifespan_context
     read_only_mode = app_context.read_only_mode
-    read_only_query_mode = app_context.read_only_query_mode
 
-    # SQL++ writes are blocked under any of three conditions:
+    # SQL++ writes are blocked under either of two conditions:
     #   1. read_only_mode is True (blanket lockdown of all writes)
-    #   2. read_only_query_mode is True (deprecated query-only lockdown)
-    #   3. The caller's JWT carries SCOPE_READ but NOT SCOPE_WRITE.
-    # Case 3 closes the gap where a token holding only couchbase-mcp:read
+    #   2. The caller's JWT carries SCOPE_READ but NOT SCOPE_WRITE.
+    # Case 2 closes the gap where a token holding only couchbase-mcp:read
     # could otherwise mutate data through SQL++ because the per-tool scope
     # wrapper classifies SQL++ as a read tool. Without this check, the
     # JWT scope guarantee would be weaker than the spec promises.
@@ -93,7 +91,7 @@ def run_sql_plus_plus_query(
     # is False so the historical config-only behavior is preserved.
     token = get_access_token()
     lacks_write_scope = token is not None and SCOPE_WRITE not in (token.scopes or [])
-    block_query_writes = read_only_mode or read_only_query_mode or lacks_write_scope
+    block_query_writes = read_only_mode or lacks_write_scope
 
     try:
         scope = bucket.scope(scope_name)
@@ -107,7 +105,7 @@ def run_sql_plus_plus_query(
 
             if data_modification_query or structure_modification_query:
                 kind = "data" if data_modification_query else "structure"
-                if lacks_write_scope and not (read_only_mode or read_only_query_mode):
+                if lacks_write_scope and not read_only_mode:
                     # lacks_write_scope implies token is not None here.
                     held_scopes = sorted(set(token.scopes or []))
                     msg = (

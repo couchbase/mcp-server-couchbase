@@ -82,17 +82,6 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     help="Enable read-only mode. When True (default), all write operations (KV and Query) are disabled and KV write tools are not loaded. Set to False to enable write operations.",
 )
 @click.option(
-    "--read-only-query-mode",
-    envvar=[
-        "CB_MCP_READ_ONLY_QUERY_MODE",
-        "READ_ONLY_QUERY_MODE",  # Deprecated
-    ],
-    type=bool,
-    deprecated=True,
-    default=DEFAULT_READ_ONLY_MODE,
-    help="[DEPRECATED: Use --read-only-mode instead] Enable read-only query mode. Set to True (default) to allow only read-only queries. Can be set to False to allow data modification queries.",
-)
-@click.option(
     "--transport",
     envvar=[
         "CB_MCP_TRANSPORT",
@@ -181,7 +170,6 @@ def main(
     client_cert_path,
     client_key_path,
     read_only_mode,
-    read_only_query_mode,
     transport,
     host,
     port,
@@ -225,7 +213,6 @@ def main(
         "client_cert_path": client_cert_path,
         "client_key_path": client_key_path,
         "read_only_mode": read_only_mode,
-        "read_only_query_mode": read_only_query_mode,
         "transport": transport,
         "host": host,
         "port": port,
@@ -239,14 +226,12 @@ def main(
         """Build the lifespan AppContext with settings captured from the CLI."""
         logger.info(
             f"MCP server initialized in lazy mode for tool discovery. "
-            f"Modes: (read_only_mode={read_only_mode}, "
-            f"read_only_query_mode={read_only_query_mode})"
+            f"Modes: (read_only_mode={read_only_mode})"
         )
         app_context = AppContext(
             cluster_provider=StaticClusterProvider(settings=settings),
             settings=settings,
             read_only_mode=read_only_mode,
-            read_only_query_mode=read_only_query_mode,
         )
         try:
             yield app_context
@@ -264,8 +249,7 @@ def main(
     mcp = FastMCP(MCP_SERVER_NAME, lifespan=app_lifespan, auth=auth)
 
     logger.info(
-        f"Registering {len(final_tools)} tool(s) with modes (read_only_mode={read_only_mode}, "
-        f"read_only_query_mode={read_only_query_mode})"
+        f"Registering {len(final_tools)} tool(s) with modes (read_only_mode={read_only_mode})"
     )
 
     # Register tools; FastMCP 3.x add_tool has no annotations kwarg, so wrap first.

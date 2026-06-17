@@ -24,7 +24,6 @@ def test_configuration_status_exposes_tool_lists():
             "connection_string": "couchbases://example",
             "username": "test-user",
             "read_only_mode": True,
-            "read_only_query_mode": True,
             "disabled_tools": {"z_tool", "a_tool"},
             "confirmation_required_tools": {
                 "delete_document_by_id",

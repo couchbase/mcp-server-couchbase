@@ -40,8 +40,8 @@ class ClusterProvider(Protocol):
         Must not include secrets — return ``_configured`` booleans instead.
         Returned keys are merged into the top-level ``configuration`` dict of
         ``get_server_configuration_status``; implementations must not reuse
-        server-level key names (``read_only_mode``, ``read_only_query_mode``,
-        ``disabled_tools``, ``confirmation_required_tools``) since those are
+        server-level key names (``read_only_mode``, ``disabled_tools``,
+        ``confirmation_required_tools``) since those are
         owned by the server and would silently override any provider value.
         Implementations may use ``ctx`` to return per-caller configuration
         (e.g., per-API-key in managed implementations) or ignore it (static implementations).
