@@ -45,12 +45,32 @@ def get_schema_for_collection(
 def _is_explain_statement(query: str) -> bool:
     """Check if the query is an EXPLAIN statement.
 
-    Handles multi-line queries where EXPLAIN is followed by newline or tab,
-    e.g., "EXPLAIN\nSELECT ..." or "EXPLAIN\tSELECT ...".
+    Detection is delegated to the SQL++ grammar via ``lark_sqlpp``: the query
+    is parsed and the resulting AST is inspected for an ``explain_statement``
+    node. This is more precise than lexical matching because it understands
+    SQL++ structure -- for example, the word ``explain`` appearing as an
+    identifier inside the statement does not trigger a false positive, and an
+    EXPLAIN wrapping a write statement (``EXPLAIN UPDATE ...``) is still
+    recognised as an EXPLAIN.
+
+    ``lark_sqlpp`` cannot parse every valid SQL++ statement today -- notably it
+    does not model comments. When parsing fails we fall back to a lexical
+    prefix check (``EXPLAIN`` followed by whitespace) so detection degrades
+    gracefully instead of misclassifying the statement.
     """
-    # Match "EXPLAIN" followed by any whitespace (space, tab, newline, etc.)
-    normalized = query.lstrip().upper()
-    return re.match(r"^EXPLAIN\s", normalized) is not None
+    try:
+        parsed_query = parse_sqlpp(query)
+    except Exception:
+        # The grammar rejected the input (e.g. comments, which it does not
+        # model, or an incomplete statement). Fall back to a lexical check so
+        # a valid EXPLAIN is not misclassified -- which would otherwise cause
+        # the write-check to run or an EXPLAIN prefix to be doubled.
+        return re.match(r"^EXPLAIN\s", query.lstrip().upper()) is not None
+
+    return any(
+        getattr(node, "data", None) == "explain_statement"
+        for node in parsed_query.iter_subtrees()
+    )
 
 
 def run_sql_plus_plus_query(
