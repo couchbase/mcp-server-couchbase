@@ -313,8 +313,7 @@ def configure_logging(
         # Requirement: warn when file logging isn't explicitly enabled so the
         # operator knows support logs aren't being persisted.
         file_warnings.append(
-            "File logging is disabled. Log files required for product support "
-            "are not being generated."
+            "WARNING: File logging is disabled. Log files required for product support are not being generated."
         )
 
     couchbase.configure_logging(MCP_SERVER_NAME, logger.level)
