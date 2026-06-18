@@ -88,7 +88,9 @@ class TestIsExplainStatement:
 
     def test_non_explain_with_explain_in_string(self) -> None:
         """Should not detect EXPLAIN when it's part of a string literal."""
-        assert _is_explain_statement("SELECT * FROM explain WHERE ...") is False
+        assert (
+            _is_explain_statement("SELECT * FROM explain WHERE name='explain'") is False
+        )
 
     def test_explain_wrapping_update(self) -> None:
         """Should detect EXPLAIN even when it wraps a write statement.

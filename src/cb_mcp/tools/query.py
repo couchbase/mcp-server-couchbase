@@ -55,17 +55,18 @@ def _is_explain_statement(query: str) -> bool:
 
     ``lark_sqlpp`` cannot parse every valid SQL++ statement today -- notably it
     does not model comments. When parsing fails we fall back to a lexical
-    prefix check (``EXPLAIN`` followed by whitespace) so detection degrades
-    gracefully instead of misclassifying the statement.
+    prefix check (``EXPLAIN`` followed by whitespace or a comment marker) so
+    detection degrades gracefully instead of misclassifying the statement.
     """
     try:
         parsed_query = parse_sqlpp(query)
-    except Exception:
-        # The grammar rejected the input (e.g. comments, which it does not
-        # model, or an incomplete statement). Fall back to a lexical check so
-        # a valid EXPLAIN is not misclassified -- which would otherwise cause
-        # the write-check to run or an EXPLAIN prefix to be doubled.
-        return re.match(r"^EXPLAIN\s", query.lstrip().upper()) is not None
+    except Exception as e:
+        logger.debug(
+            "parse_sqlpp failed during EXPLAIN detection; falling back to lexical check: %s",
+            e,
+            exc_info=True,
+        )
+        return re.match(r"^EXPLAIN(?:\s|/\*|--)", query.lstrip().upper()) is not None
 
     return any(
         getattr(node, "data", None) == "explain_statement"
