@@ -33,8 +33,6 @@ def test_safe_keys_pass_through_verbatim():
     assert out["host"] == "127.0.0.1"
     assert out["port"] == 8000
     assert out["connection_string"] == "couchbase://example"
-    assert out["username"] == "admin"
-
 
 def test_secret_paths_redacted_to_presence_booleans():
     """Missing safe keys map to ``None``; presence-only keys map to ``True``/``False``.
@@ -59,7 +57,6 @@ def test_secret_paths_redacted_to_presence_booleans():
         "host": None,
         "port": None,
         "connection_string": None,
-        "username": None,
         "disabled_tools": None,
         "confirmation_required_tools": None,
         # OAuth coordinates: safe keys, absent in input → None

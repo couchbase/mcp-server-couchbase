@@ -13,7 +13,7 @@ MCP tool (see :mod:`cb_mcp.tools.server`) and the provider's
 ``get_configuration`` so that the log file and the MCP tool output agree on
 what's safe to expose. Secrets (passwords, certificate file paths) are
 replaced with ``*_configured`` booleans; identifiers the user typed into
-their config (connection_string, username) are logged verbatim.
+their config (connection_string) are logged verbatim.
 """
 
 import json
@@ -47,7 +47,6 @@ _SAFE_SETTINGS_KEYS = (
     "disabled_tools",
     "confirmation_required_tools",
     "connection_string",
-    "username",
     # OAuth resource-server config: non-secret IdP coordinates (JWKS URL,
     # issuer, audience, algorithm, PRM base URL) plus an oauth_enabled flag.
     # There is no client secret to redact — the server only validates JWTs

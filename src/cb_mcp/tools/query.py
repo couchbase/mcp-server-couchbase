@@ -107,7 +107,7 @@ def run_sql_plus_plus_query(
         scope = bucket.scope(scope_name)
         logger.debug(
             f"Executing SQL++ query in {bucket_name}.{scope_name} "
-            f"(write_blocked={block_query_writes}): {query}"
+            f"(write_blocked={block_query_writes})"
         )
 
         results = []
@@ -198,7 +198,7 @@ def run_cluster_query(ctx: Context, query: str, **kwargs: Any) -> list[dict[str,
     results = []
 
     try:
-        logger.debug(f"Executing cluster query: {query}")
+        logger.debug("Executing cluster query")
         result = cluster.query(query, **kwargs)
         for row in result:
             results.append(row)
