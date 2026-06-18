@@ -27,8 +27,8 @@ LABEL org.opencontainers.image.revision="${GIT_COMMIT_HASH}" \
     org.opencontainers.image.created="${BUILD_DATE}" \
     org.opencontainers.image.title="MCP Server Couchbase" \
     org.opencontainers.image.description="Model Context Protocol server for Couchbase" \
-    org.opencontainers.image.source="https://github.com/Couchbase-Ecosystem/mcp-server-couchbase"\
-    io.modelcontextprotocol.server.name="io.github.Couchbase-Ecosystem/mcp-server-couchbase"
+    org.opencontainers.image.source="https://github.com/couchbase/mcp-server-couchbase"\
+    io.modelcontextprotocol.server.name="io.github.couchbase/mcp-server-couchbase"
 
 # Create non-root user
 RUN useradd --system --uid 1001 mcpuser
