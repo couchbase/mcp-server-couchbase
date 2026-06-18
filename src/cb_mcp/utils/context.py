@@ -22,19 +22,30 @@ class AppContext:
             reaching for a module global.
         read_only_mode: When True, all write operations (KV and Query) are
             disabled and KV write tools are not loaded.
-        read_only_query_mode: When True, query-based write operations are
-            disabled. DEPRECATED: use ``read_only_mode`` instead.
+        logging_config: Optional snapshot of the active logging configuration,
+            populated by the server entrypoint after configuring its loggers.
     """
 
     cluster_provider: ClusterProvider | None = None
     settings: Mapping[str, Any] = field(default_factory=dict)
     read_only_mode: bool = True
-    read_only_query_mode: bool = True
+    logging_config: Mapping[str, Any] | None = None
 
 
 def get_cluster_provider(ctx: Context):
     """Return the ClusterProvider for this request."""
-    return ctx.request_context.lifespan_context.cluster_provider
+    return ctx.request_context.lifespan_context.cluster_provider  # type: ignore
+
+
+def get_logging_config(ctx: Context) -> Mapping[str, Any] | None:
+    """Return the logging-config snapshot attached to the lifespan context.
+
+    Returns ``None`` when the server entrypoint doesn't populate the
+    field (e.g., implementations that don't use ``configure_logging`` from
+    :mod:`cb_mcp.utils.logging`) — including host servers whose lifespan
+    context type doesn't carry a ``logging_config`` attribute at all.
+    """
+    return getattr(ctx.request_context.lifespan_context, "logging_config", None)  # type: ignore
 
 
 def get_cluster_connection(ctx: Context) -> Cluster:

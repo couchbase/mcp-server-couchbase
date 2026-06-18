@@ -66,13 +66,6 @@
           "isSecret": false
         },
         {
-          "name": "CB_MCP_READ_ONLY_QUERY_MODE",
-          "description": "[Deprecated] Couchbase read only query mode. Set to true to allow only read-only queries. Set to false to allow data modification queries. Use CB_MCP_READ_ONLY_MODE instead.",
-          "isRequired": false,
-          "format": "boolean",
-          "isSecret": false
-        },
-        {
           "name": "CB_MCP_TRANSPORT",
           "description": "Transport mode for the server (stdio, http or sse). Default is stdio",
           "isRequired": false,
@@ -161,14 +154,6 @@
           "type": "named",
           "name": "--read-only-mode",
           "description": "Couchbase read only mode. Set to true to disable write operations across both KV and query. KV write tools are not loaded and SQL++ queries that modify data are blocked. Set to false to allow data modification queries and tools.",
-          "isRequired": false,
-          "format": "boolean",
-          "isSecret": false
-        },
-        {
-          "type": "named",
-          "name": "--read-only-query-mode",
-          "description": "[Deprecated] Couchbase read only query mode. Set to true to allow only read-only queries. Set to false to allow data modification queries. Use --read-only-mode instead.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
@@ -267,13 +252,6 @@
         {
           "name": "CB_MCP_READ_ONLY_MODE",
           "description": "Couchbase read only mode. Set to true to disable write operations across both KV and query. KV write tools are not loaded and SQL++ queries that modify data are blocked. Set to false to allow data modification queries and tools.",
-          "isRequired": false,
-          "format": "boolean",
-          "isSecret": false
-        },
-        {
-          "name": "CB_MCP_READ_ONLY_QUERY_MODE",
-          "description": "[Deprecated] Couchbase read only query mode. Set to true to allow only read-only queries. Set to false to allow data modification queries. Use CB_MCP_READ_ONLY_MODE instead.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false

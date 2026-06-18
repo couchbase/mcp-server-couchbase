@@ -158,7 +158,7 @@ def fetch_indexes_via_query_service(
         f"{select_clause} FROM system:indexes AS s {let_clause} "
         f"WHERE {' AND '.join(clauses)}"
     )
-    logger.info(f"Running list_indexes query: {query}")
+    logger.debug(f"Running list_indexes query: {query}")
 
     rows = run_cluster_query(ctx, query, named_parameters=params)
     return [row for row in rows if isinstance(row, dict)]

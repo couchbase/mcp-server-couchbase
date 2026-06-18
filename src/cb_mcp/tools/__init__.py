@@ -63,7 +63,7 @@ READ_ONLY_TOOLS = [
     get_document_by_id,
     # Query tools (read operations)
     get_schema_for_collection,
-    run_sql_plus_plus_query,  # Write protection handled at runtime via read_only_query_mode
+    run_sql_plus_plus_query,  # Write protection handled at runtime via read_only_mode
     explain_sql_plus_plus_query,
     # Index tools
     get_index_advisor_recommendations,

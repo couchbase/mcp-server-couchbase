@@ -31,13 +31,23 @@ def get_schema_for_collection(
     """
     schema = {"collection_name": collection_name, "schema": []}
     try:
+        logger.debug(
+            f"Inferring schema for {bucket_name}.{scope_name}.{collection_name}"
+        )
         query = f"INFER `{collection_name}`"
         result = run_sql_plus_plus_query(ctx, bucket_name, scope_name, query)
         # Result is a list of list of schemas. We convert it to a list of schemas.
         if result:
             schema["schema"] = result[0]
+        logger.info(
+            f"Retrieved schema for {bucket_name}.{scope_name}.{collection_name}"
+        )
     except Exception as e:
-        logger.error(f"Error getting schema: {e}")
+        logger.error(
+            f"Error getting schema for "
+            f"{bucket_name}.{scope_name}.{collection_name}: {e}",
+            exc_info=True,
+        )
         raise
     return schema
 
@@ -100,13 +110,11 @@ def run_sql_plus_plus_query(
 
     app_context = ctx.request_context.lifespan_context
     read_only_mode = app_context.read_only_mode
-    read_only_query_mode = app_context.read_only_query_mode
 
-    # SQL++ writes are blocked under any of three conditions:
+    # SQL++ writes are blocked under either of two conditions:
     #   1. read_only_mode is True (blanket lockdown of all writes)
-    #   2. read_only_query_mode is True (deprecated query-only lockdown)
-    #   3. The caller's JWT carries SCOPE_READ but NOT SCOPE_WRITE.
-    # Case 3 closes the gap where a token holding only couchbase-mcp:read
+    #   2. The caller's JWT carries SCOPE_READ but NOT SCOPE_WRITE.
+    # Case 2 closes the gap where a token holding only couchbase-mcp:read
     # could otherwise mutate data through SQL++ because the per-tool scope
     # wrapper classifies SQL++ as a read tool. Without this check, the
     # JWT scope guarantee would be weaker than the spec promises.
@@ -114,10 +122,14 @@ def run_sql_plus_plus_query(
     # is False so the historical config-only behavior is preserved.
     token = get_access_token()
     lacks_write_scope = token is not None and SCOPE_WRITE not in (token.scopes or [])
-    block_query_writes = read_only_mode or read_only_query_mode or lacks_write_scope
+    block_query_writes = read_only_mode or lacks_write_scope
 
     try:
         scope = bucket.scope(scope_name)
+        logger.debug(
+            f"Executing SQL++ query in {bucket_name}.{scope_name} "
+            f"(write_blocked={block_query_writes}): {query}"
+        )
 
         results = []
         # EXPLAIN statements are always safe to execute and should bypass write checks.
@@ -128,7 +140,7 @@ def run_sql_plus_plus_query(
 
             if data_modification_query or structure_modification_query:
                 kind = "data" if data_modification_query else "structure"
-                if lacks_write_scope and not (read_only_mode or read_only_query_mode):
+                if lacks_write_scope and not read_only_mode:
                     # lacks_write_scope implies token is not None here.
                     held_scopes = sorted(set(token.scopes or []))
                     msg = (
@@ -151,6 +163,9 @@ def run_sql_plus_plus_query(
         )
         for row in result:
             results.append(row)
+        logger.info(
+            f"SQL++ query in {bucket_name}.{scope_name} returned {len(results)} row(s)"
+        )
         return results
     except Exception as e:
         logger.error(f"Error running query: {e!s}", exc_info=True)
@@ -204,12 +219,14 @@ def run_cluster_query(ctx: Context, query: str, **kwargs: Any) -> list[dict[str,
     results = []
 
     try:
+        logger.debug(f"Executing cluster query: {query}")
         result = cluster.query(query, **kwargs)
         for row in result:
             results.append(row)
+        logger.info(f"Cluster query returned {len(results)} row(s)")
         return results
     except Exception as e:
-        logger.error(f"Error running query: {e}")
+        logger.error(f"Error running cluster query: {e}", exc_info=True)
         raise
 
 

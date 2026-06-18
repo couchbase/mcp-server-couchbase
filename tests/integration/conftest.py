@@ -11,15 +11,39 @@ import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
+from _test_env import (
+    REQUIRED_ENV_VARS,
+    _build_env,
+    get_test_bucket,
+    get_test_collection,
+    get_test_scope,
+    require_test_bucket,
+)
 from mcp import ClientSession, StdioServerParameters, stdio_client
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if TYPE_CHECKING:
+    from typing import TextIO
 
+__all__ = [
+    "EXPECTED_TOOLS",
+    "TOOLS_BY_CATEGORY",
+    "TOOL_REQUIRED_PARAMS",
+    "_build_env",
+    "create_logging_test_session",
+    "create_mcp_session",
+    "ensure_list",
+    "extract_payload",
+    "get_test_bucket",
+    "get_test_collection",
+    "get_test_scope",
+    "require_test_bucket",
+]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # Tools we expect to be registered by the server
 EXPECTED_TOOLS = {
@@ -131,9 +155,6 @@ TOOL_REQUIRED_PARAMS = {
     "explain_sql_plus_plus_query": ["bucket_name", "scope_name", "query"],
     "get_index_advisor_recommendations": ["bucket_name", "scope_name", "query"],
 }
-
-# Minimum configuration needed to talk to a demo cluster
-REQUIRED_ENV_VARS = ("CB_CONNECTION_STRING", "CB_USERNAME", "CB_PASSWORD")
 
 # Default timeout (seconds) to guard against hangs when the Couchbase cluster
 # is unreachable or slow. Override with CB_MCP_TEST_TIMEOUT if needed.
@@ -340,29 +361,6 @@ def extract_payload(response: Any) -> Any:
     return raw
 
 
-def get_test_bucket() -> str | None:
-    """Get the test bucket name from environment, or None if not set."""
-    return os.getenv("CB_MCP_TEST_BUCKET")
-
-
-def get_test_scope() -> str:
-    """Get the test scope name from environment, defaults to _default."""
-    return os.getenv("CB_MCP_TEST_SCOPE", "_default")
-
-
-def get_test_collection() -> str:
-    """Get the test collection name from environment, defaults to _default."""
-    return os.getenv("CB_MCP_TEST_COLLECTION", "_default")
-
-
-def require_test_bucket() -> str:
-    """Get the test bucket name, skipping test if not set."""
-    bucket = get_test_bucket()
-    if not bucket:
-        pytest.skip("CB_MCP_TEST_BUCKET not set")
-    return bucket
-
-
 def ensure_list(value: Any) -> list[Any]:
     """Ensure the value is a list.
 
@@ -374,3 +372,72 @@ def ensure_list(value: Any) -> list[Any]:
     if isinstance(value, list):
         return value
     return [value]
+
+
+@asynccontextmanager
+async def create_logging_test_session(
+    extra_args: list[str] | None = None,
+    env_overrides: dict[str, str] | None = None,
+    cwd: Path | None = None,
+    stderr_buffer: TextIO | None = None,
+) -> AsyncIterator[ClientSession]:
+    """Spawn the MCP server for CLI / logging tests; no cluster credentials.
+
+    Cluster credentials are deliberately stripped from the inherited environment
+    so the server boots in "no cluster" lazy mode (which is fine — tools that
+    don't touch the cluster, like ``get_server_configuration_status``, work
+    without connectivity). Use this helper for tests that exercise CLI flags,
+    env-var routing, or filesystem effects of logging — not for tests that
+    need to call cluster-touching tools.
+
+    Optional arguments:
+      - ``extra_args``: extra CLI flags appended after ``python -m mcp_server``.
+      - ``env_overrides``: merged onto the server's environment after credential
+        stripping. Use to set ``CB_MCP_LOG_LEVEL`` and friends.
+      - ``cwd``: working directory for the spawned process. Set to a
+        ``tmp_path`` when verifying default CWD-relative file paths.
+      - ``stderr_buffer``: a writable file object backed by a real file
+        descriptor (e.g. ``tmp_path / "server.stderr"`` opened in ``"w"``
+        mode). The MCP SDK passes this straight to ``asyncio.subprocess``,
+        which requires ``.fileno()`` — ``io.StringIO`` will not work.
+        Read the captured stderr back from the same path after the session
+        closes.
+    """
+    env = os.environ.copy()
+    # Strip credentials so the server starts in lazy mode without skipping.
+    for var in REQUIRED_ENV_VARS:
+        env.pop(var, None)
+    env["PYTHONUNBUFFERED"] = "1"
+    # Match _build_env(): always spawn the subprocess in stdio mode so the
+    # same test suite runs unchanged under the http-transport CI job (which
+    # exports CB_MCP_TRANSPORT=http and keeps a standing server on :8000).
+    env["CB_MCP_TRANSPORT"] = "stdio"
+    env.pop("MCP_TRANSPORT", None)
+    if env_overrides:
+        env.update(env_overrides)
+
+    # Ensure the subprocess imports the current source, not a stale
+    # site-packages install that may lack new CLI flags.
+    src_path = str(PROJECT_ROOT.parent / "src")
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    if existing_pythonpath:
+        env["PYTHONPATH"] = f"{src_path}{os.pathsep}{existing_pythonpath}"
+    else:
+        env["PYTHONPATH"] = src_path
+
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "mcp_server", *(extra_args or [])],
+        env=env,
+        cwd=str(cwd) if cwd is not None else None,
+    )
+
+    client_kwargs: dict[str, Any] = {}
+    if stderr_buffer is not None:
+        client_kwargs["errlog"] = stderr_buffer
+
+    async with asyncio.timeout(DEFAULT_TIMEOUT):
+        async with stdio_client(params, **client_kwargs) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                yield session

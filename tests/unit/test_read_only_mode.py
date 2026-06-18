@@ -2,7 +2,7 @@
 Tests for the READ_ONLY_MODE functionality.
 
 This module tests:
-- Tool filtering based on READ_ONLY_MODE and READ_ONLY_QUERY_MODE settings
+- Tool filtering based on READ_ONLY_MODE setting
 - The get_tools() function behavior according to the truth table
 - Verification that KV write tools are not loaded when READ_ONLY_MODE=True
 """
@@ -95,8 +95,8 @@ class TestGetToolsTruthTable:
     | True           | No                    |
     | False          | Yes                   |
 
-    Note: READ_ONLY_QUERY_MODE is handled at runtime by the query tool itself,
-    not at tool loading time.
+    Note: SQL++ query write blocking is handled at runtime by the query tool
+    itself, not at tool loading time.
     """
 
     def test_read_only_mode_true(self):
@@ -250,24 +250,11 @@ class TestAppContext:
         context = AppContext()
         assert context.read_only_mode is True
 
-    def test_app_context_read_only_query_mode_default_true(self):
-        """Verify AppContext.read_only_query_mode defaults to True."""
-
-        context = AppContext()
-        assert context.read_only_query_mode is True
-
     def test_app_context_can_set_read_only_mode_false(self):
         """Verify AppContext.read_only_mode can be set to False."""
 
         context = AppContext(read_only_mode=False)
         assert context.read_only_mode is False
-
-    def test_app_context_can_set_both_modes(self):
-        """Verify both mode fields can be set independently."""
-
-        context = AppContext(read_only_mode=False, read_only_query_mode=True)
-        assert context.read_only_mode is False
-        assert context.read_only_query_mode is True
 
 
 class TestConstantsDefault:

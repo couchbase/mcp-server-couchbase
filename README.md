@@ -172,7 +172,6 @@ The server can be configured using environment variables or command line argumen
 | `CB_CLIENT_KEY_PATH` | `--client-key-path` | Path to the client key file for mTLS authentication | **Required if using mTLS (or Username and Password required)** |
 | `CB_CA_CERT_PATH` | `--ca-cert-path` | Path to server root certificate for TLS if server is configured with a self-signed/untrusted certificate. This will not be required if you are connecting to Capella | |
 | `CB_MCP_READ_ONLY_MODE` | `--read-only-mode` | Prevent all data modifications (KV and Query). When enabled, KV write tools are not loaded. | `true` |
-| `CB_MCP_READ_ONLY_QUERY_MODE` | `--read-only-query-mode` | **[DEPRECATED]** Prevent queries that modify data. Note that data modification would still be possible via document operations tools. Use `CB_MCP_READ_ONLY_MODE` instead. | `true` |
 | `CB_MCP_TRANSPORT` | `--transport` | Transport mode: `stdio`, `http`, `sse` | `stdio` |
 | `CB_MCP_HOST` | `--host` | Host for HTTP/SSE transport modes | `127.0.0.1` |
 | `CB_MCP_PORT` | `--port` | Port for HTTP/SSE transport modes | `8000` |
@@ -181,28 +180,12 @@ The server can be configured using environment variables or command line argumen
 
 #### Read-Only Mode Configuration
 
-The MCP server provides two configuration options for controlling write operations:
+**`CB_MCP_READ_ONLY_MODE`** is the single switch controlling write operations:
 
-**`CB_MCP_READ_ONLY_MODE`** (Recommended)
+- When `true` (default): All write operations (KV and Query) are disabled. KV write tools (upsert, insert, replace, delete) are **not loaded** and will not be available to the LLM, and SQL++ queries that modify data or structure are blocked.
+- When `false`: KV write tools are loaded and SQL++ data/structure modification queries are allowed.
 
-- When `true` (default): All write operations are disabled. KV write tools (upsert, insert, replace, delete) are **not loaded** and will not be available to the LLM.
-- When `false`: KV write tools are loaded and available.
-
-**`CB_MCP_READ_ONLY_QUERY_MODE`** (Deprecated)
-
-- This option only controls SQL++ query-based writes but does not prevent KV write operations.
-- **Deprecated**: Use `CB_MCP_READ_ONLY_MODE` instead for comprehensive protection.
-
-**Mode Behavior Truth Table:**
-
-| `READ_ONLY_MODE` | `READ_ONLY_QUERY_MODE` | Result |
-| ---------------- | ---------------------- | ------ |
-| `true` | `true` | Read-only KV and Query operations. All writes disabled. |
-| `true` | `false` | Read-only KV and Query operations. All writes disabled. |
-| `false` | `true` | Only Query writes disabled. KV writes allowed. |
-| `false` | `false` | All KV and Query operations allowed. |
-
-> **Important**: When `READ_ONLY_MODE` is `true`, it takes precedence and disables all write operations regardless of `READ_ONLY_QUERY_MODE` setting. This is the recommended safe default to prevent inadvertent data modifications by LLMs.
+This is the recommended safe default to prevent inadvertent data modifications by LLMs.
 
 > Note: For authentication, you need either the Username and Password or the Client Certificate and key paths. Optionally, you can specify the CA root certificate path that will be used to validate the server certificates.
 > If both the Client Certificate & key path and the username and password are specified, the client certificates will be used for authentication.

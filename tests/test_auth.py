@@ -193,11 +193,10 @@ class TestWrapWithScopeCheck:
         assert hint in str(excinfo.value)
 
 
-def _ctx_with_modes(read_only_mode: bool = False, read_only_query_mode: bool = False):
-    """Build a Mock Context with the lifespan-context flags set."""
+def _ctx_with_modes(read_only_mode: bool = False):
+    """Build a Mock Context with the lifespan-context flag set."""
     ctx = MagicMock()
     ctx.request_context.lifespan_context.read_only_mode = read_only_mode
-    ctx.request_context.lifespan_context.read_only_query_mode = read_only_query_mode
     return ctx
 
 
@@ -212,7 +211,7 @@ class TestSqlPlusPlusScopeGate:
 
     def test_read_only_token_blocks_insert(self):
         """A token with only SCOPE_READ must NOT be able to INSERT via SQL++."""
-        ctx = _ctx_with_modes(read_only_mode=False, read_only_query_mode=False)
+        ctx = _ctx_with_modes(read_only_mode=False)
         token = SimpleNamespace(scopes=[SCOPE_READ])
 
         with (
@@ -231,7 +230,7 @@ class TestSqlPlusPlusScopeGate:
 
     def test_read_only_token_blocks_ddl(self):
         """Structure-modifying queries (CREATE INDEX, etc.) also require :write."""
-        ctx = _ctx_with_modes(read_only_mode=False, read_only_query_mode=False)
+        ctx = _ctx_with_modes(read_only_mode=False)
         token = SimpleNamespace(scopes=[SCOPE_READ])
 
         with (
@@ -249,7 +248,7 @@ class TestSqlPlusPlusScopeGate:
 
     def test_both_scopes_allow_writes_through_sqlpp(self):
         """A token with BOTH scopes can mutate via SQL++ (subject to CB RBAC)."""
-        ctx = _ctx_with_modes(read_only_mode=False, read_only_query_mode=False)
+        ctx = _ctx_with_modes(read_only_mode=False)
         token = SimpleNamespace(scopes=[SCOPE_READ, SCOPE_WRITE])
 
         # Force scope().query() to raise a sentinel so we can prove execution
@@ -272,8 +271,8 @@ class TestSqlPlusPlusScopeGate:
 
     def test_no_token_falls_back_to_config_only(self):
         """Without OAuth (no token), historical config-only behavior applies."""
-        # read_only_query_mode=True should block writes regardless of scope.
-        ctx = _ctx_with_modes(read_only_mode=False, read_only_query_mode=True)
+        # read_only_mode=True should block writes regardless of scope.
+        ctx = _ctx_with_modes(read_only_mode=True)
 
         with (
             patch("cb_mcp.tools.query.get_access_token", return_value=None),

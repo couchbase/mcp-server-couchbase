@@ -31,7 +31,7 @@ def connect_to_couchbase_cluster(
     try:
         logger.info("Connecting to Couchbase cluster...")
         if client_cert_path and client_key_path:
-            logger.info("Connecting to Couchbase cluster with client certificate...")
+            logger.debug("Using client certificate authentication")
             if not os.path.exists(client_cert_path) or not os.path.exists(
                 client_key_path
             ):
@@ -45,7 +45,7 @@ def connect_to_couchbase_cluster(
                 trust_store_path=ca_cert_path,
             )
         else:
-            logger.info("Connecting to Couchbase cluster with password...")
+            logger.debug("Using username/password authentication")
             auth = PasswordAuthenticator(username, password, cert_path=ca_cert_path)
         options = ClusterOptions(auth)
         options.apply_profile("wan_development")
@@ -56,7 +56,7 @@ def connect_to_couchbase_cluster(
         logger.info("Successfully connected to Couchbase cluster")
         return cluster
     except Exception as e:
-        logger.error(f"Failed to connect to Couchbase: {e}")
+        logger.error(f"Failed to connect to Couchbase cluster: {e}", exc_info=True)
         raise
 
 
@@ -65,9 +65,10 @@ def connect_to_bucket(cluster: Cluster, bucket_name: str) -> Bucket:
     If the operation fails, it will raise an exception.
     """
     try:
+        logger.debug(f"Opening bucket '{bucket_name}'")
         bucket = cluster.bucket(bucket_name)
         logger.info(f"Successfully connected to bucket: {bucket_name}")
         return bucket
     except Exception as e:
-        logger.error(f"Failed to connect to bucket: {e}")
+        logger.error(f"Failed to connect to bucket '{bucket_name}': {e}", exc_info=True)
         raise

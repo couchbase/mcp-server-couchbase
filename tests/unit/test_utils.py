@@ -12,10 +12,9 @@ Tests for:
 from __future__ import annotations
 
 import threading
-
-import httpx
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from cb_mcp.tools.index import (
@@ -877,15 +876,15 @@ class TestContextModule:
         """Verify AppContext has correct default values."""
         ctx = AppContext()
         assert ctx.cluster_provider is None
-        assert ctx.read_only_query_mode is True
+        assert ctx.read_only_mode is True
 
     def test_app_context_with_provider(self) -> None:
         """Verify AppContext can hold a cluster provider."""
         mock_provider = MagicMock()
-        ctx = AppContext(cluster_provider=mock_provider, read_only_query_mode=False)
+        ctx = AppContext(cluster_provider=mock_provider, read_only_mode=False)
 
         assert ctx.cluster_provider is mock_provider
-        assert ctx.read_only_query_mode is False
+        assert ctx.read_only_mode is False
 
     def test_get_cluster_connection_delegates_to_provider(self) -> None:
         """get_cluster_connection calls into the provider attached to AppContext."""
@@ -1396,9 +1395,7 @@ class TestDetermineSSLCapella:
                 return_value=True,
             ),
         ):
-            result = _determine_ssl_verification(
-                capella_conn, "/user/supplied/ca.pem"
-            )
+            result = _determine_ssl_verification(capella_conn, "/user/supplied/ca.pem")
 
         assert result == "/fake/capella_root_ca.pem"
 
@@ -1409,7 +1406,9 @@ class TestGetCapellaRootCAPath:
     def test_uses_importlib_resources_when_available(self) -> None:
         """The installed-package path uses importlib.resources.files()."""
         fake_path = MagicMock()
-        fake_path.__str__ = lambda self: "/site-packages/cb_mcp/certs/capella_root_ca.pem"
+        fake_path.__str__ = (
+            lambda self: "/site-packages/cb_mcp/certs/capella_root_ca.pem"
+        )
 
         with patch("cb_mcp.utils.index_utils.files") as mock_files:
             mock_files.return_value.joinpath.return_value = fake_path
@@ -1558,9 +1557,7 @@ class TestFetchIndexesFromRestApi:
         first_error = httpx.ConnectError("connection refused")
         success_response = self._ok_response({"status": [{"indexName": "idx1"}]})
 
-        client_patch, mock_client = self._patch_client(
-            [first_error, success_response]
-        )
+        client_patch, mock_client = self._patch_client([first_error, success_response])
 
         with client_patch:
             result = fetch_indexes_from_rest_api(
