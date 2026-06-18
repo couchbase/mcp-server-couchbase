@@ -232,8 +232,10 @@ class TestFileSinkEdgeCases:
     def test_warning_when_file_sink_not_enabled(self, capsys):
         _call(level="INFO", sinks={"stderr"})
         err = capsys.readouterr().err
-        assert "File logging is disabled" in err
-        assert "product support" in err
+        assert (
+            "WARNING: File logging is disabled. Log files required for product support "
+            "are not being generated."
+        ) in err
 
 
 class TestOffMode:
