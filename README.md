@@ -10,7 +10,7 @@ For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couc
   <img width="380" height="200" src="https://glama.ai/mcp/servers/@Couchbase-Ecosystem/mcp-server-couchbase/badge" alt="Couchbase Server MCP server" />
 </a>
 
-<!-- mcp-name: io.github.Couchbase-Ecosystem/mcp-server-couchbase -->
+<!-- mcp-name: io.github.couchbase/mcp-server-couchbase -->
 
 ## Features/Tools
 
