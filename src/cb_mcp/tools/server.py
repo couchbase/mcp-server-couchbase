@@ -42,6 +42,16 @@ def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
         "confirmation_required_tools": sorted(
             settings.get("confirmation_required_tools", set())
         ),
+        # OAuth resource-server config (non-secret IdP coordinates). Mirrors
+        # the env-info diagnostic record so the log file and this tool agree on
+        # which OAuth state is exposed. ``oauth_enabled`` reflects whether OAuth
+        # is actually active, not merely configured.
+        "oauth_enabled": settings.get("oauth_enabled", False),
+        "oauth_jwks_uri": settings.get("oauth_jwks_uri"),
+        "oauth_issuer": settings.get("oauth_issuer"),
+        "oauth_audience": settings.get("oauth_audience"),
+        "oauth_algorithm": settings.get("oauth_algorithm"),
+        "oauth_mcp_base_url": settings.get("oauth_mcp_base_url"),
     }
 
     connection_status = {

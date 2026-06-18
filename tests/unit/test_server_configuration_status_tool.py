@@ -64,6 +64,44 @@ def test_configuration_status_defaults_tool_lists_to_empty():
     assert config["confirmation_required_tools"] == []
 
 
+def test_configuration_status_exposes_oauth_config():
+    """OAuth resource-server config surfaces (non-secret IdP coordinates).
+
+    Mirrors the env-info diagnostic record so support sees the same OAuth
+    state in both the log file and the MCP tool response.
+    """
+    ctx = _make_ctx(
+        {
+            "oauth_enabled": True,
+            "oauth_jwks_uri": "https://auth.example.com/.well-known/jwks.json",
+            "oauth_issuer": "https://auth.example.com/",
+            "oauth_audience": "couchbase-mcp",
+            "oauth_algorithm": "RS256",
+            "oauth_mcp_base_url": "https://mcp.example.com",
+        }
+    )
+
+    config = get_server_configuration_status(ctx)["configuration"]
+
+    assert config["oauth_enabled"] is True
+    assert config["oauth_jwks_uri"] == "https://auth.example.com/.well-known/jwks.json"
+    assert config["oauth_issuer"] == "https://auth.example.com/"
+    assert config["oauth_audience"] == "couchbase-mcp"
+    assert config["oauth_algorithm"] == "RS256"
+    assert config["oauth_mcp_base_url"] == "https://mcp.example.com"
+
+
+def test_configuration_status_oauth_defaults_when_unset():
+    """With no OAuth settings, enabled is False and coordinates are None."""
+    config = get_server_configuration_status(_make_ctx())["configuration"]
+
+    assert config["oauth_enabled"] is False
+    assert config["oauth_jwks_uri"] is None
+    assert config["oauth_issuer"] is None
+    assert config["oauth_audience"] is None
+    assert config["oauth_mcp_base_url"] is None
+
+
 def test_logging_block_passed_through_from_lifespan_context():
     """The tool surfaces whatever shape AppContext.logging_config carries.
 

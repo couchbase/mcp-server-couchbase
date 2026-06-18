@@ -33,13 +33,16 @@ EXPECTED_TOP_LEVEL_KEYS = {
 }
 
 
-def _capture_env_record() -> logging.LogRecord:
+def _capture_env_record(server_settings=None) -> logging.LogRecord:
     """Attach a one-shot capture handler and return the emitted record.
 
     Bypasses configure_logging entirely so the test doesn't fight with the
     Couchbase SDK's one-shot ``configure_logging`` or the global handler state
-    that other tests configure.
+    that other tests configure. ``server_settings`` defaults to a minimal
+    read-only config; pass a dict to exercise specific redaction paths.
     """
+    if server_settings is None:
+        server_settings = {"read_only_mode": True}
     env_logger = logging.getLogger(ENV_LOGGER_NAME)
     captured: list[logging.LogRecord] = []
 
@@ -57,7 +60,7 @@ def _capture_env_record() -> logging.LogRecord:
     # tripping caplog-based assertions elsewhere.
     env_logger.propagate = False
     try:
-        log_environment_info(transport="http", server_settings={"read_only_mode": True})
+        log_environment_info(transport="http", server_settings=server_settings)
     finally:
         env_logger.removeHandler(handler)
         env_logger.setLevel(prev_level)
@@ -141,3 +144,28 @@ def test_config_block_reflects_redaction_policy():
     assert "password_configured" in config
     assert config["password_configured"] is False
     assert "ca_cert_path_configured" in config
+
+
+def test_config_block_captures_oauth_coordinates():
+    """OAuth config (non-secret IdP coordinates) is captured verbatim.
+
+    OAuth was added after the logging work; this pins the env record so it
+    keeps surfacing OAuth state for support triage.
+    """
+    record = _capture_env_record(
+        server_settings={
+            "oauth_enabled": True,
+            "oauth_jwks_uri": "https://auth.example.com/.well-known/jwks.json",
+            "oauth_issuer": "https://auth.example.com/",
+            "oauth_audience": "couchbase-mcp",
+            "oauth_algorithm": "RS256",
+            "oauth_mcp_base_url": "https://mcp.example.com",
+        }
+    )
+    config = json.loads(record.getMessage().split("Environment | ", 1)[1])["config"]
+    assert config["oauth_enabled"] is True
+    assert config["oauth_jwks_uri"] == "https://auth.example.com/.well-known/jwks.json"
+    assert config["oauth_issuer"] == "https://auth.example.com/"
+    assert config["oauth_audience"] == "couchbase-mcp"
+    assert config["oauth_algorithm"] == "RS256"
+    assert config["oauth_mcp_base_url"] == "https://mcp.example.com"

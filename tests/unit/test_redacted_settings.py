@@ -62,6 +62,13 @@ def test_secret_paths_redacted_to_presence_booleans():
         "username": None,
         "disabled_tools": None,
         "confirmation_required_tools": None,
+        # OAuth coordinates: safe keys, absent in input → None
+        "oauth_enabled": None,
+        "oauth_jwks_uri": None,
+        "oauth_issuer": None,
+        "oauth_audience": None,
+        "oauth_algorithm": None,
+        "oauth_mcp_base_url": None,
         # presence-only keys: values redacted to booleans
         "password_configured": True,
         "ca_cert_path_configured": True,
