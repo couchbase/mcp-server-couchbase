@@ -90,7 +90,7 @@ def build_oauth(
     )
 
     if not base_url:
-        logger.info("OAuth enabled (token verification only; PRM disabled). ")
+        logger.info("OAuth enabled (token verification only; PRM disabled).")
         return verifier
 
     auth = RemoteAuthProvider(

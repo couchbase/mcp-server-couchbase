@@ -19,7 +19,11 @@ from cb_mcp.utils import (
     ALLOWED_OAUTH_ALGORITHMS,
     ALLOWED_TRANSPORTS,
     DEFAULT_HOST,
+    DEFAULT_LOG_BACKUP_COUNT,
+    DEFAULT_LOG_FILE,
     DEFAULT_LOG_LEVEL,
+    DEFAULT_LOG_MAX_BYTES,
+    DEFAULT_LOG_SINKS,
     DEFAULT_OAUTH_ALGORITHM,
     DEFAULT_PORT,
     DEFAULT_READ_ONLY_MODE,
@@ -29,21 +33,21 @@ from cb_mcp.utils import (
     NETWORK_TRANSPORTS_SDK_MAPPING,
     STREAMABLE_HTTP_TRANSPORT,
     AppContext,
+    configure_logging,
+    get_resolved_logging_config,
+    log_environment_info,
+    validate_log_level,
+    validate_log_path,
+    validate_log_sinks,
 )
 
 # Standalone-host provider implementation
 from providers.static import StaticClusterProvider
 
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, DEFAULT_LOG_LEVEL.upper()),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-
 logger = logging.getLogger(MCP_SERVER_NAME)
 
 
-@click.command()
+@click.command(context_settings={"show_default": True})
 @click.option(
     "--connection-string",
     envvar="CB_CONNECTION_STRING",
@@ -79,7 +83,7 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     envvar="CB_MCP_READ_ONLY_MODE",
     type=bool,
     default=DEFAULT_READ_ONLY_MODE,
-    help="Enable read-only mode. When True (default), all write operations (KV and Query) are disabled and KV write tools are not loaded. Set to False to enable write operations.",
+    help="Enable read-only mode. When True, all write operations (KV and Query) are disabled and KV write tools are not loaded. Set to False to enable write operations.",
 )
 @click.option(
     "--transport",
@@ -95,13 +99,13 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     "--host",
     envvar="CB_MCP_HOST",
     default=DEFAULT_HOST,
-    help="Host to run the server on (default: 127.0.0.1)",
+    help="Host to run the server on.",
 )
 @click.option(
     "--port",
     envvar="CB_MCP_PORT",
     default=DEFAULT_PORT,
-    help="Port to run the server on (default: 8000)",
+    help="Port to run the server on.",
 )
 @click.option(
     "--disabled-tools",
@@ -117,6 +121,45 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     help="Comma-separated tool names that require user confirmation before execution. "
     "Also accepts a file path containing one tool name per line. "
     "Requires the MCP client to support elicitation.",
+)
+@click.option(
+    "--log-level",
+    envvar="CB_MCP_LOG_LEVEL",
+    default=DEFAULT_LOG_LEVEL,
+    callback=validate_log_level,
+    help="Logging level for MCP server and Couchbase SDK. Allowed values: "
+    "off, debug, info, warning, error. Use 'off' to disable logging "
+    "entirely. Invalid values fall back to the default with an error "
+    "log entry.",
+)
+@click.option(
+    "--log-sinks",
+    envvar="CB_MCP_LOG_SINKS",
+    default=DEFAULT_LOG_SINKS,
+    callback=validate_log_sinks,
+    help="Comma-separated list of log sinks. Allowed values: stderr, file. "
+    "Include 'file' (optionally with --log-file) to write per-level files; "
+    "include 'stderr' to write to the console.",
+)
+@click.option(
+    "--log-file",
+    envvar="CB_MCP_LOG_FILE",
+    default=DEFAULT_LOG_FILE,
+    callback=validate_log_path,
+    help="Base path for the per-level log files. One rotating file is written "
+    "per level, derived by inserting the level name: e.g. mcp_server.log -> "
+    "mcp_server.debug.log, mcp_server.info.log, mcp_server.warning.log, "
+    "mcp_server.error.log (the error file also captures CRITICAL). Only active "
+    "when 'file' is in --log-sinks.",
+)
+@click.option(
+    "--log-max-bytes",
+    envvar="CB_MCP_LOG_MAX_BYTES",
+    # 0 means 'never rotate' (Python logging behaviour); negative is rejected.
+    type=click.IntRange(min=0),
+    default=DEFAULT_LOG_MAX_BYTES,
+    help="Maximum size in bytes per per-level log file before it rotates. "
+    "Set to 0 to disable rotation.",
 )
 @click.option(
     "--oauth-jwks-uri",
@@ -180,8 +223,25 @@ def main(
     oauth_audience,
     oauth_algorithm,
     oauth_mcp_base_url,
+    log_level,
+    log_sinks,
+    log_file,
+    log_max_bytes,
 ):
     """Couchbase MCP Server"""
+
+    resolved_level, invalid_level = log_level
+    parsed_sinks, invalid_sinks = log_sinks
+    configure_logging(
+        level=resolved_level,
+        sinks=parsed_sinks,
+        log_file=log_file,
+        log_max_bytes=log_max_bytes,
+        # Backup count isn't user-configurable in 1.0; always the default.
+        log_backup_count=DEFAULT_LOG_BACKUP_COUNT,
+        invalid_level=invalid_level,
+        invalid_sinks=invalid_sinks,
+    )
 
     auth = _resolve_oauth(
         transport=transport,
@@ -216,6 +276,19 @@ def main(
         "transport": transport,
         "host": host,
         "port": port,
+        # OAuth resource-server config, captured so the env-info diagnostic and
+        # get_server_configuration_status can report it. These are non-secret
+        # IdP coordinates — a pure resource server holds no client secret.
+        # ``oauth_enabled`` reflects whether OAuth is actually *active*:
+        # _resolve_oauth returns None for non-http transports even when JWT
+        # settings are provided, so "settings present but oauth_enabled=False"
+        # pinpoints a transport mismatch in a support bundle.
+        "oauth_enabled": auth is not None,
+        "oauth_jwks_uri": oauth_jwks_uri,
+        "oauth_issuer": oauth_issuer,
+        "oauth_audience": oauth_audience,
+        "oauth_algorithm": oauth_algorithm,
+        "oauth_mcp_base_url": oauth_mcp_base_url,
         "disabled_tools": disabled_tool_names,
         "confirmation_required_tools": configured_confirmation_tool_names,
     }
@@ -228,15 +301,23 @@ def main(
             f"MCP server initialized in lazy mode for tool discovery. "
             f"Modes: (read_only_mode={read_only_mode})"
         )
+        # Diagnostic snapshot for customer support. Filtered at INFO; visible
+        # whenever the user runs with --log-level DEBUG.
+        log_environment_info(transport, settings)
+        # Hand the resolved logging snapshot to AppContext so shared tools
+        # (e.g. get_server_configuration_status) can surface it without
+        # coupling to our specific logging module.
+        resolved_logging = get_resolved_logging_config()
         app_context = AppContext(
             cluster_provider=StaticClusterProvider(settings=settings),
             settings=settings,
             read_only_mode=read_only_mode,
+            logging_config=resolved_logging.as_dict() if resolved_logging else None,
         )
         try:
             yield app_context
         except Exception as e:
-            logger.error(f"Error in app lifespan: {e}")
+            logger.error(f"Error in app lifespan: {e}", exc_info=True)
             raise
         finally:
             if app_context.cluster_provider:

@@ -11,5 +11,8 @@ wheels/
 # Environment variables
 .env
 
+# Log files
+*.log
+*.log.*
 #test coverage file
 .coverage
