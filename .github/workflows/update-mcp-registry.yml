@@ -169,5 +169,5 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           echo "MCP Registry updated successfully for version $VERSION"
-          echo "Docker image: docker.io/couchbaseecosystem/mcp-server-couchbase:$VERSION"
+          echo "Docker image: docker.io/couchbase/mcp-server:$VERSION"
           echo "PyPI package: couchbase-mcp-server==$VERSION"

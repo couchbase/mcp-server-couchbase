@@ -22,9 +22,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Couchbase-Ecosystem/mcp-server-couchbase"
-Documentation = "https://github.com/Couchbase-Ecosystem/mcp-server-couchbase#readme"
-Issues = "https://github.com/Couchbase-Ecosystem/mcp-server-couchbase/issues"
+Homepage = "https://github.com/couchbase/mcp-server-couchbase"
+Documentation = "https://mcp-server.couchbase.com/"
+Issues = "https://github.com/couchbase/mcp-server-couchbase/issues"
 
 [project.scripts]
 couchbase-mcp-server = "mcp_server:main"

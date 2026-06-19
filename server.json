@@ -1,11 +1,12 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.Couchbase-Ecosystem/mcp-server-couchbase",
+  "name": "io.github.couchbase/mcp-server-couchbase",
   "description": "Couchbase Model Context Protocol Server to interact with Couchbase clusters",
   "repository": {
-    "url": "https://github.com/Couchbase-Ecosystem/mcp-server-couchbase",
+    "url": "https://github.com/couchbase/mcp-server-couchbase",
     "source": "github"
   },
+  "websiteUrl": "https://mcp-server.couchbase.com/",
   "version": "0.8.1rc2",
   "packages": [
     {
