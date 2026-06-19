@@ -59,7 +59,7 @@ Update the version in all locations:
      "packages": [
        {
          "registryType": "oci",
-         "identifier": "docker.io/couchbaseecosystem/mcp-server-couchbase:0.5.2",
+         "identifier": "docker.io/couchbase/mcp-server:0.5.2",
          ...
        }
      ]
@@ -147,7 +147,7 @@ Once the tag is pushed, three GitHub Actions workflows run **in parallel/sequenc
 
 2. **Docker Build**
    - Builds multi-architecture images (amd64, arm64)
-   - Pushes to Docker Hub as `couchbaseecosystem/mcp-server-couchbase`
+   - Pushes to Docker Hub as `couchbase/mcp-server`
    - Updates Docker Hub description
 
 3. **MCP Registry Update** (runs after Docker completes)
@@ -168,7 +168,7 @@ Check that all three workflows succeeded:
 Verify the release is available on:
 
 - [PyPI](https://pypi.org/project/couchbase-mcp-server/)
-- [Docker Hub](https://hub.docker.com/r/couchbaseecosystem/mcp-server-couchbase)
+- [Docker Hub](https://hub.docker.com/r/couchbase/mcp-server)
 - [MCP Registry](https://hub.docker.com/mcp/server/couchbase/overview)
 
 There is a delay between PyPI/Docker publish and MCP Registry update due to the images being built independently by Docker on a regular schedule. So check the MCP Registry the next day.
@@ -203,7 +203,7 @@ git push origin v0.5.2rc1
 **What gets published:**
 
 - PyPI: `couchbase-mcp-server==0.5.2rc1`
-- Docker Hub: `couchbaseecosystem/mcp-server-couchbase:0.5.2rc1`
+- Docker Hub: `couchbase/mcp-server:0.5.2rc1`
 - MCP Registry: version `0.5.2rc1`
 
 **If RC succeeds, release the final version:**

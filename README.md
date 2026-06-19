@@ -10,7 +10,7 @@ For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couc
   <img width="380" height="200" src="https://glama.ai/mcp/servers/@Couchbase-Ecosystem/mcp-server-couchbase/badge" alt="Couchbase Server MCP server" />
 </a>
 
-<!-- mcp-name: io.github.Couchbase-Ecosystem/mcp-server-couchbase -->
+<!-- mcp-name: io.github.couchbase/mcp-server-couchbase -->
 
 ## Features/Tools
 
@@ -518,7 +518,7 @@ The server will be available on <http://localhost:8000/sse>. This can be used in
 
 ## Docker Image
 
-The MCP server can also be built and run as a Docker container. Prebuilt images can be found on [DockerHub](https://hub.docker.com/r/couchbaseecosystem/mcp-server-couchbase) or pulled via `docker pull couchbase.docker.scarf.sh/couchbaseecosystem/mcp-server-couchbase`.
+The MCP server can also be built and run as a Docker container. Prebuilt images can be found on [DockerHub](https://hub.docker.com/r/couchbase/mcp-server) or pulled via `docker pull docker.io/couchbase/mcp-server:latest`.
 
 Alternatively, we are part of the [Docker MCP Catalog](https://hub.docker.com/mcp/server/couchbase/overview).
 
