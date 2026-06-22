@@ -10,6 +10,7 @@ afterwards via an autouse fixture, so tests don't bleed state into one another.
 from __future__ import annotations
 
 import logging
+import re
 from logging.handlers import RotatingFileHandler
 from unittest.mock import patch
 
@@ -263,6 +264,79 @@ class TestOffMode:
         assert snap.level == "OFF"
         assert snap.sinks == ()
         assert snap.log_files is None
+
+
+class TestSdkLevelPropagation:
+    """The Couchbase SDK is configured with the same level as the MCP logger.
+
+    PRD Req 4: "The SDK logs should also be configured with whatever
+    configuration is set up for the MCP server." ``TestOffMode`` already pins
+    the OFF/sentinel case; these pin the normal levels so the MCP and SDK log
+    trees never drift to different thresholds.
+    """
+
+    def test_sdk_configured_with_matching_debug_level(
+        self, mock_sdk_configure_logging
+    ):
+        _call(level="DEBUG", sinks={"stderr"})
+        mock_sdk_configure_logging.assert_called_with(
+            MCP_SERVER_NAME, logging.DEBUG
+        )
+
+    def test_sdk_configured_with_matching_warning_level(
+        self, mock_sdk_configure_logging
+    ):
+        _call(level="WARNING", sinks={"stderr"})
+        mock_sdk_configure_logging.assert_called_with(
+            MCP_SERVER_NAME, logging.WARNING
+        )
+
+    def test_sdk_level_tracks_invalid_level_fallback(
+        self, mock_sdk_configure_logging
+    ):
+        """An invalid level falls back to INFO for the MCP logger; the SDK must
+        be told the same resolved level, not the rejected input."""
+        _call(level="NONSENSE", sinks={"stderr"})
+        mock_sdk_configure_logging.assert_called_with(
+            MCP_SERVER_NAME, logging.INFO
+        )
+
+
+class TestTimestampFormat:
+    """Emitted records carry a timezone-aware timestamp.
+
+    PRD Req 4: "The timestamp should have the timezone." This asserts the
+    formatter actually wired onto the handlers produces an ISO-8601 timestamp
+    with a UTC offset (e.g. ``2026-06-19T16:20:25+0530``), rather than just
+    trusting the format-string constant.
+    """
+
+    # ISO-8601 local time followed by a +HHMM / -HHMM UTC offset.
+    _TS_WITH_TZ = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{4}")
+
+    def test_stderr_handler_timestamp_includes_timezone_offset(self):
+        _call(level="INFO", sinks={"stderr"})
+        logger = logging.getLogger(MCP_SERVER_NAME)
+        formatter = logger.handlers[0].formatter
+        assert formatter is not None
+        record = logging.LogRecord(
+            MCP_SERVER_NAME, logging.INFO, "f", 1, "hello", None, None
+        )
+        formatted = formatter.format(record)
+        assert self._TS_WITH_TZ.search(formatted), (
+            f"timestamp is missing a timezone offset:\n{formatted}"
+        )
+
+    def test_file_handler_timestamp_includes_timezone_offset(self, tmp_path):
+        _call(level="INFO", sinks={"file"}, log_file=str(tmp_path / "m.log"))
+        log = logging.getLogger(f"{MCP_SERVER_NAME}.test")
+        log.info("an-info")
+        for h in logging.getLogger(MCP_SERVER_NAME).handlers:
+            h.flush()
+        info_line = (tmp_path / "m.info.log").read_text()
+        assert self._TS_WITH_TZ.search(info_line), (
+            f"file timestamp is missing a timezone offset:\n{info_line}"
+        )
 
 
 class TestLenientLevelFallback:

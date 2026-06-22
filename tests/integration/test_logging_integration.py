@@ -73,6 +73,68 @@ async def test_custom_log_file_paths_honoured(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_multiple_sinks_write_to_both_stderr_and_file(tmp_path) -> None:
+    """``--log-sinks stderr,file`` writes the same record to BOTH destinations.
+
+    PRD Req 5: "Users can specify multiple values in this option ... the MCP
+    server will write the Logs to all of those options." Unit tests verify both
+    handlers attach; this verifies a real record actually reaches stderr *and*
+    the per-level file through the spawned server.
+    """
+    base_path = tmp_path / "main.log"
+    stderr_path = tmp_path / "server.stderr"
+    with stderr_path.open("w", encoding="utf-8") as stderr_file:
+        async with create_logging_test_session(
+            extra_args=[
+                "--log-sinks",
+                "stderr,file",
+                "--log-file",
+                str(base_path),
+            ],
+            stderr_buffer=stderr_file,
+        ):
+            pass
+
+    # The startup summary is a single INFO record. With both sinks active it
+    # must land in the INFO file AND on stderr.
+    info_text = (tmp_path / "main.info.log").read_text()
+    stderr_text = stderr_path.read_text()
+    assert "Logging configured" in info_text, (
+        "INFO record missing from the file sink under --log-sinks stderr,file"
+    )
+    assert "Logging configured" in stderr_text, (
+        "INFO record missing from the stderr sink under --log-sinks stderr,file"
+    )
+
+
+@pytest.mark.asyncio
+async def test_default_sink_is_stderr_and_creates_no_files(tmp_path) -> None:
+    """With no ``--log-sinks``, output goes to stderr and no log files are written.
+
+    PRD Req 5: "MCP server will write to stderr as a default and when this
+    configuration is not set." Guards against a regression where file logging
+    silently becomes a default and starts writing files no one asked for.
+    """
+    stderr_path = tmp_path / "server.stderr"
+    with stderr_path.open("w", encoding="utf-8") as stderr_file:
+        async with create_logging_test_session(
+            cwd=tmp_path,
+            stderr_buffer=stderr_file,
+        ):
+            pass
+
+    stderr_text = stderr_path.read_text()
+    assert "Logging configured" in stderr_text, (
+        "default stderr sink produced no records on stderr"
+    )
+    # No per-level files should be created anywhere in the CWD by default.
+    created_logs = list(tmp_path.glob("*.log"))
+    assert created_logs == [], (
+        f"default run (no --log-sinks) unexpectedly created log files: {created_logs}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_debug_level_writes_env_info_record(tmp_path) -> None:
     """At DEBUG, ``log_environment_info`` writes a JSON record to the DEBUG file."""
     base_path = tmp_path / "main.log"
