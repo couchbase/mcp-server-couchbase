@@ -627,10 +627,6 @@ Notes
 - Couchbase does not review or evaluate the quality or accuracy of such outputs, and such outputs may not reflect Couchbase's views.
 - You are solely responsible for determining whether to use large language models and related technology, and for complying with any license terms, terms of use, and your organization's policies governing your use of the same.
 
-### Managed MCP Server
-
-The Couchbase MCP server can also be used as a managed server in your agentic applications via [Smithery.ai](https://smithery.ai/server/@Couchbase-Ecosystem/mcp-server-couchbase).
-
 ## Troubleshooting Tips
 
 - Ensure the path to your MCP server repository is correct in the configuration if running from source.

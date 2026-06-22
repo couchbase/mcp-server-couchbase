@@ -146,7 +146,6 @@ mcp-server-couchbase/
 ├── pyproject.toml                                 # Project dependencies and Ruff config
 ├── RELEASE.md                                     # Release process documentation
 ├── server.json                                    # MCP Registry configuration
-├── smithery.yaml                                  # Smithery.ai deployment config
 ├── CONTRIBUTING.md                                # Contribution Guide
 └── README.md                                      # Usage
 ```
