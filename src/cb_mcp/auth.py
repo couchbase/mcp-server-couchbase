@@ -101,7 +101,7 @@ def build_oauth(
         resource_name="Couchbase MCP Server",
     )
     logger.info(
-        "OAuth enabled with PRM at %s/.well-known/oauth-protected-resource (scopes=%s)",
+        "OAuth enabled with PRM at %s/.well-known/oauth-protected-resource/mcp (scopes=%s)",
         base_url.rstrip("/"),
         SUPPORTED_SCOPES,
     )
