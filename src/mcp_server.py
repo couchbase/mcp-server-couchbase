@@ -198,8 +198,8 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     default=None,
     help="Public base URL of this MCP server (e.g. https://api.yourcompany.com). "
     "When set, the server publishes RFC 9728 Protected Resource Metadata at "
-    "<base_url>/.well-known/oauth-protected-resource so PRM-aware clients can "
-    "discover the authorization server and perform DCR directly against it. "
+    "<base_url>/.well-known/oauth-protected-resource/mcp so PRM-aware clients "
+    "can discover the authorization server and perform DCR directly against it. "
     "Optional — omit to run as a JWT-validating resource server only.",
 )
 @click.version_option(package_name="couchbase-mcp-server")

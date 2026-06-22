@@ -54,7 +54,7 @@ def build_oauth(
     validates tokens but does not publish protected-resource metadata. Pass
     ``base_url`` to wrap the verifier in a ``RemoteAuthProvider`` that also
     serves RFC 9728 metadata at
-    ``<base_url>/.well-known/oauth-protected-resource``, advertising the IdP
+    ``<base_url>/.well-known/oauth-protected-resource/mcp``, advertising the IdP
     (derived from ``issuer``) and the two supported scopes so PRM-aware
     clients can discover the authorization server.
 
