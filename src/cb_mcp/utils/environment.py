@@ -40,7 +40,6 @@ _REPORTED_DEPENDENCIES = ("fastmcp", "mcp", "couchbase", "httpx", "click", "lark
 # customer-shared support bundle.
 _SAFE_SETTINGS_KEYS = (
     "read_only_mode",
-    "read_only_query_mode",
     "transport",
     "host",
     "port",

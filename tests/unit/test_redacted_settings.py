@@ -19,7 +19,6 @@ def test_safe_keys_pass_through_verbatim():
     out = _redacted_settings(
         {
             "read_only_mode": True,
-            "read_only_query_mode": False,
             "transport": "http",
             "host": "127.0.0.1",
             "port": 8000,
@@ -28,7 +27,6 @@ def test_safe_keys_pass_through_verbatim():
         }
     )
     assert out["read_only_mode"] is True
-    assert out["read_only_query_mode"] is False
     assert out["transport"] == "http"
     assert out["host"] == "127.0.0.1"
     assert out["port"] == 8000
@@ -52,7 +50,6 @@ def test_secret_paths_redacted_to_presence_booleans():
     assert out == {
         # all safe keys absent in input → fall through as None
         "read_only_mode": None,
-        "read_only_query_mode": None,
         "transport": None,
         "host": None,
         "port": None,
