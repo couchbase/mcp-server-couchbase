@@ -91,6 +91,16 @@ def create_indexes(cluster: Cluster, bucket_name: str) -> None:
             f"CREATE PRIMARY INDEX IF NOT EXISTS ON `{bucket_name}`.`_default`.`_default`",
             "primary index on _default._default",
         ),
+        # Legacy bucket-level index: created with the pre-scopes, unqualified
+        # `ON `bucket`(...)` DDL (no scope/collection), so it lands in
+        # system:indexes with keyspace_id=<bucket> and no bucket_id/scope_id.
+        # This is what
+        # test_list_indexes_filtered_by_bucket_includes_legacy_indexes verifies;
+        # without a legacy index present that regression test just skips.
+        (
+            f"CREATE INDEX IF NOT EXISTS idx_legacy_default ON `{bucket_name}`(`type`)",
+            "idx_legacy_default (legacy bucket-level index)",
+        ),
         # Primary index on inventory.airline for index tests
         (
             f"CREATE PRIMARY INDEX IF NOT EXISTS ON `{bucket_name}`.`inventory`.`airline`",
