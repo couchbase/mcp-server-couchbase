@@ -7,12 +7,12 @@
     "source": "github"
   },
   "websiteUrl": "https://mcp-server.couchbase.com/",
-  "version": "0.8.1rc2",
+  "version": "1.0.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "couchbase-mcp-server",
-      "version": "0.8.1rc2",
+      "version": "1.0.0",
       "transport": {
         "type": "stdio"
       },
@@ -203,7 +203,7 @@
     },
     {
       "registryType": "oci",
-      "identifier": "docker.io/couchbase/mcp-server:0.8.1rc2",
+      "identifier": "docker.io/couchbase/mcp-server:1.0.0",
       "transport": {
         "type": "stdio"
       },
