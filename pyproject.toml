@@ -9,7 +9,7 @@ authors = [
     { name="Couchbase, Inc.", email="mcp-server@couchbase.com" },
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Programming Language :: Python :: 3",
     "Topic :: Database",
 ]
