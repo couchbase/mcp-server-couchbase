@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10,<3.15"
 license = "Apache-2.0"
 authors = [
-    { name="Developer Experience & Ecosystem, Couchbase", email="devadvocates@couchbase.com" },
+    { name="Couchbase, Inc.", email="mcp-server@couchbase.com" },
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
