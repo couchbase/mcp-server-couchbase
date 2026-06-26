@@ -20,9 +20,9 @@ on:
   workflow_dispatch:
     inputs:
       model:
-        description: "OpenAI model id (default gpt-4o-mini)"
+        description: "OpenAI model id"
         required: false
-        default: "gpt-4o-mini"
+        default: "gpt-4o"
         type: string
       run_id:
         description: "Run id used in tests/accuracy/results/<run_id>.json (defaults to release-<tag> on tag pushes, gh-run-<run_number> otherwise)"
@@ -197,7 +197,7 @@ jobs:
           CB_MCP_TEST_SCOPE: inventory
           CB_MCP_TEST_COLLECTION: airline
           PYTHONPATH: src
-          # OpenAI / eval config (model defaults to gpt-4o-mini via conftest
+          # OpenAI / eval config (model defaults to gpt-4o via conftest
           # when inputs.model is empty, e.g. on tag-triggered runs).
           # CB_ACCURACY_RUN_ID is set in the previous step via $GITHUB_ENV.
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

@@ -91,7 +91,7 @@ export CB_MCP_TEST_COLLECTION="_default"
 # OpenAI (accuracy only)
 export OPENAI_API_KEY="sk-..."
 # Optional accuracy overrides:
-# export CB_ACCURACY_OPENAI_MODEL="gpt-4o-mini"     # agent model (default)
+# export CB_ACCURACY_OPENAI_MODEL="gpt-4o"     # agent model (default)
 # export CB_ACCURACY_JUDGE_MODEL="gpt-4o"           # result-validation judge (default: agent model)
 # export CB_ACCURACY_OPENAI_BASE_URL="https://..."  # Azure / proxy
 # export CB_ACCURACY_RUN_ID="ci-2026-05-22"

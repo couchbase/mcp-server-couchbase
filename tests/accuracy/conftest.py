@@ -8,7 +8,7 @@ demo cluster env vars are set.
 
 Environment variables:
   - ``CB_ACCURACY_OPENAI_API_KEY`` / ``OPENAI_API_KEY`` — required.
-  - ``CB_ACCURACY_OPENAI_MODEL`` — defaults to ``gpt-4o-mini``.
+  - ``CB_ACCURACY_OPENAI_MODEL`` — defaults to ``gpt-4o``.
   - ``CB_ACCURACY_OPENAI_BASE_URL`` — optional override (Azure, proxy, etc.).
   - ``CB_ACCURACY_RUN_ID`` — run identifier; defaults to ``local-<unix_ts>``.
   - ``CB_ACCURACY_RESULTS_DIR`` — output dir; defaults to
@@ -124,7 +124,7 @@ def result_storage(results_dir: Path) -> DiskResultStorage:
 
 @pytest.fixture(scope="session")
 def openai_model() -> str:
-    return os.getenv("CB_ACCURACY_OPENAI_MODEL", "gpt-4o-mini")
+    return os.getenv("CB_ACCURACY_OPENAI_MODEL", "gpt-4o")
 
 
 @pytest.fixture(scope="session")
