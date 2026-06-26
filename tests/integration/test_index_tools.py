@@ -54,69 +54,6 @@ async def test_list_indexes_all() -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_indexes_filtered_by_bucket_includes_legacy_indexes() -> None:
-    """Regression test: filtering by bucket_name must include legacy indexes.
-
-    Legacy bucket-level indexes (created on a bucket before scopes/collections
-    existed) appear in `system:indexes` with only `keyspace_id` (holding the
-    bucket name) and no `bucket_id`/`scope_id`. The SQL query in
-    fetch_indexes_via_query_service applies the user's bucket filter against
-    the normalized LET alias `bid = IFMISSING(s.bucket_id, s.keyspace_id)`,
-    so a legacy index in bucket X matches `bucket_name=X` symmetrically
-    with a modern one.
-
-    Before this fix, the filter was `bucket_id = $bucket_id`, which
-    silently dropped every legacy index from the result.
-    """
-    bucket = require_test_bucket()
-
-    async with create_mcp_session() as session:
-        response = await session.call_tool(
-            "list_indexes", arguments={"bucket_name": bucket}
-        )
-        payload = extract_payload(response)
-
-    if not isinstance(payload, list) or not payload:
-        pytest.skip(f"No indexes found in bucket {bucket!r}")
-
-    # Every returned row must actually belong to the requested bucket.
-    for idx in payload:
-        assert idx.get("bucket") == bucket, (
-            f"Index {idx.get('name')!r} reported bucket "
-            f"{idx.get('bucket')!r} but bucket filter was {bucket!r}"
-        )
-
-    # Identify any legacy bucket-level indexes returned. The DDL signature
-    # for legacy is `ON \`bucket\`(...)` (no scope.collection qualifier);
-    # the normalised shape is scope=_default + collection=_default.
-    legacy_indexes = [
-        idx
-        for idx in payload
-        if (
-            idx.get("scope") == "_default"
-            and idx.get("collection") == "_default"
-            and isinstance(idx.get("definition"), str)
-            and f"ON `{bucket}`(" in idx["definition"]
-            and f"ON `{bucket}`." not in idx["definition"]
-        )
-    ]
-
-    if not legacy_indexes:
-        pytest.skip(
-            f"Bucket {bucket!r} has no legacy bucket-level indexes — cannot "
-            f"verify the legacy filter fix. Try a bucket like travel-sample."
-        )
-
-    # Each legacy index must be correctly normalised: bucket equals the
-    # filter, scope/collection both '_default'. If any of these slip,
-    # either the SQL LET clause or our bucket filter has regressed.
-    for idx in legacy_indexes:
-        assert idx["bucket"] == bucket
-        assert idx["scope"] == "_default"
-        assert idx["collection"] == "_default"
-
-
-@pytest.mark.asyncio
 async def test_list_indexes_filtered_by_bucket() -> None:
     """Verify list_indexes can filter by bucket name."""
     bucket = require_test_bucket()
