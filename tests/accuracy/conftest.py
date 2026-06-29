@@ -124,7 +124,7 @@ def result_storage(results_dir: Path) -> DiskResultStorage:
 
 @pytest.fixture(scope="session")
 def openai_model() -> str:
-    return os.getenv("CB_ACCURACY_OPENAI_MODEL", "gpt-4o")
+    return os.getenv("CB_ACCURACY_OPENAI_MODEL") or "gpt-4o"
 
 
 @pytest.fixture(scope="session")

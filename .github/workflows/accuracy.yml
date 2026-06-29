@@ -197,11 +197,11 @@ jobs:
           CB_MCP_TEST_SCOPE: inventory
           CB_MCP_TEST_COLLECTION: airline
           PYTHONPATH: src
-          # OpenAI / eval config (model defaults to gpt-4o via conftest
+          # OpenAI / eval config (model defaults to gpt-4o
           # when inputs.model is empty, e.g. on tag-triggered runs).
           # CB_ACCURACY_RUN_ID is set in the previous step via $GITHUB_ENV.
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          CB_ACCURACY_OPENAI_MODEL: ${{ inputs.model }}
+          CB_ACCURACY_OPENAI_MODEL: ${{ inputs.model || 'gpt-4o' }}
           CB_ACCURACY_RESULTS_DIR: ${{ github.workspace }}/accuracy-results
           CB_ACCURACY_TEST_FILTER: ${{ inputs.test_filter }}
         run: |
