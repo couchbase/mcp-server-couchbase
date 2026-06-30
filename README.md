@@ -18,7 +18,7 @@ For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couc
 
 | Tool Name | Description |
 | --------- | ----------- |
-| `get_server_configuration_status` | Get the status of the MCP server |
+| `get_server_configuration_status` | Get the server status and configuration without connecting to the cluster — reports read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration |
 | `test_cluster_connection` | Check the cluster credentials by connecting to the cluster |
 | `get_cluster_health_and_services` | Get cluster health status and list of all running services |
 
@@ -177,6 +177,15 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_PORT` | `--port` | Port for HTTP/SSE transport modes | `8000` |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Elicitation/Confirmation Required Tools](#elicitationconfirmation-for-tool-calls)) | None |
+| `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
+| `CB_MCP_LOG_SINKS` | `--log-sinks` | Comma-separated log destinations: `stderr`, `file`, or both (see [Logging](#logging)) | `stderr` |
+| `CB_MCP_LOG_FILE` | `--log-file` | Base path for per-level log files (only used when the `file` sink is enabled) | `mcp_server.log` |
+| `CB_MCP_LOG_MAX_BYTES` | `--log-max-bytes` | Maximum size in bytes per log file before it rotates. Set to `0` to disable rotation | `1048576` (1 MB) |
+| `CB_MCP_OAUTH_JWT_JWKS_URI` | `--oauth-jwks-uri` | JWKS endpoint of the identity provider used to verify bearer JWTs. Enables OAuth when set with the issuer and audience (see [OAuth 2.1 Authorization](#oauth-21-authorization)) | None |
+| `CB_MCP_OAUTH_JWT_ISSUER` | `--oauth-issuer` | Expected JWT `iss` claim. Required to enable OAuth | None |
+| `CB_MCP_OAUTH_JWT_AUDIENCE` | `--oauth-audience` | Expected JWT `aud` claim. Required to enable OAuth | None |
+| `CB_MCP_OAUTH_JWT_ALGORITHM` | `--oauth-algorithm` | JWT signing algorithm: one of `RS256/384/512`, `ES256/384/512`, `PS256/384/512` | `RS256` |
+| `CB_MCP_OAUTH_MCP_BASE_URL` | `--oauth-mcp-base-url` | Public base URL of this server. When set, publishes RFC 9728 Protected Resource Metadata so PRM-aware clients can discover the IdP | None |
 
 #### Read-Only Mode Configuration
 
@@ -309,6 +318,20 @@ You can also check the version of the server using:
 ```bash
 uvx couchbase-mcp-server --version
 ```
+
+### Logging
+
+The MCP server logs to `stderr` by default. Logging is configured with the `CB_MCP_LOG_*` variables listed in [Additional Configuration](#additional-configuration-for-mcp-server):
+
+- **`CB_MCP_LOG_LEVEL`** — how much is logged: `info` (the default) logs lifecycle events and tool invocations (metadata only — never query text or document content), `debug` adds verbose internal detail, and `off` disables all logging.
+- **`CB_MCP_LOG_SINKS`** — where logs go: `stderr` (the default), per-level rotating files (`file`), or both. With `file`, one file is written per level (for example `mcp_server.info.log` and `mcp_server.error.log`) at the path set by `CB_MCP_LOG_FILE`.
+
+```bash
+# Enable debug logging to both stderr and rotating per-level files
+uvx couchbase-mcp-server --log-level=debug --log-sinks=stderr,file
+```
+
+For more details, see the [documentation](https://mcp-server.couchbase.com/configuration/logging).
 
 ### Client Specific Configuration
 
@@ -454,7 +477,7 @@ The log file can be explored at **Help > Show Log in Finder (Explorer) > mcp > c
 The MCP Server can be run in [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http) transport mode which allows multiple clients to connect to the same server instance via HTTP.
 Check if your [MCP client](https://modelcontextprotocol.io/clients) supports streamable http transport before attempting to connect to MCP server in this mode.
 
-> Note: This mode does not include authorization support.
+> Note: OAuth 2.1 authorization is supported on this transport. See [OAuth 2.1 Authorization](#oauth-21-authorization). Without OAuth configured, the HTTP endpoint is unauthenticated.
 
 ### Usage
 
@@ -515,6 +538,30 @@ The server will be available on <http://localhost:8000/sse>. This can be used in
   }
 }
 ```
+
+## OAuth 2.1 Authorization
+
+When running with `--transport=http`, the MCP server can act as an **OAuth 2.1 resource server**: it validates incoming bearer JWTs against your identity provider's JWKS. It is provider-agnostic (any OAuth 2.1 / OIDC provider that publishes a JWKS — Auth0, Okta, Keycloak, AWS Cognito, Microsoft Entra, etc.) and does **not** issue tokens or manage users. OAuth settings are ignored on `stdio`.
+
+OAuth is configured with the `CB_MCP_OAUTH_*` variables listed in [Additional Configuration](#additional-configuration-for-mcp-server):
+
+- OAuth activates only when all three of `CB_MCP_OAUTH_JWT_JWKS_URI`, `CB_MCP_OAUTH_JWT_ISSUER`, and `CB_MCP_OAUTH_JWT_AUDIENCE` are set; setting only some of them fails at startup.
+- Setting `CB_MCP_OAUTH_MCP_BASE_URL` additionally publishes RFC 9728 Protected Resource Metadata so PRM-aware clients can discover the authorization server.
+- Access is gated by two scopes read from the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools, including SQL++) and `couchbase-mcp:write` (KV mutation tools). Full access requires both.
+
+```bash
+uvx couchbase-mcp-server \
+  --connection-string='<couchbase_connection_string>' \
+  --username='<database_username>' \
+  --password='<database_password>' \
+  --transport=http \
+  --oauth-jwks-uri='https://auth.example.com/.well-known/jwks.json' \
+  --oauth-issuer='https://auth.example.com/' \
+  --oauth-audience='couchbase-mcp-server' \
+  --oauth-mcp-base-url='https://mcp.example.com'
+```
+
+For full details, see the [documentation](https://mcp-server.couchbase.com/configuration/oauth).
 
 ## Docker Image
 
