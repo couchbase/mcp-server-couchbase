@@ -120,7 +120,7 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_MCP_LOG_LEVEL`                   | Logging level for the server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging))                                                        | `info`                                                         |
 | `CB_MCP_LOG_SINKS`                   | Comma-separated log destinations: `stderr`, `file`, or both (see [Logging](#logging))                                                                     | `stderr`                                                       |
 | `CB_MCP_LOG_FILE`                    | Base path for per-level log files (only used when the `file` sink is enabled)                                                                             | `mcp_server.log`                                               |
-| `CB_MCP_LOG_MAX_BYTES`               | Maximum size in bytes per log file before it rotates. Set to `0` to disable rotation                                                                      | `1048576` (1 MB)                                               |
+| `CB_MCP_LOG_MAX_BYTES`               | Maximum size in bytes per log file before it rotates                                                                                                      | `1048576` (1 MB)                                               |
 | `CB_MCP_OAUTH_JWT_JWKS_URI`          | JWKS endpoint of the identity provider used to verify bearer JWTs. Enables OAuth when set with the issuer and audience (see [OAuth 2.1 Authorization](#oauth-21-authorization)) | None                                            |
 | `CB_MCP_OAUTH_JWT_ISSUER`            | Expected JWT `iss` claim. Required to enable OAuth                                                                                                        | None                                                           |
 | `CB_MCP_OAUTH_JWT_AUDIENCE`          | Expected JWT `aud` claim. Required to enable OAuth                                                                                                        | None                                                           |
@@ -298,7 +298,7 @@ When a listed tool is invoked:
 
 The server logs to `stderr` by default. Logging is configured with the `CB_MCP_LOG_*` variables in the [Environment Variables](#environment-variables) table:
 
-- **`CB_MCP_LOG_LEVEL`** — how much is logged: `info` (the default) logs lifecycle events and tool invocations (metadata only — never query text or document content), `debug` adds verbose internal detail, and `off` disables all logging.
+- **`CB_MCP_LOG_LEVEL`** — how much is logged: `info` (the default) logs lifecycle events and tool invocations, `debug` adds verbose internal detail, and `off` disables all logging.
 - **`CB_MCP_LOG_SINKS`** — where logs go: `stderr` (the default), per-level rotating files (`file`), or both. With `file`, one file is written per level (for example `mcp_server.info.log` and `mcp_server.error.log`) at the path set by `CB_MCP_LOG_FILE`. Mount a volume at that path to keep the logs after the container stops.
 
 For more details, see the [documentation](https://mcp-server.couchbase.com/configuration/logging).

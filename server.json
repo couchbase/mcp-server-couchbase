@@ -124,7 +124,7 @@
         },
         {
           "name": "CB_MCP_LOG_MAX_BYTES",
-          "description": "Maximum size in bytes per per-level log file before it rotates. Set to 0 to disable rotation. Default is 1048576 (1 MB).",
+          "description": "Maximum size in bytes per per-level log file before it rotates. Default is 1048576 (1 MB).",
           "isRequired": false,
           "format": "number",
           "isSecret": false
@@ -289,7 +289,7 @@
         {
           "type": "named",
           "name": "--log-max-bytes",
-          "description": "Maximum size in bytes per per-level log file before it rotates. Set to 0 to disable rotation. Default is 1048576 (1 MB).",
+          "description": "Maximum size in bytes per per-level log file before it rotates. Default is 1048576 (1 MB).",
           "isRequired": false,
           "format": "number",
           "isSecret": false
@@ -450,7 +450,7 @@
         },
         {
           "name": "CB_MCP_LOG_MAX_BYTES",
-          "description": "Maximum size in bytes per per-level log file before it rotates. Set to 0 to disable rotation. Default is 1048576 (1 MB).",
+          "description": "Maximum size in bytes per per-level log file before it rotates. Default is 1048576 (1 MB).",
           "isRequired": false,
           "format": "number",
           "isSecret": false

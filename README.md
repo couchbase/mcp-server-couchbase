@@ -183,7 +183,7 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
 | `CB_MCP_LOG_SINKS` | `--log-sinks` | Comma-separated log destinations: `stderr`, `file`, or both (see [Logging](#logging)) | `stderr` |
 | `CB_MCP_LOG_FILE` | `--log-file` | Base path for per-level log files (only used when the `file` sink is enabled) | `mcp_server.log` |
-| `CB_MCP_LOG_MAX_BYTES` | `--log-max-bytes` | Maximum size in bytes per log file before it rotates. Set to `0` to disable rotation | `1048576` (1 MB) |
+| `CB_MCP_LOG_MAX_BYTES` | `--log-max-bytes` | Maximum size in bytes per log file before it rotates | `1048576` (1 MB) |
 | `CB_MCP_OAUTH_JWT_JWKS_URI` | `--oauth-jwks-uri` | JWKS endpoint of the identity provider used to verify bearer JWTs. Enables OAuth when set with the issuer and audience (see [OAuth 2.1 Authorization](#oauth-21-authorization)) | None |
 | `CB_MCP_OAUTH_JWT_ISSUER` | `--oauth-issuer` | Expected JWT `iss` claim. Required to enable OAuth | None |
 | `CB_MCP_OAUTH_JWT_AUDIENCE` | `--oauth-audience` | Expected JWT `aud` claim. Required to enable OAuth | None |
@@ -326,7 +326,7 @@ uvx couchbase-mcp-server --version
 
 The MCP server logs to `stderr` by default. Logging is configured with the `CB_MCP_LOG_*` variables listed in [Additional Configuration](#additional-configuration-for-mcp-server):
 
-- **`CB_MCP_LOG_LEVEL`** — how much is logged: `info` (the default) logs lifecycle events and tool invocations (metadata only — never query text or document content), `debug` adds verbose internal detail, and `off` disables all logging.
+- **`CB_MCP_LOG_LEVEL`** — how much is logged: `info` (the default) logs lifecycle events and tool invocations, `debug` adds verbose internal detail, and `off` disables all logging.
 - **`CB_MCP_LOG_SINKS`** — where logs go: `stderr` (the default), per-level rotating files (`file`), or both. With `file`, one file is written per level (for example `mcp_server.info.log` and `mcp_server.error.log`) at the path set by `CB_MCP_LOG_FILE`.
 
 ```bash
