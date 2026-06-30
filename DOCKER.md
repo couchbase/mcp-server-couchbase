@@ -2,7 +2,9 @@
 
 Pre-built images for the [Couchbase](https://www.couchbase.com/) MCP Server.
 
-A Model Context Protocol (MCP) server that allows AI agents to interact with Couchbase databases.
+Couchbase MCP Server is a self-hosted MCP Server that allows AI agents to connect to and interact with data in Couchbase clusters, whether hosted on Capella or self-managed. It provides tools across categories including Cluster Health, Data Schema, Key-Value, Query, and Performance — with safety controls via read-only mode and fine-grained tool disabling. It supports both STDIO and Streamable HTTP transports.
+
+Enterprise support for Couchbase MCP Server is available by licensing [Couchbase AI Data Plane](https://www.couchbase.com/downloads/?family=ai-data-plane), which also entitles use and enterprise support of Couchbase Agent Memory and Couchbase Agent Catalog.
 
 GitHub Repo: <https://github.com/couchbase/mcp-server-couchbase>
 
