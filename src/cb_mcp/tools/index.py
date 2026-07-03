@@ -189,9 +189,8 @@ def list_indexes(
         # Validate parameters
         validate_filter_params(bucket_name, scope_name, collection_name, index_name)
 
-        # Get and validate connection settings
+        # Get connection settings
         settings = get_settings(ctx)
-        validate_connection_settings(settings)
 
         # Decide which path to use based on cluster version (via SDK).
         cluster = get_cluster_connection(ctx)
@@ -217,7 +216,11 @@ def list_indexes(
             logger.info(f"Found {len(indexes)} indexes via query service")
             return indexes
 
-        # Fallback / pre-8.x path: Index Service REST API
+        # Fallback / pre-8.x path: Index Service REST API.
+        # This path authenticates directly against the REST endpoint, so
+        # username/password (and connection_string) must be present.
+        validate_connection_settings(settings)
+
         logger.info(
             f"Fetching indexes from Index Service REST API for "
             f"bucket={bucket_name}, scope={scope_name}, "
