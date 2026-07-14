@@ -88,9 +88,14 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[ResultCase]:
                 "list that is consistent with the schema the tool returned — it "
                 "must not invent fields that the tool output does not contain. "
                 "It is acceptable for the answer to list a subset of fields. "
-                "FAIL only if it fabricates fields absent from the tool output "
-                "or claims it could not infer anything when the tool returned a "
-                "schema."
+                "INFER may return more than one schema flavor/sample, and the "
+                "output includes a '~meta' wrapper; an answer that groups fields "
+                "across those samples, or that reports '~meta.id' (the string "
+                "document key) separately from a top-level 'id' field (whose own "
+                "type comes from the documents), is FAITHFUL — do not penalize "
+                "either as an error. FAIL only if it fabricates fields absent "
+                "from the tool output or claims it could not infer anything when "
+                "the tool returned a schema."
             ),
             # Seed a doc so the collection is non-empty and INFER has a sample.
             seed=seed_document(
@@ -98,7 +103,15 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[ResultCase]:
                 scope,
                 collection,
                 schema_id,
-                {"name": "Schema Sample Air", "iata": "SS", "active": True},
+                {
+                    "id": 19999,
+                    "type": "airline",
+                    "name": "Schema Sample Air",
+                    "country": "United States",
+                    "iata": "SS",
+                    "icao": "SSA",
+                    "callsign": "SAMPLE",
+                },
             ),
             cleanup=delete_document(bucket, scope, collection, schema_id),
         )

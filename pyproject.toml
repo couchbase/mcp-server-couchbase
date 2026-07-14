@@ -1,15 +1,15 @@
 [project]
 name = "couchbase-mcp-server"
-version = "0.8.1rc2"
-description = "Couchbase MCP Server - The Developer Data Platform for Critical Applications in Our AI World"
+version = "1.0.0.post1"
+description = "Couchbase MCP Server - Enable AI agents to connect to and interact with Couchbase clusters."
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
 license = "Apache-2.0"
 authors = [
-    { name="Developer Experience & Ecosystem, Couchbase", email="devadvocates@couchbase.com" },
+    { name="Couchbase, Inc.", email="mcp-server@couchbase.com" },
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Programming Language :: Python :: 3",
     "Topic :: Database",
 ]

@@ -91,8 +91,7 @@ logger = logging.getLogger(MCP_SERVER_NAME)
 @click.option(
     "--transport",
     envvar=[
-        "CB_MCP_TRANSPORT",
-        "MCP_TRANSPORT",  # Deprecated
+        "CB_MCP_TRANSPORT"
     ],
     type=click.Choice(ALLOWED_TRANSPORTS),
     default=DEFAULT_TRANSPORT,

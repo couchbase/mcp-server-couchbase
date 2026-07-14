@@ -2,7 +2,9 @@
 
 Pre-built images for the [Couchbase](https://www.couchbase.com/) MCP Server.
 
-A Model Context Protocol (MCP) server that allows AI agents to interact with Couchbase databases.
+Couchbase MCP Server is a self-hosted MCP Server that allows AI agents to connect to and interact with data in Couchbase clusters, whether hosted on Capella or self-managed. It provides tools across categories including Cluster Health, Data Schema, Key-Value, Query, and Performance — with safety controls via read-only mode and fine-grained tool disabling. It supports both STDIO and Streamable HTTP transports.
+
+Enterprise support for Couchbase MCP Server is available by licensing [Couchbase AI Data Plane](https://www.couchbase.com/downloads/?family=ai-data-plane), which also entitles use and enterprise support of Couchbase Agent Memory and Couchbase Agent Catalog.
 
 GitHub Repo: <https://github.com/couchbase/mcp-server-couchbase>
 
@@ -16,7 +18,7 @@ Documentation: <https://mcp-server.couchbase.com>
 
 | Tool Name | Description |
 | --------- | ----------- |
-| `get_server_configuration_status` | Get the status of the MCP server |
+| `get_server_configuration_status` | Get the server status and configuration without connecting to the cluster — reports read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration |
 | `test_cluster_connection` | Check the cluster credentials by connecting to the cluster |
 | `get_cluster_health_and_services` | Get cluster health status and list of all running services |
 
@@ -115,6 +117,15 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_MCP_PORT`                        | Server port (HTTP/SSE modes)                                                                                                                             | `8000`                                                         |
 | `CB_MCP_DISABLED_TOOLS`              | Tools to disable (see [Disabling Tools](#disabling-tools))                                                                                               | None                                                           |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | Tools that require explicit user confirmation before execution (see [Elicitation/Confirmation for Tool Calls](#elicitationconfirmation-for-tool-calls))  | None                                                           |
+| `CB_MCP_LOG_LEVEL`                   | Logging level for the server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging))                                                        | `info`                                                         |
+| `CB_MCP_LOG_SINKS`                   | Comma-separated log destinations: `stderr`, `file`, or both (see [Logging](#logging))                                                                     | `stderr`                                                       |
+| `CB_MCP_LOG_FILE`                    | Base path for per-level log files (only used when the `file` sink is enabled)                                                                             | `mcp_server.log`                                               |
+| `CB_MCP_LOG_MAX_BYTES`               | Maximum size in bytes per log file before it rotates                                                                                                      | `1048576` (1 MB)                                               |
+| `CB_MCP_OAUTH_JWT_JWKS_URI`          | JWKS endpoint of the identity provider used to verify bearer JWTs. Enables OAuth when set with the issuer and audience (see [OAuth 2.1 Authorization](#oauth-21-authorization)) | None                                            |
+| `CB_MCP_OAUTH_JWT_ISSUER`            | Expected JWT `iss` claim. Required to enable OAuth                                                                                                        | None                                                           |
+| `CB_MCP_OAUTH_JWT_AUDIENCE`          | Expected JWT `aud` claim. Required to enable OAuth                                                                                                        | None                                                           |
+| `CB_MCP_OAUTH_JWT_ALGORITHM`         | JWT signing algorithm: one of `RS256/384/512`, `ES256/384/512`, `PS256/384/512`                                                                           | `RS256`                                                        |
+| `CB_MCP_OAUTH_MCP_BASE_URL`          | Public base URL of this server. When set, publishes RFC 9728 Protected Resource Metadata for PRM-aware clients                                            | None                                                           |
 
 ### Disabling Tools
 
@@ -282,3 +293,24 @@ When a listed tool is invoked:
   }
 }
 ```
+
+### Logging
+
+The server logs to `stderr` by default. Logging is configured with the `CB_MCP_LOG_*` variables in the [Environment Variables](#environment-variables) table:
+
+- **`CB_MCP_LOG_LEVEL`** — how much is logged: `info` (the default) logs lifecycle events and tool invocations, `debug` adds verbose internal detail, and `off` disables all logging.
+- **`CB_MCP_LOG_SINKS`** — where logs go: `stderr` (the default), per-level rotating files (`file`), or both. With `file`, one file is written per level (for example `mcp_server.info.log` and `mcp_server.error.log`) at the path set by `CB_MCP_LOG_FILE`. Mount a volume at that path to keep the logs after the container stops.
+
+For more details, see the [documentation](https://mcp-server.couchbase.com/configuration/logging).
+
+### OAuth 2.1 Authorization
+
+When running with `CB_MCP_TRANSPORT=http`, the server can act as an **OAuth 2.1 resource server**: it validates incoming bearer JWTs against your identity provider's JWKS. It is provider-agnostic (any OAuth 2.1 / OIDC provider that publishes a JWKS — Auth0, Okta, Keycloak, AWS Cognito, Microsoft Entra, etc.) and does **not** issue tokens or manage users. OAuth settings are ignored on `stdio`.
+
+OAuth is configured with the `CB_MCP_OAUTH_*` variables in the [Environment Variables](#environment-variables) table:
+
+- OAuth activates only when all three of `CB_MCP_OAUTH_JWT_JWKS_URI`, `CB_MCP_OAUTH_JWT_ISSUER`, and `CB_MCP_OAUTH_JWT_AUDIENCE` are set; setting only some of them fails at startup.
+- Setting `CB_MCP_OAUTH_MCP_BASE_URL` additionally publishes RFC 9728 Protected Resource Metadata so PRM-aware clients can discover the authorization server.
+- Access is gated by two scopes read from the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools, including SQL++) and `couchbase-mcp:write` (KV mutation tools). Full access requires both.
+
+For full details, see the [documentation](https://mcp-server.couchbase.com/configuration/oauth).
