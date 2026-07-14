@@ -12,14 +12,14 @@ Usage::
     @click.option("--log-sinks", callback=validate_log_sinks, ...)
 """
 
-import logging
+from logging import getLogger
 
 import click
 
 from .constants import MCP_SERVER_NAME
 from .logging import parse_log_level, parse_log_sinks
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.cli")
+logger = getLogger(f"{MCP_SERVER_NAME}.utils.cli")
 
 
 def validate_log_level(

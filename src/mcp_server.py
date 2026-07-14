@@ -90,9 +90,7 @@ logger = logging.getLogger(MCP_SERVER_NAME)
 )
 @click.option(
     "--transport",
-    envvar=[
-        "CB_MCP_TRANSPORT"
-    ],
+    envvar=["CB_MCP_TRANSPORT"],
     type=click.Choice(ALLOWED_TRANSPORTS),
     default=DEFAULT_TRANSPORT,
     help="Transport mode for the server (stdio, http or sse). Default is stdio. OAuth is only honored with http (streamable-http).",
@@ -451,6 +449,21 @@ def _resolve_oauth(
                 f"issuer is published in Protected Resource Metadata as an "
                 f"authorization server. Got: {issuer!r}."
             ) from e
+
+    # The read and write labels must be distinct — mirror build_oauth's
+    # effective-value resolution so a None argument still maps to its
+    # canonical default before the comparison.
+    effective_read = scope_read or SCOPE_READ
+    effective_write = scope_write or SCOPE_WRITE
+    if effective_read == effective_write:
+        raise click.UsageError(
+            "The read and write OAuth scope labels must be distinct, but both "
+            f"resolve to {effective_read!r}. Set different values for "
+            "--oauth-scope-read-label / --oauth-scope-write-label "
+            "(CB_MCP_OAUTH_SCOPE_READ_LABEL / CB_MCP_OAUTH_SCOPE_WRITE_LABEL); "
+            "note a single override that equals the other scope's canonical "
+            "default also collides."
+        )
 
     return build_oauth(
         jwks_uri=jwks_uri,
