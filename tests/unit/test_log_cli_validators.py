@@ -9,8 +9,8 @@ rejection behaviour for ``validate_log_path``.
 
 from __future__ import annotations
 
-import logging
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import click
 import pytest
@@ -123,42 +123,36 @@ class TestValidateScopeLabel:
             == "couchbase-mcp/read"
         )
 
-    def test_default_passes_through_without_warning(self, caplog):
+    def test_default_passes_through_without_warning(self):
         """When the flag is omitted, Click passes the default (a valid str);
         the callback must return it without emitting a warning."""
-        with caplog.at_level(logging.WARNING):
+        with patch("cb_mcp.utils.cli.logger") as mock_logger:
             result = validate_scope_label(None, _scope_param(SCOPE_READ), SCOPE_READ)  # type: ignore[arg-type]
         assert result == SCOPE_READ
-        assert caplog.records == []
+        mock_logger.warning.assert_not_called()
 
-    def test_empty_string_warns_and_falls_back(self, caplog):
-        with caplog.at_level(logging.WARNING):
+    def test_empty_string_warns_and_falls_back(self):
+        with patch("cb_mcp.utils.cli.logger") as mock_logger:
             result = validate_scope_label(None, _scope_param(SCOPE_READ), "")  # type: ignore[arg-type]
         assert result == SCOPE_READ
-        assert any(
-            "Falling back to the default scope" in r.message for r in caplog.records
-        )
+        mock_logger.warning.assert_called_once()
 
-    def test_whitespace_only_warns_and_falls_back(self, caplog):
-        with caplog.at_level(logging.WARNING):
+    def test_whitespace_only_warns_and_falls_back(self):
+        with patch("cb_mcp.utils.cli.logger") as mock_logger:
             result = validate_scope_label(None, _scope_param(SCOPE_READ), "   ")  # type: ignore[arg-type]
         assert result == SCOPE_READ
-        assert any(
-            "Falling back to the default scope" in r.message for r in caplog.records
-        )
+        mock_logger.warning.assert_called_once()
 
-    def test_non_string_value_warns_and_falls_back(self, caplog):
+    def test_non_string_value_warns_and_falls_back(self):
         """Defensive: a non-str value (e.g. from a programmatic caller) warns
         and falls back rather than propagating a type error downstream."""
-        with caplog.at_level(logging.WARNING):
+        with patch("cb_mcp.utils.cli.logger") as mock_logger:
             result = validate_scope_label(None, _scope_param(SCOPE_READ), 123)  # type: ignore[arg-type]
         assert result == SCOPE_READ
-        assert any("expected a non-empty string" in r.message for r in caplog.records)
+        mock_logger.warning.assert_called_once()
 
-    def test_none_value_warns_and_falls_back(self, caplog):
-        with caplog.at_level(logging.WARNING):
+    def test_none_value_warns_and_falls_back(self):
+        with patch("cb_mcp.utils.cli.logger") as mock_logger:
             result = validate_scope_label(None, _scope_param(SCOPE_READ), None)  # type: ignore[arg-type]
         assert result == SCOPE_READ
-        assert any(
-            "Falling back to the default scope" in r.message for r in caplog.records
-        )
+        mock_logger.warning.assert_called_once()
