@@ -18,7 +18,7 @@ import pytest
 from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
-from cb_mcp.auth import build_oauth
+from cb_mcp.auth import CouchbaseJWTVerifier, build_oauth
 from cb_mcp.tools.query import run_sql_plus_plus_query
 from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
 from cb_mcp.utils.scope_enforcement import (
@@ -61,6 +61,128 @@ class TestBuildOAuth:
             jwks_uri=JWKS, issuer=ISSUER, audience=AUDIENCE, algorithm="ES256"
         )
         assert auth.algorithm == "ES256"
+
+    def test_default_returns_couchbase_subclass(self):
+        """build_oauth must use the normalizing subclass so built-in aliases
+        (Cognito slash form, dash form) work without operator config."""
+        bare = build_oauth(jwks_uri=JWKS, issuer=ISSUER, audience=AUDIENCE)
+        wrapped = build_oauth(
+            jwks_uri=JWKS,
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            base_url="https://api.example.com",
+        )
+        assert isinstance(bare, CouchbaseJWTVerifier)
+        assert isinstance(wrapped.token_verifier, CouchbaseJWTVerifier)
+
+
+class TestCustomScopeNames:
+    """``--oauth-scope-read-label`` / ``--oauth-scope-write-label`` let operators
+    declare the exact scope strings their IdP issues. They get normalized to
+    canonical ``SCOPE_READ`` / ``SCOPE_WRITE`` inside the verifier so
+    downstream per-tool enforcement keeps its single canonical view.
+
+    Defaults must preserve current behavior — this is a non-breaking change.
+    """
+
+    def test_defaults_advertise_canonical_in_prm(self):
+        """No overrides → PRM advertises canonical colon scopes (unchanged)."""
+        auth = build_oauth(
+            jwks_uri=JWKS,
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            base_url="https://api.example.com",
+        )
+        assert set(auth._scopes_supported) == {SCOPE_READ, SCOPE_WRITE}
+
+    def test_overrides_advertise_custom_in_prm(self):
+        """Override scopes flow into PRM ``scopes_supported`` so the client
+        requests them from the IdP."""
+        custom_read = "http://api.example.com/mcp/read"
+        custom_write = "http://api.example.com/mcp/write"
+        auth = build_oauth(
+            jwks_uri=JWKS,
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            base_url="https://api.example.com",
+            scope_read=custom_read,
+            scope_write=custom_write,
+        )
+        assert set(auth._scopes_supported) == {custom_read, custom_write}
+
+    def test_overrides_normalize_to_canonical(self):
+        """Token issued with the operator's scope string should normalize to
+        the canonical SCOPE_READ / SCOPE_WRITE for downstream enforcement."""
+        custom_read = "http://api.example.com/mcp/read"
+        custom_write = "http://api.example.com/mcp/write"
+        verifier = build_oauth(
+            jwks_uri=JWKS,
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            scope_read=custom_read,
+            scope_write=custom_write,
+        )
+        assert isinstance(verifier, CouchbaseJWTVerifier)
+
+        # Simulate the IdP-issued scope claim. The extractor must surface the
+        # canonical strings so the per-tool check (which compares against
+        # SCOPE_READ/SCOPE_WRITE) sees them as valid.
+        normalized = verifier._extract_scopes(
+            {"scope": f"{custom_read} {custom_write}"}
+        )
+        assert set(normalized) == {SCOPE_READ, SCOPE_WRITE}
+
+    def test_builtin_aliases_still_work_with_overrides(self):
+        """Operator overrides are additive on top of built-in aliases — a
+        Cognito slash-form scope should still normalize even when the
+        operator hasn't passed it explicitly."""
+        custom_read = "http://api.example.com/mcp/read"
+        verifier = build_oauth(
+            jwks_uri=JWKS,
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            scope_read=custom_read,
+        )
+        # Override path:
+        assert verifier._extract_scopes({"scope": custom_read}) == [SCOPE_READ]
+        # Built-in Cognito slash form still works (defensive — same verifier):
+        assert verifier._extract_scopes({"scope": "couchbase-mcp/write"}) == [
+            SCOPE_WRITE
+        ]
+        # Canonical pass-through still works:
+        assert verifier._extract_scopes({"scope": SCOPE_READ}) == [SCOPE_READ]
+
+    def test_default_extraction_unchanged(self):
+        """Without overrides, canonical-form tokens (Auth0/Keycloak/Stytch)
+        pass through unchanged — backward compatibility check."""
+        verifier = build_oauth(jwks_uri=JWKS, issuer=ISSUER, audience=AUDIENCE)
+        scopes = verifier._extract_scopes(
+            {"scope": f"{SCOPE_READ} {SCOPE_WRITE} openid"}
+        )
+        assert set(scopes) == {SCOPE_READ, SCOPE_WRITE, "openid"}
+
+    def test_unknown_scopes_pass_through(self):
+        """Anything outside both the override map and built-in aliases must
+        be preserved verbatim. Prevents accidental swallowing of third-party
+        scopes that happen to coexist in the token."""
+        verifier = build_oauth(jwks_uri=JWKS, issuer=ISSUER, audience=AUDIENCE)
+        scopes = verifier._extract_scopes({"scope": "openid profile some-other-scope"})
+        assert set(scopes) == {"openid", "profile", "some-other-scope"}
+
+    def test_setting_canonical_value_explicitly_is_a_noop(self):
+        """Operator explicitly passes the canonical value → no alias entry
+        added beyond the built-ins. Smoke test for the conditional in
+        ``build_oauth``."""
+        # Passing the same value as the default shouldn't change behavior.
+        verifier = build_oauth(
+            jwks_uri=JWKS,
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            scope_read=SCOPE_READ,
+            scope_write=SCOPE_WRITE,
+        )
+        # Canonical token still works:
+        assert verifier._extract_scopes({"scope": SCOPE_READ}) == [SCOPE_READ]
 
 
 class TestRequiredScopesForTool:

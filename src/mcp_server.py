@@ -31,6 +31,8 @@ from cb_mcp.utils import (
     MCP_SERVER_NAME,
     NETWORK_TRANSPORTS,
     NETWORK_TRANSPORTS_SDK_MAPPING,
+    SCOPE_READ,
+    SCOPE_WRITE,
     STREAMABLE_HTTP_TRANSPORT,
     AppContext,
     configure_logging,
@@ -39,6 +41,7 @@ from cb_mcp.utils import (
     validate_log_level,
     validate_log_path,
     validate_log_sinks,
+    validate_scope_label,
 )
 
 # Standalone-host provider implementation
@@ -87,9 +90,7 @@ logger = logging.getLogger(MCP_SERVER_NAME)
 )
 @click.option(
     "--transport",
-    envvar=[
-        "CB_MCP_TRANSPORT"
-    ],
+    envvar=["CB_MCP_TRANSPORT"],
     type=click.Choice(ALLOWED_TRANSPORTS),
     default=DEFAULT_TRANSPORT,
     help="Transport mode for the server (stdio, http or sse). Default is stdio. OAuth is only honored with http (streamable-http).",
@@ -201,6 +202,29 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     "can discover the authorization server and perform DCR directly against it. "
     "Optional — omit to run as a JWT-validating resource server only.",
 )
+@click.option(
+    "--oauth-scope-read-label",
+    "oauth_scope_read",
+    envvar="CB_MCP_OAUTH_SCOPE_READ_LABEL",
+    default=SCOPE_READ,
+    callback=validate_scope_label,
+    help="Override the OAuth scope label the server treats as 'read' access. "
+    "Use this when the customer's IdP cannot emit the canonical form "
+    "(e.g. AWS Cognito Resource Server prefixing yields '<rs-identifier>/read'). "
+    "The configured value is advertised in PRM and accepted in token 'scope'/"
+    "'scp' claims; it's normalized to the canonical scope internally so per-tool "
+    "enforcement keeps a single canonical view. A blank/invalid value warns and "
+    "falls back to the default.",
+)
+@click.option(
+    "--oauth-scope-write-label",
+    "oauth_scope_write",
+    envvar="CB_MCP_OAUTH_SCOPE_WRITE_LABEL",
+    default=SCOPE_WRITE,
+    callback=validate_scope_label,
+    help="Override the OAuth scope label for 'write' access. "
+    "Same semantics as --oauth-scope-read-label.",
+)
 @click.version_option(package_name="couchbase-mcp-server")
 @click.pass_context
 def main(
@@ -222,6 +246,8 @@ def main(
     oauth_audience,
     oauth_algorithm,
     oauth_mcp_base_url,
+    oauth_scope_read,
+    oauth_scope_write,
     log_level,
     log_sinks,
     log_file,
@@ -249,6 +275,8 @@ def main(
         audience=oauth_audience,
         algorithm=oauth_algorithm,
         base_url=oauth_mcp_base_url,
+        scope_read=oauth_scope_read,
+        scope_write=oauth_scope_write,
     )
 
     (
@@ -352,6 +380,8 @@ def _resolve_oauth(
     audience: str | None,
     algorithm: str,
     base_url: str | None,
+    scope_read: str | None = None,
+    scope_write: str | None = None,
 ):
     """Resolve CLI/env OAuth settings into a FastMCP ``AuthProvider`` or ``None``.
 
@@ -420,12 +450,29 @@ def _resolve_oauth(
                 f"authorization server. Got: {issuer!r}."
             ) from e
 
+    # The read and write labels must be distinct — mirror build_oauth's
+    # effective-value resolution so a None argument still maps to its
+    # canonical default before the comparison.
+    effective_read = scope_read or SCOPE_READ
+    effective_write = scope_write or SCOPE_WRITE
+    if effective_read == effective_write:
+        raise click.UsageError(
+            "The read and write OAuth scope labels must be distinct, but both "
+            f"resolve to {effective_read!r}. Set different values for "
+            "--oauth-scope-read-label / --oauth-scope-write-label "
+            "(CB_MCP_OAUTH_SCOPE_READ_LABEL / CB_MCP_OAUTH_SCOPE_WRITE_LABEL); "
+            "note a single override that equals the other scope's canonical "
+            "default also collides."
+        )
+
     return build_oauth(
         jwks_uri=jwks_uri,
         issuer=issuer,
         audience=audience,
         algorithm=algorithm,
         base_url=base_url,
+        scope_read=scope_read,
+        scope_write=scope_write,
     )
 
 

@@ -9,6 +9,9 @@ rejection behaviour for ``validate_log_path``.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import click
 import pytest
 
@@ -16,7 +19,9 @@ from cb_mcp.utils.cli import (
     validate_log_level,
     validate_log_path,
     validate_log_sinks,
+    validate_scope_label,
 )
+from cb_mcp.utils.constants import SCOPE_READ
 
 
 class TestValidateLogLevel:
@@ -85,3 +90,69 @@ class TestValidateLogPath:
         """Defensive: if Click somehow passes None (shouldn't with a default), reject."""
         with pytest.raises(click.BadParameter):
             validate_log_path(None, None, None)  # type: ignore[arg-type]
+
+
+def _scope_param(default: str = SCOPE_READ):
+    """A minimal stand-in for the Click Option the callback reads.
+
+    ``validate_scope_label`` only touches ``param.default`` (the fallback
+    scope) and ``param.opts`` (the flag name, used in the warning), so a
+    SimpleNamespace suffices without constructing a full Click invocation.
+    """
+    return SimpleNamespace(
+        default=default, opts=["--oauth-scope-read-label"], name="oauth_scope_read"
+    )
+
+
+class TestValidateScopeLabel:
+    """Click callback for the OAuth scope-label options.
+
+    Returns a usable label unchanged (trimmed); warns and falls back to the
+    option's default (the canonical scope) for blank/non-string input. Unlike
+    validate_log_path, an unusable label is non-fatal — the server stays
+    functional on the default — so it warns rather than raising.
+    """
+
+    def test_valid_label_passes_through(self):
+        label = "couchbase-mcp/read"
+        assert validate_scope_label(None, _scope_param(), label) == label  # type: ignore[arg-type]
+
+    def test_strips_surrounding_whitespace(self):
+        assert (
+            validate_scope_label(None, _scope_param(), "  couchbase-mcp/read  ")  # type: ignore[arg-type]
+            == "couchbase-mcp/read"
+        )
+
+    def test_default_passes_through_without_warning(self):
+        """When the flag is omitted, Click passes the default (a valid str);
+        the callback must return it without emitting a warning."""
+        with patch("cb_mcp.utils.cli.logger") as mock_logger:
+            result = validate_scope_label(None, _scope_param(SCOPE_READ), SCOPE_READ)  # type: ignore[arg-type]
+        assert result == SCOPE_READ
+        mock_logger.warning.assert_not_called()
+
+    def test_empty_string_warns_and_falls_back(self):
+        with patch("cb_mcp.utils.cli.logger") as mock_logger:
+            result = validate_scope_label(None, _scope_param(SCOPE_READ), "")  # type: ignore[arg-type]
+        assert result == SCOPE_READ
+        mock_logger.warning.assert_called_once()
+
+    def test_whitespace_only_warns_and_falls_back(self):
+        with patch("cb_mcp.utils.cli.logger") as mock_logger:
+            result = validate_scope_label(None, _scope_param(SCOPE_READ), "   ")  # type: ignore[arg-type]
+        assert result == SCOPE_READ
+        mock_logger.warning.assert_called_once()
+
+    def test_non_string_value_warns_and_falls_back(self):
+        """Defensive: a non-str value (e.g. from a programmatic caller) warns
+        and falls back rather than propagating a type error downstream."""
+        with patch("cb_mcp.utils.cli.logger") as mock_logger:
+            result = validate_scope_label(None, _scope_param(SCOPE_READ), 123)  # type: ignore[arg-type]
+        assert result == SCOPE_READ
+        mock_logger.warning.assert_called_once()
+
+    def test_none_value_warns_and_falls_back(self):
+        with patch("cb_mcp.utils.cli.logger") as mock_logger:
+            result = validate_scope_label(None, _scope_param(SCOPE_READ), None)  # type: ignore[arg-type]
+        assert result == SCOPE_READ
+        mock_logger.warning.assert_called_once()
