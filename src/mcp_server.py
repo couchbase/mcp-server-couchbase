@@ -9,10 +9,9 @@ from contextlib import asynccontextmanager
 import click
 from fastmcp import FastMCP
 from fastmcp.tools import FunctionTool
-from pydantic import AnyHttpUrl, ValidationError
 
 # Reusable tools and utilities from the cb_mcp package
-from cb_mcp.auth import build_oauth
+from cb_mcp.auth import OAuthConfigError, resolve_oauth
 from cb_mcp.tool_registration import prepare_tools_for_registration
 from cb_mcp.tools import TOOL_ANNOTATIONS
 from cb_mcp.utils import (
@@ -33,7 +32,6 @@ from cb_mcp.utils import (
     NETWORK_TRANSPORTS_SDK_MAPPING,
     SCOPE_READ,
     SCOPE_WRITE,
-    STREAMABLE_HTTP_TRANSPORT,
     AppContext,
     configure_logging,
     get_resolved_logging_config,
@@ -266,16 +264,19 @@ def main(
         invalid_sinks=invalid_sinks,
     )
 
-    auth = _resolve_oauth(
-        transport=transport,
-        jwks_uri=oauth_jwks_uri,
-        issuer=oauth_issuer,
-        audience=oauth_audience,
-        algorithm=oauth_algorithm,
-        base_url=oauth_mcp_base_url,
-        scope_read=oauth_scope_read,
-        scope_write=oauth_scope_write,
-    )
+    try:
+        auth = resolve_oauth(
+            transport=transport,
+            jwks_uri=oauth_jwks_uri,
+            issuer=oauth_issuer,
+            audience=oauth_audience,
+            algorithm=oauth_algorithm,
+            base_url=oauth_mcp_base_url,
+            scope_read=oauth_scope_read,
+            scope_write=oauth_scope_write,
+        )
+    except OAuthConfigError as e:
+        raise click.UsageError(str(e)) from e
 
     (
         final_tools,
@@ -370,110 +371,6 @@ def main(
 
     run_kwargs = {"host": host, "port": port} if transport in NETWORK_TRANSPORTS else {}
     mcp.run(transport=sdk_transport, show_banner=False, **run_kwargs)  # type: ignore
-
-
-def _resolve_oauth(
-    *,
-    transport: str,
-    jwks_uri: str | None,
-    issuer: str | None,
-    audience: str | None,
-    algorithm: str,
-    base_url: str | None,
-    scope_read: str | None = None,
-    scope_write: str | None = None,
-):
-    """Resolve CLI/env OAuth settings into a FastMCP ``AuthProvider`` or ``None``.
-
-    Contract:
-      - OAuth is honored only when ``transport`` is the streamable-http
-        transport. For any other transport (stdio, sse), OAuth settings —
-        if any are provided — are ignored with a warning, and ``None`` is
-        returned.
-      - If none of the three required JWT settings are provided, OAuth is
-        opt-in via absence: returns ``None`` silently.
-      - If the user provides some but not all of (jwks_uri, issuer,
-        audience), raise ``click.UsageError`` so misconfiguration fails
-        loud instead of silently disabling auth.
-      - ``algorithm`` always has a default and isn't part of the
-        all-or-nothing check.
-      - When ``base_url`` is set, ``issuer`` is published in PRM as an
-        authorization server and must be a valid http(s) URL. We validate
-        that here (rather than letting the Pydantic ``AnyHttpUrl`` coercion
-        inside ``build_oauth`` raise a raw traceback) so the user gets a
-        clear ``click.UsageError``. Token-only mode does not require a URL
-        issuer, matching ``JWTVerifier``'s plain-string ``iss`` handling.
-    """
-    jwt_fields = {
-        "--oauth-jwks-uri / CB_MCP_OAUTH_JWT_JWKS_URI": jwks_uri,
-        "--oauth-issuer / CB_MCP_OAUTH_JWT_ISSUER": issuer,
-        "--oauth-audience / CB_MCP_OAUTH_JWT_AUDIENCE": audience,
-    }
-    provided = {k: v for k, v in jwt_fields.items() if v}
-    any_provided = bool(provided)
-    any_oauth_setting = any_provided or bool(base_url)
-
-    if transport != STREAMABLE_HTTP_TRANSPORT:
-        if any_oauth_setting:
-            logger.warning(
-                "OAuth settings provided but transport=%s; OAuth is only honored "
-                "for streamable-http (--transport=http). Ignoring OAuth config.",
-                transport,
-            )
-        return None
-
-    if not any_provided:
-        if base_url:
-            logger.warning(
-                "CB_MCP_OAUTH_MCP_BASE_URL set without any JWT settings; "
-                "ignoring (PRM publication requires a configured token verifier)."
-            )
-        logger.info("OAuth disabled (no CB_MCP_OAUTH_JWT_* settings provided).")
-        return None
-
-    if len(provided) != len(jwt_fields):
-        missing = sorted(set(jwt_fields) - set(provided))
-        raise click.UsageError(
-            "Incomplete OAuth configuration. To enable OAuth, set all of: "
-            + ", ".join(jwt_fields)
-            + f". Missing: {missing}."
-        )
-
-    if base_url:
-        try:
-            AnyHttpUrl(issuer)
-        except ValidationError as e:
-            raise click.UsageError(
-                f"--oauth-issuer / CB_MCP_OAUTH_JWT_ISSUER must be a valid "
-                f"http(s) URL when --oauth-mcp-base-url is set, because the "
-                f"issuer is published in Protected Resource Metadata as an "
-                f"authorization server. Got: {issuer!r}."
-            ) from e
-
-    # The read and write labels must be distinct — mirror build_oauth's
-    # effective-value resolution so a None argument still maps to its
-    # canonical default before the comparison.
-    effective_read = scope_read or SCOPE_READ
-    effective_write = scope_write or SCOPE_WRITE
-    if effective_read == effective_write:
-        raise click.UsageError(
-            "The read and write OAuth scope labels must be distinct, but both "
-            f"resolve to {effective_read!r}. Set different values for "
-            "--oauth-scope-read-label / --oauth-scope-write-label "
-            "(CB_MCP_OAUTH_SCOPE_READ_LABEL / CB_MCP_OAUTH_SCOPE_WRITE_LABEL); "
-            "note a single override that equals the other scope's canonical "
-            "default also collides."
-        )
-
-    return build_oauth(
-        jwks_uri=jwks_uri,
-        issuer=issuer,
-        audience=audience,
-        algorithm=algorithm,
-        base_url=base_url,
-        scope_read=scope_read,
-        scope_write=scope_write,
-    )
 
 
 if __name__ == "__main__":
