@@ -302,13 +302,10 @@ def main(
         "transport": transport,
         "host": host,
         "port": port,
-        # OAuth resource-server config, captured so the env-info diagnostic and
-        # get_server_configuration_status can report it. These are non-secret
-        # IdP coordinates — a pure resource server holds no client secret.
-        # ``oauth_enabled`` reflects whether OAuth is actually *active*:
-        # _resolve_oauth returns None for non-http transports even when JWT
-        # settings are provided, so "settings present but oauth_enabled=False"
-        # pinpoints a transport mismatch in a support bundle.
+        # OAuth resource-server config (non-secret IdP coordinates), captured
+        # for the env-info diagnostic and get_server_configuration_status.
+        # ``oauth_enabled`` is whether OAuth is active: resolve_oauth returns
+        # None for non-http transports even when JWT settings are present.
         "oauth_enabled": auth is not None,
         "oauth_jwks_uri": oauth_jwks_uri,
         "oauth_issuer": oauth_issuer,

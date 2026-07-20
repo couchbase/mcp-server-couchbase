@@ -158,9 +158,8 @@ class TestResolveOauthScopeLabelCollision:
         assert SCOPE_READ != SCOPE_WRITE
 
     def test_cli_translates_oauth_config_error_to_usage_error(self):
-        """The CLI layer converts ``OAuthConfigError`` into a clean click usage
-        error (exit code 2, no traceback) instead of letting it crash. This is
-        the boundary that keeps ``auth.py`` free of any ``click`` dependency."""
+        """The CLI layer converts ``OAuthConfigError`` into a click usage error
+        (exit code 2), not an uncaught traceback."""
         result = CliRunner().invoke(
             mcp_server.main,
             [

@@ -132,10 +132,9 @@ class TestCustomScopeNames:
         )
         assert set(normalized) == {SCOPE_READ, SCOPE_WRITE}
 
-    def test_builtin_aliases_still_work_with_overrides(self):
-        """Operator overrides are additive on top of built-in aliases — a
-        Cognito slash-form scope should still normalize even when the
-        operator hasn't passed it explicitly."""
+    def test_overrides_replace_builtin_aliases(self):
+        """A custom label replaces the built-in aliases; canonical scopes still
+        pass through."""
         custom_read = "http://api.example.com/mcp/read"
         verifier = build_oauth(
             jwks_uri=JWKS,
@@ -143,14 +142,15 @@ class TestCustomScopeNames:
             audience=AUDIENCE,
             scope_read=custom_read,
         )
-        # Override path:
+        # Declared custom label normalizes to canonical:
         assert verifier._extract_scopes({"scope": custom_read}) == [SCOPE_READ]
-        # Built-in Cognito slash form still works (defensive — same verifier):
+        # Built-in Cognito slash form is not honored; it passes through verbatim:
         assert verifier._extract_scopes({"scope": "couchbase-mcp/write"}) == [
-            SCOPE_WRITE
+            "couchbase-mcp/write"
         ]
-        # Canonical pass-through still works:
+        # Canonical scopes pass through:
         assert verifier._extract_scopes({"scope": SCOPE_READ}) == [SCOPE_READ]
+        assert verifier._extract_scopes({"scope": SCOPE_WRITE}) == [SCOPE_WRITE]
 
     def test_default_extraction_unchanged(self):
         """Without overrides, canonical-form tokens (Auth0/Keycloak/Stytch)

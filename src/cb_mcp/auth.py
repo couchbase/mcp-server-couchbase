@@ -38,12 +38,9 @@ logger = logging.getLogger(f"{MCP_SERVER_NAME}.auth")
 
 
 class OAuthConfigError(Exception):
-    """Raised when CLI/env OAuth settings are invalid or incomplete.
+    """Invalid or incomplete CLI/env OAuth settings.
 
-    Deliberately framework-agnostic — this module does not import ``click``.
-    The CLI layer catches this and re-raises it as a ``click.UsageError`` so
-    the operator sees a clean usage message rather than a traceback. See
-    ``resolve_oauth``.
+    Framework-agnostic; the CLI layer re-raises it as a ``click.UsageError``.
     """
 
 
@@ -61,17 +58,12 @@ class CouchbaseJWTVerifier(JWTVerifier):
       - Some operators prefer a dashed form (``couchbase-mcp-read``) when the
         IdP UI disallows ``:`` or ``/`` in scope names.
 
-    Per-instance ``scope_aliases`` (provided by the operator via CLI / env)
-    take precedence over the built-in aliases, so a customer can declare the
-    exact strings their IdP issues without code changes.
-
-    Any scope not in either map passes through unchanged, so canonical-form
-    tokens from Auth0 / Keycloak / Stytch are unaffected.
+    Operator-supplied ``scope_aliases`` (via CLI / env) replace the built-in
+    aliases; the built-ins apply when none are given.
     """
 
-    # Built-in aliases for the most common ``couchbase-mcp``-prefixed
-    # variants. Operator-supplied entries via ``scope_aliases`` override
-    # these for the same key.
+    # Default aliases for the common ``couchbase-mcp``-prefixed variants,
+    # used when the operator supplies no ``scope_aliases``.
     _BUILTIN_ALIASES: ClassVar[dict[str, str]] = {
         "couchbase-mcp/read": SCOPE_READ,
         "couchbase-mcp-read": SCOPE_READ,
@@ -87,20 +79,18 @@ class CouchbaseJWTVerifier(JWTVerifier):
     ) -> None:
         """
         Args:
-            scope_aliases: Optional per-instance map from IdP-issued scope
-                strings to canonical scopes. Used when the customer's IdP
-                cannot emit the canonical form (e.g. Cognito Resource Server
-                prefixing). Operator entries take precedence over the
-                built-in aliases.
+            scope_aliases: Optional map from IdP-issued scope strings to
+                canonical scopes, for IdPs that cannot emit the canonical form.
+                Replaces the built-in aliases when given; the built-ins apply
+                otherwise.
             **jwt_verifier_kwargs: Forwarded to ``JWTVerifier.__init__``
                 (``jwks_uri``, ``issuer``, ``audience``, ``algorithm``, etc.).
         """
         super().__init__(**jwt_verifier_kwargs)
-        # Operator-provided entries shadow built-ins on the same key.
-        self._scope_aliases: dict[str, str] = {
-            **self._BUILTIN_ALIASES,
-            **(scope_aliases or {}),
-        }
+        # Operator aliases replace the built-ins; canonical scopes pass through.
+        self._scope_aliases: dict[str, str] = dict(
+            scope_aliases or self._BUILTIN_ALIASES
+        )
 
     def _extract_scopes(self, claims: dict) -> list[str]:
         """Extract scopes and apply alias normalization.
@@ -169,9 +159,9 @@ def build_oauth(
     effective_read = scope_read or SCOPE_READ
     effective_write = scope_write or SCOPE_WRITE
 
-    # Build per-instance aliases only for non-canonical operator overrides;
-    # if the operator passed the canonical value (or nothing), nothing extra
-    # is needed beyond the built-in normalizations.
+    # Alias entries only for non-canonical overrides. A non-empty map replaces
+    # the built-ins, so override both labels if the IdP uses non-canonical
+    # forms for both scopes.
     aliases: dict[str, str] = {}
     if effective_read != SCOPE_READ:
         aliases[effective_read] = SCOPE_READ
