@@ -77,6 +77,8 @@ def test_configuration_status_exposes_oauth_config():
             "oauth_audience": "couchbase-mcp",
             "oauth_algorithm": "RS256",
             "oauth_mcp_base_url": "https://mcp.example.com",
+            "oauth_scope_read_label": "couchbase-mcp/read",
+            "oauth_scope_write_label": "couchbase-mcp/write",
         }
     )
 
@@ -88,6 +90,8 @@ def test_configuration_status_exposes_oauth_config():
     assert config["oauth_audience"] == "couchbase-mcp"
     assert config["oauth_algorithm"] == "RS256"
     assert config["oauth_mcp_base_url"] == "https://mcp.example.com"
+    assert config["oauth_scope_read_label"] == "couchbase-mcp/read"
+    assert config["oauth_scope_write_label"] == "couchbase-mcp/write"
 
 
 def test_configuration_status_oauth_defaults_when_unset():

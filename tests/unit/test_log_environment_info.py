@@ -160,6 +160,8 @@ def test_config_block_captures_oauth_coordinates():
             "oauth_audience": "couchbase-mcp",
             "oauth_algorithm": "RS256",
             "oauth_mcp_base_url": "https://mcp.example.com",
+            "oauth_scope_read_label": "couchbase-mcp/read",
+            "oauth_scope_write_label": "couchbase-mcp/write",
         }
     )
     config = json.loads(record.getMessage().split("Environment | ", 1)[1])["config"]
@@ -169,3 +171,5 @@ def test_config_block_captures_oauth_coordinates():
     assert config["oauth_audience"] == "couchbase-mcp"
     assert config["oauth_algorithm"] == "RS256"
     assert config["oauth_mcp_base_url"] == "https://mcp.example.com"
+    assert config["oauth_scope_read_label"] == "couchbase-mcp/read"
+    assert config["oauth_scope_write_label"] == "couchbase-mcp/write"

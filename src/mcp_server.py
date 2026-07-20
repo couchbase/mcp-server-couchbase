@@ -209,12 +209,10 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     default=SCOPE_READ,
     callback=validate_scope_label,
     help="Override the OAuth scope label the server treats as 'read' access. "
-    "Use this when the customer's IdP cannot emit the canonical form "
-    "(e.g. AWS Cognito Resource Server prefixing yields '<rs-identifier>/read'). "
-    "The configured value is advertised in PRM and accepted in token 'scope'/"
-    "'scp' claims; it's normalized to the canonical scope internally so per-tool "
-    "enforcement keeps a single canonical view. A blank/invalid value warns and "
-    "falls back to the default.",
+    "Use this when your IdP cannot emit the canonical scope form. "
+    "The configured value is advertised in PRM and accepted in the token "
+    "'scope'/'scp' claims. A blank/invalid value warns and falls back to the "
+    "default.",
 )
 @click.option(
     "--oauth-scope-write-label",
@@ -316,6 +314,8 @@ def main(
         "oauth_audience": oauth_audience,
         "oauth_algorithm": oauth_algorithm,
         "oauth_mcp_base_url": oauth_mcp_base_url,
+        "oauth_scope_read_label": oauth_scope_read,
+        "oauth_scope_write_label": oauth_scope_write,
         "disabled_tools": disabled_tool_names,
         "confirmation_required_tools": configured_confirmation_tool_names,
     }
