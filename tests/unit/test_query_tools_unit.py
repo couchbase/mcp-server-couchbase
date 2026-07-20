@@ -291,3 +291,18 @@ class TestCollectionExpressionReadOnlyGuard:
 
         assert result == [{"ok": 1}]
         scope.query.assert_called_once()
+
+
+def test_array_slice_projection_with_is_not_missing_parses() -> None:
+    """Array-slice projection (h.public_likes[0:2]) combined with an
+    IS NOT MISSING predicate must parse and classify as a read-only SELECT.
+    """
+    query = (
+        "SELECT h.name, h.public_likes[0:2] AS top_likes "
+        "FROM hotel AS h "
+        "WHERE h.public_likes IS NOT MISSING "
+        "LIMIT 5;"
+    )
+    tree = parse_sqlpp(query)
+    assert modifies_data(tree) is False
+    assert modifies_structure(tree) is False
