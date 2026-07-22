@@ -51,6 +51,8 @@ def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
         "oauth_audience": settings.get("oauth_audience"),
         "oauth_algorithm": settings.get("oauth_algorithm"),
         "oauth_mcp_base_url": settings.get("oauth_mcp_base_url"),
+        "oauth_scope_read_label": settings.get("oauth_scope_read_label"),
+        "oauth_scope_write_label": settings.get("oauth_scope_write_label"),
     }
 
     connection_status = {
