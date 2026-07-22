@@ -334,7 +334,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.2.1,<9.0.0" },
     { name = "couchbase", specifier = ">=4.4.0,<5.0.0" },
     { name = "fastmcp", specifier = ">=3.2.0,<4.0.0" },
-    { name = "lark-sqlpp", specifier = ">=0.1.0" },
+    { name = "lark-sqlpp", specifier = ">=0.2.1" },
     { name = "openai", marker = "extra == 'dev'", specifier = ">=2.0.0,<3.0.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = "==4.2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = "==9.0.3" },
@@ -1004,14 +1004,14 @@ wheels = [
 
 [[package]]
 name = "lark-sqlpp"
-version = "0.1"
+version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lark" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cb/62/b636fc0e0815bd7706e12c3dfbbe8c957ba2b2e39f9a36e66fbebc16f4ba/lark_sqlpp-0.1.tar.gz", hash = "sha256:a70733aa35998e846a32bd5b6d3c43a9b19a6330a30855c33c2b475837dbbffa", size = 14102, upload-time = "2026-06-04T13:33:48.459Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/95/60/98270478d50883d8d9730182d4c8d8c8dc17a2c382ff60d36b74b97a1fb6/lark_sqlpp-0.2.1.tar.gz", hash = "sha256:d8254060dbb41d86e52c1ad9e3bf0d5a696dba2ae8fde4fdeb83bb719bec55cc", size = 14379, upload-time = "2026-07-16T13:04:42.697Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f8/8f/667507dd00cdef3c7e1c8b5dda2061f5798823fd85f75437e3703812fa37/lark_sqlpp-0.1-py3-none-any.whl", hash = "sha256:d844a43c99c29736cd55813937668a01c69d58213f5daea626750b3df126b63a", size = 10486, upload-time = "2026-06-04T13:33:47.485Z" },
+    { url = "https://files.pythonhosted.org/packages/0e/23/1b14f83d46e68efb361113a2f284fd321883f3d63371b817580601c4fd5c/lark_sqlpp-0.2.1-py3-none-any.whl", hash = "sha256:72432f4b3d7404453921467c3c933217d5989f45ae2c830299c96a87df2a838c", size = 10504, upload-time = "2026-07-16T13:04:41.514Z" },
 ]
 
 [[package]]
