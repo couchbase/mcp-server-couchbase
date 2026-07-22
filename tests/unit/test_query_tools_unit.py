@@ -222,19 +222,20 @@ class TestRunQueryToolWithEmptyMessage:
 
 
 # Collection-expression query forms — ANY / SOME / EVERY / WITHIN / EXISTS used
-# as bare paths or expressions (not subqueries). lark-sqlpp < 0.2 could not
-# parse these: `parse_sqlpp` raised UnexpectedCharacters / UnexpectedEOF, so the
-# read-only write guard rejected legitimate read-only SELECTs. lark-sqlpp 0.2
-# fixes the grammar (see DA-1945 and
-# https://github.com/couchbaselabs/lark_sqlpp/issues/3). Every form here is a
-# read-only SELECT, so it must parse, classify as non-modifying, and pass the
-# read-only guard through to the cluster.
+# as bare paths or expressions rather than subqueries. These are all valid
+# read-only SQL++ SELECTs, so each one must parse, classify as non-modifying,
+# and pass the read-only write guard through to the cluster.
 COLLECTION_EXPR_QUERIES = [
     pytest.param(
         "SELECT h.name, h.city, h.country "
         "FROM `travel-sample`.`inventory`.`hotel` h "
         "WHERE ANY v WITHIN h.reviews SATISFIES v = 5 END LIMIT 10;",
         id="any-within-satisfies",
+    ),
+    pytest.param(
+        "SELECT h.name FROM hotel AS h "
+        "WHERE EVERY v IN h.reviews SATISFIES v.rating >= 3 END LIMIT 10;",
+        id="every-in-satisfies",
     ),
     pytest.param(
         "SELECT any v in [1,2,3] satisfies v > 1 end as result",
@@ -256,15 +257,14 @@ COLLECTION_EXPR_QUERIES = [
 
 
 class TestCollectionExpressionParsing:
-    """lark-sqlpp 0.2 must parse ANY/SOME/EVERY/WITHIN/EXISTS collection
+    """The parser must accept ANY/SOME/EVERY/WITHIN/EXISTS collection
     expressions in their bare (non-subquery) forms and classify them as
-    read-only. Regression guard for DA-1945 and the pinned lark-sqlpp version.
+    read-only.
     """
 
     @pytest.mark.parametrize("query", COLLECTION_EXPR_QUERIES)
     def test_parses_without_error(self, query: str) -> None:
         """The grammar must accept the statement (no parse exception)."""
-        # Raises UnexpectedCharacters / UnexpectedEOF on lark-sqlpp < 0.2.
         parse_sqlpp(query)
 
     @pytest.mark.parametrize("query", COLLECTION_EXPR_QUERIES)
@@ -276,9 +276,9 @@ class TestCollectionExpressionParsing:
 
 
 class TestCollectionExpressionReadOnlyGuard:
-    """The read-only write guard must let these SELECTs through. Previously the
-    guard's parse_sqlpp() call raised on them, so read-only callers got an error
-    instead of query results.
+    """The read-only write guard must let these SELECTs through: the guard
+    parses each statement before running it, so a form it cannot parse would
+    block a legitimate read-only query from reaching the cluster.
     """
 
     @pytest.mark.parametrize("query", COLLECTION_EXPR_QUERIES)
