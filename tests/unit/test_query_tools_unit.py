@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from lark_sqlpp import modifies_data, modifies_structure, parse_sqlpp
 
 from cb_mcp.tools.query import (
     _run_query_tool_with_empty_message,
@@ -218,3 +219,90 @@ class TestRunQueryToolWithEmptyMessage:
             ctx, "SELECT * FROM x", limit=10, empty_message="No data"
         )
         assert result == [{"message": "No data", "results": []}]
+
+
+# Collection-expression query forms — ANY / SOME / EVERY / WITHIN / EXISTS used
+# as bare paths or expressions rather than subqueries. These are all valid
+# read-only SQL++ SELECTs, so each one must parse, classify as non-modifying,
+# and pass the read-only write guard through to the cluster.
+COLLECTION_EXPR_QUERIES = [
+    pytest.param(
+        "SELECT h.name, h.city, h.country "
+        "FROM `travel-sample`.`inventory`.`hotel` h "
+        "WHERE ANY v WITHIN h.reviews SATISFIES v = 5 END LIMIT 10;",
+        id="any-within-satisfies",
+    ),
+    pytest.param(
+        "SELECT h.name FROM hotel AS h "
+        "WHERE EVERY v IN h.reviews SATISFIES v.rating >= 3 END LIMIT 10;",
+        id="every-in-satisfies",
+    ),
+    pytest.param(
+        "SELECT any v in [1,2,3] satisfies v > 1 end as result",
+        id="any-in-projection",
+    ),
+    pytest.param(
+        "SELECT some v in [1,2,3] satisfies v > 1 end as result",
+        id="some-in-projection",
+    ),
+    pytest.param(
+        'SELECT * FROM hotel AS t WHERE "Walton Wolf" WITHIN t;',
+        id="within-postfix",
+    ),
+    pytest.param(
+        "SELECT DISTINCT h.city FROM hotel AS h WHERE EXISTS h.reviews;",
+        id="exists-bare-path",
+    ),
+]
+
+
+class TestCollectionExpressionParsing:
+    """The parser must accept ANY/SOME/EVERY/WITHIN/EXISTS collection
+    expressions in their bare (non-subquery) forms and classify them as
+    read-only.
+    """
+
+    @pytest.mark.parametrize("query", COLLECTION_EXPR_QUERIES)
+    def test_parses_without_error(self, query: str) -> None:
+        """The grammar must accept the statement (no parse exception)."""
+        parse_sqlpp(query)
+
+    @pytest.mark.parametrize("query", COLLECTION_EXPR_QUERIES)
+    def test_classified_as_read_only(self, query: str) -> None:
+        """These SELECTs modify neither data nor structure."""
+        tree = parse_sqlpp(query)
+        assert modifies_data(tree) is False
+        assert modifies_structure(tree) is False
+
+
+class TestCollectionExpressionReadOnlyGuard:
+    """The read-only write guard must let these SELECTs through: the guard
+    parses each statement before running it, so a form it cannot parse would
+    block a legitimate read-only query from reaching the cluster.
+    """
+
+    @pytest.mark.parametrize("query", COLLECTION_EXPR_QUERIES)
+    def test_not_blocked_in_read_only_mode(self, query: str) -> None:
+        """In read-only mode the query must reach the cluster and return rows."""
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+        scope.query.return_value = iter([{"ok": 1}])
+
+        result = run_sql_plus_plus_query(ctx, "b", "s", query)
+
+        assert result == [{"ok": 1}]
+        scope.query.assert_called_once()
+
+
+def test_array_slice_projection_with_is_not_missing_parses() -> None:
+    """Array-slice projection (h.public_likes[0:2]) combined with an
+    IS NOT MISSING predicate must parse and classify as a read-only SELECT.
+    """
+    query = (
+        "SELECT h.name, h.public_likes[0:2] AS top_likes "
+        "FROM hotel AS h "
+        "WHERE h.public_likes IS NOT MISSING "
+        "LIMIT 5;"
+    )
+    tree = parse_sqlpp(query)
+    assert modifies_data(tree) is False
+    assert modifies_structure(tree) is False
