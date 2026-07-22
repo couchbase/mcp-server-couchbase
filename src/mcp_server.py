@@ -9,10 +9,9 @@ from contextlib import asynccontextmanager
 import click
 from fastmcp import FastMCP
 from fastmcp.tools import FunctionTool
-from pydantic import AnyHttpUrl, ValidationError
 
 # Reusable tools and utilities from the cb_mcp package
-from cb_mcp.auth import build_oauth
+from cb_mcp.auth import OAuthConfigError, resolve_oauth
 from cb_mcp.tool_registration import prepare_tools_for_registration
 from cb_mcp.tools import TOOL_ANNOTATIONS
 from cb_mcp.utils import (
@@ -31,7 +30,8 @@ from cb_mcp.utils import (
     MCP_SERVER_NAME,
     NETWORK_TRANSPORTS,
     NETWORK_TRANSPORTS_SDK_MAPPING,
-    STREAMABLE_HTTP_TRANSPORT,
+    SCOPE_READ,
+    SCOPE_WRITE,
     AppContext,
     configure_logging,
     get_resolved_logging_config,
@@ -39,6 +39,7 @@ from cb_mcp.utils import (
     validate_log_level,
     validate_log_path,
     validate_log_sinks,
+    validate_scope_label,
 )
 
 # Standalone-host provider implementation
@@ -87,9 +88,7 @@ logger = logging.getLogger(MCP_SERVER_NAME)
 )
 @click.option(
     "--transport",
-    envvar=[
-        "CB_MCP_TRANSPORT"
-    ],
+    envvar=["CB_MCP_TRANSPORT"],
     type=click.Choice(ALLOWED_TRANSPORTS),
     default=DEFAULT_TRANSPORT,
     help="Transport mode for the server (stdio, http or sse). Default is stdio. OAuth is only honored with http (streamable-http).",
@@ -201,6 +200,27 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     "can discover the authorization server and perform DCR directly against it. "
     "Optional — omit to run as a JWT-validating resource server only.",
 )
+@click.option(
+    "--oauth-scope-read-label",
+    "oauth_scope_read",
+    envvar="CB_MCP_OAUTH_SCOPE_READ_LABEL",
+    default=SCOPE_READ,
+    callback=validate_scope_label,
+    help="Override the OAuth scope label the server treats as 'read' access. "
+    "Use this when your IdP cannot emit the canonical scope form. "
+    "The configured value is advertised in PRM and accepted in the token "
+    "'scope'/'scp' claims. A blank/invalid value warns and falls back to the "
+    "default.",
+)
+@click.option(
+    "--oauth-scope-write-label",
+    "oauth_scope_write",
+    envvar="CB_MCP_OAUTH_SCOPE_WRITE_LABEL",
+    default=SCOPE_WRITE,
+    callback=validate_scope_label,
+    help="Override the OAuth scope label for 'write' access. "
+    "Same semantics as --oauth-scope-read-label.",
+)
 @click.version_option(package_name="couchbase-mcp-server")
 @click.pass_context
 def main(
@@ -222,6 +242,8 @@ def main(
     oauth_audience,
     oauth_algorithm,
     oauth_mcp_base_url,
+    oauth_scope_read,
+    oauth_scope_write,
     log_level,
     log_sinks,
     log_file,
@@ -242,14 +264,19 @@ def main(
         invalid_sinks=invalid_sinks,
     )
 
-    auth = _resolve_oauth(
-        transport=transport,
-        jwks_uri=oauth_jwks_uri,
-        issuer=oauth_issuer,
-        audience=oauth_audience,
-        algorithm=oauth_algorithm,
-        base_url=oauth_mcp_base_url,
-    )
+    try:
+        auth = resolve_oauth(
+            transport=transport,
+            jwks_uri=oauth_jwks_uri,
+            issuer=oauth_issuer,
+            audience=oauth_audience,
+            algorithm=oauth_algorithm,
+            base_url=oauth_mcp_base_url,
+            scope_read=oauth_scope_read,
+            scope_write=oauth_scope_write,
+        )
+    except OAuthConfigError as e:
+        raise click.UsageError(str(e)) from e
 
     (
         final_tools,
@@ -275,19 +302,18 @@ def main(
         "transport": transport,
         "host": host,
         "port": port,
-        # OAuth resource-server config, captured so the env-info diagnostic and
-        # get_server_configuration_status can report it. These are non-secret
-        # IdP coordinates — a pure resource server holds no client secret.
-        # ``oauth_enabled`` reflects whether OAuth is actually *active*:
-        # _resolve_oauth returns None for non-http transports even when JWT
-        # settings are provided, so "settings present but oauth_enabled=False"
-        # pinpoints a transport mismatch in a support bundle.
+        # OAuth resource-server config (non-secret IdP coordinates), captured
+        # for the env-info diagnostic and get_server_configuration_status.
+        # ``oauth_enabled`` is whether OAuth is active: resolve_oauth returns
+        # None for non-http transports even when JWT settings are present.
         "oauth_enabled": auth is not None,
         "oauth_jwks_uri": oauth_jwks_uri,
         "oauth_issuer": oauth_issuer,
         "oauth_audience": oauth_audience,
         "oauth_algorithm": oauth_algorithm,
         "oauth_mcp_base_url": oauth_mcp_base_url,
+        "oauth_scope_read_label": oauth_scope_read,
+        "oauth_scope_write_label": oauth_scope_write,
         "disabled_tools": disabled_tool_names,
         "confirmation_required_tools": configured_confirmation_tool_names,
     }
@@ -342,91 +368,6 @@ def main(
 
     run_kwargs = {"host": host, "port": port} if transport in NETWORK_TRANSPORTS else {}
     mcp.run(transport=sdk_transport, show_banner=False, **run_kwargs)  # type: ignore
-
-
-def _resolve_oauth(
-    *,
-    transport: str,
-    jwks_uri: str | None,
-    issuer: str | None,
-    audience: str | None,
-    algorithm: str,
-    base_url: str | None,
-):
-    """Resolve CLI/env OAuth settings into a FastMCP ``AuthProvider`` or ``None``.
-
-    Contract:
-      - OAuth is honored only when ``transport`` is the streamable-http
-        transport. For any other transport (stdio, sse), OAuth settings —
-        if any are provided — are ignored with a warning, and ``None`` is
-        returned.
-      - If none of the three required JWT settings are provided, OAuth is
-        opt-in via absence: returns ``None`` silently.
-      - If the user provides some but not all of (jwks_uri, issuer,
-        audience), raise ``click.UsageError`` so misconfiguration fails
-        loud instead of silently disabling auth.
-      - ``algorithm`` always has a default and isn't part of the
-        all-or-nothing check.
-      - When ``base_url`` is set, ``issuer`` is published in PRM as an
-        authorization server and must be a valid http(s) URL. We validate
-        that here (rather than letting the Pydantic ``AnyHttpUrl`` coercion
-        inside ``build_oauth`` raise a raw traceback) so the user gets a
-        clear ``click.UsageError``. Token-only mode does not require a URL
-        issuer, matching ``JWTVerifier``'s plain-string ``iss`` handling.
-    """
-    jwt_fields = {
-        "--oauth-jwks-uri / CB_MCP_OAUTH_JWT_JWKS_URI": jwks_uri,
-        "--oauth-issuer / CB_MCP_OAUTH_JWT_ISSUER": issuer,
-        "--oauth-audience / CB_MCP_OAUTH_JWT_AUDIENCE": audience,
-    }
-    provided = {k: v for k, v in jwt_fields.items() if v}
-    any_provided = bool(provided)
-    any_oauth_setting = any_provided or bool(base_url)
-
-    if transport != STREAMABLE_HTTP_TRANSPORT:
-        if any_oauth_setting:
-            logger.warning(
-                "OAuth settings provided but transport=%s; OAuth is only honored "
-                "for streamable-http (--transport=http). Ignoring OAuth config.",
-                transport,
-            )
-        return None
-
-    if not any_provided:
-        if base_url:
-            logger.warning(
-                "CB_MCP_OAUTH_MCP_BASE_URL set without any JWT settings; "
-                "ignoring (PRM publication requires a configured token verifier)."
-            )
-        logger.info("OAuth disabled (no CB_MCP_OAUTH_JWT_* settings provided).")
-        return None
-
-    if len(provided) != len(jwt_fields):
-        missing = sorted(set(jwt_fields) - set(provided))
-        raise click.UsageError(
-            "Incomplete OAuth configuration. To enable OAuth, set all of: "
-            + ", ".join(jwt_fields)
-            + f". Missing: {missing}."
-        )
-
-    if base_url:
-        try:
-            AnyHttpUrl(issuer)
-        except ValidationError as e:
-            raise click.UsageError(
-                f"--oauth-issuer / CB_MCP_OAUTH_JWT_ISSUER must be a valid "
-                f"http(s) URL when --oauth-mcp-base-url is set, because the "
-                f"issuer is published in Protected Resource Metadata as an "
-                f"authorization server. Got: {issuer!r}."
-            ) from e
-
-    return build_oauth(
-        jwks_uri=jwks_uri,
-        issuer=issuer,
-        audience=audience,
-        algorithm=algorithm,
-        base_url=base_url,
-    )
 
 
 if __name__ == "__main__":

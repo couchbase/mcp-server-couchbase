@@ -19,6 +19,8 @@ from click.testing import CliRunner
 
 import cb_mcp.utils.logging as logmod
 import mcp_server
+from cb_mcp.auth import OAuthConfigError, resolve_oauth
+from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
 
 
 @pytest.fixture(autouse=True)
@@ -99,3 +101,87 @@ def test_env_var_used_when_flag_absent() -> None:
             assert app_context.settings["connection_string"] == "couchbase://from-env"
 
     asyncio.run(drive())
+
+
+def _resolve_oauth_kwargs(**overrides):
+    """Minimal OAuth-enabled kwargs for ``resolve_oauth`` (http + all JWT
+    fields present), so only the scope-label behavior under test varies."""
+    base = {
+        "transport": "http",
+        "jwks_uri": "https://idp.example.com/.well-known/jwks.json",
+        "issuer": "https://idp.example.com",
+        "audience": "mcp-couchbase",
+        "algorithm": "RS256",
+        "base_url": None,
+    }
+    base.update(overrides)
+    return base
+
+
+class TestResolveOauthScopeLabelCollision:
+    """``resolve_oauth`` must reject read/write scope labels that collapse to
+    the same string — otherwise the alias map loses one canonical scope and a
+    whole tool class becomes unreachable."""
+
+    def test_identical_custom_labels_rejected(self):
+        with pytest.raises(OAuthConfigError, match="must be distinct"):
+            resolve_oauth(
+                **_resolve_oauth_kwargs(
+                    scope_read="couchbase-mcp:access",
+                    scope_write="couchbase-mcp:access",
+                )
+            )
+
+    def test_read_override_equal_to_write_canonical_rejected(self):
+        """A single override that equals the *other* scope's canonical default
+        also collides (read label == canonical write, write left default)."""
+        with pytest.raises(OAuthConfigError, match="must be distinct"):
+            resolve_oauth(**_resolve_oauth_kwargs(scope_read=SCOPE_WRITE))
+
+    def test_distinct_labels_reach_build_oauth(self):
+        sentinel = object()
+        with patch("cb_mcp.auth.build_oauth", return_value=sentinel) as m:
+            result = resolve_oauth(
+                **_resolve_oauth_kwargs(scope_read="idp-read", scope_write="idp-write")
+            )
+        assert result is sentinel
+        m.assert_called_once()
+
+    def test_defaults_do_not_collide(self):
+        """Both labels unset (None) → canonical defaults, which differ; must
+        not trip the guard."""
+        sentinel = object()
+        with patch("cb_mcp.auth.build_oauth", return_value=sentinel):
+            result = resolve_oauth(**_resolve_oauth_kwargs())
+        assert result is sentinel
+        # Sanity: the defaults the guard compares against are genuinely distinct.
+        assert SCOPE_READ != SCOPE_WRITE
+
+    def test_cli_translates_oauth_config_error_to_usage_error(self):
+        """The CLI layer converts ``OAuthConfigError`` into a click usage error
+        (exit code 2), not an uncaught traceback."""
+        result = CliRunner().invoke(
+            mcp_server.main,
+            [
+                "--transport",
+                "http",
+                "--connection-string",
+                "couchbase://example",
+                "--username",
+                "u",
+                "--password",
+                "p",
+                "--oauth-jwks-uri",
+                "https://idp.example.com/.well-known/jwks.json",
+                "--oauth-issuer",
+                "https://idp.example.com",
+                "--oauth-audience",
+                "mcp-couchbase",
+                "--oauth-scope-read-label",
+                "couchbase-mcp:access",
+                "--oauth-scope-write-label",
+                "couchbase-mcp:access",
+            ],
+        )
+        assert result.exit_code == 2
+        assert "must be distinct" in result.output

@@ -5,7 +5,12 @@ This module contains utility functions for configuration, connection, and contex
 """
 
 # CLI adapters
-from .cli import validate_log_level, validate_log_path, validate_log_sinks
+from .cli import (
+    validate_log_level,
+    validate_log_path,
+    validate_log_sinks,
+    validate_scope_label,
+)
 
 # Configuration utilities
 from .config import (
@@ -119,6 +124,7 @@ __all__ = [
     "validate_log_level",
     "validate_log_path",
     "validate_log_sinks",
+    "validate_scope_label",
     # Elicitation
     "wrap_with_confirmation",
     # Environment diagnostics

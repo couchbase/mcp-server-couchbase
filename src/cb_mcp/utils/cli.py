@@ -12,9 +12,14 @@ Usage::
     @click.option("--log-sinks", callback=validate_log_sinks, ...)
 """
 
+from logging import getLogger
+
 import click
 
+from .constants import MCP_SERVER_NAME
 from .logging import parse_log_level, parse_log_sinks
+
+logger = getLogger(f"{MCP_SERVER_NAME}.utils.cli")
 
 
 def validate_log_level(
@@ -57,3 +62,40 @@ def validate_log_path(ctx: click.Context, param: click.Parameter, value: str) ->
             "or provide a non-empty path."
         )
     return trimmed
+
+
+def validate_scope_label(
+    ctx: click.Context, param: click.Parameter, value: object
+) -> str:
+    """Click callback for the OAuth scope-label options
+    (``--oauth-scope-read-label`` / ``--oauth-scope-write-label``).
+
+    Returns the trimmed label when the operator supplies a usable, non-empty
+    string. Otherwise it warns and falls back to the option's default — the
+    canonical ``couchbase-mcp:read`` / ``couchbase-mcp:write`` scope. Click
+    always delivers CLI/env input as ``str``, so in practice this guards
+    blank/whitespace values; the ``isinstance`` check is defensive against a
+    non-string default override or a programmatic caller.
+
+    Unlike ``--log-file`` (which rejects empties loudly via ``BadParameter``),
+    an unusable scope label is non-fatal — the server stays functional on the
+    canonical default — so we warn and continue rather than abort startup.
+
+    Note: callbacks run during Click argument parsing, before
+    ``configure_logging`` wires the handlers, so this warning is emitted via
+    Python logging's last-resort stderr handler. That is intentional — a
+    misconfigured scope label should surface at startup regardless of the
+    log-sink configuration.
+    """
+    default = param.default
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    flag = param.opts[0] if param.opts else (param.name or "scope label")
+    logger.warning(
+        "Invalid value %r for %s; expected a non-empty string. "
+        "Falling back to the default scope %r.",
+        value,
+        flag,
+        default,
+    )
+    return default

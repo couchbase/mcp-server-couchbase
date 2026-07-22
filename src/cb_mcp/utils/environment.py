@@ -47,15 +47,18 @@ _SAFE_SETTINGS_KEYS = (
     "confirmation_required_tools",
     "connection_string",
     # OAuth resource-server config: non-secret IdP coordinates (JWKS URL,
-    # issuer, audience, algorithm, PRM base URL) plus an oauth_enabled flag.
-    # There is no client secret to redact — the server only validates JWTs
-    # against a public JWKS — so these are safe to log verbatim.
+    # issuer, audience, algorithm, PRM base URL, effective scope labels) plus
+    # an oauth_enabled flag. There is no client secret to redact — the server
+    # only validates JWTs against a public JWKS — so these are safe to log
+    # verbatim.
     "oauth_enabled",
     "oauth_jwks_uri",
     "oauth_issuer",
     "oauth_audience",
     "oauth_algorithm",
     "oauth_mcp_base_url",
+    "oauth_scope_read_label",
+    "oauth_scope_write_label",
 )
 
 # Settings whose presence is diagnostically useful but whose values are

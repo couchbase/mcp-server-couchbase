@@ -32,6 +32,7 @@ def test_safe_keys_pass_through_verbatim():
     assert out["port"] == 8000
     assert out["connection_string"] == "couchbase://example"
 
+
 def test_secret_paths_redacted_to_presence_booleans():
     """Missing safe keys map to ``None``; presence-only keys map to ``True``/``False``.
 
@@ -63,6 +64,8 @@ def test_secret_paths_redacted_to_presence_booleans():
         "oauth_audience": None,
         "oauth_algorithm": None,
         "oauth_mcp_base_url": None,
+        "oauth_scope_read_label": None,
+        "oauth_scope_write_label": None,
         # presence-only keys: values redacted to booleans
         "password_configured": True,
         "ca_cert_path_configured": True,
