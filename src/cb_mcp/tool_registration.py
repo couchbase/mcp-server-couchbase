@@ -14,6 +14,7 @@ from .utils.scope_enforcement import (
     required_scopes_for_tool,
     wrap_with_scope_check,
 )
+from .utils.telemetry import wrap_with_telemetry
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tool_registration")
 
@@ -30,11 +31,13 @@ def prepare_tools_for_registration(
     filters disabled tools out, and wraps tools with elicitation and (when
     OAuth is active) per-tool scope enforcement.
 
-    Wrap order is ``scope_check ⟶ confirmation ⟶ tool``: the scope check
-    runs first so unauthorized callers never trigger an elicitation prompt.
-    Scope checks are no-ops at runtime when no access token is present
+    Wrap order is ``scope_check ⟶ confirmation ⟶ telemetry ⟶ tool``: the scope
+    check runs first so unauthorized callers never trigger an elicitation
+    prompt. Scope checks are no-ops at runtime when no access token is present
     (stdio / unauthenticated), so ``enforce_scopes`` only affects whether
-    the wrapper is installed — not whether it does work per call.
+    the wrapper is installed — not whether it does work per call. Telemetry
+    is innermost so it always fires around the actual tool execution,
+    unaffected by confirmation/scope-check outcomes.
     """
     # When read_only_mode is True, KV write tools are not loaded.
     tools = get_tools(read_only_mode=read_only_mode)
@@ -78,7 +81,7 @@ def prepare_tools_for_registration(
 
     final_tools: list[Callable] = []
     for tool in enabled_tools:
-        wrapped = tool
+        wrapped = wrap_with_telemetry(tool)
         if tool.__name__ in active_confirmation_tool_names:
             wrapped = wrap_with_confirmation(wrapped)
         if enforce_scopes:
