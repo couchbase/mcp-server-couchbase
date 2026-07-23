@@ -112,9 +112,13 @@ def log_environment_info(transport: str, server_settings: Mapping[str, Any]) -> 
     MCP tool returns, so support engineers reading the log and tools reading
     the MCP response see the same shape and field names.
 
-    Fires unconditionally; the record is filtered by the logger's effective
-    level. Customers running at INFO see nothing; enabling DEBUG surfaces the
-    full diagnostic line without any code change.
+    The record is written two ways. First, to a dedicated non-rotating file
+    (``ResolvedLoggingConfig.env_file``, e.g. ``mcp_server.env.log``) in
+    overwrite mode, so the *current* environment is always captured regardless
+    of log level and never scrolls out of a rotating debug file. Second, it is
+    emitted as a DEBUG log record for live/stderr visibility — filtered by the
+    logger's effective level (customers at INFO see nothing on stderr, but the
+    dedicated file is still written).
     """
     resolved_logging = get_resolved_logging_config()
     info: dict[str, Any] = {
@@ -130,4 +134,18 @@ def log_environment_info(transport: str, server_settings: Mapping[str, Any]) -> 
         "logging": resolved_logging.as_dict() if resolved_logging else None,
         "config": _redacted_settings(server_settings),
     }
-    logger.debug("Environment | %s", json.dumps(info, default=str))
+    payload = json.dumps(info, default=str)
+
+    # Durable copy: overwrite the dedicated env file so it always holds the
+    # current run's snapshot, independent of log level and immune to rotation of
+    # the debug file. Only present when the file sink is active.
+    env_file = resolved_logging.env_file if resolved_logging else None
+    if env_file:
+        try:
+            with open(env_file, "w", encoding="utf-8") as fh:
+                fh.write(f"Environment | {payload}\n")
+        except OSError as e:
+            logger.warning("Could not write environment file %r: %s", env_file, e)
+
+    # Live/stderr visibility at DEBUG (filtered by the logger's effective level).
+    logger.debug("Environment | %s", payload)

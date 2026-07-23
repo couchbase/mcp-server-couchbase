@@ -272,7 +272,22 @@ async def test_logging_block_exposed_via_mcp_tool(tmp_path) -> None:
     assert log_files["INFO"] == str(tmp_path / "main.info.log")
     assert log_files["DEBUG"] == str(tmp_path / "main.debug.log")
     assert log_files["ERROR"] == str(tmp_path / "main.error.log")
-    assert logging_block["max_bytes"] == 1048576
+    # max_bytes and backup_counts are per-level maps keyed by the active levels.
+    assert logging_block["max_bytes"] == {
+        "DEBUG": 1048576,
+        "INFO": 1048576,
+        "WARNING": 1048576,
+        "ERROR": 1048576,
+    }
+    assert logging_block["backup_counts"] == {
+        "DEBUG": 1,
+        "INFO": 1,
+        "WARNING": 1,
+        "ERROR": 1,
+    }
+    # The dedicated env file is derived from the same --log-file base.
+    assert logging_block["env_file"] == str(tmp_path / "main.env.log")
+    # The serialised keys are the plural, per-level forms.
     assert "backup_count" not in logging_block
 
 
@@ -357,8 +372,9 @@ async def test_log_file_rotates_when_max_bytes_exceeded(tmp_path) -> None:
     ) as session:
         # Each tool call generates ~tens of bytes of DEBUG records; 40 iterations
         # is generous given the 1 KiB cap on the per-level DEBUG file. Backup
-        # count is fixed at 1 (not configurable), so a single .1 rollover is
-        # what we expect.
+        # count defaults to 1 here (configurable via
+        # CB_MCP_LOG_RETENTION_BACKUP_COUNT), so a single .1 rollover is what we
+        # expect. Higher/zero counts are covered by the retention tests below.
         for _ in range(40):
             await session.call_tool("get_server_configuration_status", arguments={})
 
@@ -406,3 +422,232 @@ async def test_combined_invalid_inputs_degrade_gracefully(tmp_path) -> None:
     assert "foo_sink" in err_text, (
         f"invalid sink fallback missing from error log:\n{err_text}"
     )
+
+
+async def _restart_server_n_times(extra_args: list[str], times: int) -> None:
+    """Boot and cleanly shut down the server ``times`` times with the same args.
+
+    Per-tool-call log volume is effectively zero (the config tool logs nothing),
+    so rotation is driven by the one-time startup records instead. Each restart
+    appends the ~2 KB DEBUG env-info record to the per-level files; with a small
+    ``--log-max-bytes`` that reliably forces rollovers without depending on
+    fragile per-call byte estimates.
+    """
+    for _ in range(times):
+        async with create_logging_test_session(extra_args=extra_args):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_configurable_backup_count_keeps_multiple_backups(tmp_path) -> None:
+    """``--log-retention-backup-count N`` retains up to N rotated backups on disk.
+
+    Req 1 end-to-end: with the count set to 2 and a small byte budget, repeated
+    startups must produce ``.1`` and ``.2`` rotations of the DEBUG file but never
+    ``.3`` — the count both takes effect (>1 backup) and is capped (no N+1).
+    """
+    base_path = tmp_path / "main.log"
+    await _restart_server_n_times(
+        [
+            "--log-level",
+            "DEBUG",
+            "--log-sinks",
+            "file",
+            "--log-file",
+            str(base_path),
+            "--log-max-bytes",
+            "1000",
+            "--log-retention-backup-count",
+            "2",
+        ],
+        times=4,
+    )
+
+    assert (tmp_path / "main.debug.log.1").exists(), "first backup (.1) never created"
+    assert (tmp_path / "main.debug.log.2").exists(), (
+        "second backup (.2) missing — configured count of 2 did not take effect"
+    )
+    # The count is capped at 2: a third backup must never exist.
+    assert not (tmp_path / "main.debug.log.3").exists(), (
+        "backup count cap breached — .3 exists despite count=2"
+    )
+
+
+@pytest.mark.asyncio
+async def test_zero_backup_count_keeps_only_live_file(tmp_path) -> None:
+    """``--log-retention-backup-count 0`` keeps only the live file, still bounded.
+
+    Req 1 behaviour: 0 means no rotated backups. The live file is truncated on
+    rollover (via the bounded handler) instead of growing unbounded, so across
+    repeated startups no ``.N`` files appear and the live file stays bounded
+    rather than accumulating every run's volume.
+    """
+    base_path = tmp_path / "main.log"
+    await _restart_server_n_times(
+        [
+            "--log-level",
+            "DEBUG",
+            "--log-sinks",
+            "file",
+            "--log-file",
+            str(base_path),
+            "--log-max-bytes",
+            "1000",
+            "--log-retention-backup-count",
+            "0",
+        ],
+        times=4,
+    )
+
+    debug_path = tmp_path / "main.debug.log"
+    assert debug_path.exists(), "live DEBUG file missing"
+    # No rotated backups of any level should exist at count=0.
+    assert not list(tmp_path.glob("*.log.*")), (
+        f"count=0 created rotated backups: {list(tmp_path.glob('*.log.*'))}"
+    )
+    # The live file stayed bounded: 4 restarts append ~2 KB each (~8 KB) without
+    # rotation; truncation on rollover keeps it well under that.
+    assert debug_path.stat().st_size <= 4096, (
+        f"live file grew unbounded at count=0: {debug_path.stat().st_size} bytes"
+    )
+
+
+@pytest.mark.asyncio
+async def test_per_level_retention_and_size_via_env_reflected_in_snapshot(
+    tmp_path,
+) -> None:
+    """Per-level size + retention env vars flow through to the MCP tool snapshot.
+
+    Reqs 1 & 2 end-to-end via the ``CB_MCP_LOG_*`` env vars (the config surface
+    operators actually use): unset levels inherit the global, explicit per-level
+    values win, and ``get_server_configuration_status`` reports the resolved
+    per-level maps.
+    """
+    base_path = tmp_path / "main.log"
+    async with create_logging_test_session(
+        extra_args=[
+            "--log-level",
+            "DEBUG",
+            "--log-sinks",
+            "file",
+            "--log-file",
+            str(base_path),
+        ],
+        env_overrides={
+            "CB_MCP_LOG_MAX_BYTES": "1000",
+            "CB_MCP_LOG_INFO_ROTATION_MAX_SIZE": "2000",
+            "CB_MCP_LOG_RETENTION_BACKUP_COUNT": "2",
+            "CB_MCP_LOG_ERROR_RETENTION_BACKUP_COUNT": "5",
+        },
+    ) as session:
+        response = await session.call_tool(
+            "get_server_configuration_status", arguments={}
+        )
+        payload = extract_payload(response)
+
+    logging_block = payload["logging"]
+    # Size: INFO overridden to 2000, every other level inherits the 1000 global.
+    assert logging_block["max_bytes"] == {
+        "DEBUG": 1000,
+        "INFO": 2000,
+        "WARNING": 1000,
+        "ERROR": 1000,
+    }
+    # Retention: ERROR overridden to 5, every other level inherits the 2 global.
+    assert logging_block["backup_counts"] == {
+        "DEBUG": 2,
+        "INFO": 2,
+        "WARNING": 2,
+        "ERROR": 5,
+    }
+
+
+@pytest.mark.asyncio
+async def test_zero_max_bytes_falls_back_to_default_with_warning(tmp_path) -> None:
+    """``--log-max-bytes 0`` is rejected at startup: warn + fall back to default.
+
+    Req 2 breaking change: 0 no longer disables rotation. The server must still
+    start, log a warning naming the offending variable, and resolve the size to
+    the package default (verified via the tool snapshot).
+    """
+    base_path = tmp_path / "main.log"
+    stderr_path = tmp_path / "server.stderr"
+    with stderr_path.open("w", encoding="utf-8") as stderr_file:
+        async with create_logging_test_session(
+            extra_args=[
+                "--log-level",
+                "DEBUG",
+                "--log-sinks",
+                "stderr,file",
+                "--log-file",
+                str(base_path),
+                "--log-max-bytes",
+                "0",
+            ],
+            stderr_buffer=stderr_file,
+        ) as session:
+            response = await session.call_tool(
+                "get_server_configuration_status", arguments={}
+            )
+            payload = extract_payload(response)
+
+    # The warning names the offending variable and is visible on stderr.
+    stderr_text = stderr_path.read_text()
+    assert "CB_MCP_LOG_MAX_BYTES=0" in stderr_text, (
+        f"missing 0-is-invalid warning on stderr:\n{stderr_text}"
+    )
+    # Every level resolved to the 1 MB package default rather than 0.
+    assert payload["logging"]["max_bytes"] == {
+        "DEBUG": 1048576,
+        "INFO": 1048576,
+        "WARNING": 1048576,
+        "ERROR": 1048576,
+    }
+
+
+@pytest.mark.asyncio
+async def test_env_info_captured_in_dedicated_file_at_info(tmp_path) -> None:
+    """Req 3: the environment snapshot lands in its own file, even at INFO.
+
+    At the default INFO level no DEBUG file is created, yet the dedicated
+    ``.env.log`` file must still capture the system-info record — proving it is
+    level-independent and lives outside the rotating per-level files (so a
+    debug-file rotation can't lose it).
+    """
+    base_path = tmp_path / "main.log"
+    async with create_logging_test_session(
+        extra_args=[
+            "--log-sinks",
+            "file",
+            "--log-file",
+            str(base_path),
+        ],
+    ):
+        pass
+
+    env_file = tmp_path / "main.env.log"
+    assert env_file.exists(), "dedicated env file not created at INFO"
+    # No DEBUG file at INFO — the env record only survives because it has its
+    # own file, not because it rode along in the (absent) debug log.
+    assert not (tmp_path / "main.debug.log").exists()
+
+    text = env_file.read_text()
+    assert text.startswith("Environment | "), f"unexpected env-file content:\n{text}"
+    parsed = json.loads(text.split("Environment | ", 1)[1])
+    assert "os" in parsed and "python" in parsed and "logging" in parsed
+    # Exactly one record — the file is overwritten each start, not appended.
+    assert text.count("Environment | ") == 1
+
+
+@pytest.mark.asyncio
+async def test_env_file_survives_across_restarts_as_current_snapshot(tmp_path) -> None:
+    """The env file is overwritten each start, so it always holds one current
+    record and never grows across restarts."""
+    base_path = tmp_path / "main.log"
+    args = ["--log-sinks", "file", "--log-file", str(base_path)]
+    await _restart_server_n_times(args, times=3)
+
+    env_file = tmp_path / "main.env.log"
+    assert env_file.exists()
+    # Overwrite (not append): still exactly one record after three starts.
+    assert env_file.read_text().count("Environment | ") == 1

@@ -124,7 +124,70 @@
         },
         {
           "name": "CB_MCP_LOG_MAX_BYTES",
-          "description": "Maximum size in bytes per per-level log file before it rotates. Default is 1048576 (1 MB).",
+          "description": "Global maximum size in bytes per-level log file before it rotates, inherited by every level unless overridden by a per-level CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE. A value of 0 is invalid and falls back to the default with a startup warning (breaking change: no longer disables rotation). Default is 1048576 (1 MB).",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE",
+          "description": "Rotation size in bytes for the ERROR log file. Overrides CB_MCP_LOG_MAX_BYTES for ERROR; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE",
+          "description": "Rotation size in bytes for the WARNING log file. Overrides CB_MCP_LOG_MAX_BYTES for WARNING; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_INFO_ROTATION_MAX_SIZE",
+          "description": "Rotation size in bytes for the INFO log file. Overrides CB_MCP_LOG_MAX_BYTES for INFO; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE",
+          "description": "Rotation size in bytes for the DEBUG log file. Overrides CB_MCP_LOG_MAX_BYTES for DEBUG; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_RETENTION_BACKUP_COUNT",
+          "description": "Number of rotated backup files kept per-level log file, excluding the live file. Applies to every level unless overridden per level. Set to 0 to keep only the live file (still capped by the rotation size). Default is 1.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_ERROR_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the ERROR log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for ERROR; inherits it when unset.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_WARNING_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the WARNING log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for WARNING; inherits it when unset.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_INFO_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the INFO log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for INFO; inherits it when unset.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_DEBUG_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the DEBUG log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for DEBUG; inherits it when unset.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
@@ -289,7 +352,7 @@
         {
           "type": "named",
           "name": "--log-max-bytes",
-          "description": "Maximum size in bytes per per-level log file before it rotates. Default is 1048576 (1 MB).",
+          "description": "Maximum size in bytes per-level log file before it rotates. Default is 1048576 (1 MB).",
           "isRequired": false,
           "format": "number",
           "isSecret": false
@@ -450,7 +513,70 @@
         },
         {
           "name": "CB_MCP_LOG_MAX_BYTES",
-          "description": "Maximum size in bytes per per-level log file before it rotates. Default is 1048576 (1 MB).",
+          "description": "Global maximum size in bytes per-level log file before it rotates, inherited by every level unless overridden by a per-level CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE. A value of 0 is invalid and falls back to the default with a startup warning (breaking change: no longer disables rotation). Default is 1048576 (1 MB).",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE",
+          "description": "Rotation size in bytes for the ERROR log file. Overrides CB_MCP_LOG_MAX_BYTES for ERROR; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE",
+          "description": "Rotation size in bytes for the WARNING log file. Overrides CB_MCP_LOG_MAX_BYTES for WARNING; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_INFO_ROTATION_MAX_SIZE",
+          "description": "Rotation size in bytes for the INFO log file. Overrides CB_MCP_LOG_MAX_BYTES for INFO; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE",
+          "description": "Rotation size in bytes for the DEBUG log file. Overrides CB_MCP_LOG_MAX_BYTES for DEBUG; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_RETENTION_BACKUP_COUNT",
+          "description": "Number of rotated backup files kept per-level log file, excluding the live file. Applies to every level unless overridden per level. Set to 0 to keep only the live file (still capped by the rotation size). Default is 1.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_ERROR_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the ERROR log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for ERROR; inherits it when unset.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_WARNING_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the WARNING log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for WARNING; inherits it when unset.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_INFO_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the INFO log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for INFO; inherits it when unset.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_DEBUG_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the DEBUG log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for DEBUG; inherits it when unset.",
           "isRequired": false,
           "format": "number",
           "isSecret": false

@@ -30,15 +30,11 @@ QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION = 8
 # Logging Configuration
 # Change this to DEBUG, WARNING, ERROR as needed
 DEFAULT_LOG_LEVEL = "INFO"
-# Byte/MB conversion factor. The global rotation size (CB_MCP_LOG_MAX_BYTES) is
-# expressed in bytes; the per-level overrides (CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE)
-# are expressed in MB and converted with this factor.
-BYTES_PER_MB = 1024 * 1024
 # Global rotation size in bytes, inherited by every level unless overridden by a
-# per-level CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE (MB). BREAKING CHANGE from 1.0:
-# a value of 0 is no longer "disable rotation" — 0 is rejected at startup with a
-# warning and falls back to this default.
-DEFAULT_LOG_MAX_BYTES = 1 * BYTES_PER_MB  # 1 MB
+# per-level CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE (also in bytes). BREAKING CHANGE
+# from 1.0: a value of 0 is no longer "disable rotation" — 0 is rejected at
+# startup with a warning and falls back to this default.
+DEFAULT_LOG_MAX_BYTES = 1 * 1024 * 1024  # 1 MB
 # Default number of rotated backup files kept per level file, applied to every
 # level unless overridden. Exposed globally via CB_MCP_LOG_RETENTION_BACKUP_COUNT
 # and per level via CB_MCP_LOG_<LEVEL>_RETENTION_BACKUP_COUNT (which inherit this

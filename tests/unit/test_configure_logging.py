@@ -18,7 +18,6 @@ import pytest
 
 import cb_mcp.utils.logging as logmod
 from cb_mcp.utils.constants import (
-    BYTES_PER_MB,
     DEFAULT_LOG_MAX_BYTES,
     MCP_SERVER_NAME,
 )
@@ -395,6 +394,7 @@ class TestAsDict:
             log_files=None,
             log_max_bytes=None,
             log_backup_counts=None,
+            env_file=None,
         )
         d = cfg.as_dict()
         # JSON-friendly key names
@@ -404,6 +404,7 @@ class TestAsDict:
             "log_files",
             "max_bytes",
             "backup_counts",
+            "env_file",
         }
         # The serialised key is the plural, per-level form.
         assert "backup_count" not in d
@@ -415,12 +416,14 @@ class TestAsDict:
             log_files={"INFO": "m.info.log", "ERROR": "e.log"},
             log_max_bytes={"INFO": 1048576, "ERROR": 5242880},
             log_backup_counts={"INFO": 1, "ERROR": 5},
+            env_file="m.env.log",
         )
         d = cfg.as_dict()
         assert d["sinks"] == ["file", "stderr"]
         assert d["log_files"] == {"INFO": "m.info.log", "ERROR": "e.log"}
         assert d["max_bytes"] == {"INFO": 1048576, "ERROR": 5242880}
         assert d["backup_counts"] == {"INFO": 1, "ERROR": 5}
+        assert d["env_file"] == "m.env.log"
 
 
 class TestIdempotency:
@@ -444,13 +447,14 @@ class TestPerLevelMaxBytes:
         assert per_level == dict.fromkeys(self._ALL_LEVELS, 500_000)
         assert warnings == []
 
-    def test_resolve_converts_mb_overrides_to_bytes(self):
+    def test_resolve_uses_byte_overrides_directly(self):
         per_level, warnings = logmod._resolve_per_level_max_bytes(
-            1000, {"ERROR": 5, "DEBUG": 2}
+            1000, {"ERROR": 5_000_000, "DEBUG": 2_000_000}
         )
-        assert per_level["ERROR"] == 5 * BYTES_PER_MB
-        assert per_level["DEBUG"] == 2 * BYTES_PER_MB
-        # Unset levels inherit the global bytes value as-is.
+        # Overrides are bytes, used as-is (no unit conversion).
+        assert per_level["ERROR"] == 5_000_000
+        assert per_level["DEBUG"] == 2_000_000
+        # Unset levels inherit the global bytes value.
         assert per_level["INFO"] == 1000
         assert per_level["WARNING"] == 1000
         assert warnings == []
@@ -477,7 +481,7 @@ class TestPerLevelMaxBytes:
             sinks={"file"},
             log_file=str(tmp_path / "m.log"),
             log_max_bytes=1000,
-            log_max_bytes_overrides={"ERROR": 3},  # 3 MB
+            log_max_bytes_overrides={"ERROR": 3_000_000},  # bytes
         )
         logger = logging.getLogger(MCP_SERVER_NAME)
         by_path = {
@@ -485,7 +489,7 @@ class TestPerLevelMaxBytes:
             for h in logger.handlers
             if isinstance(h, RotatingFileHandler)
         }
-        assert by_path[str(tmp_path / "m.error.log")] == 3 * BYTES_PER_MB
+        assert by_path[str(tmp_path / "m.error.log")] == 3_000_000
         assert by_path[str(tmp_path / "m.info.log")] == 1000
 
     def test_snapshot_reports_per_level_bytes(self, tmp_path):
@@ -494,12 +498,12 @@ class TestPerLevelMaxBytes:
             sinks={"file"},
             log_file=str(tmp_path / "m.log"),
             log_max_bytes=1000,
-            log_max_bytes_overrides={"DEBUG": 2},
+            log_max_bytes_overrides={"DEBUG": 2_000_000},
         )
         snap = get_resolved_logging_config()
         assert snap is not None
         assert snap.log_max_bytes == {
-            "DEBUG": 2 * BYTES_PER_MB,
+            "DEBUG": 2_000_000,
             "INFO": 1000,
             "WARNING": 1000,
             "ERROR": 1000,
@@ -624,3 +628,30 @@ class TestPerLevelBackupCounts:
         # And it stayed bounded (within one record of the cap), proving the file
         # was truncated on rollover rather than growing without limit.
         assert max_seen <= 2000 + 200
+
+
+class TestEnvFile:
+    """The dedicated environment-file path is derived and reported correctly."""
+
+    def test_env_file_derived_from_base_when_file_sink_active(self, tmp_path):
+        _call(
+            level="INFO",
+            sinks={"file"},
+            log_file=str(tmp_path / "mcp_server.log"),
+        )
+        snap = get_resolved_logging_config()
+        assert snap is not None
+        # Derived from the --log-file base by inserting ".env".
+        assert snap.env_file == str(tmp_path / "mcp_server.env.log")
+
+    def test_env_file_none_for_stderr_only(self, tmp_path):
+        _call(level="INFO", sinks={"stderr"}, log_file=str(tmp_path / "m.log"))
+        snap = get_resolved_logging_config()
+        assert snap is not None
+        assert snap.env_file is None
+
+    def test_env_file_none_when_off(self, tmp_path):
+        _call(level="OFF", sinks={"file"}, log_file=str(tmp_path / "m.log"))
+        snap = get_resolved_logging_config()
+        assert snap is not None
+        assert snap.env_file is None

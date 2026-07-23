@@ -12,8 +12,10 @@ from __future__ import annotations
 import json
 import logging
 
+import cb_mcp.utils.logging as logmod
 from cb_mcp.utils.constants import MCP_SERVER_NAME
 from cb_mcp.utils.environment import log_environment_info
+from cb_mcp.utils.logging import ResolvedLoggingConfig
 
 ENV_LOGGER_NAME = f"{MCP_SERVER_NAME}.utils.environment"
 
@@ -59,9 +61,16 @@ def _capture_env_record(server_settings=None) -> logging.LogRecord:
     # configured — otherwise we'd see noise in pytest output and risk
     # tripping caplog-based assertions elsewhere.
     env_logger.propagate = False
+    # These tests pin the DEBUG-record payload contract only; force the snapshot
+    # to None so ``log_environment_info`` doesn't also try to write a dedicated
+    # env file (which would add a second captured record). The file-write path
+    # is covered by test_env_snapshot_written_to_dedicated_file.
+    prev_resolved = logmod._resolved_config
+    logmod._resolved_config = None
     try:
         log_environment_info(transport="http", server_settings=server_settings)
     finally:
+        logmod._resolved_config = prev_resolved
         env_logger.removeHandler(handler)
         env_logger.setLevel(prev_level)
         env_logger.propagate = prev_propagate
@@ -173,3 +182,72 @@ def test_config_block_captures_oauth_coordinates():
     assert config["oauth_mcp_base_url"] == "https://mcp.example.com"
     assert config["oauth_scope_read_label"] == "couchbase-mcp/read"
     assert config["oauth_scope_write_label"] == "couchbase-mcp/write"
+
+
+def _snapshot_with_env_file(env_path) -> ResolvedLoggingConfig:
+    return ResolvedLoggingConfig(
+        level="INFO",
+        sinks=("file",),
+        log_files={"INFO": "ignored.info.log"},
+        log_max_bytes={"INFO": 1048576},
+        log_backup_counts={"INFO": 1},
+        env_file=str(env_path),
+    )
+
+
+def test_env_snapshot_written_to_dedicated_file(tmp_path):
+    """When ``env_file`` is set, the snapshot is written there verbatim.
+
+    Note the logger is at INFO (not DEBUG) here: the dedicated file must be
+    written regardless of level, unlike the DEBUG-gated stderr record.
+    """
+    env_path = tmp_path / "mcp_server.env.log"
+    prev = logmod._resolved_config
+    logmod._resolved_config = _snapshot_with_env_file(env_path)
+    try:
+        log_environment_info(
+            transport="stdio", server_settings={"read_only_mode": True}
+        )
+    finally:
+        logmod._resolved_config = prev
+
+    assert env_path.exists(), "dedicated env file was not written"
+    text = env_path.read_text()
+    assert text.startswith("Environment | ")
+    payload = json.loads(text.split("Environment | ", 1)[1])
+    assert payload["transport"] == "stdio"
+
+
+def test_env_file_overwritten_not_appended(tmp_path):
+    """Each start overwrites the env file so it always holds the current run —
+    the file never grows across restarts (immune to rotation by construction)."""
+    env_path = tmp_path / "mcp_server.env.log"
+    prev = logmod._resolved_config
+    logmod._resolved_config = _snapshot_with_env_file(env_path)
+    try:
+        log_environment_info(
+            transport="stdio", server_settings={"read_only_mode": True}
+        )
+        log_environment_info(transport="http", server_settings={"read_only_mode": True})
+    finally:
+        logmod._resolved_config = prev
+
+    text = env_path.read_text()
+    assert text.count("Environment | ") == 1, "env file grew — should overwrite"
+    # The surviving record is the most recent run's.
+    payload = json.loads(text.split("Environment | ", 1)[1])
+    assert payload["transport"] == "http"
+
+
+def test_no_env_file_written_when_snapshot_absent(tmp_path):
+    """With no resolved snapshot (env_file None) no dedicated file is created."""
+    env_path = tmp_path / "mcp_server.env.log"
+    prev = logmod._resolved_config
+    logmod._resolved_config = None
+    try:
+        log_environment_info(
+            transport="stdio", server_settings={"read_only_mode": True}
+        )
+    finally:
+        logmod._resolved_config = prev
+    assert not env_path.exists()
