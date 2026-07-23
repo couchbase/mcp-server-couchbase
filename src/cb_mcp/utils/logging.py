@@ -10,6 +10,7 @@ SDK records as well.
 import logging
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from logging.handlers import RotatingFileHandler
 from typing import Any
@@ -19,10 +20,12 @@ import couchbase
 from .constants import (
     ALLOWED_LOG_LEVELS,
     ALLOWED_LOG_SINKS,
+    BYTES_PER_MB,
     DEFAULT_LOG_DATEFMT,
     DEFAULT_LOG_FILE,
     DEFAULT_LOG_FORMAT,
     DEFAULT_LOG_LEVEL,
+    DEFAULT_LOG_MAX_BYTES,
     DEFAULT_LOG_SINKS,
     MCP_SERVER_NAME,
 )
@@ -50,15 +53,19 @@ class ResolvedLoggingConfig:
     The fields reflect what's *active*: ``sinks`` lists only the destinations
     that received handler attachments, and ``log_files`` maps each active log
     level to the file it is written to (``{"INFO": "mcp_server.info.log", ...}``).
-    ``log_files`` is ``None`` whenever the file sink isn't part of that set —
-    including under ``level="OFF"``, where no handlers are attached at all.
+    ``log_max_bytes`` maps each active level to its resolved rotation size in
+    bytes, and ``log_backup_counts`` maps each active level to the number of
+    rotated backups retained for it (``{"INFO": 1, "ERROR": 5, ...}``). All three
+    per-level maps share the same keys and are ``None`` whenever the file sink
+    isn't part of that set — including under ``level="OFF"``, where no handlers
+    are attached at all.
     """
 
     level: str
     sinks: tuple[str, ...]
     log_files: dict[str, str] | None
-    log_max_bytes: int
-    log_backup_count: int
+    log_max_bytes: dict[str, int] | None
+    log_backup_counts: dict[str, int] | None
 
     def as_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-friendly dict with shorter key names."""
@@ -66,7 +73,10 @@ class ResolvedLoggingConfig:
             "level": self.level,
             "sinks": list(self.sinks),
             "log_files": dict(self.log_files) if self.log_files else None,
-            "max_bytes": self.log_max_bytes,
+            "max_bytes": dict(self.log_max_bytes) if self.log_max_bytes else None,
+            "backup_counts": dict(self.log_backup_counts)
+            if self.log_backup_counts
+            else None,
         }
 
 
@@ -105,19 +115,94 @@ def _per_level_path(base_path: str, level_name: str) -> str:
     return f"{root}.{level_name.lower()}{ext}"
 
 
+def _resolve_per_level_max_bytes(
+    global_max_bytes: int,
+    overrides_mb: Mapping[str, int],
+) -> tuple[dict[str, int], list[str]]:
+    """Resolve per-level rotation sizes in bytes, applying the 0-is-invalid rule.
+
+    ``global_max_bytes`` is the byte value of ``CB_MCP_LOG_MAX_BYTES``;
+    ``overrides_mb`` maps level names to explicit
+    ``CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE`` values **in MB**. A level absent from
+    the overrides inherits the (resolved) global. A value of 0 — at either the
+    global or a level — is invalid and falls back to the default: the global
+    falls back to :data:`DEFAULT_LOG_MAX_BYTES`, and a level's 0 falls back to
+    inheriting the resolved global (i.e. it behaves as if unset). Returns the
+    ``{level: bytes}`` map for all levels plus human-readable warnings the caller
+    should surface once the logger is wired.
+    """
+    warnings: list[str] = []
+
+    resolved_global = global_max_bytes
+    if global_max_bytes == 0:
+        warnings.append(
+            "CB_MCP_LOG_MAX_BYTES=0 is not a valid rotation size; falling back "
+            f"to the default of {DEFAULT_LOG_MAX_BYTES} bytes."
+        )
+        resolved_global = DEFAULT_LOG_MAX_BYTES
+
+    per_level: dict[str, int] = {}
+    for lvl in _PER_LEVEL_FILE_LEVELS:
+        mb = overrides_mb.get(lvl)
+        if mb is None:
+            per_level[lvl] = resolved_global  # inherit the global
+        elif mb == 0:
+            warnings.append(
+                f"CB_MCP_LOG_{lvl}_ROTATION_MAX_SIZE=0 is not a valid rotation "
+                f"size; falling back to the global CB_MCP_LOG_MAX_BYTES "
+                f"({resolved_global} bytes)."
+            )
+            per_level[lvl] = resolved_global  # 0 behaves as unset -> inherit
+        else:
+            per_level[lvl] = mb * BYTES_PER_MB
+    return per_level, warnings
+
+
+class _BoundedRotatingFileHandler(RotatingFileHandler):
+    """RotatingFileHandler that keeps the live file bounded when backupCount=0.
+
+    Stock ``RotatingFileHandler`` with ``backupCount == 0`` reopens the base
+    file in append mode on rollover, so the live file grows past ``maxBytes``
+    without limit and re-triggers a rollover on every subsequent write. When an
+    operator sets retention to 0 (keep only the live file, no backups), they
+    still expect ``maxBytes`` to cap it — so here we truncate the file on
+    rollover instead, cycling a single bounded live file. With
+    ``backupCount > 0`` the stock numbered-backup behaviour is used unchanged.
+    """
+
+    def doRollover(self) -> None:  # noqa: N802 (overrides stdlib camelCase API)
+        if self.backupCount > 0:
+            super().doRollover()
+            return
+        if self.stream:
+            self.stream.close()
+            self.stream = None
+        # Reset the live file to empty on disk so the truncation holds even on
+        # the delayed-open path; a fresh append then starts from zero bytes.
+        with open(self.baseFilename, "w", encoding=self.encoding):
+            pass
+        if not self.delay:
+            self.stream = self._open()
+
+
 def _attach_per_level_file_handlers(
     logger: logging.Logger,
     formatter: logging.Formatter,
     log_file: str,
-    log_max_bytes: int,
-    log_backup_count: int,
+    max_bytes: Mapping[str, int],
+    backup_counts: Mapping[str, int],
 ) -> tuple[dict[str, str], list[str]]:
     """Attach one rotating file handler per active level to ``logger``.
 
     All per-level files derive from the single ``log_file`` base path by
     inserting the level name (``mcp_server.log`` -> ``mcp_server.info.log``,
-    ``mcp_server.error.log``, ...). Returns ``(attached, errors)`` where
-    ``attached`` maps each level that got a handler to its file path, and
+    ``mcp_server.error.log``, ...). Each handler keeps ``backup_counts[level]``
+    rotated backups — the caller resolves the per-level count (explicit override
+    or the inherited global) before calling. A count of 0 keeps no rotated
+    backups; only the live file is retained, and it is truncated on rollover so
+    it stays bounded by ``maxBytes`` (see :class:`_BoundedRotatingFileHandler`).
+    Returns ``(attached, errors)``
+    where ``attached`` maps each level that got a handler to its file path, and
     ``errors`` collects human-readable problems (a missing base path that fell
     back to the default, or a file that couldn't be opened) for the caller to
     log once all handlers are wired and visible.
@@ -142,10 +227,10 @@ def _attach_per_level_file_handlers(
             continue
         path = _per_level_path(log_file, lvl_name)
         try:
-            handler = RotatingFileHandler(
+            handler = _BoundedRotatingFileHandler(
                 path,
-                maxBytes=log_max_bytes,
-                backupCount=log_backup_count,
+                maxBytes=max_bytes[lvl_name],
+                backupCount=backup_counts[lvl_name],
                 encoding="utf-8",
             )
         except OSError as e:
@@ -213,6 +298,8 @@ def configure_logging(
     log_file: str,
     log_max_bytes: int,
     log_backup_count: int,
+    log_max_bytes_overrides: Mapping[str, int] | None = None,
+    log_backup_count_overrides: Mapping[str, int] | None = None,
     invalid_sinks: list[str] | None = None,
     invalid_level: str | None = None,
 ) -> None:
@@ -226,6 +313,24 @@ def configure_logging(
     ``mcp_server.error.log``, ...). The DEBUG/INFO/WARNING files are filtered to
     exactly their level; the ERROR file captures ERROR **and** CRITICAL (there
     is no separate CRITICAL file).
+
+    Retention is per level. ``log_backup_count`` is the global number of rotated
+    backups kept for every level file; ``log_backup_count_overrides`` maps
+    individual level names (``"DEBUG"``/``"INFO"``/``"WARNING"``/``"ERROR"``) to
+    an explicit count that wins over the global for that level. A level absent
+    from the overrides inherits ``log_backup_count``. A resolved count of 0 keeps
+    no rotated backups for that level — only the live file remains, still bounded
+    by the resolved rotation size (it is truncated on rollover rather than
+    rotated).
+
+    Rotation size is per level too. ``log_max_bytes`` is the global size in bytes
+    (``CB_MCP_LOG_MAX_BYTES``); ``log_max_bytes_overrides`` maps individual level
+    names to an explicit size **in MB** (``CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE``)
+    that wins over the global. A level absent from the overrides inherits the
+    global. **Breaking change from 1.0:** a size of 0 (global or per level) is no
+    longer "disable rotation" — it is rejected with a startup warning and falls
+    back to the default (the global to :data:`DEFAULT_LOG_MAX_BYTES`, a level to
+    the inherited global).
 
     File-sink edge cases:
       * If ``"file"`` is requested but ``log_file`` is missing, an error is
@@ -267,8 +372,8 @@ def configure_logging(
             level=level_name,
             sinks=(),
             log_files=None,
-            log_max_bytes=log_max_bytes,
-            log_backup_count=log_backup_count,
+            log_max_bytes=None,
+            log_backup_counts=None,
         )
         return
 
@@ -278,6 +383,17 @@ def configure_logging(
 
     effective_sinks = set(sinks)
     file_sink_active = "file" in effective_sinks
+
+    # Resolve per-level rotation size and retention count up front: an explicit
+    # per-level override wins, otherwise the level inherits the global value.
+    # ``size_warnings`` captures any 0-is-invalid fallbacks for deferred logging.
+    resolved_max_bytes, size_warnings = _resolve_per_level_max_bytes(
+        log_max_bytes, log_max_bytes_overrides or {}
+    )
+    overrides = log_backup_count_overrides or {}
+    resolved_backup_counts = {
+        lvl: overrides.get(lvl, log_backup_count) for lvl in _PER_LEVEL_FILE_LEVELS
+    }
 
     if "stderr" in effective_sinks:
         stderr_handler = logging.StreamHandler(sys.stderr)
@@ -295,8 +411,8 @@ def configure_logging(
             logger,
             formatter,
             log_file,
-            log_max_bytes,
-            log_backup_count,
+            resolved_max_bytes,
+            resolved_backup_counts,
         )
         # Make sure file errors are actually visible. ERROR-level records are
         # only captured by a stderr handler or the ERROR file; if neither is
@@ -340,15 +456,25 @@ def configure_logging(
         logger.error(message)
     for message in file_warnings:
         logger.warning(message)
+    # 0-is-invalid rotation-size fallbacks (global or per level) — surface these
+    # regardless of sink so an operator learns their 0 was ignored.
+    for message in size_warnings:
+        logger.warning(message)
+
+    # Per-level rotation size and retention, restricted to the levels that
+    # actually got a file.
+    active_max_bytes = {lvl: resolved_max_bytes[lvl] for lvl in attached_files}
+    active_backup_counts = {lvl: resolved_backup_counts[lvl] for lvl in attached_files}
 
     # Show the per-level files in the summary only when the file sink is active;
     # for a stderr-only run printing paths would falsely suggest files exist.
     logger.info(
-        "Logging configured: level=%s, sinks=%s, log_files=%s, max_bytes=%d",
+        "Logging configured: level=%s, sinks=%s, log_files=%s, max_bytes=%s, backup_counts=%s",
         level_name,
         ",".join(sorted(effective_sinks)),
         attached_files if file_sink_active else "-",
-        log_max_bytes,
+        active_max_bytes if file_sink_active else "-",
+        active_backup_counts if file_sink_active else "-",
     )
 
     # Record the snapshot so the server-config MCP tool and env-info diagnostic
@@ -359,6 +485,10 @@ def configure_logging(
         log_files=dict(attached_files)
         if (file_sink_active and attached_files)
         else None,
-        log_max_bytes=log_max_bytes,
-        log_backup_count=log_backup_count,
+        log_max_bytes=active_max_bytes
+        if (file_sink_active and attached_files)
+        else None,
+        log_backup_counts=active_backup_counts
+        if (file_sink_active and attached_files)
+        else None,
     )

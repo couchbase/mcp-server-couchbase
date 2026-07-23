@@ -17,7 +17,11 @@ from unittest.mock import patch
 import pytest
 
 import cb_mcp.utils.logging as logmod
-from cb_mcp.utils.constants import MCP_SERVER_NAME
+from cb_mcp.utils.constants import (
+    BYTES_PER_MB,
+    DEFAULT_LOG_MAX_BYTES,
+    MCP_SERVER_NAME,
+)
 from cb_mcp.utils.logging import (
     LEVEL_OFF,
     ResolvedLoggingConfig,
@@ -275,31 +279,21 @@ class TestSdkLevelPropagation:
     trees never drift to different thresholds.
     """
 
-    def test_sdk_configured_with_matching_debug_level(
-        self, mock_sdk_configure_logging
-    ):
+    def test_sdk_configured_with_matching_debug_level(self, mock_sdk_configure_logging):
         _call(level="DEBUG", sinks={"stderr"})
-        mock_sdk_configure_logging.assert_called_with(
-            MCP_SERVER_NAME, logging.DEBUG
-        )
+        mock_sdk_configure_logging.assert_called_with(MCP_SERVER_NAME, logging.DEBUG)
 
     def test_sdk_configured_with_matching_warning_level(
         self, mock_sdk_configure_logging
     ):
         _call(level="WARNING", sinks={"stderr"})
-        mock_sdk_configure_logging.assert_called_with(
-            MCP_SERVER_NAME, logging.WARNING
-        )
+        mock_sdk_configure_logging.assert_called_with(MCP_SERVER_NAME, logging.WARNING)
 
-    def test_sdk_level_tracks_invalid_level_fallback(
-        self, mock_sdk_configure_logging
-    ):
+    def test_sdk_level_tracks_invalid_level_fallback(self, mock_sdk_configure_logging):
         """An invalid level falls back to INFO for the MCP logger; the SDK must
         be told the same resolved level, not the rejected input."""
         _call(level="NONSENSE", sinks={"stderr"})
-        mock_sdk_configure_logging.assert_called_with(
-            MCP_SERVER_NAME, logging.INFO
-        )
+        mock_sdk_configure_logging.assert_called_with(MCP_SERVER_NAME, logging.INFO)
 
 
 class TestTimestampFormat:
@@ -399,8 +393,8 @@ class TestAsDict:
             level="DEBUG",
             sinks=("stderr",),
             log_files=None,
-            log_max_bytes=42,
-            log_backup_count=3,
+            log_max_bytes=None,
+            log_backup_counts=None,
         )
         d = cfg.as_dict()
         # JSON-friendly key names
@@ -409,7 +403,9 @@ class TestAsDict:
             "sinks",
             "log_files",
             "max_bytes",
+            "backup_counts",
         }
+        # The serialised key is the plural, per-level form.
         assert "backup_count" not in d
 
     def test_sinks_serialised_as_list(self):
@@ -417,12 +413,14 @@ class TestAsDict:
             level="INFO",
             sinks=("file", "stderr"),
             log_files={"INFO": "m.info.log", "ERROR": "e.log"},
-            log_max_bytes=1,
-            log_backup_count=1,
+            log_max_bytes={"INFO": 1048576, "ERROR": 5242880},
+            log_backup_counts={"INFO": 1, "ERROR": 5},
         )
         d = cfg.as_dict()
         assert d["sinks"] == ["file", "stderr"]
         assert d["log_files"] == {"INFO": "m.info.log", "ERROR": "e.log"}
+        assert d["max_bytes"] == {"INFO": 1048576, "ERROR": 5242880}
+        assert d["backup_counts"] == {"INFO": 1, "ERROR": 5}
 
 
 class TestIdempotency:
@@ -434,3 +432,195 @@ class TestIdempotency:
         _call(sinks={"stderr"})
         second_count = len(logging.getLogger(MCP_SERVER_NAME).handlers)
         assert first_count == second_count == 1
+
+
+class TestPerLevelMaxBytes:
+    """Per-level rotation size: global inheritance, MB overrides, 0-is-invalid."""
+
+    _ALL_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+
+    def test_resolve_inherits_global_when_no_overrides(self):
+        per_level, warnings = logmod._resolve_per_level_max_bytes(500_000, {})
+        assert per_level == dict.fromkeys(self._ALL_LEVELS, 500_000)
+        assert warnings == []
+
+    def test_resolve_converts_mb_overrides_to_bytes(self):
+        per_level, warnings = logmod._resolve_per_level_max_bytes(
+            1000, {"ERROR": 5, "DEBUG": 2}
+        )
+        assert per_level["ERROR"] == 5 * BYTES_PER_MB
+        assert per_level["DEBUG"] == 2 * BYTES_PER_MB
+        # Unset levels inherit the global bytes value as-is.
+        assert per_level["INFO"] == 1000
+        assert per_level["WARNING"] == 1000
+        assert warnings == []
+
+    def test_resolve_global_zero_falls_back_to_default_with_warning(self):
+        per_level, warnings = logmod._resolve_per_level_max_bytes(0, {})
+        assert all(v == DEFAULT_LOG_MAX_BYTES for v in per_level.values())
+        assert any("CB_MCP_LOG_MAX_BYTES=0" in w for w in warnings)
+
+    def test_resolve_per_level_zero_inherits_global_with_warning(self):
+        per_level, warnings = logmod._resolve_per_level_max_bytes(700, {"ERROR": 0})
+        assert per_level["ERROR"] == 700  # 0 behaves as unset -> inherit global
+        assert any("CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE=0" in w for w in warnings)
+
+    def test_resolve_both_zero_inherits_resolved_default(self):
+        # Global 0 first falls back to the default, then the level inherits that.
+        per_level, warnings = logmod._resolve_per_level_max_bytes(0, {"INFO": 0})
+        assert per_level["INFO"] == DEFAULT_LOG_MAX_BYTES
+        assert len(warnings) == 2  # one global, one per-level
+
+    def test_handlers_wired_with_per_level_max_bytes(self, tmp_path):
+        _call(
+            level="INFO",
+            sinks={"file"},
+            log_file=str(tmp_path / "m.log"),
+            log_max_bytes=1000,
+            log_max_bytes_overrides={"ERROR": 3},  # 3 MB
+        )
+        logger = logging.getLogger(MCP_SERVER_NAME)
+        by_path = {
+            h.baseFilename: h.maxBytes
+            for h in logger.handlers
+            if isinstance(h, RotatingFileHandler)
+        }
+        assert by_path[str(tmp_path / "m.error.log")] == 3 * BYTES_PER_MB
+        assert by_path[str(tmp_path / "m.info.log")] == 1000
+
+    def test_snapshot_reports_per_level_bytes(self, tmp_path):
+        _call(
+            level="DEBUG",
+            sinks={"file"},
+            log_file=str(tmp_path / "m.log"),
+            log_max_bytes=1000,
+            log_max_bytes_overrides={"DEBUG": 2},
+        )
+        snap = get_resolved_logging_config()
+        assert snap is not None
+        assert snap.log_max_bytes == {
+            "DEBUG": 2 * BYTES_PER_MB,
+            "INFO": 1000,
+            "WARNING": 1000,
+            "ERROR": 1000,
+        }
+
+    def test_max_bytes_none_when_file_sink_absent(self, tmp_path):
+        _call(level="INFO", sinks={"stderr"}, log_file=str(tmp_path / "m.log"))
+        snap = get_resolved_logging_config()
+        assert snap is not None
+        assert snap.log_max_bytes is None
+
+
+class TestPerLevelBackupCounts:
+    """Retention: global backup count plus per-level overrides that inherit it."""
+
+    def test_global_applies_to_all_active_levels(self, tmp_path):
+        _call(
+            level="DEBUG",
+            sinks={"file"},
+            log_file=str(tmp_path / "m.log"),
+            log_backup_count=4,
+        )
+        snap = get_resolved_logging_config()
+        assert snap is not None
+        assert snap.log_backup_counts == {
+            "DEBUG": 4,
+            "INFO": 4,
+            "WARNING": 4,
+            "ERROR": 4,
+        }
+
+    def test_per_level_override_wins_others_inherit(self, tmp_path):
+        _call(
+            level="DEBUG",
+            sinks={"file"},
+            log_file=str(tmp_path / "m.log"),
+            log_backup_count=2,
+            log_backup_count_overrides={"ERROR": 10, "DEBUG": 0},
+        )
+        snap = get_resolved_logging_config()
+        assert snap is not None
+        assert snap.log_backup_counts == {
+            "DEBUG": 0,  # explicit override
+            "INFO": 2,  # inherited global
+            "WARNING": 2,  # inherited global
+            "ERROR": 10,  # explicit override
+        }
+
+    def test_counts_restricted_to_active_levels(self, tmp_path):
+        # At WARNING threshold only WARNING/ERROR files exist, so DEBUG/INFO
+        # counts do not appear in the snapshot even when overridden.
+        _call(
+            level="WARNING",
+            sinks={"file"},
+            log_file=str(tmp_path / "m.log"),
+            log_backup_count=3,
+            log_backup_count_overrides={"DEBUG": 9, "ERROR": 7},
+        )
+        snap = get_resolved_logging_config()
+        assert snap is not None
+        assert snap.log_backup_counts == {"WARNING": 3, "ERROR": 7}
+
+    def test_zero_keeps_no_backups_on_handler(self, tmp_path):
+        # backupCount=0 -> the RotatingFileHandler retains only the live file.
+        _call(
+            level="INFO",
+            sinks={"file"},
+            log_file=str(tmp_path / "m.log"),
+            log_backup_count=0,
+        )
+        logger = logging.getLogger(MCP_SERVER_NAME)
+        rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
+        assert rotating
+        assert all(h.backupCount == 0 for h in rotating)
+
+    def test_per_level_count_reaches_matching_handler(self, tmp_path):
+        # The ERROR override must land on the ERROR file's handler specifically,
+        # not leak onto the INFO handler.
+        _call(
+            level="INFO",
+            sinks={"file"},
+            log_file=str(tmp_path / "m.log"),
+            log_backup_count=2,
+            log_backup_count_overrides={"ERROR": 6},
+        )
+        logger = logging.getLogger(MCP_SERVER_NAME)
+        by_path = {
+            h.baseFilename: h.backupCount
+            for h in logger.handlers
+            if isinstance(h, RotatingFileHandler)
+        }
+        assert by_path[str(tmp_path / "m.error.log")] == 6
+        assert by_path[str(tmp_path / "m.info.log")] == 2
+
+    def test_backup_counts_none_when_file_sink_absent(self, tmp_path):
+        _call(level="INFO", sinks={"stderr"}, log_file=str(tmp_path / "m.log"))
+        snap = get_resolved_logging_config()
+        assert snap is not None
+        assert snap.log_backup_counts is None
+
+    def test_zero_keeps_only_live_file_bounded_by_max_bytes(self, tmp_path):
+        # backupCount=0 must keep ONLY the live file and cap it at maxBytes by
+        # truncating on rollover — not grow unbounded (stock RFH behaviour).
+        _call(
+            level="ERROR",
+            sinks={"file"},
+            log_file=str(tmp_path / "m.log"),
+            log_max_bytes=2000,
+            log_backup_count=0,
+        )
+        log = logging.getLogger(f"{MCP_SERVER_NAME}.test")
+        handlers = logging.getLogger(MCP_SERVER_NAME).handlers
+        max_seen = 0
+        for i in range(500):
+            log.error("x" * 80 + f" {i}")
+            for h in handlers:
+                h.flush()
+            max_seen = max(max_seen, (tmp_path / "m.error.log").stat().st_size)
+
+        # Only the live file exists — no numbered backups were created.
+        assert not list(tmp_path.glob("m.error.log.*"))
+        # And it stayed bounded (within one record of the cap), proving the file
+        # was truncated on rollover rather than growing without limit.
+        assert max_seen <= 2000 + 200

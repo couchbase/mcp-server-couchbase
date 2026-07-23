@@ -183,7 +183,16 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
 | `CB_MCP_LOG_SINKS` | `--log-sinks` | Comma-separated log destinations: `stderr`, `file`, or both (see [Logging](#logging)) | `stderr` |
 | `CB_MCP_LOG_FILE` | `--log-file` | Base path for per-level log files (only used when the `file` sink is enabled) | `mcp_server.log` |
-| `CB_MCP_LOG_MAX_BYTES` | `--log-max-bytes` | Maximum size in bytes per log file before it rotates | `1048576` (1 MB) |
+| `CB_MCP_LOG_MAX_BYTES` | `--log-max-bytes` | Global maximum size **in bytes** per log file before it rotates, inherited by every level unless overridden. `0` is invalid and falls back to the default with a startup warning | `1048576` (1 MB) |
+| `CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE` | `--log-error-rotation-max-size` | Rotation size **in MB** for the ERROR log file; overrides `CB_MCP_LOG_MAX_BYTES` for ERROR | Inherits `CB_MCP_LOG_MAX_BYTES` |
+| `CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE` | `--log-warning-rotation-max-size` | Rotation size **in MB** for the WARNING log file; overrides `CB_MCP_LOG_MAX_BYTES` for WARNING | Inherits `CB_MCP_LOG_MAX_BYTES` |
+| `CB_MCP_LOG_INFO_ROTATION_MAX_SIZE` | `--log-info-rotation-max-size` | Rotation size **in MB** for the INFO log file; overrides `CB_MCP_LOG_MAX_BYTES` for INFO | Inherits `CB_MCP_LOG_MAX_BYTES` |
+| `CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE` | `--log-debug-rotation-max-size` | Rotation size **in MB** for the DEBUG log file; overrides `CB_MCP_LOG_MAX_BYTES` for DEBUG | Inherits `CB_MCP_LOG_MAX_BYTES` |
+| `CB_MCP_LOG_RETENTION_BACKUP_COUNT` | `--log-retention-backup-count` | Rotated backup files kept per per-level log file (excluding the live file), applied to every level unless overridden. `0` keeps only the live file (see [Logging](#logging)) | `1` |
+| `CB_MCP_LOG_ERROR_RETENTION_BACKUP_COUNT` | `--log-error-retention-backup-count` | Rotated backups kept for the ERROR log file; overrides the global count for ERROR | Inherits `CB_MCP_LOG_RETENTION_BACKUP_COUNT` |
+| `CB_MCP_LOG_WARNING_RETENTION_BACKUP_COUNT` | `--log-warning-retention-backup-count` | Rotated backups kept for the WARNING log file; overrides the global count for WARNING | Inherits `CB_MCP_LOG_RETENTION_BACKUP_COUNT` |
+| `CB_MCP_LOG_INFO_RETENTION_BACKUP_COUNT` | `--log-info-retention-backup-count` | Rotated backups kept for the INFO log file; overrides the global count for INFO | Inherits `CB_MCP_LOG_RETENTION_BACKUP_COUNT` |
+| `CB_MCP_LOG_DEBUG_RETENTION_BACKUP_COUNT` | `--log-debug-retention-backup-count` | Rotated backups kept for the DEBUG log file; overrides the global count for DEBUG | Inherits `CB_MCP_LOG_RETENTION_BACKUP_COUNT` |
 | `CB_MCP_OAUTH_JWT_JWKS_URI` | `--oauth-jwks-uri` | JWKS endpoint of the identity provider used to verify bearer JWTs. Enables OAuth when set with the issuer and audience (see [OAuth 2.1 Authorization](#oauth-21-authorization)) | None |
 | `CB_MCP_OAUTH_JWT_ISSUER` | `--oauth-issuer` | Expected JWT `iss` claim. Required to enable OAuth | None |
 | `CB_MCP_OAUTH_JWT_AUDIENCE` | `--oauth-audience` | Expected JWT `aud` claim. Required to enable OAuth | None |
@@ -328,10 +337,16 @@ The MCP server logs to `stderr` by default. Logging is configured with the `CB_M
 
 - **`CB_MCP_LOG_LEVEL`** — how much is logged: `info` (the default) logs lifecycle events and tool invocations, `debug` adds verbose internal detail, and `off` disables all logging.
 - **`CB_MCP_LOG_SINKS`** — where logs go: `stderr` (the default), per-level rotating files (`file`), or both. With `file`, one file is written per level (for example `mcp_server.info.log` and `mcp_server.error.log`) at the path set by `CB_MCP_LOG_FILE`.
+- **Rotation size** — `CB_MCP_LOG_MAX_BYTES` is the global size (in bytes) at which each per-level file rotates. Override individual levels with `CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE` (`ERROR`/`WARNING`/`INFO`/`DEBUG`), expressed **in MB**, which inherit the global when unset. **Breaking change:** a size of `0` (global or per-level) is no longer "disable rotation" — it is rejected at startup with a warning and falls back to the default.
+- **Retention** — `CB_MCP_LOG_RETENTION_BACKUP_COUNT` sets how many rotated backups are kept per level (excluding the live file); the default of `1` preserves the previous behaviour. Override individual levels with `CB_MCP_LOG_<LEVEL>_RETENTION_BACKUP_COUNT` (`ERROR`/`WARNING`/`INFO`/`DEBUG`), which inherit the global value when unset. Set a count to `0` to keep only the live file for that level — it is still capped by the rotation size (reset on rollover rather than backed up).
 
 ```bash
 # Enable debug logging to both stderr and rotating per-level files
 uvx couchbase-mcp-server --log-level=debug --log-sinks=stderr,file
+
+# Keep 30 rotated ERROR backups but only the live DEBUG file
+uvx couchbase-mcp-server --log-level=debug --log-sinks=file \
+  --log-error-retention-backup-count=30 --log-debug-retention-backup-count=0
 ```
 
 For more details, see the [documentation](https://mcp-server.couchbase.com/configuration/logging).

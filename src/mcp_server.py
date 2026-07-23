@@ -153,11 +153,92 @@ logger = logging.getLogger(MCP_SERVER_NAME)
 @click.option(
     "--log-max-bytes",
     envvar="CB_MCP_LOG_MAX_BYTES",
-    # 0 means 'never rotate' (Python logging behaviour); negative is rejected.
+    # Global rotation size in bytes, inherited by every level. 0 is accepted here
+    # but rejected at startup (BREAKING CHANGE: no longer 'disable rotation') —
+    # configure_logging warns and falls back to the default. Negative is rejected.
     type=click.IntRange(min=0),
     default=DEFAULT_LOG_MAX_BYTES,
-    help="Maximum size in bytes per per-level log file before it rotates. "
-    "Set to 0 to disable rotation.",
+    help="Global maximum size in bytes per per-level log file before it rotates, "
+    "inherited by every level unless overridden. 0 is invalid and falls back to "
+    "the default with a startup warning.",
+)
+@click.option(
+    "--log-error-rotation-max-size",
+    envvar="CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Rotation size in MB for the ERROR log file. Overrides --log-max-bytes "
+    "for ERROR; inherits it when unset. 0 is invalid and falls back to the "
+    "inherited global with a startup warning.",
+)
+@click.option(
+    "--log-warning-rotation-max-size",
+    envvar="CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Rotation size in MB for the WARNING log file. Overrides --log-max-bytes "
+    "for WARNING; inherits it when unset. 0 is invalid and falls back to the "
+    "inherited global with a startup warning.",
+)
+@click.option(
+    "--log-info-rotation-max-size",
+    envvar="CB_MCP_LOG_INFO_ROTATION_MAX_SIZE",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Rotation size in MB for the INFO log file. Overrides --log-max-bytes "
+    "for INFO; inherits it when unset. 0 is invalid and falls back to the "
+    "inherited global with a startup warning.",
+)
+@click.option(
+    "--log-debug-rotation-max-size",
+    envvar="CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Rotation size in MB for the DEBUG log file. Overrides --log-max-bytes "
+    "for DEBUG; inherits it when unset. 0 is invalid and falls back to the "
+    "inherited global with a startup warning.",
+)
+@click.option(
+    "--log-retention-backup-count",
+    envvar="CB_MCP_LOG_RETENTION_BACKUP_COUNT",
+    # 0 keeps no rotated backups (only the live file); negative is rejected.
+    type=click.IntRange(min=0),
+    default=DEFAULT_LOG_BACKUP_COUNT,
+    help="Number of rotated backup files kept per per-level log file, excluding "
+    "the live file. Applies to every level unless overridden per level. Set to 0 "
+    "to keep only the live file.",
+)
+@click.option(
+    "--log-error-retention-backup-count",
+    envvar="CB_MCP_LOG_ERROR_RETENTION_BACKUP_COUNT",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Rotated backups kept for the ERROR log file. Overrides "
+    "--log-retention-backup-count for ERROR; inherits it when unset.",
+)
+@click.option(
+    "--log-warning-retention-backup-count",
+    envvar="CB_MCP_LOG_WARNING_RETENTION_BACKUP_COUNT",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Rotated backups kept for the WARNING log file. Overrides "
+    "--log-retention-backup-count for WARNING; inherits it when unset.",
+)
+@click.option(
+    "--log-info-retention-backup-count",
+    envvar="CB_MCP_LOG_INFO_RETENTION_BACKUP_COUNT",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Rotated backups kept for the INFO log file. Overrides "
+    "--log-retention-backup-count for INFO; inherits it when unset.",
+)
+@click.option(
+    "--log-debug-retention-backup-count",
+    envvar="CB_MCP_LOG_DEBUG_RETENTION_BACKUP_COUNT",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Rotated backups kept for the DEBUG log file. Overrides "
+    "--log-retention-backup-count for DEBUG; inherits it when unset.",
 )
 @click.option(
     "--oauth-jwks-uri",
@@ -248,18 +329,51 @@ def main(
     log_sinks,
     log_file,
     log_max_bytes,
+    log_error_rotation_max_size,
+    log_warning_rotation_max_size,
+    log_info_rotation_max_size,
+    log_debug_rotation_max_size,
+    log_retention_backup_count,
+    log_error_retention_backup_count,
+    log_warning_retention_backup_count,
+    log_info_retention_backup_count,
+    log_debug_retention_backup_count,
 ):
     """Couchbase MCP Server"""
 
     resolved_level, invalid_level = log_level
     parsed_sinks, invalid_sinks = log_sinks
+    # Per-level overrides: keep only the levels the operator set explicitly; the
+    # rest inherit the global (--log-max-bytes / --log-retention-backup-count).
+    # Rotation-size overrides are in MB — configure_logging converts to bytes.
+    max_bytes_overrides = {
+        level: value
+        for level, value in (
+            ("ERROR", log_error_rotation_max_size),
+            ("WARNING", log_warning_rotation_max_size),
+            ("INFO", log_info_rotation_max_size),
+            ("DEBUG", log_debug_rotation_max_size),
+        )
+        if value is not None
+    }
+    backup_count_overrides = {
+        level: value
+        for level, value in (
+            ("ERROR", log_error_retention_backup_count),
+            ("WARNING", log_warning_retention_backup_count),
+            ("INFO", log_info_retention_backup_count),
+            ("DEBUG", log_debug_retention_backup_count),
+        )
+        if value is not None
+    }
     configure_logging(
         level=resolved_level,
         sinks=parsed_sinks,
         log_file=log_file,
         log_max_bytes=log_max_bytes,
-        # Backup count isn't user-configurable in 1.0; always the default.
-        log_backup_count=DEFAULT_LOG_BACKUP_COUNT,
+        log_backup_count=log_retention_backup_count,
+        log_max_bytes_overrides=max_bytes_overrides,
+        log_backup_count_overrides=backup_count_overrides,
         invalid_level=invalid_level,
         invalid_sinks=invalid_sinks,
     )
