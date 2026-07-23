@@ -15,7 +15,6 @@ import logging
 import cb_mcp.utils.logging as logmod
 from cb_mcp.utils.constants import MCP_SERVER_NAME
 from cb_mcp.utils.environment import log_environment_info
-from cb_mcp.utils.logging import ResolvedLoggingConfig
 
 ENV_LOGGER_NAME = f"{MCP_SERVER_NAME}.utils.environment"
 
@@ -184,8 +183,8 @@ def test_config_block_captures_oauth_coordinates():
     assert config["oauth_scope_write_label"] == "couchbase-mcp/write"
 
 
-def _snapshot_with_env_file(env_path) -> ResolvedLoggingConfig:
-    return ResolvedLoggingConfig(
+def _snapshot_with_env_file(env_path) -> logmod.ResolvedLoggingConfig:
+    return logmod.ResolvedLoggingConfig(
         level="INFO",
         sinks=("file",),
         log_files={"INFO": "ignored.info.log"},
