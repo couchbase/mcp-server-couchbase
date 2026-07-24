@@ -272,7 +272,8 @@ async def test_logging_block_exposed_via_mcp_tool(tmp_path) -> None:
     assert log_files["INFO"] == str(tmp_path / "main.info.log")
     assert log_files["DEBUG"] == str(tmp_path / "main.debug.log")
     assert log_files["ERROR"] == str(tmp_path / "main.error.log")
-    # max_bytes and backup_counts are per-level maps keyed by the active levels.
+    # max_bytes and backup_counts are per-level maps keyed by the active levels
+    # (size reported in bytes; default 1 MB = 1048576).
     assert logging_block["max_bytes"] == {
         "DEBUG": 1048576,
         "INFO": 1048576,
@@ -523,9 +524,8 @@ async def test_per_level_retention_and_size_via_env_reflected_in_snapshot(
     ``CB_MCP_LOG_ROTATION_MAX_SIZE`` and per-level ``*_ROTATION_MAX_SIZE``, unset
     levels inherit the global, explicit per-level values win, and
     ``get_server_configuration_status`` reports the resolved per-level maps
-    (in bytes).
+    (size in MB).
     """
-    one_mb = 1024 * 1024
     base_path = tmp_path / "main.log"
     async with create_logging_test_session(
         extra_args=[
@@ -549,13 +549,12 @@ async def test_per_level_retention_and_size_via_env_reflected_in_snapshot(
         payload = extract_payload(response)
 
     logging_block = payload["logging"]
-    # Size: INFO overridden to 2 MB, every other level inherits the 1 MB global
-    # (snapshot reports bytes).
+    # Size (bytes): INFO overridden to 2 MB, every other level inherits 1 MB.
     assert logging_block["max_bytes"] == {
-        "DEBUG": one_mb,
-        "INFO": 2 * one_mb,
-        "WARNING": one_mb,
-        "ERROR": one_mb,
+        "DEBUG": 1048576,
+        "INFO": 2097152,
+        "WARNING": 1048576,
+        "ERROR": 1048576,
     }
     # Retention: ERROR overridden to 5, every other level inherits the 2 global.
     assert logging_block["backup_counts"] == {
@@ -601,7 +600,7 @@ async def test_zero_rotation_size_falls_back_to_default_with_warning(tmp_path) -
     assert "CB_MCP_LOG_ROTATION_MAX_SIZE=0" in stderr_text, (
         f"missing 0-is-invalid warning on stderr:\n{stderr_text}"
     )
-    # Every level resolved to the 1 MB package default rather than 0.
+    # Every level resolved to the 1 MB package default (1048576 bytes) rather than 0.
     assert payload["logging"]["max_bytes"] == {
         "DEBUG": 1048576,
         "INFO": 1048576,
@@ -643,12 +642,41 @@ async def test_deprecated_max_bytes_warns_but_is_honored(tmp_path) -> None:
     assert "CB_MCP_LOG_MAX_BYTES is deprecated" in stderr_text, (
         f"missing deprecation warning on stderr:\n{stderr_text}"
     )
-    # Honored verbatim (bytes) across every level.
+    # Honored verbatim (4096 bytes) across every level.
     assert payload["logging"]["max_bytes"] == {
         "DEBUG": 4096,
         "INFO": 4096,
         "WARNING": 4096,
         "ERROR": 4096,
+    }
+
+
+@pytest.mark.asyncio
+async def test_fractional_rotation_size_reflected_in_snapshot(tmp_path) -> None:
+    """A fractional MB rotation size (0.5) is accepted and stored as exact bytes."""
+    base_path = tmp_path / "main.log"
+    async with create_logging_test_session(
+        extra_args=[
+            "--log-level",
+            "DEBUG",
+            "--log-sinks",
+            "file",
+            "--log-file",
+            str(base_path),
+        ],
+        env_overrides={"CB_MCP_LOG_ROTATION_MAX_SIZE": "0.5"},
+    ) as session:
+        response = await session.call_tool(
+            "get_server_configuration_status", arguments={}
+        )
+        payload = extract_payload(response)
+
+    # 0.5 MB -> exactly 524288 bytes, no rounding.
+    assert payload["logging"]["max_bytes"] == {
+        "DEBUG": 524288,
+        "INFO": 524288,
+        "WARNING": 524288,
+        "ERROR": 524288,
     }
 
 

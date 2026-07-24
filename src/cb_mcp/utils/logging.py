@@ -126,7 +126,7 @@ def _per_level_path(base_path: str, level_name: str) -> str:
 
 
 def _resolve_global_max_bytes(
-    rotation_max_size_mb: int | None,
+    rotation_max_size_mb: float | None,
     max_bytes: int | None,
 ) -> tuple[int, list[str]]:
     """Resolve the effective global rotation size in bytes.
@@ -158,7 +158,7 @@ def _resolve_global_max_bytes(
                 f"falling back to the default of {DEFAULT_LOG_MAX_BYTES} bytes."
             )
             return DEFAULT_LOG_MAX_BYTES, warnings
-        return rotation_max_size_mb * BYTES_PER_MB, warnings
+        return round(rotation_max_size_mb * BYTES_PER_MB), warnings
 
     if max_bytes is not None:
         if max_bytes == 0:
@@ -173,9 +173,9 @@ def _resolve_global_max_bytes(
 
 
 def _resolve_per_level_max_bytes(
-    rotation_max_size_mb: int | None,
+    rotation_max_size_mb: float | None,
     max_bytes: int | None,
-    overrides_mb: Mapping[str, int],
+    overrides_mb: Mapping[str, float],
 ) -> tuple[dict[str, int], list[str]]:
     """Resolve per-level rotation sizes in bytes from the size configuration.
 
@@ -203,7 +203,7 @@ def _resolve_per_level_max_bytes(
             )
             per_level[lvl] = resolved_global  # 0 behaves as unset -> inherit
         else:
-            per_level[lvl] = size_mb * BYTES_PER_MB
+            per_level[lvl] = round(size_mb * BYTES_PER_MB)
     return per_level, warnings
 
 
@@ -346,9 +346,9 @@ def configure_logging(
     sinks: set[str],
     log_file: str,
     log_backup_count: int,
-    log_rotation_max_size: int | None = None,
+    log_rotation_max_size: float | None = None,
     log_max_bytes: int | None = None,
-    log_rotation_size_overrides: Mapping[str, int] | None = None,
+    log_rotation_size_overrides: Mapping[str, float] | None = None,
     log_backup_count_overrides: Mapping[str, int] | None = None,
     invalid_sinks: list[str] | None = None,
     invalid_level: str | None = None,

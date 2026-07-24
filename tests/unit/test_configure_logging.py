@@ -499,6 +499,15 @@ class TestPerLevelMaxBytes:
         assert per_level["ERROR"] == 2 * BYTES_PER_MB
         assert any("CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE=0" in w for w in warnings)
 
+    def test_resolve_fractional_mb_rounds_to_bytes(self):
+        # Fractional MB is allowed and rounded to the nearest whole byte.
+        per_level, warnings = logmod._resolve_per_level_max_bytes(
+            0.5, None, {"ERROR": 1.5}
+        )
+        assert per_level["INFO"] == round(0.5 * BYTES_PER_MB) == 524288
+        assert per_level["ERROR"] == round(1.5 * BYTES_PER_MB) == 1572864
+        assert warnings == []
+
     def test_handlers_wired_with_per_level_max_bytes(self, tmp_path):
         _call(
             level="INFO",
@@ -532,6 +541,23 @@ class TestPerLevelMaxBytes:
             "WARNING": 1 * BYTES_PER_MB,
             "ERROR": 1 * BYTES_PER_MB,
         }
+
+    def test_fractional_mb_converted_to_exact_bytes(self, tmp_path):
+        # 0.5 MB -> exactly 524288 bytes on the handler and in the snapshot.
+        _call(
+            level="INFO",
+            sinks={"file"},
+            log_file=str(tmp_path / "m.log"),
+            log_rotation_max_size=0.5,
+        )
+        logger = logging.getLogger(MCP_SERVER_NAME)
+        rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
+        assert rotating and all(h.maxBytes == 524288 for h in rotating)
+        snap = get_resolved_logging_config()
+        assert snap is not None
+        assert snap.as_dict()["max_bytes"] == dict.fromkeys(
+            ("INFO", "WARNING", "ERROR"), 524288
+        )
 
     def test_deprecated_max_bytes_still_honored_end_to_end(self, tmp_path):
         # The deprecated bytes var still reaches the handlers (byte granularity).

@@ -152,11 +152,9 @@ logger = logging.getLogger(MCP_SERVER_NAME)
 @click.option(
     "--log-rotation-max-size",
     envvar="CB_MCP_LOG_ROTATION_MAX_SIZE",
-    # Canonical global rotation size in MB, inherited by every level. 0 is
-    # invalid and falls back to the default at startup with a warning. Default
-    # None here so the effective 1 MB default is applied in configure_logging
-    # only when neither this nor the deprecated --log-max-bytes is set.
-    type=click.IntRange(min=0),
+    # Default None so the 1 MB default is applied only when neither this nor the
+    # deprecated --log-max-bytes is set.
+    type=click.FloatRange(min=0),
     default=None,
     help="Global maximum size in MB per-level log file before it rotates, "
     "inherited by every level unless overridden. Default is 1 MB. 0 is invalid "
@@ -178,7 +176,7 @@ logger = logging.getLogger(MCP_SERVER_NAME)
 @click.option(
     "--log-error-rotation-max-size",
     envvar="CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE",
-    type=click.IntRange(min=0),
+    type=click.FloatRange(min=0),
     default=None,
     help="Rotation size in MB for the ERROR log file. Overrides "
     "--log-rotation-max-size for ERROR; inherits it when unset. 0 is invalid and "
@@ -187,7 +185,7 @@ logger = logging.getLogger(MCP_SERVER_NAME)
 @click.option(
     "--log-warning-rotation-max-size",
     envvar="CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE",
-    type=click.IntRange(min=0),
+    type=click.FloatRange(min=0),
     default=None,
     help="Rotation size in MB for the WARNING log file. Overrides "
     "--log-rotation-max-size for WARNING; inherits it when unset. 0 is invalid "
@@ -196,7 +194,7 @@ logger = logging.getLogger(MCP_SERVER_NAME)
 @click.option(
     "--log-info-rotation-max-size",
     envvar="CB_MCP_LOG_INFO_ROTATION_MAX_SIZE",
-    type=click.IntRange(min=0),
+    type=click.FloatRange(min=0),
     default=None,
     help="Rotation size in MB for the INFO log file. Overrides "
     "--log-rotation-max-size for INFO; inherits it when unset. 0 is invalid and "
@@ -205,7 +203,7 @@ logger = logging.getLogger(MCP_SERVER_NAME)
 @click.option(
     "--log-debug-rotation-max-size",
     envvar="CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE",
-    type=click.IntRange(min=0),
+    type=click.FloatRange(min=0),
     default=None,
     help="Rotation size in MB for the DEBUG log file. Overrides "
     "--log-rotation-max-size for DEBUG; inherits it when unset. 0 is invalid and "
