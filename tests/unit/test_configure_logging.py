@@ -18,6 +18,7 @@ import pytest
 
 import cb_mcp.utils.logging as logmod
 from cb_mcp.utils.constants import (
+    BYTES_PER_MB,
     DEFAULT_LOG_MAX_BYTES,
     MCP_SERVER_NAME,
 )
@@ -54,12 +55,17 @@ def mock_sdk_configure_logging():
 
 
 def _call(level="INFO", sinks=None, log_file="m.log", **kwargs):
-    """Helper that fills in the boilerplate arguments."""
+    """Helper that fills in the boilerplate arguments.
+
+    Size is left unset by default, so configure_logging applies the effective
+    1 MB default. Tests that exercise rotation pass an explicit size — either
+    ``log_rotation_max_size`` (MB, canonical) or ``log_max_bytes`` (bytes,
+    deprecated, handy for byte-granular rollover thresholds).
+    """
     configure_logging(
         level=level,
         sinks=sinks if sinks is not None else {"stderr"},
         log_file=log_file,
-        log_max_bytes=kwargs.pop("log_max_bytes", 1024),
         log_backup_count=kwargs.pop("log_backup_count", 1),
         **kwargs,
     )
@@ -214,8 +220,10 @@ class TestFileSinkEdgeCases:
         err = capsys.readouterr().err
         assert "Cannot write" in err
         snap = get_resolved_logging_config()
-        # Nothing could attach, so no per-level files recorded.
+        # Nothing could attach, so no per-level files recorded — and no env file
+        # is advertised either (writing it to the same bad dir would fail too).
         assert snap is not None and not snap.log_files
+        assert snap.env_file is None
 
     def test_partial_failure_error_surfaces_on_stderr(self, tmp_path, capsys):
         """If one level's file fails but others succeed, and stderr isn't a sink,
@@ -442,46 +450,62 @@ class TestPerLevelMaxBytes:
 
     _ALL_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
-    def test_resolve_inherits_global_when_no_overrides(self):
-        per_level, warnings = logmod._resolve_per_level_max_bytes(500_000, {})
-        assert per_level == dict.fromkeys(self._ALL_LEVELS, 500_000)
+    # Signature: _resolve_per_level_max_bytes(rotation_max_size_mb, max_bytes, overrides_mb)
+
+    def test_resolve_inherits_global_mb_when_no_overrides(self):
+        # 2 MB global, no per-level overrides -> every level = 2 MB in bytes.
+        per_level, warnings = logmod._resolve_per_level_max_bytes(2, None, {})
+        assert per_level == dict.fromkeys(self._ALL_LEVELS, 2 * BYTES_PER_MB)
         assert warnings == []
 
-    def test_resolve_uses_byte_overrides_directly(self):
+    def test_resolve_converts_mb_overrides_to_bytes(self):
         per_level, warnings = logmod._resolve_per_level_max_bytes(
-            1000, {"ERROR": 5_000_000, "DEBUG": 2_000_000}
+            1, None, {"ERROR": 5, "DEBUG": 2}
         )
-        # Overrides are bytes, used as-is (no unit conversion).
-        assert per_level["ERROR"] == 5_000_000
-        assert per_level["DEBUG"] == 2_000_000
-        # Unset levels inherit the global bytes value.
-        assert per_level["INFO"] == 1000
-        assert per_level["WARNING"] == 1000
+        assert per_level["ERROR"] == 5 * BYTES_PER_MB
+        assert per_level["DEBUG"] == 2 * BYTES_PER_MB
+        # Unset levels inherit the global (1 MB).
+        assert per_level["INFO"] == 1 * BYTES_PER_MB
+        assert per_level["WARNING"] == 1 * BYTES_PER_MB
+        assert warnings == []
+
+    def test_deprecated_max_bytes_used_when_canonical_unset(self):
+        # Only the deprecated bytes var set -> used as-is (bytes) + deprecation.
+        per_level, warnings = logmod._resolve_per_level_max_bytes(None, 4096, {})
+        assert all(v == 4096 for v in per_level.values())
+        assert any("CB_MCP_LOG_MAX_BYTES is deprecated" in w for w in warnings)
+
+    def test_canonical_wins_when_both_set(self):
+        # Canonical MB wins over deprecated bytes; a warning notes MAX_BYTES ignored.
+        per_level, warnings = logmod._resolve_per_level_max_bytes(3, 4096, {})
+        assert all(v == 3 * BYTES_PER_MB for v in per_level.values())
+        assert any(
+            "ignoring the deprecated CB_MCP_LOG_MAX_BYTES" in w for w in warnings
+        )
+
+    def test_default_when_neither_global_set(self):
+        per_level, warnings = logmod._resolve_per_level_max_bytes(None, None, {})
+        assert all(v == DEFAULT_LOG_MAX_BYTES for v in per_level.values())
         assert warnings == []
 
     def test_resolve_global_zero_falls_back_to_default_with_warning(self):
-        per_level, warnings = logmod._resolve_per_level_max_bytes(0, {})
+        per_level, warnings = logmod._resolve_per_level_max_bytes(0, None, {})
         assert all(v == DEFAULT_LOG_MAX_BYTES for v in per_level.values())
-        assert any("CB_MCP_LOG_MAX_BYTES=0" in w for w in warnings)
+        assert any("CB_MCP_LOG_ROTATION_MAX_SIZE=0" in w for w in warnings)
 
     def test_resolve_per_level_zero_inherits_global_with_warning(self):
-        per_level, warnings = logmod._resolve_per_level_max_bytes(700, {"ERROR": 0})
-        assert per_level["ERROR"] == 700  # 0 behaves as unset -> inherit global
+        # Global 2 MB; ERROR override of 0 -> invalid -> inherits the 2 MB global.
+        per_level, warnings = logmod._resolve_per_level_max_bytes(2, None, {"ERROR": 0})
+        assert per_level["ERROR"] == 2 * BYTES_PER_MB
         assert any("CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE=0" in w for w in warnings)
-
-    def test_resolve_both_zero_inherits_resolved_default(self):
-        # Global 0 first falls back to the default, then the level inherits that.
-        per_level, warnings = logmod._resolve_per_level_max_bytes(0, {"INFO": 0})
-        assert per_level["INFO"] == DEFAULT_LOG_MAX_BYTES
-        assert len(warnings) == 2  # one global, one per-level
 
     def test_handlers_wired_with_per_level_max_bytes(self, tmp_path):
         _call(
             level="INFO",
             sinks={"file"},
             log_file=str(tmp_path / "m.log"),
-            log_max_bytes=1000,
-            log_max_bytes_overrides={"ERROR": 3_000_000},  # bytes
+            log_rotation_max_size=1,  # 1 MB global
+            log_rotation_size_overrides={"ERROR": 3},  # 3 MB
         )
         logger = logging.getLogger(MCP_SERVER_NAME)
         by_path = {
@@ -489,25 +513,37 @@ class TestPerLevelMaxBytes:
             for h in logger.handlers
             if isinstance(h, RotatingFileHandler)
         }
-        assert by_path[str(tmp_path / "m.error.log")] == 3_000_000
-        assert by_path[str(tmp_path / "m.info.log")] == 1000
+        assert by_path[str(tmp_path / "m.error.log")] == 3 * BYTES_PER_MB
+        assert by_path[str(tmp_path / "m.info.log")] == 1 * BYTES_PER_MB
 
     def test_snapshot_reports_per_level_bytes(self, tmp_path):
         _call(
             level="DEBUG",
             sinks={"file"},
             log_file=str(tmp_path / "m.log"),
-            log_max_bytes=1000,
-            log_max_bytes_overrides={"DEBUG": 2_000_000},
+            log_rotation_max_size=1,  # 1 MB global
+            log_rotation_size_overrides={"DEBUG": 2},  # 2 MB
         )
         snap = get_resolved_logging_config()
         assert snap is not None
         assert snap.log_max_bytes == {
-            "DEBUG": 2_000_000,
-            "INFO": 1000,
-            "WARNING": 1000,
-            "ERROR": 1000,
+            "DEBUG": 2 * BYTES_PER_MB,
+            "INFO": 1 * BYTES_PER_MB,
+            "WARNING": 1 * BYTES_PER_MB,
+            "ERROR": 1 * BYTES_PER_MB,
         }
+
+    def test_deprecated_max_bytes_still_honored_end_to_end(self, tmp_path):
+        # The deprecated bytes var still reaches the handlers (byte granularity).
+        _call(
+            level="INFO",
+            sinks={"file"},
+            log_file=str(tmp_path / "m.log"),
+            log_max_bytes=4096,
+        )
+        logger = logging.getLogger(MCP_SERVER_NAME)
+        rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
+        assert rotating and all(h.maxBytes == 4096 for h in rotating)
 
     def test_max_bytes_none_when_file_sink_absent(self, tmp_path):
         _call(level="INFO", sinks={"stderr"}, log_file=str(tmp_path / "m.log"))
