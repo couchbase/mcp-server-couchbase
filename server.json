@@ -123,43 +123,43 @@
           "isSecret": false
         },
         {
-          "name": "CB_MCP_LOG_ROTATION_MAX_SIZE",
-          "description": "Global maximum size in MB per-level log file before it rotates, inherited by every level unless overridden by a per-level CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE. A value of 0 is invalid and falls back to the default (1 MB) with a startup warning. Default is 1 (1 MB).",
+          "name": "CB_MCP_LOG_ROTATION_MAX_SIZE_MB",
+          "description": "Global maximum size in MB per-level log file before it rotates, inherited by every level unless overridden by a per-level CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE_MB. A value of 0 is invalid and falls back to the default (1 MB) with a startup warning. Default is 1 (1 MB).",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
           "name": "CB_MCP_LOG_MAX_BYTES",
-          "description": "[DEPRECATED] Global rotation size in bytes; use CB_MCP_LOG_ROTATION_MAX_SIZE (MB) instead. Still honored for backward compatibility but ignored when CB_MCP_LOG_ROTATION_MAX_SIZE is also set. A value of 0 is invalid and falls back to the default with a startup warning.",
+          "description": "[DEPRECATED] Global rotation size in bytes; use CB_MCP_LOG_ROTATION_MAX_SIZE_MB (MB) instead. Still honored for backward compatibility but ignored when CB_MCP_LOG_ROTATION_MAX_SIZE_MB is also set. A value of 0 is invalid and falls back to the default with a startup warning.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE",
-          "description": "Rotation size in MB for the ERROR log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE for ERROR; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "name": "CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the ERROR log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for ERROR; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE",
-          "description": "Rotation size in MB for the WARNING log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE for WARNING; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "name": "CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the WARNING log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for WARNING; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_LOG_INFO_ROTATION_MAX_SIZE",
-          "description": "Rotation size in MB for the INFO log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE for INFO; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "name": "CB_MCP_LOG_INFO_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the INFO log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for INFO; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE",
-          "description": "Rotation size in MB for the DEBUG log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE for DEBUG; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "name": "CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the DEBUG log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for DEBUG; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
@@ -358,8 +358,8 @@
         },
         {
           "type": "named",
-          "name": "--log-rotation-max-size",
-          "description": "Global maximum size in MB per-level log file before it rotates, inherited by every level unless overridden by a per-level --log-<level>-rotation-max-size. A value of 0 is invalid and falls back to the default (1 MB) with a startup warning. Default is 1 (1 MB).",
+          "name": "--log-rotation-max-size-mb",
+          "description": "Global maximum size in MB per-level log file before it rotates, inherited by every level unless overridden by a per-level --log-<level>-rotation-max-size-mb. A value of 0 is invalid and falls back to the default (1 MB) with a startup warning. Default is 1 (1 MB).",
           "isRequired": false,
           "format": "number",
           "isSecret": false
@@ -367,39 +367,39 @@
         {
           "type": "named",
           "name": "--log-max-bytes",
-          "description": "[DEPRECATED] Global rotation size in bytes; use --log-rotation-max-size (MB) instead. Still honored for backward compatibility but ignored when --log-rotation-max-size is also set. A value of 0 is invalid and falls back to the default with a startup warning.",
+          "description": "[DEPRECATED] Global rotation size in bytes; use --log-rotation-max-size-mb (MB) instead. Still honored for backward compatibility but ignored when --log-rotation-max-size-mb is also set. A value of 0 is invalid and falls back to the default with a startup warning.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
           "type": "named",
-          "name": "--log-error-rotation-max-size",
-          "description": "Rotation size in MB for the ERROR log file. Overrides --log-rotation-max-size for ERROR; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "name": "--log-error-rotation-max-size-mb",
+          "description": "Rotation size in MB for the ERROR log file. Overrides --log-rotation-max-size-mb for ERROR; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
           "type": "named",
-          "name": "--log-warning-rotation-max-size",
-          "description": "Rotation size in MB for the WARNING log file. Overrides --log-rotation-max-size for WARNING; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "name": "--log-warning-rotation-max-size-mb",
+          "description": "Rotation size in MB for the WARNING log file. Overrides --log-rotation-max-size-mb for WARNING; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
           "type": "named",
-          "name": "--log-info-rotation-max-size",
-          "description": "Rotation size in MB for the INFO log file. Overrides --log-rotation-max-size for INFO; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "name": "--log-info-rotation-max-size-mb",
+          "description": "Rotation size in MB for the INFO log file. Overrides --log-rotation-max-size-mb for INFO; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
           "type": "named",
-          "name": "--log-debug-rotation-max-size",
-          "description": "Rotation size in MB for the DEBUG log file. Overrides --log-rotation-max-size for DEBUG; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "name": "--log-debug-rotation-max-size-mb",
+          "description": "Rotation size in MB for the DEBUG log file. Overrides --log-rotation-max-size-mb for DEBUG; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
@@ -599,43 +599,43 @@
           "isSecret": false
         },
         {
-          "name": "CB_MCP_LOG_ROTATION_MAX_SIZE",
-          "description": "Global maximum size in MB per-level log file before it rotates, inherited by every level unless overridden by a per-level CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE. A value of 0 is invalid and falls back to the default (1 MB) with a startup warning. Default is 1 (1 MB).",
+          "name": "CB_MCP_LOG_ROTATION_MAX_SIZE_MB",
+          "description": "Global maximum size in MB per-level log file before it rotates, inherited by every level unless overridden by a per-level CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE_MB. A value of 0 is invalid and falls back to the default (1 MB) with a startup warning. Default is 1 (1 MB).",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
           "name": "CB_MCP_LOG_MAX_BYTES",
-          "description": "[DEPRECATED] Global rotation size in bytes; use CB_MCP_LOG_ROTATION_MAX_SIZE (MB) instead. Still honored for backward compatibility but ignored when CB_MCP_LOG_ROTATION_MAX_SIZE is also set. A value of 0 is invalid and falls back to the default with a startup warning.",
+          "description": "[DEPRECATED] Global rotation size in bytes; use CB_MCP_LOG_ROTATION_MAX_SIZE_MB (MB) instead. Still honored for backward compatibility but ignored when CB_MCP_LOG_ROTATION_MAX_SIZE_MB is also set. A value of 0 is invalid and falls back to the default with a startup warning.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE",
-          "description": "Rotation size in MB for the ERROR log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE for ERROR; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "name": "CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the ERROR log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for ERROR; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE",
-          "description": "Rotation size in MB for the WARNING log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE for WARNING; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "name": "CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the WARNING log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for WARNING; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_LOG_INFO_ROTATION_MAX_SIZE",
-          "description": "Rotation size in MB for the INFO log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE for INFO; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "name": "CB_MCP_LOG_INFO_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the INFO log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for INFO; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE",
-          "description": "Rotation size in MB for the DEBUG log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE for DEBUG; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "name": "CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the DEBUG log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for DEBUG; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
