@@ -155,7 +155,7 @@ def _resolve_global_max_bytes(
                 f"falling back to the default of {DEFAULT_LOG_MAX_BYTES} bytes."
             )
             return DEFAULT_LOG_MAX_BYTES, warnings
-        return round(rotation_max_size_mb * BYTES_PER_MB), warnings
+        return max(1, round(rotation_max_size_mb * BYTES_PER_MB)), warnings
 
     if max_bytes is not None:
         if max_bytes == 0:
