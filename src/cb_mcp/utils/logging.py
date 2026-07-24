@@ -64,9 +64,7 @@ class ResolvedLoggingConfig:
     the one-shot environment/system-info snapshot (derived from the ``--log-file``
     base, e.g. ``mcp_server.env.log``). Like the per-level maps it is ``None``
     unless file logging is active *and* at least one per-level file was opened —
-    so it never advertises a file that couldn't actually be written. Kept
-    separate from the per-level files so the diagnostic survives rotation of the
-    debug file and is captured regardless of log level.
+    so it never advertises a file that couldn't actually be written.
     """
 
     level: str
@@ -141,8 +139,7 @@ def _resolve_global_max_bytes(
     if max_bytes is not None:
         warnings.append(
             "CB_MCP_LOG_MAX_BYTES is deprecated; use CB_MCP_LOG_ROTATION_MAX_SIZE "
-            "(in MB) instead. CB_MCP_LOG_MAX_BYTES is still honored (in bytes) but "
-            "will be removed in a future release."
+            "(in MB) instead. It will be removed in a future release."
         )
 
     if rotation_max_size_mb is not None:
@@ -536,9 +533,9 @@ def configure_logging(
         "Logging configured: level=%s, sinks=%s, log_files=%s, max_bytes=%s, backup_counts=%s",
         level_name,
         ",".join(sorted(effective_sinks)),
-        attached_files if file_sink_active else "-",
-        active_max_bytes if file_sink_active else "-",
-        active_backup_counts if file_sink_active else "-",
+        attached_files or "-",
+        active_max_bytes or "-",
+        active_backup_counts or "-",
     )
 
     # Record the snapshot so the server-config MCP tool and env-info diagnostic

@@ -524,7 +524,7 @@ async def test_per_level_retention_and_size_via_env_reflected_in_snapshot(
     ``CB_MCP_LOG_ROTATION_MAX_SIZE`` and per-level ``*_ROTATION_MAX_SIZE``, unset
     levels inherit the global, explicit per-level values win, and
     ``get_server_configuration_status`` reports the resolved per-level maps
-    (size in MB).
+    (size in bytes).
     """
     base_path = tmp_path / "main.log"
     async with create_logging_test_session(

@@ -30,22 +30,13 @@ QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION = 8
 # Logging Configuration
 # Change this to DEBUG, WARNING, ERROR as needed
 DEFAULT_LOG_LEVEL = "INFO"
-# Bytes per megabyte. Rotation sizes are configured in MB
-# (CB_MCP_LOG_ROTATION_MAX_SIZE and the per-level CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE)
-# and converted to bytes with this factor for the handlers.
+# Rotation sizes are configured in MB and converted to bytes with this factor.
 BYTES_PER_MB = 1024 * 1024
-# Default effective rotation size in bytes (1 MB), used when neither the
-# canonical CB_MCP_LOG_ROTATION_MAX_SIZE (MB) nor the deprecated
-# CB_MCP_LOG_MAX_BYTES (bytes) is set — and as the fallback when either is given
-# an invalid value of 0. The canonical variable is in MB and is inherited by
-# every level unless overridden per level; CB_MCP_LOG_MAX_BYTES remains honored
-# (in bytes) for backward compatibility but is deprecated.
+# Effective rotation size when no size variable is set, and the fallback for an
+# invalid 0.
 DEFAULT_LOG_MAX_BYTES = 1 * BYTES_PER_MB  # 1 MB
-# Default number of rotated backup files kept per level file, applied to every
-# level unless overridden. Exposed globally via CB_MCP_LOG_RETENTION_BACKUP_COUNT
-# and per level via CB_MCP_LOG_<LEVEL>_RETENTION_BACKUP_COUNT (which inherit this
-# global when unset). 0 means no rotated backups — only the live file is kept,
-# still capped by DEFAULT_LOG_MAX_BYTES (truncated on rollover, not backed up).
+# Rotated backups kept per level when no retention variable is set; 0 keeps only
+# the live file.
 DEFAULT_LOG_BACKUP_COUNT = 1
 ALLOWED_LOG_LEVELS = ("OFF", "DEBUG", "INFO", "WARNING", "ERROR")
 DEFAULT_LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

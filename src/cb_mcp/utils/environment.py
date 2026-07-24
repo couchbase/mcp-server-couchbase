@@ -112,13 +112,10 @@ def log_environment_info(transport: str, server_settings: Mapping[str, Any]) -> 
     MCP tool returns, so support engineers reading the log and tools reading
     the MCP response see the same shape and field names.
 
-    The record is written two ways. First, to a dedicated non-rotating file
-    (``ResolvedLoggingConfig.env_file``, e.g. ``mcp_server.env.log``) in
-    overwrite mode, so the *current* environment is always captured regardless
-    of log level and never scrolls out of a rotating debug file. Second, it is
-    emitted as a DEBUG log record for live/stderr visibility — filtered by the
-    logger's effective level (customers at INFO see nothing on stderr, but the
-    dedicated file is still written).
+    The record is written two ways. First, to a dedicated non-rotating file in
+    overwrite mode, so the current environment is captured even at INFO (not
+    only DEBUG) and survives rotation of the debug file. Second, it is emitted as
+    a DEBUG log record for live/stderr visibility.
     """
     resolved_logging = get_resolved_logging_config()
     info: dict[str, Any] = {
