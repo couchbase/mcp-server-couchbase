@@ -129,7 +129,7 @@ def _resolve_global_max_bytes(
 ) -> tuple[int, list[str]]:
     """Resolve the effective global rotation size in bytes.
 
-    ``rotation_max_size_mb`` is the canonical ``CB_MCP_LOG_ROTATION_MAX_SIZE``
+    ``rotation_max_size_mb`` is the canonical ``CB_MCP_LOG_ROTATION_MAX_SIZE_MB``
     (MB) and takes precedence; ``max_bytes`` is the deprecated
     ``CB_MCP_LOG_MAX_BYTES`` (bytes), still honored for backward compatibility.
     A value of 0 (either variable) is invalid and falls back to
@@ -138,20 +138,20 @@ def _resolve_global_max_bytes(
     warnings: list[str] = []
     if max_bytes is not None:
         warnings.append(
-            "CB_MCP_LOG_MAX_BYTES is deprecated; use CB_MCP_LOG_ROTATION_MAX_SIZE "
+            "CB_MCP_LOG_MAX_BYTES is deprecated; use CB_MCP_LOG_ROTATION_MAX_SIZE_MB "
             "(in MB) instead. It will be removed in a future release."
         )
 
     if rotation_max_size_mb is not None:
         if max_bytes is not None:
             warnings.append(
-                "Both CB_MCP_LOG_ROTATION_MAX_SIZE and CB_MCP_LOG_MAX_BYTES are "
-                "set; using CB_MCP_LOG_ROTATION_MAX_SIZE and ignoring the "
+                "Both CB_MCP_LOG_ROTATION_MAX_SIZE_MB and CB_MCP_LOG_MAX_BYTES are "
+                "set; using CB_MCP_LOG_ROTATION_MAX_SIZE_MB and ignoring the "
                 "deprecated CB_MCP_LOG_MAX_BYTES."
             )
         if rotation_max_size_mb == 0:
             warnings.append(
-                "CB_MCP_LOG_ROTATION_MAX_SIZE=0 is not a valid rotation size; "
+                "CB_MCP_LOG_ROTATION_MAX_SIZE_MB=0 is not a valid rotation size; "
                 f"falling back to the default of {DEFAULT_LOG_MAX_BYTES} bytes."
             )
             return DEFAULT_LOG_MAX_BYTES, warnings
@@ -177,7 +177,7 @@ def _resolve_per_level_max_bytes(
     """Resolve per-level rotation sizes in bytes from the size configuration.
 
     Resolves the effective global via :func:`_resolve_global_max_bytes`, then
-    applies per-level ``CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE`` overrides (in
+    applies per-level ``CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE_MB`` overrides (in
     **MB**): a level absent from ``overrides_mb`` inherits the global, and a
     level's 0 is invalid and falls back to inheriting the global. Returns the
     ``{level: bytes}`` map for all levels plus human-readable warnings the caller
@@ -194,7 +194,7 @@ def _resolve_per_level_max_bytes(
             per_level[lvl] = resolved_global  # inherit the global
         elif size_mb == 0:
             warnings.append(
-                f"CB_MCP_LOG_{lvl}_ROTATION_MAX_SIZE=0 is not a valid rotation "
+                f"CB_MCP_LOG_{lvl}_ROTATION_MAX_SIZE_MB=0 is not a valid rotation "
                 f"size; falling back to the global rotation size "
                 f"({resolved_global} bytes)."
             )
@@ -343,7 +343,7 @@ def configure_logging(
     sinks: set[str],
     log_file: str,
     log_backup_count: int,
-    log_rotation_max_size: float | None = None,
+    log_rotation_max_size_mb: float | None = None,
     log_max_bytes: int | None = None,
     log_rotation_size_overrides: Mapping[str, float] | None = None,
     log_backup_count_overrides: Mapping[str, int] | None = None,
@@ -370,13 +370,13 @@ def configure_logging(
     by the resolved rotation size (it is truncated on rollover rather than
     rotated).
 
-    Rotation size is per level too, configured in **MB**. ``log_rotation_max_size``
-    is the canonical global size (``CB_MCP_LOG_ROTATION_MAX_SIZE``, MB);
+    Rotation size is per level too, configured in **MB**. ``log_rotation_max_size_mb``
+    is the canonical global size (``CB_MCP_LOG_ROTATION_MAX_SIZE_MB``, MB);
     ``log_max_bytes`` is the **deprecated** ``CB_MCP_LOG_MAX_BYTES`` (bytes), still
     honored for backward compatibility but superseded by the canonical variable
     when both are set (with a deprecation warning). ``log_rotation_size_overrides``
     maps individual level names to an explicit size **in MB**
-    (``CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE``) that wins over the global; a level
+    (``CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE_MB``) that wins over the global; a level
     absent from the overrides inherits it. A size of 0 (global or per level) is
     invalid and falls back to the default with a startup warning (the global to
     :data:`DEFAULT_LOG_MAX_BYTES`, a level to the inherited global). All values
@@ -449,7 +449,7 @@ def configure_logging(
     # ``size_warnings`` captures deprecation and 0-is-invalid fallbacks for
     # deferred logging.
     resolved_max_bytes, size_warnings = _resolve_per_level_max_bytes(
-        log_rotation_max_size, log_max_bytes, log_rotation_size_overrides or {}
+        log_rotation_max_size_mb, log_max_bytes, log_rotation_size_overrides or {}
     )
     overrides = log_backup_count_overrides or {}
     resolved_backup_counts = {

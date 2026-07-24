@@ -150,8 +150,8 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     "when 'file' is in --log-sinks.",
 )
 @click.option(
-    "--log-rotation-max-size",
-    envvar="CB_MCP_LOG_ROTATION_MAX_SIZE",
+    "--log-rotation-max-size-mb",
+    envvar="CB_MCP_LOG_ROTATION_MAX_SIZE_MB",
     # Default None so the 1 MB default is applied only when neither this nor the
     # deprecated --log-max-bytes is set.
     type=click.FloatRange(min=0),
@@ -163,50 +163,50 @@ logger = logging.getLogger(MCP_SERVER_NAME)
 @click.option(
     "--log-max-bytes",
     envvar="CB_MCP_LOG_MAX_BYTES",
-    # DEPRECATED: superseded by --log-rotation-max-size (MB). Still honored in
+    # DEPRECATED: superseded by --log-rotation-max-size-mb (MB). Still honored in
     # bytes for backward compatibility. Default None so it's only applied when
-    # explicitly set; if set alongside --log-rotation-max-size it is ignored.
+    # explicitly set; if set alongside --log-rotation-max-size-mb it is ignored.
     type=click.IntRange(min=0),
     default=None,
-    help="[DEPRECATED] Global rotation size in bytes; use --log-rotation-max-size "
+    help="[DEPRECATED] Global rotation size in bytes; use --log-rotation-max-size-mb "
     "(MB) instead. Still honored for backward compatibility. Ignored when "
-    "--log-rotation-max-size is also set. 0 is invalid and falls back to the "
+    "--log-rotation-max-size-mb is also set. 0 is invalid and falls back to the "
     "default with a startup warning.",
 )
 @click.option(
-    "--log-error-rotation-max-size",
-    envvar="CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE",
+    "--log-error-rotation-max-size-mb",
+    envvar="CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE_MB",
     type=click.FloatRange(min=0),
     default=None,
     help="Rotation size in MB for the ERROR log file. Overrides "
-    "--log-rotation-max-size for ERROR; inherits it when unset. 0 is invalid and "
+    "--log-rotation-max-size-mb for ERROR; inherits it when unset. 0 is invalid and "
     "falls back to the inherited global with a startup warning.",
 )
 @click.option(
-    "--log-warning-rotation-max-size",
-    envvar="CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE",
+    "--log-warning-rotation-max-size-mb",
+    envvar="CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE_MB",
     type=click.FloatRange(min=0),
     default=None,
     help="Rotation size in MB for the WARNING log file. Overrides "
-    "--log-rotation-max-size for WARNING; inherits it when unset. 0 is invalid "
+    "--log-rotation-max-size-mb for WARNING; inherits it when unset. 0 is invalid "
     "and falls back to the inherited global with a startup warning.",
 )
 @click.option(
-    "--log-info-rotation-max-size",
-    envvar="CB_MCP_LOG_INFO_ROTATION_MAX_SIZE",
+    "--log-info-rotation-max-size-mb",
+    envvar="CB_MCP_LOG_INFO_ROTATION_MAX_SIZE_MB",
     type=click.FloatRange(min=0),
     default=None,
     help="Rotation size in MB for the INFO log file. Overrides "
-    "--log-rotation-max-size for INFO; inherits it when unset. 0 is invalid and "
+    "--log-rotation-max-size-mb for INFO; inherits it when unset. 0 is invalid and "
     "falls back to the inherited global with a startup warning.",
 )
 @click.option(
-    "--log-debug-rotation-max-size",
-    envvar="CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE",
+    "--log-debug-rotation-max-size-mb",
+    envvar="CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE_MB",
     type=click.FloatRange(min=0),
     default=None,
     help="Rotation size in MB for the DEBUG log file. Overrides "
-    "--log-rotation-max-size for DEBUG; inherits it when unset. 0 is invalid and "
+    "--log-rotation-max-size-mb for DEBUG; inherits it when unset. 0 is invalid and "
     "falls back to the inherited global with a startup warning.",
 )
 @click.option(
@@ -339,12 +339,12 @@ def main(
     log_level,
     log_sinks,
     log_file,
-    log_rotation_max_size,
+    log_rotation_max_size_mb,
     log_max_bytes,
-    log_error_rotation_max_size,
-    log_warning_rotation_max_size,
-    log_info_rotation_max_size,
-    log_debug_rotation_max_size,
+    log_error_rotation_max_size_mb,
+    log_warning_rotation_max_size_mb,
+    log_info_rotation_max_size_mb,
+    log_debug_rotation_max_size_mb,
     log_retention_backup_count,
     log_error_retention_backup_count,
     log_warning_retention_backup_count,
@@ -357,14 +357,14 @@ def main(
     parsed_sinks, invalid_sinks = log_sinks
     # Per-level overrides: keep only the levels the operator set explicitly; the
     # rest inherit the global. Rotation-size overrides are in MB, matching the
-    # canonical --log-rotation-max-size global.
+    # canonical --log-rotation-max-size-mb global.
     rotation_size_overrides = {
         level: value
         for level, value in (
-            ("ERROR", log_error_rotation_max_size),
-            ("WARNING", log_warning_rotation_max_size),
-            ("INFO", log_info_rotation_max_size),
-            ("DEBUG", log_debug_rotation_max_size),
+            ("ERROR", log_error_rotation_max_size_mb),
+            ("WARNING", log_warning_rotation_max_size_mb),
+            ("INFO", log_info_rotation_max_size_mb),
+            ("DEBUG", log_debug_rotation_max_size_mb),
         )
         if value is not None
     }
@@ -382,7 +382,7 @@ def main(
         level=resolved_level,
         sinks=parsed_sinks,
         log_file=log_file,
-        log_rotation_max_size=log_rotation_max_size,
+        log_rotation_max_size_mb=log_rotation_max_size_mb,
         log_max_bytes=log_max_bytes,
         log_backup_count=log_retention_backup_count,
         log_rotation_size_overrides=rotation_size_overrides,

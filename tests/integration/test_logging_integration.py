@@ -521,7 +521,7 @@ async def test_per_level_retention_and_size_via_env_reflected_in_snapshot(
 
     Reqs 1 & 2 end-to-end via the ``CB_MCP_LOG_*`` env vars (the config surface
     operators actually use): sizes are configured in MB via the canonical
-    ``CB_MCP_LOG_ROTATION_MAX_SIZE`` and per-level ``*_ROTATION_MAX_SIZE``, unset
+    ``CB_MCP_LOG_ROTATION_MAX_SIZE_MB`` and per-level ``*_ROTATION_MAX_SIZE_MB``, unset
     levels inherit the global, explicit per-level values win, and
     ``get_server_configuration_status`` reports the resolved per-level maps
     (size in bytes).
@@ -537,8 +537,8 @@ async def test_per_level_retention_and_size_via_env_reflected_in_snapshot(
             str(base_path),
         ],
         env_overrides={
-            "CB_MCP_LOG_ROTATION_MAX_SIZE": "1",  # 1 MB global (canonical)
-            "CB_MCP_LOG_INFO_ROTATION_MAX_SIZE": "2",  # 2 MB INFO override
+            "CB_MCP_LOG_ROTATION_MAX_SIZE_MB": "1",  # 1 MB global (canonical)
+            "CB_MCP_LOG_INFO_ROTATION_MAX_SIZE_MB": "2",  # 2 MB INFO override
             "CB_MCP_LOG_RETENTION_BACKUP_COUNT": "2",
             "CB_MCP_LOG_ERROR_RETENTION_BACKUP_COUNT": "5",
         },
@@ -572,7 +572,7 @@ async def test_zero_rotation_size_falls_back_to_default_with_warning(tmp_path) -
     0 is invalid (it never means "disable rotation"). The server must still
     start, log a warning naming the offending variable, and resolve the size to
     the package default (verified via the tool snapshot). Uses the canonical
-    ``--log-rotation-max-size`` (MB).
+    ``--log-rotation-max-size-mb`` (MB).
     """
     base_path = tmp_path / "main.log"
     stderr_path = tmp_path / "server.stderr"
@@ -585,7 +585,7 @@ async def test_zero_rotation_size_falls_back_to_default_with_warning(tmp_path) -
                 "stderr,file",
                 "--log-file",
                 str(base_path),
-                "--log-rotation-max-size",
+                "--log-rotation-max-size-mb",
                 "0",
             ],
             stderr_buffer=stderr_file,
@@ -597,7 +597,7 @@ async def test_zero_rotation_size_falls_back_to_default_with_warning(tmp_path) -
 
     # The warning names the offending variable and is visible on stderr.
     stderr_text = stderr_path.read_text()
-    assert "CB_MCP_LOG_ROTATION_MAX_SIZE=0" in stderr_text, (
+    assert "CB_MCP_LOG_ROTATION_MAX_SIZE_MB=0" in stderr_text, (
         f"missing 0-is-invalid warning on stderr:\n{stderr_text}"
     )
     # Every level resolved to the 1 MB package default (1048576 bytes) rather than 0.
@@ -615,7 +615,7 @@ async def test_deprecated_max_bytes_warns_but_is_honored(tmp_path) -> None:
 
     Backward compatibility: existing configs using CB_MCP_LOG_MAX_BYTES keep
     working (in bytes), but a deprecation warning steers operators to the
-    canonical ``--log-rotation-max-size`` (MB).
+    canonical ``--log-rotation-max-size-mb`` (MB).
     """
     base_path = tmp_path / "main.log"
     stderr_path = tmp_path / "server.stderr"
@@ -664,7 +664,7 @@ async def test_fractional_rotation_size_reflected_in_snapshot(tmp_path) -> None:
             "--log-file",
             str(base_path),
         ],
-        env_overrides={"CB_MCP_LOG_ROTATION_MAX_SIZE": "0.5"},
+        env_overrides={"CB_MCP_LOG_ROTATION_MAX_SIZE_MB": "0.5"},
     ) as session:
         response = await session.call_tool(
             "get_server_configuration_status", arguments={}

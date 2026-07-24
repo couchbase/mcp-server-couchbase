@@ -59,7 +59,7 @@ def _call(level="INFO", sinks=None, log_file="m.log", **kwargs):
 
     Size is left unset by default, so configure_logging applies the effective
     1 MB default. Tests that exercise rotation pass an explicit size — either
-    ``log_rotation_max_size`` (MB, canonical) or ``log_max_bytes`` (bytes,
+    ``log_rotation_max_size_mb`` (MB, canonical) or ``log_max_bytes`` (bytes,
     deprecated, handy for byte-granular rollover thresholds).
     """
     configure_logging(
@@ -491,13 +491,13 @@ class TestPerLevelMaxBytes:
     def test_resolve_global_zero_falls_back_to_default_with_warning(self):
         per_level, warnings = logmod._resolve_per_level_max_bytes(0, None, {})
         assert all(v == DEFAULT_LOG_MAX_BYTES for v in per_level.values())
-        assert any("CB_MCP_LOG_ROTATION_MAX_SIZE=0" in w for w in warnings)
+        assert any("CB_MCP_LOG_ROTATION_MAX_SIZE_MB=0" in w for w in warnings)
 
     def test_resolve_per_level_zero_inherits_global_with_warning(self):
         # Global 2 MB; ERROR override of 0 -> invalid -> inherits the 2 MB global.
         per_level, warnings = logmod._resolve_per_level_max_bytes(2, None, {"ERROR": 0})
         assert per_level["ERROR"] == 2 * BYTES_PER_MB
-        assert any("CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE=0" in w for w in warnings)
+        assert any("CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE_MB=0" in w for w in warnings)
 
     def test_resolve_fractional_mb_rounds_to_bytes(self):
         # Fractional MB is allowed and rounded to the nearest whole byte.
@@ -513,7 +513,7 @@ class TestPerLevelMaxBytes:
             level="INFO",
             sinks={"file"},
             log_file=str(tmp_path / "m.log"),
-            log_rotation_max_size=1,  # 1 MB global
+            log_rotation_max_size_mb=1,  # 1 MB global
             log_rotation_size_overrides={"ERROR": 3},  # 3 MB
         )
         logger = logging.getLogger(MCP_SERVER_NAME)
@@ -530,7 +530,7 @@ class TestPerLevelMaxBytes:
             level="DEBUG",
             sinks={"file"},
             log_file=str(tmp_path / "m.log"),
-            log_rotation_max_size=1,  # 1 MB global
+            log_rotation_max_size_mb=1,  # 1 MB global
             log_rotation_size_overrides={"DEBUG": 2},  # 2 MB
         )
         snap = get_resolved_logging_config()
@@ -548,7 +548,7 @@ class TestPerLevelMaxBytes:
             level="INFO",
             sinks={"file"},
             log_file=str(tmp_path / "m.log"),
-            log_rotation_max_size=0.5,
+            log_rotation_max_size_mb=0.5,
         )
         logger = logging.getLogger(MCP_SERVER_NAME)
         rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
