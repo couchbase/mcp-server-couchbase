@@ -6,6 +6,8 @@ Cases:
   - negative selection (a "read-only" prompt must not call delete)
   - sub_document_lookup_in selected over get_document_by_id for exists/count/
     single-field prompts
+  - sub_document_mutate_in selected over upsert_document_by_id for single-field
+    set/append/increment prompts
 """
 
 from __future__ import annotations
@@ -339,6 +341,99 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
         )
     )
 
+    mutate_upsert_id = _doc_id("acc_mutate_upsert")
+    cases.append(
+        AccuracyCase(
+            test_id="sub_document_mutate_in_upsert_single_field",
+            prompt=(
+                f"On document '{mutate_upsert_id}' in bucket '{bucket}', scope "
+                f"'{scope}', collection '{collection}', just set its 'status' "
+                "field to 'active'. Don't rewrite the whole document, only "
+                "change that one field."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="sub_document_mutate_in",
+                    parameters={
+                        "bucket_name": bucket,
+                        "scope_name": scope,
+                        "collection_name": collection,
+                        "document_id": mutate_upsert_id,
+                        "upsert_specs": Matcher.any_value(),
+                    },
+                ),
+            ],
+            seed=_seed_doc(
+                bucket, scope, collection, mutate_upsert_id, {"name": "Mutate Upsert"}
+            ),
+            cleanup=_delete_doc(bucket, scope, collection, mutate_upsert_id),
+        )
+    )
+
+    mutate_append_id = _doc_id("acc_mutate_append")
+    cases.append(
+        AccuracyCase(
+            test_id="sub_document_mutate_in_array_append",
+            prompt=(
+                f"Append the value 'urgent' to the 'tags' array of document "
+                f"'{mutate_append_id}' in bucket '{bucket}', scope '{scope}', "
+                f"collection '{collection}'. Only modify that array field."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="sub_document_mutate_in",
+                    parameters={
+                        "bucket_name": bucket,
+                        "scope_name": scope,
+                        "collection_name": collection,
+                        "document_id": mutate_append_id,
+                        "array_append_specs": Matcher.any_value(),
+                    },
+                ),
+            ],
+            seed=_seed_doc(
+                bucket,
+                scope,
+                collection,
+                mutate_append_id,
+                {"name": "Mutate Append", "tags": ["draft"]},
+            ),
+            cleanup=_delete_doc(bucket, scope, collection, mutate_append_id),
+        )
+    )
+
+    mutate_counter_id = _doc_id("acc_mutate_counter")
+    cases.append(
+        AccuracyCase(
+            test_id="sub_document_mutate_in_counter",
+            prompt=(
+                f"Increment the 'views' counter of document '{mutate_counter_id}' "
+                f"in bucket '{bucket}', scope '{scope}', collection '{collection}' "
+                "by 3. Only modify that field."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="sub_document_mutate_in",
+                    parameters={
+                        "bucket_name": bucket,
+                        "scope_name": scope,
+                        "collection_name": collection,
+                        "document_id": mutate_counter_id,
+                        "counter_specs": Matcher.any_value(),
+                    },
+                ),
+            ],
+            seed=_seed_doc(
+                bucket,
+                scope,
+                collection,
+                mutate_counter_id,
+                {"name": "Mutate Counter", "views": 10},
+            ),
+            cleanup=_delete_doc(bucket, scope, collection, mutate_counter_id),
+        )
+    )
+
     return cases
 
 
@@ -359,6 +454,9 @@ KV_CASE_IDS = [
     "sub_document_lookup_in_exists",
     "sub_document_lookup_in_count",
     "sub_document_lookup_in_get_field_not_whole_doc",
+    "sub_document_mutate_in_upsert_single_field",
+    "sub_document_mutate_in_array_append",
+    "sub_document_mutate_in_counter",
 ]
 
 

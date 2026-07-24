@@ -9,6 +9,10 @@ sub_document_lookup_in cases mirror the get cases (exact seeded value, exact
 count, no hallucination on a missing field) but ask for field-existence,
 value, and array-count questions that only need a sub-document read.
 
+sub_document_mutate_in cases are faithfulness checks like the write cases
+above: the tool mutates one field, and the answer must report the outcome
+without contradicting it — verified by reading the field back afterward.
+
 Seeded values use invented tokens (e.g. country 'Zubrowka') so an answer that
 didn't actually read the document can't fabricate them.
 """
@@ -298,6 +302,82 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[ResultCase]:
         )
     )
 
+    # --- sub_document_mutate_in: upsert a single field (faithfulness) ----
+    mutate_upsert_id = doc_id("rv_mutate_upsert")
+    cases.append(
+        ResultCase(
+            test_id="sub_document_mutate_in_upsert_reports_success",
+            prompt=(
+                f"On document '{mutate_upsert_id}' in bucket '{bucket}', scope "
+                f"'{scope}', collection '{collection}', set its 'status' field "
+                "to 'shipped'. Only change that one field."
+            ),
+            expectation=(
+                "The mutation succeeds. A correct answer confirms the field was "
+                "set/updated successfully. It must NOT report failure."
+            ),
+            seed=seed_document(
+                bucket,
+                scope,
+                collection,
+                mutate_upsert_id,
+                {"name": "Mutate Upsert Air", "status": "pending"},
+            ),
+            cleanup=delete_document(bucket, scope, collection, mutate_upsert_id),
+        )
+    )
+
+    # --- sub_document_mutate_in: counter (seeded ground truth) -----------
+    mutate_counter_id = doc_id("rv_mutate_counter")
+    cases.append(
+        ResultCase(
+            test_id="sub_document_mutate_in_counter_reports_new_value",
+            prompt=(
+                f"Increment the 'views' field of document '{mutate_counter_id}' "
+                f"in bucket '{bucket}', scope '{scope}', collection '{collection}' "
+                "by 5, then tell me the new value."
+            ),
+            expectation=(
+                "The 'views' field starts at 10, so incrementing by 5 makes it "
+                "15. The answer must state the new value is 15. Any other "
+                "number, or no number, is incorrect."
+            ),
+            seed=seed_document(
+                bucket,
+                scope,
+                collection,
+                mutate_counter_id,
+                {"name": "Mutate Counter Air", "views": 10},
+            ),
+            cleanup=delete_document(bucket, scope, collection, mutate_counter_id),
+        )
+    )
+
+    # --- sub_document_mutate_in: remove a field (faithfulness) -----------
+    mutate_remove_id = doc_id("rv_mutate_remove")
+    cases.append(
+        ResultCase(
+            test_id="sub_document_mutate_in_remove_reports_success",
+            prompt=(
+                f"Remove the 'temp_note' field from document '{mutate_remove_id}' "
+                f"in bucket '{bucket}', scope '{scope}', collection '{collection}'."
+            ),
+            expectation=(
+                "The 'temp_note' field exists (it was seeded), so the removal "
+                "succeeds. A correct answer confirms the field was removed "
+                "successfully. It must NOT report failure or not-found."
+            ),
+            seed=seed_document(
+                bucket,
+                scope,
+                collection,
+                mutate_remove_id,
+                {"name": "Mutate Remove Air", "temp_note": "delete me"},
+            ),
+            cleanup=delete_document(bucket, scope, collection, mutate_remove_id),
+        )
+    )
+
     return cases
 
 
@@ -318,6 +398,9 @@ KV_RESULT_CASE_IDS = [
     "sub_document_exists_and_value",
     "sub_document_count",
     "sub_document_missing_field_no_hallucination",
+    "sub_document_mutate_in_upsert_reports_success",
+    "sub_document_mutate_in_counter_reports_new_value",
+    "sub_document_mutate_in_remove_reports_success",
 ]
 
 

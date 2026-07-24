@@ -4,6 +4,7 @@ Integration tests for kv.py tools.
 Tests for:
 - get_document_by_id
 - sub_document_lookup_in
+- sub_document_mutate_in
 - upsert_document_by_id
 - insert_document_by_id
 - replace_document_by_id
@@ -817,6 +818,584 @@ async def test_sub_document_lookup_in_exceeds_16_ops() -> None:
                 "collection_name": collection,
                 "document_id": doc_id,
                 "get_paths": [f"field{i}" for i in range(17)],
+            },
+        )
+        payload = extract_payload(response)
+
+        is_error = getattr(response, "isError", None) or getattr(
+            response, "is_error", False
+        )
+        assert not is_error
+        assert "error" in payload, (
+            "Expected an error key when exceeding the 16-op limit"
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_mutate_in_upsert() -> None:
+    """Verify sub_document_mutate_in can upsert a new field into an existing doc."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_mutate_upsert_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Mutate Upsert Test"}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "upsert_specs": [{"path": "status", "value": "active"}],
+            },
+        )
+        payload = extract_payload(response)
+
+        assert payload["upsert"]["status"] == {"success": True}
+
+        get_response = await session.call_tool(
+            "get_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+        get_payload = extract_payload(get_response)
+        assert get_payload["status"] == "active"
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_mutate_in_insert_fails_if_path_exists() -> None:
+    """insert_specs on an already-present path must fail atomically without
+    raising an MCP-level error."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_mutate_insert_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Mutate Insert Test", "status": "already-here"}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "insert_specs": [{"path": "status", "value": "should-not-land"}],
+            },
+        )
+        payload = extract_payload(response)
+
+        is_error = getattr(response, "isError", None) or getattr(
+            response, "is_error", False
+        )
+        assert not is_error
+        assert "error" in payload
+
+        get_response = await session.call_tool(
+            "get_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+        get_payload = extract_payload(get_response)
+        assert get_payload["status"] == "already-here"
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_mutate_in_replace() -> None:
+    """Verify sub_document_mutate_in can replace an existing field's value."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_mutate_replace_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Mutate Replace Test", "status": "pending"}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "replace_specs": [{"path": "status", "value": "done"}],
+            },
+        )
+        payload = extract_payload(response)
+
+        assert payload["replace"]["status"] == {"success": True}
+
+        get_response = await session.call_tool(
+            "get_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+        get_payload = extract_payload(get_response)
+        assert get_payload["status"] == "done"
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_mutate_in_remove() -> None:
+    """Verify sub_document_mutate_in can remove a field from a document."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_mutate_remove_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Mutate Remove Test", "temp_field": "gone soon"}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "remove_paths": ["temp_field"],
+            },
+        )
+        payload = extract_payload(response)
+
+        assert payload["remove"]["temp_field"] == {"success": True}
+
+        get_response = await session.call_tool(
+            "get_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+        get_payload = extract_payload(get_response)
+        assert "temp_field" not in get_payload
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_mutate_in_array_append_and_prepend() -> None:
+    """Verify array_append_specs/array_prepend_specs place values at the
+    expected ends of an array."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_mutate_array_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Mutate Array Test", "tags": ["b"]}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "array_append_specs": [{"path": "tags", "values": ["c"]}],
+                "array_prepend_specs": [{"path": "tags", "values": ["a"]}],
+            },
+        )
+        payload = extract_payload(response)
+
+        assert payload["array_append"]["tags"] == {"success": True}
+        assert payload["array_prepend"]["tags"] == {"success": True}
+
+        get_response = await session.call_tool(
+            "get_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+        get_payload = extract_payload(get_response)
+        assert get_payload["tags"] == ["a", "b", "c"]
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_mutate_in_array_add_unique() -> None:
+    """Verify array_add_unique_specs rejects a duplicate scalar and accepts a new one."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_mutate_adduniq_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Mutate Add Unique Test", "tags": ["a", "b"]}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        dup_response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "array_add_unique_specs": [{"path": "tags", "value": "a"}],
+            },
+        )
+        dup_payload = extract_payload(dup_response)
+        assert "error" in dup_payload, "Adding a duplicate value must fail atomically"
+
+        new_response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "array_add_unique_specs": [{"path": "tags", "value": "c"}],
+            },
+        )
+        new_payload = extract_payload(new_response)
+        assert new_payload["array_add_unique"]["tags"] == {"success": True}
+
+        get_response = await session.call_tool(
+            "get_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+        get_payload = extract_payload(get_response)
+        assert sorted(get_payload["tags"]) == ["a", "b", "c"]
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_mutate_in_counter() -> None:
+    """Verify counter_specs increments and decrements a numeric field."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_mutate_counter_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Mutate Counter Test", "views": 10}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        inc_response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "counter_specs": [{"path": "views", "delta": 5}],
+            },
+        )
+        inc_payload = extract_payload(inc_response)
+        assert inc_payload["counter"]["views"] == {"success": True, "value": 15}
+
+        dec_response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "counter_specs": [{"path": "views", "delta": -3}],
+            },
+        )
+        dec_payload = extract_payload(dec_response)
+        assert dec_payload["counter"]["views"] == {"success": True, "value": 12}
+
+        get_response = await session.call_tool(
+            "get_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+        get_payload = extract_payload(get_response)
+        assert get_payload["views"] == 12
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_mutate_in_create_parents() -> None:
+    """create_parents=False must fail when the parent path is missing;
+    create_parents=True must succeed and create the intermediate path."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_mutate_createparents_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Mutate Create Parents Test"}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        no_parents_response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "upsert_specs": [{"path": "address.city", "value": "Austin"}],
+                "create_parents": False,
+            },
+        )
+        no_parents_payload = extract_payload(no_parents_response)
+        assert "error" in no_parents_payload
+
+        with_parents_response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "upsert_specs": [{"path": "address.city", "value": "Austin"}],
+                "create_parents": True,
+            },
+        )
+        with_parents_payload = extract_payload(with_parents_response)
+        assert with_parents_payload["upsert"]["address.city"] == {"success": True}
+
+        get_response = await session.call_tool(
+            "get_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+        get_payload = extract_payload(get_response)
+        assert get_payload["address"]["city"] == "Austin"
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_mutate_in_no_specs_returns_error() -> None:
+    """Calling with no mutation specs at all must report an error in the
+    payload without failing the MCP call itself."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+    doc_id = f"test_mutate_nospecs_{uuid.uuid4().hex[:8]}"
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+        payload = extract_payload(response)
+
+        is_error = getattr(response, "isError", None) or getattr(
+            response, "is_error", False
+        )
+        assert not is_error
+        assert "error" in payload, "Expected an error key when no specs are provided"
+
+
+@pytest.mark.asyncio
+async def test_sub_document_mutate_in_exceeds_16_ops() -> None:
+    """Requesting more than 16 combined mutation specs must report an error in
+    the payload without failing the MCP call itself."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+    doc_id = f"test_mutate_toomany_{uuid.uuid4().hex[:8]}"
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "upsert_specs": [{"path": f"field{i}", "value": i} for i in range(17)],
             },
         )
         payload = extract_payload(response)

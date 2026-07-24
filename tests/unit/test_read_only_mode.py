@@ -22,6 +22,7 @@ KV_WRITE_TOOL_NAMES = {
     "insert_document_by_id",
     "replace_document_by_id",
     "delete_document_by_id",
+    "sub_document_mutate_in",
 }
 
 # Read-only tool names that should always be available (21 tools)
@@ -66,7 +67,7 @@ class TestToolCategories:
 
     def test_kv_write_tools_defined(self):
         """Verify KV_WRITE_TOOLS list is properly defined."""
-        assert len(KV_WRITE_TOOLS) == 4
+        assert len(KV_WRITE_TOOLS) == 5
         tool_names = {tool.__name__ for tool in KV_WRITE_TOOLS}
         assert tool_names == KV_WRITE_TOOL_NAMES
 
@@ -164,11 +165,11 @@ class TestToolCounts:
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        assert len(tools) == 25  # Expected total count (21 read-only + 4 KV write)
+        assert len(tools) == 26  # Expected total count (21 read-only + 5 KV write)
 
     def test_kv_write_tools_count(self):
-        """Verify exactly 4 KV write tools exist."""
-        assert len(KV_WRITE_TOOLS) == 4
+        """Verify exactly 5 KV write tools exist."""
+        assert len(KV_WRITE_TOOLS) == 5
 
 
 class TestReadOnlyModeToolFiltering:
