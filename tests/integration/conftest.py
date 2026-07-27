@@ -65,6 +65,9 @@ EXPECTED_TOOLS = {
     "explain_sql_plus_plus_query",
     "get_index_advisor_recommendations",
     "list_indexes",
+    "create_index",
+    "build_index",
+    "drop_index",
     "get_cluster_health_and_services",
     # Performance analysis tools
     "get_longest_running_queries",
@@ -104,6 +107,9 @@ TOOLS_BY_CATEGORY = {
     "index": {
         "list_indexes",
         "get_index_advisor_recommendations",
+        "create_index",
+        "build_index",
+        "drop_index",
     },
     "performance": {
         "get_longest_running_queries",
@@ -158,6 +164,15 @@ TOOL_REQUIRED_PARAMS = {
     "run_sql_plus_plus_query": ["bucket_name", "scope_name", "query"],
     "explain_sql_plus_plus_query": ["bucket_name", "scope_name", "query"],
     "get_index_advisor_recommendations": ["bucket_name", "scope_name", "query"],
+    "create_index": [
+        "bucket_name",
+        "scope_name",
+        "collection_name",
+        "index_name",
+        "keys",
+    ],
+    "build_index": ["bucket_name", "scope_name", "collection_name"],
+    "drop_index": ["bucket_name", "scope_name", "collection_name", "index_name"],
 }
 
 # Default timeout (seconds) to guard against hangs when the Couchbase cluster

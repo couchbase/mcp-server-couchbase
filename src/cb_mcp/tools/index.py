@@ -7,9 +7,11 @@ This module contains tools for listing and managing indexes in the Couchbase clu
 import logging
 from typing import Any
 
+from couchbase.management.options import CreateQueryIndexOptions, DropQueryIndexOptions
 from fastmcp import Context
 
 from ..utils.config import get_settings
+from ..utils.connection import connect_to_bucket
 from ..utils.constants import (
     MCP_SERVER_NAME,
     QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION,
@@ -26,6 +28,10 @@ from ..utils.index_utils import (
 from .query import run_cluster_query, run_sql_plus_plus_query
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.index")
+
+
+def _keyspace(bucket_name: str, scope_name: str, collection_name: str) -> str:
+    return f"{bucket_name}.{scope_name}.{collection_name}"
 
 
 def get_index_advisor_recommendations(
@@ -248,3 +254,130 @@ def list_indexes(
     except Exception as e:
         logger.error(f"Error listing indexes: {e}", exc_info=True)
         raise
+
+
+def create_index(
+    ctx: Context,
+    bucket_name: str,
+    scope_name: str,
+    collection_name: str,
+    index_name: str,
+    keys: list[str],
+    deferred: bool = True,
+    condition: str | None = None,
+    num_replicas: int | None = None,
+    ignore_if_exists: bool = False,
+) -> dict[str, Any]:
+    """Create a non-vector (scalar) GSI secondary index on a collection.
+
+    This is the preferred way to create an index — prefer it over a raw SQL++ CREATE INDEX
+    statement via run_sql_plus_plus_query. This tool only creates scalar GSI indexes; it cannot
+    create vector indexes.
+
+    keys: the field(s)/expression(s) to index, e.g. ["email"] or ["type", "created_at DESC"].
+    condition: optional WHERE clause for a partial index, e.g. "type = 'user'".
+    deferred: if True (the default), the index is created but NOT built immediately. Call
+        build_index afterward to trigger the build, then list_indexes to confirm it reaches the
+        'online' state. Set False only if you want the build to happen synchronously as part of
+        this call.
+    ignore_if_exists: if True, does not error when an index with this name already exists.
+
+    Returns {"success": False, "error": ...} if the index already exists (unless
+    ignore_if_exists=True) or the keys/condition are invalid.
+    """
+    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    cluster = get_cluster_connection(ctx)
+    bucket = connect_to_bucket(cluster, bucket_name)
+    try:
+        logger.debug(f"Creating index {index_name!r} on {keyspace}")
+        collection = bucket.scope(scope_name).collection(collection_name)
+        index_manager = collection.query_indexes()
+        index_manager.create_index(
+            index_name,
+            keys,
+            CreateQueryIndexOptions(
+                deferred=deferred,
+                condition=condition,
+                num_replicas=num_replicas,
+                ignore_if_exists=ignore_if_exists,
+            ),
+        )
+        logger.info(f"Created index {index_name!r} on {keyspace} (deferred={deferred})")
+        return {
+            "success": True,
+            "index_name": index_name,
+            "deferred": deferred,
+            "keyspace": keyspace,
+        }
+    except Exception as e:
+        logger.error(
+            f"Error creating index {index_name!r} on {keyspace}: {e}", exc_info=True
+        )
+        return {"success": False, "error": str(e)}
+
+
+def build_index(
+    ctx: Context,
+    bucket_name: str,
+    scope_name: str,
+    collection_name: str,
+) -> dict[str, Any]:
+    """Trigger the build of all deferred indexes on a collection.
+
+    This builds every index in this collection currently in the 'deferred' state — you cannot
+    target a single index by name, and this includes vector indexes if any are deferred (build
+    is not restricted to scalar indexes; only create_index is). If there are no deferred
+    indexes, this is a harmless no-op. After calling this, use list_indexes to check when the
+    index(es) reach the 'online' state — the build runs asynchronously and is not necessarily
+    complete when this call returns.
+    """
+    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    cluster = get_cluster_connection(ctx)
+    bucket = connect_to_bucket(cluster, bucket_name)
+    try:
+        logger.debug(f"Building deferred indexes on {keyspace}")
+        collection = bucket.scope(scope_name).collection(collection_name)
+        index_manager = collection.query_indexes()
+        index_manager.build_deferred_indexes()
+        logger.info(f"Triggered build of deferred indexes on {keyspace}")
+        return {"success": True}
+    except Exception as e:
+        logger.error(
+            f"Error building deferred indexes on {keyspace}: {e}", exc_info=True
+        )
+        return {"success": False, "error": str(e)}
+
+
+def drop_index(
+    ctx: Context,
+    bucket_name: str,
+    scope_name: str,
+    collection_name: str,
+    index_name: str,
+    ignore_if_not_exists: bool = False,
+) -> dict[str, Any]:
+    """Drop an existing GSI index (scalar or vector) from a collection.
+
+    ignore_if_not_exists: if True, does not error when the named index doesn't exist.
+
+    Returns {"success": False, "error": ...} if the index does not exist (unless
+    ignore_if_not_exists=True).
+    """
+    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    cluster = get_cluster_connection(ctx)
+    bucket = connect_to_bucket(cluster, bucket_name)
+    try:
+        logger.debug(f"Dropping index {index_name!r} on {keyspace}")
+        collection = bucket.scope(scope_name).collection(collection_name)
+        index_manager = collection.query_indexes()
+        index_manager.drop_index(
+            index_name,
+            DropQueryIndexOptions(ignore_if_not_exists=ignore_if_not_exists),
+        )
+        logger.info(f"Dropped index {index_name!r} on {keyspace}")
+        return {"success": True, "index_name": index_name}
+    except Exception as e:
+        logger.error(
+            f"Error dropping index {index_name!r} on {keyspace}: {e}", exc_info=True
+        )
+        return {"success": False, "error": str(e)}
