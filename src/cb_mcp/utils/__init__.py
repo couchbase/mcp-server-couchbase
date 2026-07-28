@@ -134,8 +134,6 @@ __all__ = [
     "SCOPE_WRITE",
     "ALLOWED_OAUTH_ALGORITHMS",
     "DEFAULT_OAUTH_ALGORITHM",
-    # Elicitation
-    "wrap_with_confirmation",
     # OAuth scope enforcement
     "required_scopes_for_tool",
     "wrap_with_scope_check",

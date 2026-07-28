@@ -53,26 +53,18 @@ class TestUpsertDocument:
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.upsert.side_effect = Exception("transient error")
 
-        with patch(
-            "cb_mcp.tools.kv.get_cluster_connection", return_value=cluster
-        ):
-            result = upsert_document_by_id(
-                ctx, "b", "s", "c", "doc1", {"a": 1}
-            )
+        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+            result = upsert_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
 
         assert result is False
         collection.upsert.assert_called_once_with("doc1", {"a": 1})
 
     def test_returns_true_on_success(self) -> None:
         """Happy path returns True after invoking collection.upsert."""
-        ctx, cluster, collection = _make_ctx_with_collection()
+        ctx, cluster, _collection = _make_ctx_with_collection()
 
-        with patch(
-            "cb_mcp.tools.kv.get_cluster_connection", return_value=cluster
-        ):
-            result = upsert_document_by_id(
-                ctx, "b", "s", "c", "doc1", {"a": 1}
-            )
+        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+            result = upsert_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
 
         assert result is True
 
@@ -85,12 +77,8 @@ class TestInsertDocument:
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.insert.side_effect = Exception("DocumentExistsException")
 
-        with patch(
-            "cb_mcp.tools.kv.get_cluster_connection", return_value=cluster
-        ):
-            result = insert_document_by_id(
-                ctx, "b", "s", "c", "doc1", {"a": 1}
-            )
+        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+            result = insert_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
 
         assert result is False
 
@@ -103,12 +91,8 @@ class TestReplaceDocument:
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.replace.side_effect = Exception("DocumentNotFoundException")
 
-        with patch(
-            "cb_mcp.tools.kv.get_cluster_connection", return_value=cluster
-        ):
-            result = replace_document_by_id(
-                ctx, "b", "s", "c", "doc1", {"a": 1}
-            )
+        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+            result = replace_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
 
         assert result is False
 
@@ -121,9 +105,7 @@ class TestDeleteDocument:
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.remove.side_effect = Exception("DocumentNotFoundException")
 
-        with patch(
-            "cb_mcp.tools.kv.get_cluster_connection", return_value=cluster
-        ):
+        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
             result = delete_document_by_id(ctx, "b", "s", "c", "doc1")
 
         assert result is False
