@@ -112,10 +112,11 @@ def log_environment_info(transport: str, server_settings: Mapping[str, Any]) -> 
     MCP tool returns, so support engineers reading the log and tools reading
     the MCP response see the same shape and field names.
 
-    The record is written two ways. First, to a dedicated non-rotating file in
-    overwrite mode, so the current environment is captured even at INFO (not
-    only DEBUG) and survives rotation of the debug file. Second, it is emitted as
-    a DEBUG log record for live/stderr visibility.
+    The record is written two ways. First, as pure JSON to a dedicated
+    non-rotating file in overwrite mode, so the current
+    server config is captured even at INFO (not only DEBUG) and survives
+    rotation of the debug file. Second, it is emitted as a DEBUG log record
+    (with the ``Environment |`` prefix) for live/stderr visibility.
     """
     resolved_logging = get_resolved_logging_config()
     info: dict[str, Any] = {
@@ -133,16 +134,20 @@ def log_environment_info(transport: str, server_settings: Mapping[str, Any]) -> 
     }
     payload = json.dumps(info, default=str)
 
-    # Durable copy: overwrite the dedicated env file so it always holds the
+    # Durable copy: overwrite the dedicated JSON file so it always holds the
     # current run's snapshot, independent of log level and immune to rotation of
     # the debug file. Only present when the file sink is active.
-    env_file = resolved_logging.env_file if resolved_logging else None
-    if env_file:
+    server_config_file = (
+        resolved_logging.server_config_file if resolved_logging else None
+    )
+    if server_config_file:
         try:
-            with open(env_file, "w", encoding="utf-8") as fh:
-                fh.write(f"Environment | {payload}\n")
+            with open(server_config_file, "w", encoding="utf-8") as fh:
+                fh.write(payload + "\n")
         except OSError as e:
-            logger.warning("Could not write environment file %r: %s", env_file, e)
+            logger.error(
+                "Could not write server config file %r: %s", server_config_file, e
+            )
 
     # Live/stderr visibility at DEBUG (filtered by the logger's effective level).
     logger.debug("Environment | %s", payload)

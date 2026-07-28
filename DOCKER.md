@@ -311,7 +311,7 @@ The server logs to `stderr` by default. Logging is configured with the `CB_MCP_L
 - **`CB_MCP_LOG_LEVEL`** — how much is logged: `info` (the default) logs lifecycle events and tool invocations, `debug` adds verbose internal detail, and `off` disables all logging.
 - **`CB_MCP_LOG_SINKS`** — where logs go: `stderr` (the default), per-level rotating files (`file`), or both. With `file`, one file is written per level (for example `mcp_server.info.log` and `mcp_server.error.log`) at the path set by `CB_MCP_LOG_FILE`. Mount a volume at that path to keep the logs after the container stops.
 - **Rotation & retention** — rotation size is configured **in MB** via `CB_MCP_LOG_ROTATION_MAX_SIZE_MB` (global) and per-level `CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE_MB` (inheriting the global); retention via `CB_MCP_LOG_RETENTION_BACKUP_COUNT` (global) and per-level `CB_MCP_LOG_<LEVEL>_RETENTION_BACKUP_COUNT`. A rotation size of `0` is invalid and falls back to the default with a startup warning. `CB_MCP_LOG_MAX_BYTES` (bytes) is deprecated but still honored for backward compatibility.
-- **Environment snapshot** — with the `file` sink active, a one-shot system/environment record is written to a dedicated `mcp_server.env.log` file (derived from `CB_MCP_LOG_FILE`), overwritten each start, so support always has the current environment even after other logs rotate.
+- **Server-config snapshot** — with the `file` sink active, a one-shot record is written as JSON to a dedicated `mcp_server_config.log.json` file (derived from `CB_MCP_LOG_FILE`), overwritten each start, so support always has the current config even after other logs rotate.
 
 For more details, see the [documentation](https://mcp-server.couchbase.com/configuration/logging).
 

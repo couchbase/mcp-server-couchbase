@@ -223,7 +223,7 @@ class TestFileSinkEdgeCases:
         # Nothing could attach, so no per-level files recorded — and no env file
         # is advertised either (writing it to the same bad dir would fail too).
         assert snap is not None and not snap.log_files
-        assert snap.env_file is None
+        assert snap.server_config_file is None
 
     def test_partial_failure_error_surfaces_on_stderr(self, tmp_path, capsys):
         """If one level's file fails but others succeed, and stderr isn't a sink,
@@ -402,7 +402,7 @@ class TestAsDict:
             log_files=None,
             log_max_bytes=None,
             log_backup_counts=None,
-            env_file=None,
+            server_config_file=None,
         )
         d = cfg.as_dict()
         # JSON-friendly key names
@@ -412,7 +412,7 @@ class TestAsDict:
             "log_files",
             "max_bytes",
             "backup_counts",
-            "env_file",
+            "server_config_file",
         }
         # The serialised key is the plural, per-level form.
         assert "backup_count" not in d
@@ -424,14 +424,14 @@ class TestAsDict:
             log_files={"INFO": "m.info.log", "ERROR": "e.log"},
             log_max_bytes={"INFO": 1048576, "ERROR": 5242880},
             log_backup_counts={"INFO": 1, "ERROR": 5},
-            env_file="m.env.log",
+            server_config_file="m_config.log.json",
         )
         d = cfg.as_dict()
         assert d["sinks"] == ["file", "stderr"]
         assert d["log_files"] == {"INFO": "m.info.log", "ERROR": "e.log"}
         assert d["max_bytes"] == {"INFO": 1048576, "ERROR": 5242880}
         assert d["backup_counts"] == {"INFO": 1, "ERROR": 5}
-        assert d["env_file"] == "m.env.log"
+        assert d["server_config_file"] == "m_config.log.json"
 
 
 class TestIdempotency:
@@ -695,7 +695,7 @@ class TestPerLevelBackupCounts:
 class TestEnvFile:
     """The dedicated environment-file path is derived and reported correctly."""
 
-    def test_env_file_derived_from_base_when_file_sink_active(self, tmp_path):
+    def test_server_config_file_derived_from_base_when_file_sink_active(self, tmp_path):
         _call(
             level="INFO",
             sinks={"file"},
@@ -704,16 +704,16 @@ class TestEnvFile:
         snap = get_resolved_logging_config()
         assert snap is not None
         # Derived from the --log-file base by inserting ".env".
-        assert snap.env_file == str(tmp_path / "mcp_server.env.log")
+        assert snap.server_config_file == str(tmp_path / "mcp_server_config.log.json")
 
-    def test_env_file_none_for_stderr_only(self, tmp_path):
+    def test_server_config_file_none_for_stderr_only(self, tmp_path):
         _call(level="INFO", sinks={"stderr"}, log_file=str(tmp_path / "m.log"))
         snap = get_resolved_logging_config()
         assert snap is not None
-        assert snap.env_file is None
+        assert snap.server_config_file is None
 
-    def test_env_file_none_when_off(self, tmp_path):
+    def test_server_config_file_none_when_off(self, tmp_path):
         _call(level="OFF", sinks={"file"}, log_file=str(tmp_path / "m.log"))
         snap = get_resolved_logging_config()
         assert snap is not None
-        assert snap.env_file is None
+        assert snap.server_config_file is None

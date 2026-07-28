@@ -24,6 +24,8 @@ from pathlib import Path
 import pytest
 from conftest import create_logging_test_session, extract_payload
 
+from cb_mcp.utils.constants import BYTES_PER_MB
+
 
 @pytest.mark.asyncio
 async def test_default_file_sinks_create_per_level_files(tmp_path) -> None:
@@ -275,10 +277,10 @@ async def test_logging_block_exposed_via_mcp_tool(tmp_path) -> None:
     # max_bytes and backup_counts are per-level maps keyed by the active levels
     # (size reported in bytes; default 1 MB = 1048576).
     assert logging_block["max_bytes"] == {
-        "DEBUG": 1048576,
-        "INFO": 1048576,
-        "WARNING": 1048576,
-        "ERROR": 1048576,
+        "DEBUG": BYTES_PER_MB,
+        "INFO": BYTES_PER_MB,
+        "WARNING": BYTES_PER_MB,
+        "ERROR": BYTES_PER_MB,
     }
     assert logging_block["backup_counts"] == {
         "DEBUG": 1,
@@ -287,7 +289,7 @@ async def test_logging_block_exposed_via_mcp_tool(tmp_path) -> None:
         "ERROR": 1,
     }
     # The dedicated env file is derived from the same --log-file base.
-    assert logging_block["env_file"] == str(tmp_path / "main.env.log")
+    assert logging_block["server_config_file"] == str(tmp_path / "main_config.log.json")
     # The serialised keys are the plural, per-level forms.
     assert "backup_count" not in logging_block
 
@@ -502,10 +504,11 @@ async def test_zero_backup_count_keeps_only_live_file(tmp_path) -> None:
 
     debug_path = tmp_path / "main.debug.log"
     assert debug_path.exists(), "live DEBUG file missing"
-    # No rotated backups of any level should exist at count=0.
-    assert not list(tmp_path.glob("*.log.*")), (
-        f"count=0 created rotated backups: {list(tmp_path.glob('*.log.*'))}"
-    )
+    # No rotated backups of any level should exist at count=0. Rotated files are
+    # numbered (main.<level>.log.1, .2, ...); the *.log.[0-9]* glob excludes the
+    # dedicated main_config.log.json snapshot.
+    rotated = list(tmp_path.glob("*.log.[0-9]*"))
+    assert not rotated, f"count=0 created rotated backups: {rotated}"
     # The live file stayed bounded: 4 restarts append ~2 KB each (~8 KB) without
     # rotation; truncation on rollover keeps it well under that.
     assert debug_path.stat().st_size <= 4096, (
@@ -551,10 +554,10 @@ async def test_per_level_retention_and_size_via_env_reflected_in_snapshot(
     logging_block = payload["logging"]
     # Size (bytes): INFO overridden to 2 MB, every other level inherits 1 MB.
     assert logging_block["max_bytes"] == {
-        "DEBUG": 1048576,
-        "INFO": 2097152,
-        "WARNING": 1048576,
-        "ERROR": 1048576,
+        "DEBUG": BYTES_PER_MB,
+        "INFO": 2 * BYTES_PER_MB,
+        "WARNING": BYTES_PER_MB,
+        "ERROR": BYTES_PER_MB,
     }
     # Retention: ERROR overridden to 5, every other level inherits the 2 global.
     assert logging_block["backup_counts"] == {
@@ -602,10 +605,10 @@ async def test_zero_rotation_size_falls_back_to_default_with_warning(tmp_path) -
     )
     # Every level resolved to the 1 MB package default (1048576 bytes) rather than 0.
     assert payload["logging"]["max_bytes"] == {
-        "DEBUG": 1048576,
-        "INFO": 1048576,
-        "WARNING": 1048576,
-        "ERROR": 1048576,
+        "DEBUG": BYTES_PER_MB,
+        "INFO": BYTES_PER_MB,
+        "WARNING": BYTES_PER_MB,
+        "ERROR": BYTES_PER_MB,
     }
 
 
@@ -673,10 +676,10 @@ async def test_fractional_rotation_size_reflected_in_snapshot(tmp_path) -> None:
 
     # 0.5 MB -> exactly 524288 bytes, no rounding.
     assert payload["logging"]["max_bytes"] == {
-        "DEBUG": 524288,
-        "INFO": 524288,
-        "WARNING": 524288,
-        "ERROR": 524288,
+        "DEBUG": BYTES_PER_MB // 2,
+        "INFO": BYTES_PER_MB // 2,
+        "WARNING": BYTES_PER_MB // 2,
+        "ERROR": BYTES_PER_MB // 2,
     }
 
 
@@ -685,7 +688,7 @@ async def test_env_info_captured_in_dedicated_file_at_info(tmp_path) -> None:
     """Req 3: the environment snapshot lands in its own file, even at INFO.
 
     At the default INFO level no DEBUG file is created, yet the dedicated
-    ``.env.log`` file must still capture the system-info record — proving it is
+    ``_config.log.json`` file must still capture the snapshot — proving it is
     level-independent and lives outside the rotating per-level files (so a
     debug-file rotation can't lose it).
     """
@@ -700,29 +703,28 @@ async def test_env_info_captured_in_dedicated_file_at_info(tmp_path) -> None:
     ):
         pass
 
-    env_file = tmp_path / "main.env.log"
-    assert env_file.exists(), "dedicated env file not created at INFO"
-    # No DEBUG file at INFO — the env record only survives because it has its
-    # own file, not because it rode along in the (absent) debug log.
+    server_config_file = tmp_path / "main_config.log.json"
+    assert server_config_file.exists(), "dedicated config file not created at INFO"
+    # No DEBUG file at INFO — the record only survives because it has its own
+    # file, not because it rode along in the (absent) debug log.
     assert not (tmp_path / "main.debug.log").exists()
 
-    text = env_file.read_text()
-    assert text.startswith("Environment | "), f"unexpected env-file content:\n{text}"
-    parsed = json.loads(text.split("Environment | ", 1)[1])
+    # The file is pure JSON (a single object).
+    parsed = json.loads(server_config_file.read_text())
     assert "os" in parsed and "python" in parsed and "logging" in parsed
-    # Exactly one record — the file is overwritten each start, not appended.
-    assert text.count("Environment | ") == 1
 
 
 @pytest.mark.asyncio
-async def test_env_file_survives_across_restarts_as_current_snapshot(tmp_path) -> None:
-    """The env file is overwritten each start, so it always holds one current
+async def test_server_config_file_survives_across_restarts_as_current_snapshot(
+    tmp_path,
+) -> None:
+    """The config file is overwritten each start, so it always holds one current
     record and never grows across restarts."""
     base_path = tmp_path / "main.log"
     args = ["--log-sinks", "file", "--log-file", str(base_path)]
     await _restart_server_n_times(args, times=3)
 
-    env_file = tmp_path / "main.env.log"
-    assert env_file.exists()
-    # Overwrite (not append): still exactly one record after three starts.
-    assert env_file.read_text().count("Environment | ") == 1
+    server_config_file = tmp_path / "main_config.log.json"
+    assert server_config_file.exists()
+    # Overwrite (not append): still a single valid JSON object after three starts.
+    assert isinstance(json.loads(server_config_file.read_text()), dict)

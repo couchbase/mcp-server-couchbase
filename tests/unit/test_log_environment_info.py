@@ -183,26 +183,26 @@ def test_config_block_captures_oauth_coordinates():
     assert config["oauth_scope_write_label"] == "couchbase-mcp/write"
 
 
-def _snapshot_with_env_file(env_path) -> logmod.ResolvedLoggingConfig:
+def _snapshot_with_config_file(config_path) -> logmod.ResolvedLoggingConfig:
     return logmod.ResolvedLoggingConfig(
         level="INFO",
         sinks=("file",),
         log_files={"INFO": "ignored.info.log"},
         log_max_bytes={"INFO": 1048576},
         log_backup_counts={"INFO": 1},
-        env_file=str(env_path),
+        server_config_file=str(config_path),
     )
 
 
-def test_env_snapshot_written_to_dedicated_file(tmp_path):
-    """When ``env_file`` is set, the snapshot is written there verbatim.
+def test_config_snapshot_written_to_dedicated_file(tmp_path):
+    """When ``server_config_file`` is set, the snapshot is written there as JSON.
 
     Note the logger is at INFO (not DEBUG) here: the dedicated file must be
     written regardless of level, unlike the DEBUG-gated stderr record.
     """
-    env_path = tmp_path / "mcp_server.env.log"
+    config_path = tmp_path / "mcp_server_config.log.json"
     prev = logmod._resolved_config
-    logmod._resolved_config = _snapshot_with_env_file(env_path)
+    logmod._resolved_config = _snapshot_with_config_file(config_path)
     try:
         log_environment_info(
             transport="stdio", server_settings={"read_only_mode": True}
@@ -210,19 +210,18 @@ def test_env_snapshot_written_to_dedicated_file(tmp_path):
     finally:
         logmod._resolved_config = prev
 
-    assert env_path.exists(), "dedicated env file was not written"
-    text = env_path.read_text()
-    assert text.startswith("Environment | ")
-    payload = json.loads(text.split("Environment | ", 1)[1])
+    assert config_path.exists(), "dedicated config file was not written"
+    # The file is pure JSON (no "Environment |" prefix).
+    payload = json.loads(config_path.read_text())
     assert payload["transport"] == "stdio"
 
 
-def test_env_file_overwritten_not_appended(tmp_path):
-    """Each start overwrites the env file so it always holds the current run —
-    the file never grows across restarts (immune to rotation by construction)."""
-    env_path = tmp_path / "mcp_server.env.log"
+def test_config_file_overwritten_not_appended(tmp_path):
+    """Each start overwrites the file so it always holds the current run — it
+    never grows across restarts (immune to rotation by construction)."""
+    config_path = tmp_path / "mcp_server_config.log.json"
     prev = logmod._resolved_config
-    logmod._resolved_config = _snapshot_with_env_file(env_path)
+    logmod._resolved_config = _snapshot_with_config_file(config_path)
     try:
         log_environment_info(
             transport="stdio", server_settings={"read_only_mode": True}
@@ -231,16 +230,14 @@ def test_env_file_overwritten_not_appended(tmp_path):
     finally:
         logmod._resolved_config = prev
 
-    text = env_path.read_text()
-    assert text.count("Environment | ") == 1, "env file grew — should overwrite"
-    # The surviving record is the most recent run's.
-    payload = json.loads(text.split("Environment | ", 1)[1])
+    # Still a single valid JSON object (overwritten, not appended), newest run.
+    payload = json.loads(config_path.read_text())
     assert payload["transport"] == "http"
 
 
-def test_no_env_file_written_when_snapshot_absent(tmp_path):
-    """With no resolved snapshot (env_file None) no dedicated file is created."""
-    env_path = tmp_path / "mcp_server.env.log"
+def test_no_config_file_written_when_snapshot_absent(tmp_path):
+    """With no resolved snapshot (server_config_file None) no file is created."""
+    config_path = tmp_path / "mcp_server_config.log.json"
     prev = logmod._resolved_config
     logmod._resolved_config = None
     try:
@@ -249,4 +246,4 @@ def test_no_env_file_written_when_snapshot_absent(tmp_path):
         )
     finally:
         logmod._resolved_config = prev
-    assert not env_path.exists()
+    assert not config_path.exists()

@@ -60,11 +60,12 @@ class ResolvedLoggingConfig:
     isn't part of that set — including under ``level="OFF"``, where no handlers
     are attached at all.
 
-    ``env_file`` is the path of the dedicated, non-rotating file that captures
-    the one-shot environment/system-info snapshot (derived from the ``--log-file``
-    base, e.g. ``mcp_server.env.log``). Like the per-level maps it is ``None``
-    unless file logging is active *and* at least one per-level file was opened —
-    so it never advertises a file that couldn't actually be written.
+    ``server_config_file`` is the path of the dedicated, non-rotating JSON file
+    that captures the one-shot server-config/environment snapshot (derived from
+    the ``--log-file`` base, e.g. ``mcp_server_config.log.json``). Like the
+    per-level maps it is ``None`` unless file logging is active *and* at least
+    one per-level file was opened — so it never advertises a file that couldn't
+    actually be written.
     """
 
     level: str
@@ -72,7 +73,7 @@ class ResolvedLoggingConfig:
     log_files: dict[str, str] | None
     log_max_bytes: dict[str, int] | None
     log_backup_counts: dict[str, int] | None
-    env_file: str | None
+    server_config_file: str | None
 
     def as_dict(self) -> dict[str, Any]:
         """Serialise to a JSON-friendly dict with shorter key names."""
@@ -84,7 +85,7 @@ class ResolvedLoggingConfig:
             "backup_counts": dict(self.log_backup_counts)
             if self.log_backup_counts
             else None,
-            "env_file": self.env_file,
+            "server_config_file": self.server_config_file,
         }
 
 
@@ -157,6 +158,7 @@ def _resolve_global_max_bytes(
             return DEFAULT_LOG_MAX_BYTES, warnings
         return max(1, round(rotation_max_size_mb * BYTES_PER_MB)), warnings
 
+    # Deprecated fallback: only reached when CB_MCP_LOG_ROTATION_MAX_SIZE_MB is unset.
     if max_bytes is not None:
         if max_bytes == 0:
             warnings.append(
@@ -183,7 +185,7 @@ def _resolve_per_level_max_bytes(
     ``{level: bytes}`` map for all levels plus human-readable warnings the caller
     should surface once the logger is wired.
     """
-    resolved_global, warnings = _resolve_global_max_bytes(
+    resolved_global_bytes, warnings = _resolve_global_max_bytes(
         rotation_max_size_mb, max_bytes
     )
 
@@ -191,16 +193,16 @@ def _resolve_per_level_max_bytes(
     for lvl in _PER_LEVEL_FILE_LEVELS:
         size_mb = overrides_mb.get(lvl)
         if size_mb is None:
-            per_level[lvl] = resolved_global  # inherit the global
+            per_level[lvl] = resolved_global_bytes  # inherit the global
         elif size_mb == 0:
             warnings.append(
                 f"CB_MCP_LOG_{lvl}_ROTATION_MAX_SIZE_MB=0 is not a valid rotation "
                 f"size; falling back to the global rotation size "
-                f"({resolved_global} bytes)."
+                f"({resolved_global_bytes} bytes)."
             )
-            per_level[lvl] = resolved_global  # 0 behaves as unset -> inherit
+            per_level[lvl] = resolved_global_bytes  # 0 behaves as unset -> inherit
         else:
-            per_level[lvl] = round(size_mb * BYTES_PER_MB)
+            per_level[lvl] = max(1, round(size_mb * BYTES_PER_MB))
     return per_level, warnings
 
 
@@ -424,7 +426,7 @@ def configure_logging(
             log_files=None,
             log_max_bytes=None,
             log_backup_counts=None,
-            env_file=None,
+            server_config_file=None,
         )
         return
 
@@ -435,11 +437,11 @@ def configure_logging(
     effective_sinks = set(sinks)
     file_sink_active = "file" in effective_sinks
 
-    # The environment/system-info snapshot gets its own non-rotating file derived
-    # from the same base path (mcp_server.log -> mcp_server.env.log). Only when
-    # the file sink is active; ``log_environment_info`` writes to it later.
-    env_file = (
-        _per_level_path(log_file or DEFAULT_LOG_FILE, "env")
+    # The server-config/environment snapshot gets its own non-rotating JSON file
+    # derived from the base path (mcp_server.log -> mcp_server_config.log.json).
+    # Only when the file sink is active; ``log_environment_info`` writes it later.
+    server_config_file = (
+        "{}_config{}.json".format(*os.path.splitext(log_file or DEFAULT_LOG_FILE))
         if file_sink_active
         else None
     )
@@ -552,8 +554,10 @@ def configure_logging(
         log_backup_counts=active_backup_counts
         if (file_sink_active and attached_files)
         else None,
-        # Only claim an env file when file logging actually succeeded — if every
+        # Only claim the file when file logging actually succeeded — if every
         # per-level handler failed to open (e.g. an unwritable directory),
-        # attached_files is empty and writing the env file would fail too.
-        env_file=env_file if (file_sink_active and attached_files) else None,
+        # attached_files is empty and writing it would fail too.
+        server_config_file=server_config_file
+        if (file_sink_active and attached_files)
+        else None,
     )
