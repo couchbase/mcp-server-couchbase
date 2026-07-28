@@ -76,7 +76,13 @@ def wrap_with_telemetry(fn: Callable) -> Callable:
     whether it succeeded or raised. Applied as the innermost wrapper (before
     confirmation/scope-check wrapping) so the recorded duration/success
     reflects only the tool's own execution.
+
+    When telemetry is unavailable (``_logger`` is ``None`` at wrap time), the
+    original function is returned unchanged rather than a wrapper that would
+    just do timing work for an event that never sends.
     """
+    if _logger is None:
+        return fn
 
     if inspect.iscoroutinefunction(fn):
 
