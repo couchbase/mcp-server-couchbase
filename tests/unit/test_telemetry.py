@@ -59,7 +59,7 @@ class TestWrapWithTelemetry:
             return x * 2
 
         wrapped = telemetry.wrap_with_telemetry(sample_tool)
-        result = await wrapped(21)
+        result = wrapped(21)
 
         assert result == 42
         assert len(fake_logger.events) == 1
@@ -99,7 +99,7 @@ class TestWrapWithTelemetry:
         wrapped = telemetry.wrap_with_telemetry(failing_tool)
 
         with pytest.raises(ValueError, match="bad input"):
-            await wrapped()
+            wrapped()
 
         assert len(fake_logger.events) == 1
         assert fake_logger.events[0]["success"] == "false"
@@ -112,4 +112,4 @@ class TestWrapWithTelemetry:
             return "ok"
 
         wrapped = telemetry.wrap_with_telemetry(sample_tool)
-        assert await wrapped() == "ok"
+        assert wrapped() == "ok"
