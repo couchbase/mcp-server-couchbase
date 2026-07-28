@@ -497,9 +497,9 @@ async def test_get_index_advisor_recommendations_with_update_query() -> None:
         assert isinstance(payload, dict), (
             f"Expected dict envelope, got {type(payload)}: {payload}"
         )
-        assert (
-            "recommended_indexes" in payload or "message" in payload
-        ), f"Unexpected advisor response shape: {payload}"
+        assert "recommended_indexes" in payload or "message" in payload, (
+            f"Unexpected advisor response shape: {payload}"
+        )
 
 
 @pytest.mark.asyncio
@@ -525,9 +525,9 @@ async def test_get_index_advisor_recommendations_with_delete_query() -> None:
         assert isinstance(payload, dict), (
             f"Expected dict envelope, got {type(payload)}: {payload}"
         )
-        assert (
-            "recommended_indexes" in payload or "message" in payload
-        ), f"Unexpected advisor response shape: {payload}"
+        assert "recommended_indexes" in payload or "message" in payload, (
+            f"Unexpected advisor response shape: {payload}"
+        )
 
 
 @pytest.mark.asyncio

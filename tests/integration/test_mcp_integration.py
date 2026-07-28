@@ -263,7 +263,6 @@ async def test_server_status_without_connection() -> None:
         assert payload.get("server_name") == "couchbase"
 
 
-
 @pytest.mark.asyncio
 async def test_disabled_tool_not_exposed_via_mcp() -> None:
     """A tool named in CB_MCP_DISABLED_TOOLS must not appear in list_tools.
@@ -290,9 +289,7 @@ async def test_calling_disabled_tool_returns_error() -> None:
     async with create_mcp_session(
         extra_env={"CB_MCP_DISABLED_TOOLS": "get_buckets_in_cluster"}
     ) as session:
-        response = await session.call_tool(
-            "get_buckets_in_cluster", arguments={}
-        )
+        response = await session.call_tool("get_buckets_in_cluster", arguments={})
 
         assert is_error_response(response), (
             "Calling a disabled tool must produce an error response"

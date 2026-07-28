@@ -42,9 +42,7 @@ async def test_read_only_mode_filters_write_tools_from_listing() -> None:
         names = {tool.name for tool in response.tools}
 
         leaked = WRITE_TOOL_NAMES & names
-        assert not leaked, (
-            f"Write tools leaked into read-only mode: {sorted(leaked)}"
-        )
+        assert not leaked, f"Write tools leaked into read-only mode: {sorted(leaked)}"
 
         # Sanity: read tools must still be present.
         assert "get_buckets_in_cluster" in names
