@@ -78,13 +78,28 @@ def wrap_with_telemetry(fn: Callable) -> Callable:
     reflects only the tool's own execution.
     """
 
+    if inspect.iscoroutinefunction(fn):
+
+        @functools.wraps(fn)
+        async def async_wrapper(*args, **kwargs):
+            started = time.monotonic()
+            success = True
+            try:
+                return await fn(*args, **kwargs)
+            except Exception:
+                success = False
+                raise
+            finally:
+                duration_ms = (time.monotonic() - started) * 1000
+                _send_tool_call_event(fn.__name__, success, duration_ms)
+
+        return async_wrapper
+
     @functools.wraps(fn)
-    async def wrapper(*args, **kwargs):
+    def sync_wrapper(*args, **kwargs):
         started = time.monotonic()
         success = True
         try:
-            if inspect.iscoroutinefunction(fn):
-                return await fn(*args, **kwargs)
             return fn(*args, **kwargs)
         except Exception:
             success = False
@@ -93,4 +108,4 @@ def wrap_with_telemetry(fn: Callable) -> Callable:
             duration_ms = (time.monotonic() - started) * 1000
             _send_tool_call_event(fn.__name__, success, duration_ms)
 
-    return wrapper
+    return sync_wrapper
