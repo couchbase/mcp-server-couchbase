@@ -728,3 +728,35 @@ async def test_server_config_file_survives_across_restarts_as_current_snapshot(
     assert server_config_file.exists()
     # Overwrite (not append): still a single valid JSON object after three starts.
     assert isinstance(json.loads(server_config_file.read_text()), dict)
+
+
+@pytest.mark.asyncio
+async def test_config_file_survives_debug_rotation(tmp_path) -> None:
+    """the config snapshot is independent of per-level rotation.
+
+    Even after the DEBUG file rotates (forced with a tiny byte cap so the ~2 KB
+    startup env record rolls it over), the dedicated JSON snapshot is intact and
+    holds current, valid JSON.
+    """
+    base_path = tmp_path / "main.log"
+    # Small byte cap via the deprecated bytes var so the DEBUG env record forces
+    # a rollover; the MB var's 1 MB floor wouldn't rotate on ~2 KB.
+    args = [
+        "--log-level",
+        "DEBUG",
+        "--log-sinks",
+        "file",
+        "--log-file",
+        str(base_path),
+        "--log-max-bytes",
+        "1024",
+    ]
+    await _restart_server_n_times(args, times=3)
+
+    # The DEBUG file rotated (default retention keeps one backup) ...
+    assert (tmp_path / "main.debug.log.1").exists(), "DEBUG file did not rotate"
+    # ... but the dedicated config file survives and holds current, valid JSON.
+    config_file = tmp_path / "main_config.log.json"
+    assert config_file.exists()
+    parsed = json.loads(config_file.read_text())
+    assert "os" in parsed and "logging" in parsed

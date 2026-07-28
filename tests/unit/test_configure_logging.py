@@ -493,6 +493,12 @@ class TestPerLevelMaxBytes:
         assert all(v == DEFAULT_LOG_MAX_BYTES for v in per_level.values())
         assert any("CB_MCP_LOG_ROTATION_MAX_SIZE_MB=0" in w for w in warnings)
 
+    def test_deprecated_max_bytes_zero_falls_back_to_default_with_warning(self):
+        # The deprecated bytes var at 0 is also invalid -> falls back to default.
+        per_level, warnings = logmod._resolve_per_level_max_bytes(None, 0, {})
+        assert all(v == DEFAULT_LOG_MAX_BYTES for v in per_level.values())
+        assert any("CB_MCP_LOG_MAX_BYTES=0" in w for w in warnings)
+
     def test_resolve_per_level_zero_inherits_global_with_warning(self):
         # Global 2 MB; ERROR override of 0 -> invalid -> inherits the 2 MB global.
         per_level, warnings = logmod._resolve_per_level_max_bytes(2, None, {"ERROR": 0})
