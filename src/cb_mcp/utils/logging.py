@@ -238,22 +238,26 @@ def _attach_per_level_file_handlers(
     formatter: logging.Formatter,
     log_file: str,
     max_bytes: Mapping[str, int],
-    backup_counts: Mapping[str, int],
-) -> tuple[dict[str, str], list[str]]:
+    global_backup_count: int,
+    backup_count_overrides: Mapping[str, int],
+) -> tuple[dict[str, str], dict[str, int], list[str]]:
     """Attach one rotating file handler per active level to ``logger``.
 
     All per-level files derive from the single ``log_file`` base path by
     inserting the level name (``mcp_server.log`` -> ``mcp_server.info.log``,
-    ``mcp_server.error.log``, ...). Each handler keeps ``backup_counts[level]``
-    rotated backups — the caller resolves the per-level count (explicit override
-    or the inherited global) before calling. A count of 0 keeps no rotated
-    backups; only the live file is retained, and it is truncated on rollover so
-    it stays bounded by ``maxBytes`` (see :class:`_BoundedRotatingFileHandler`).
-    Returns ``(attached, errors)``
-    where ``attached`` maps each level that got a handler to its file path, and
-    ``errors`` collects human-readable problems (a missing base path that fell
-    back to the default, or a file that couldn't be opened) for the caller to
-    log once all handlers are wired and visible.
+    ``mcp_server.error.log``, ...). Each handler's ``maxBytes`` comes from the
+    pre-resolved ``max_bytes`` map; its retention is resolved here — a level's
+    ``backup_count_overrides`` value if set, otherwise ``global_backup_count``.
+    A count of 0 keeps no rotated backups; only the live file is retained, and it
+    is truncated on rollover so it stays bounded by ``maxBytes``
+    (see :class:`_BoundedRotatingFileHandler`).
+
+    Returns ``(attached, backup_counts, errors)`` where ``attached`` maps each
+    level that got a handler to its file path, ``backup_counts`` maps those same
+    levels to the retention count actually applied, and ``errors`` collects
+    human-readable problems (a missing base path that fell back to the default,
+    or a file that couldn't be opened) for the caller to log once all handlers
+    are wired and visible.
 
     A missing ``log_file`` falls back to the package default rather than
     dropping file logging entirely. Only levels at or above the logger's
@@ -269,16 +273,18 @@ def _attach_per_level_file_handlers(
         log_file = DEFAULT_LOG_FILE
 
     attached: dict[str, str] = {}
+    backup_counts: dict[str, int] = {}
     for lvl_name in _PER_LEVEL_FILE_LEVELS:
         lvl_no = logging.getLevelName(lvl_name)
         if lvl_no < logger.level:
             continue
         path = _per_level_path(log_file, lvl_name)
+        backup_count = backup_count_overrides.get(lvl_name, global_backup_count)
         try:
             handler = _BoundedRotatingFileHandler(
                 path,
                 maxBytes=max_bytes[lvl_name],
-                backupCount=backup_counts[lvl_name],
+                backupCount=backup_count,
                 encoding="utf-8",
             )
         except OSError as e:
@@ -294,7 +300,8 @@ def _attach_per_level_file_handlers(
             handler.addFilter(_exact_level_filter(lvl_no))
         logger.addHandler(handler)
         attached[lvl_name] = path
-    return attached, errors
+        backup_counts[lvl_name] = backup_count
+    return attached, backup_counts, errors
 
 
 def parse_log_level(value: str) -> tuple[str, str | None]:
@@ -446,17 +453,13 @@ def configure_logging(
         else None
     )
 
-    # Resolve per-level rotation size and retention count up front: an explicit
-    # per-level override wins, otherwise the level inherits the global value.
-    # ``size_warnings`` captures deprecation and 0-is-invalid fallbacks for
-    # deferred logging.
+    # Rotation size is resolved up front because its global resolution emits
+    # deprecation / 0-is-invalid warnings (``size_warnings``) that must be
+    # surfaced regardless of which levels attach. Retention (backup count) is a
+    # plain default-fill, so it's resolved per level inside the handler attach.
     resolved_max_bytes, size_warnings = _resolve_per_level_max_bytes(
         log_rotation_max_size_mb, log_max_bytes, log_rotation_size_overrides or {}
     )
-    overrides = log_backup_count_overrides or {}
-    resolved_backup_counts = {
-        lvl: overrides.get(lvl, log_backup_count) for lvl in _PER_LEVEL_FILE_LEVELS
-    }
 
     if "stderr" in effective_sinks:
         stderr_handler = logging.StreamHandler(sys.stderr)
@@ -468,14 +471,18 @@ def configure_logging(
     file_warnings: list[str] = []
     file_errors: list[str] = []
     attached_files: dict[str, str] = {}
+    active_backup_counts: dict[str, int] = {}
 
     if file_sink_active:
-        attached_files, file_errors = _attach_per_level_file_handlers(
-            logger,
-            formatter,
-            log_file,
-            resolved_max_bytes,
-            resolved_backup_counts,
+        attached_files, active_backup_counts, file_errors = (
+            _attach_per_level_file_handlers(
+                logger,
+                formatter,
+                log_file,
+                resolved_max_bytes,
+                log_backup_count,
+                log_backup_count_overrides or {},
+            )
         )
         # Make sure file errors are actually visible. ERROR-level records are
         # only captured by a stderr handler or the ERROR file; if neither is
@@ -524,10 +531,9 @@ def configure_logging(
     for message in size_warnings:
         logger.warning(message)
 
-    # Per-level rotation size and retention, restricted to the levels that
-    # actually got a file.
+    # Rotation sizes for the levels that actually got a file (retention counts
+    # come back from the attach as ``active_backup_counts``).
     active_max_bytes = {lvl: resolved_max_bytes[lvl] for lvl in attached_files}
-    active_backup_counts = {lvl: resolved_backup_counts[lvl] for lvl in attached_files}
 
     # Show the per-level files in the summary only when the file sink is active;
     # for a stderr-only run printing paths would falsely suggest files exist.
