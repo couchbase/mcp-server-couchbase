@@ -518,5 +518,3 @@ async def test_upsert_to_nonexistent_bucket_raises_error() -> None:
             f"Got payload={payload}, isError={is_error}. "
             f"This exposes Bug #1: KV tools swallow exceptions."
         )
-
-

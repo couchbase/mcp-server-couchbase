@@ -1406,8 +1406,8 @@ class TestGetCapellaRootCAPath:
     def test_uses_importlib_resources_when_available(self) -> None:
         """The installed-package path uses importlib.resources.files()."""
         fake_path = MagicMock()
-        fake_path.__str__ = (
-            lambda self: "/site-packages/cb_mcp/certs/capella_root_ca.pem"
+        fake_path.__str__ = lambda self: (
+            "/site-packages/cb_mcp/certs/capella_root_ca.pem"
         )
 
         with patch("cb_mcp.utils.index_utils.files") as mock_files:
@@ -1579,7 +1579,7 @@ class TestFetchIndexesFromRestApi:
         error = httpx.ConnectError("connection refused")
         client_patch, _ = self._patch_client([error, error])
 
-        with client_patch, pytest.raises(RuntimeError, match="host1.*host2"):
+        with client_patch, pytest.raises(RuntimeError, match=r"host1.*host2"):
             fetch_indexes_from_rest_api(
                 "couchbase://host1,host2",
                 "u",
