@@ -67,7 +67,7 @@ class TestUpsertDocument:
 
     def test_returns_true_on_success(self) -> None:
         """Happy path returns True after invoking collection.upsert."""
-        ctx, cluster, collection = _make_ctx_with_collection()
+        ctx, cluster, _collection = _make_ctx_with_collection()
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
             result = upsert_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})

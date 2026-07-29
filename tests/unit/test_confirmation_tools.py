@@ -379,9 +379,7 @@ class TestWrapWithConfirmation:
                 )
 
             async def elicit(self, message, schema):
-                raise AssertionError(
-                    "elicit must not be called when session is None"
-                )
+                raise AssertionError("elicit must not be called when session is None")
 
         result = await wrapped(ctx=FakeContext())
         assert result is True

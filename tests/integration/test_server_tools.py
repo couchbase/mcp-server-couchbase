@@ -142,7 +142,6 @@ async def test_get_cluster_health_and_services_with_bucket() -> None:
         assert "data" in payload, "Expected 'data' key with health info"
 
 
-
 @pytest.mark.asyncio
 async def test_get_scopes_in_nonexistent_bucket_returns_error() -> None:
     """A bucket that doesn't exist must surface a clean error response."""
