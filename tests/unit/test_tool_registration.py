@@ -38,7 +38,7 @@ class TestPrepareToolsDisabling:
 
     def test_no_disabled_tools(self):
         """Passing None for disabled_tools should leave all tools enabled."""
-        tools_all, _, disabled = prepare_tools_for_registration(
+        _tools_all, _, disabled = prepare_tools_for_registration(
             read_only_mode=True,
             disabled_tools=None,
             confirmation_required_tools=None,

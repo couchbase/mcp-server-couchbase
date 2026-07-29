@@ -275,31 +275,21 @@ class TestSdkLevelPropagation:
     trees never drift to different thresholds.
     """
 
-    def test_sdk_configured_with_matching_debug_level(
-        self, mock_sdk_configure_logging
-    ):
+    def test_sdk_configured_with_matching_debug_level(self, mock_sdk_configure_logging):
         _call(level="DEBUG", sinks={"stderr"})
-        mock_sdk_configure_logging.assert_called_with(
-            MCP_SERVER_NAME, logging.DEBUG
-        )
+        mock_sdk_configure_logging.assert_called_with(MCP_SERVER_NAME, logging.DEBUG)
 
     def test_sdk_configured_with_matching_warning_level(
         self, mock_sdk_configure_logging
     ):
         _call(level="WARNING", sinks={"stderr"})
-        mock_sdk_configure_logging.assert_called_with(
-            MCP_SERVER_NAME, logging.WARNING
-        )
+        mock_sdk_configure_logging.assert_called_with(MCP_SERVER_NAME, logging.WARNING)
 
-    def test_sdk_level_tracks_invalid_level_fallback(
-        self, mock_sdk_configure_logging
-    ):
+    def test_sdk_level_tracks_invalid_level_fallback(self, mock_sdk_configure_logging):
         """An invalid level falls back to INFO for the MCP logger; the SDK must
         be told the same resolved level, not the rejected input."""
         _call(level="NONSENSE", sinks={"stderr"})
-        mock_sdk_configure_logging.assert_called_with(
-            MCP_SERVER_NAME, logging.INFO
-        )
+        mock_sdk_configure_logging.assert_called_with(MCP_SERVER_NAME, logging.INFO)
 
 
 class TestTimestampFormat:
