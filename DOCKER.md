@@ -120,12 +120,24 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_MCP_LOG_LEVEL`                   | Logging level for the server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging))                                                        | `info`                                                         |
 | `CB_MCP_LOG_SINKS`                   | Comma-separated log destinations: `stderr`, `file`, or both (see [Logging](#logging))                                                                     | `stderr`                                                       |
 | `CB_MCP_LOG_FILE`                    | Base path for per-level log files (only used when the `file` sink is enabled)                                                                             | `mcp_server.log`                                               |
-| `CB_MCP_LOG_MAX_BYTES`               | Maximum size in bytes per log file before it rotates                                                                                                      | `1048576` (1 MB)                                               |
+| `CB_MCP_LOG_ROTATION_MAX_SIZE_MB`       | Global max size **in MB** per log file before it rotates, inherited by every level. `0` is invalid and falls back to the default with a startup warning    | `1` (1 MB)                                                     |
+| `CB_MCP_LOG_MAX_BYTES`               | **Deprecated** — use `CB_MCP_LOG_ROTATION_MAX_SIZE_MB` (MB). Global rotation size **in bytes**, still honored for backward compatibility; ignored when `CB_MCP_LOG_ROTATION_MAX_SIZE_MB` is set | Unset                                     |
+| `CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE_MB`   | Rotation size **in MB** for the ERROR log file; overrides `CB_MCP_LOG_ROTATION_MAX_SIZE_MB` for ERROR                                                        | Inherits `CB_MCP_LOG_ROTATION_MAX_SIZE_MB`                        |
+| `CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE_MB` | Rotation size **in MB** for the WARNING log file; overrides `CB_MCP_LOG_ROTATION_MAX_SIZE_MB` for WARNING                                                    | Inherits `CB_MCP_LOG_ROTATION_MAX_SIZE_MB`                        |
+| `CB_MCP_LOG_INFO_ROTATION_MAX_SIZE_MB`    | Rotation size **in MB** for the INFO log file; overrides `CB_MCP_LOG_ROTATION_MAX_SIZE_MB` for INFO                                                          | Inherits `CB_MCP_LOG_ROTATION_MAX_SIZE_MB`                        |
+| `CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE_MB`   | Rotation size **in MB** for the DEBUG log file; overrides `CB_MCP_LOG_ROTATION_MAX_SIZE_MB` for DEBUG                                                        | Inherits `CB_MCP_LOG_ROTATION_MAX_SIZE_MB`                        |
+| `CB_MCP_LOG_RETENTION_BACKUP_COUNT`  | Rotated backups kept per-level log file (excluding the live file), applied to every level unless overridden. `0` keeps only the live file            | `1`                                                            |
+| `CB_MCP_LOG_ERROR_RETENTION_BACKUP_COUNT`   | Rotated backups kept for the ERROR log file; overrides the global count for ERROR                                                                  | Inherits `CB_MCP_LOG_RETENTION_BACKUP_COUNT`                   |
+| `CB_MCP_LOG_WARNING_RETENTION_BACKUP_COUNT` | Rotated backups kept for the WARNING log file; overrides the global count for WARNING                                                              | Inherits `CB_MCP_LOG_RETENTION_BACKUP_COUNT`                   |
+| `CB_MCP_LOG_INFO_RETENTION_BACKUP_COUNT`    | Rotated backups kept for the INFO log file; overrides the global count for INFO                                                                    | Inherits `CB_MCP_LOG_RETENTION_BACKUP_COUNT`                   |
+| `CB_MCP_LOG_DEBUG_RETENTION_BACKUP_COUNT`   | Rotated backups kept for the DEBUG log file; overrides the global count for DEBUG                                                                  | Inherits `CB_MCP_LOG_RETENTION_BACKUP_COUNT`                   |
 | `CB_MCP_OAUTH_JWT_JWKS_URI`          | JWKS endpoint of the identity provider used to verify bearer JWTs. Enables OAuth when set with the issuer and audience (see [OAuth 2.1 Authorization](#oauth-21-authorization)) | None                                            |
 | `CB_MCP_OAUTH_JWT_ISSUER`            | Expected JWT `iss` claim. Required to enable OAuth                                                                                                        | None                                                           |
 | `CB_MCP_OAUTH_JWT_AUDIENCE`          | Expected JWT `aud` claim. Required to enable OAuth                                                                                                        | None                                                           |
 | `CB_MCP_OAUTH_JWT_ALGORITHM`         | JWT signing algorithm: one of `RS256/384/512`, `ES256/384/512`, `PS256/384/512`                                                                           | `RS256`                                                        |
 | `CB_MCP_OAUTH_MCP_BASE_URL`          | Public base URL of this server. When set, publishes RFC 9728 Protected Resource Metadata for PRM-aware clients                                            | None                                                           |
+| `CB_MCP_OAUTH_SCOPE_READ_LABEL`      | Override the OAuth scope label treated as 'read' access (advertised in PRM and matched against the token `scope`/`scp` claim). Use when your IdP can't emit the canonical form | `couchbase-mcp:read`                       |
+| `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`     | Override the OAuth scope label treated as 'write' access; same semantics as the read label                                                                | `couchbase-mcp:write`                                          |
 
 ### Disabling Tools
 
@@ -300,6 +312,8 @@ The server logs to `stderr` by default. Logging is configured with the `CB_MCP_L
 
 - **`CB_MCP_LOG_LEVEL`** — how much is logged: `info` (the default) logs lifecycle events and tool invocations, `debug` adds verbose internal detail, and `off` disables all logging.
 - **`CB_MCP_LOG_SINKS`** — where logs go: `stderr` (the default), per-level rotating files (`file`), or both. With `file`, one file is written per level (for example `mcp_server.info.log` and `mcp_server.error.log`) at the path set by `CB_MCP_LOG_FILE`. Mount a volume at that path to keep the logs after the container stops.
+- **Rotation & retention** — rotation size is configured **in MB** via `CB_MCP_LOG_ROTATION_MAX_SIZE_MB` (global) and per-level `CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE_MB` (inheriting the global); retention via `CB_MCP_LOG_RETENTION_BACKUP_COUNT` (global) and per-level `CB_MCP_LOG_<LEVEL>_RETENTION_BACKUP_COUNT`. A rotation size of `0` is invalid and falls back to the default with a startup warning. `CB_MCP_LOG_MAX_BYTES` (bytes) is deprecated but still honored for backward compatibility.
+- **Server-config snapshot** — with the `file` sink active, a one-shot record is written as JSON to a dedicated `mcp_server_config.log.json` file (derived from `CB_MCP_LOG_FILE`), overwritten each start, so support always has the current config even after other logs rotate.
 
 For more details, see the [documentation](https://mcp-server.couchbase.com/configuration/logging).
 
@@ -311,6 +325,6 @@ OAuth is configured with the `CB_MCP_OAUTH_*` variables in the [Environment Vari
 
 - OAuth activates only when all three of `CB_MCP_OAUTH_JWT_JWKS_URI`, `CB_MCP_OAUTH_JWT_ISSUER`, and `CB_MCP_OAUTH_JWT_AUDIENCE` are set; setting only some of them fails at startup.
 - Setting `CB_MCP_OAUTH_MCP_BASE_URL` additionally publishes RFC 9728 Protected Resource Metadata so PRM-aware clients can discover the authorization server.
-- Access is gated by two scopes read from the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools, including SQL++) and `couchbase-mcp:write` (KV mutation tools). Full access requires both.
+- Access is gated by two scopes read from the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools, including SQL++) and `couchbase-mcp:write` (KV mutation tools). Full access requires both. If your IdP can't emit those canonical labels, override them with `CB_MCP_OAUTH_SCOPE_READ_LABEL` / `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`.
 
 For full details, see the [documentation](https://mcp-server.couchbase.com/configuration/oauth).
