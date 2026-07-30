@@ -325,7 +325,7 @@ class TestBuildIndex:
         with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
             result = build_index(ctx, "b", "s", "c")
 
-        assert result == {"success": True}
+        assert result == {"success": True, "keyspace": "b.s.c"}
         index_manager.build_deferred_indexes.assert_called_once()
         index_manager.get_all_indexes.assert_not_called()
 
@@ -350,7 +350,7 @@ class TestDropIndex:
         with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
             result = drop_index(ctx, "b", "s", "c", "idx1", ignore_if_not_exists=True)
 
-        assert result == {"success": True, "index_name": "idx1"}
+        assert result == {"success": True, "index_name": "idx1", "keyspace": "b.s.c"}
         args, _kwargs = index_manager.drop_index.call_args
         assert args[0] == "idx1"
         assert args[1]["ignore_if_not_exists"] is True
