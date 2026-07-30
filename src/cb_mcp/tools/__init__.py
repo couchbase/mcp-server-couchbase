@@ -6,6 +6,7 @@ This module contains all the MCP tools for Couchbase operations.
 Tool Categories:
 - READ_ONLY_TOOLS: Tools that only read data (always available)
 - KV_WRITE_TOOLS: KV tools that modify data (disabled when READ_ONLY_MODE=True)
+- INDEX_WRITE_TOOLS: Index management tools that modify data (disabled when READ_ONLY_MODE=True)
 """
 
 from collections.abc import Callable
@@ -13,7 +14,13 @@ from collections.abc import Callable
 from mcp.types import ToolAnnotations
 
 # Index tools
-from .index import get_index_advisor_recommendations, list_indexes
+from .index import (
+    build_index,
+    create_index,
+    drop_index,
+    get_index_advisor_recommendations,
+    list_indexes,
+)
 
 # Key-Value tools
 from .kv import (
@@ -86,8 +93,15 @@ KV_WRITE_TOOLS = [
     delete_document_by_id,
 ]
 
+# Index write tools - disabled when READ_ONLY_MODE is True
+INDEX_WRITE_TOOLS = [
+    create_index,
+    build_index,
+    drop_index,
+]
+
 # List of all tools for easy registration (kept for backward compatibility)
-ALL_TOOLS = READ_ONLY_TOOLS + KV_WRITE_TOOLS
+ALL_TOOLS = READ_ONLY_TOOLS + KV_WRITE_TOOLS + INDEX_WRITE_TOOLS
 
 # Tool annotations for MCP clients (readOnlyHint, destructiveHint, etc.)
 TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
@@ -121,6 +135,10 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "insert_document_by_id": ToolAnnotations(idempotentHint=True),
     "replace_document_by_id": ToolAnnotations(idempotentHint=True),
     "delete_document_by_id": ToolAnnotations(destructiveHint=True, idempotentHint=True),
+    # Index write tools
+    "create_index": ToolAnnotations(),
+    "build_index": ToolAnnotations(idempotentHint=True),
+    "drop_index": ToolAnnotations(destructiveHint=True),
 }
 
 
@@ -133,8 +151,9 @@ def get_tools(read_only_mode: bool = True) -> list[Callable]:
     tools = list(READ_ONLY_TOOLS)
 
     if not read_only_mode:
-        # KV write tools are only loaded when READ_ONLY_MODE is False
+        # KV and index write tools are only loaded when READ_ONLY_MODE is False
         tools.extend(KV_WRITE_TOOLS)
+        tools.extend(INDEX_WRITE_TOOLS)
 
     return tools
 
@@ -157,6 +176,9 @@ __all__ = [
     "explain_sql_plus_plus_query",
     "get_index_advisor_recommendations",
     "list_indexes",
+    "create_index",
+    "build_index",
+    "drop_index",
     "get_cluster_health_and_services",
     "get_queries_not_selective",
     "get_queries_not_using_covering_index",
@@ -168,6 +190,7 @@ __all__ = [
     # Tool categories
     "READ_ONLY_TOOLS",
     "KV_WRITE_TOOLS",
+    "INDEX_WRITE_TOOLS",
     # Tool annotations
     "TOOL_ANNOTATIONS",
     # Convenience

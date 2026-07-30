@@ -4,6 +4,9 @@ Covers:
   - list_indexes (all variants: cluster-wide, per-bucket, per-scope,
     per-collection)
   - get_index_advisor_recommendations
+  - create_index
+  - build_index
+  - drop_index
 """
 
 from __future__ import annotations
@@ -153,6 +156,70 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
         )
     )
 
+    cases.append(
+        AccuracyCase(
+            test_id="create_index_on_field",
+            prompt=(
+                f"Create an index on the 'email' field for the '{collection}' "
+                f"collection in scope '{scope}' of bucket '{bucket}'. Call the "
+                f"index 'idx_email_test'."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="create_index",
+                    parameters={
+                        "bucket_name": bucket,
+                        "scope_name": scope,
+                        "collection_name": collection,
+                        "index_name": _contains("email"),
+                        "keys": Matcher.any_value(),
+                    },
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="build_deferred_indexes",
+            prompt=(
+                f"Build the deferred indexes on the '{collection}' collection "
+                f"in scope '{scope}' of bucket '{bucket}'."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="build_index",
+                    parameters={
+                        "bucket_name": bucket,
+                        "scope_name": scope,
+                        "collection_name": collection,
+                    },
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="drop_index_by_name",
+            prompt=(
+                f"Drop the index named 'idx_email_test' on the '{collection}' "
+                f"collection in scope '{scope}' of bucket '{bucket}'."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="drop_index",
+                    parameters={
+                        "bucket_name": bucket,
+                        "scope_name": scope,
+                        "collection_name": collection,
+                        "index_name": "idx_email_test",
+                    },
+                ),
+            ],
+        )
+    )
+
     return cases
 
 
@@ -168,6 +235,9 @@ INDEX_CASE_IDS = [
     "get_index_advisor_recommendations",
     "conversational_what_indexes_exist",
     "conversational_make_this_faster",
+    "create_index_on_field",
+    "build_deferred_indexes",
+    "drop_index_by_name",
 ]
 
 

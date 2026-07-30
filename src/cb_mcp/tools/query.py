@@ -82,6 +82,10 @@ def run_sql_plus_plus_query(
     Example:
         query = "SELECT * FROM users WHERE age > 18"
         # Incorrect: "SELECT * FROM bucket.scope.users WHERE age > 18"
+
+    For creating a new index, prefer the create_index tool over a raw CREATE INDEX statement
+    here — it defers the build by default and tells you the recommended next step. Use
+    list_indexes to check whether an index is online before relying on it in a query plan.
     """
     cluster = get_cluster_connection(ctx)
 
