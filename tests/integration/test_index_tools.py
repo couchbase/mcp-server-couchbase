@@ -608,7 +608,8 @@ async def test_get_index_advisor_with_single_quoted_string() -> None:
 @pytest.mark.asyncio
 async def test_create_index_deferred_by_default() -> None:
     """create_index without deferred= must default to deferred=True, and the
-    index must show up as 'deferred' via list_indexes."""
+    index must show up as not-yet-built via list_indexes (status 'created' on
+    newer clusters, 'deferred' on older ones)."""
     bucket = require_test_bucket()
     scope = get_test_scope()
     collection = get_test_collection()
@@ -643,7 +644,9 @@ async def test_create_index_deferred_by_default() -> None:
             )
             indexes = extract_payload(list_response)
             assert isinstance(indexes, list) and len(indexes) == 1
-            assert indexes[0]["status"].lower() == "deferred"
+            # A deferred (not-yet-built) index reports status "created" on newer
+            # clusters and "deferred" on older ones — accept either.
+            assert indexes[0]["status"].lower() in {"created", "deferred"}
         finally:
             await _drop_index_quietly(session, bucket, scope, collection, index_name)
 
@@ -765,7 +768,10 @@ async def test_build_index_no_deferred_indexes() -> None:
         )
         payload = extract_payload(response)
 
-        assert payload == {"success": True, "keyspace": f"{bucket}.{scope}.{collection}"}
+        assert payload == {
+            "success": True,
+            "keyspace": f"{bucket}.{scope}.{collection}",
+        }
 
 
 @pytest.mark.asyncio

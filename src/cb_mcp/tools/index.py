@@ -266,21 +266,22 @@ def create_index(
     ignore_if_exists: bool = False,
 ) -> dict[str, Any]:
     """Create a non-vector (scalar) GSI secondary index on a collection.
+    This is the preferred way to create a scalar index — use it instead of a raw CREATE
+    INDEX statement via run_sql_plus_plus_query. It only creates scalar GSI indexes; it
+    cannot create vector indexes.
 
-    This is the preferred way to create an index. This tool only creates scalar GSI indexes; it cannot
-    create vector indexes.
+    By default the index is created deferred (not built). The recommended next step is to
+    call build_index to trigger the build, then list_indexes to confirm it reaches the
+    'online' state.
 
-    keys: the field(s)/expression(s) to index, e.g. ["email"] or ["type", "created_at DESC"].
-    condition: optional WHERE clause for a partial index, e.g. "type = 'user'".
-    deferred: if True (the default), the index is created but NOT built immediately. Call
-        build_index afterward to trigger the build, then list_indexes to confirm it reaches the
-        'online' state. Set False only if you want the build to happen synchronously as part of
-        this call.
-    num_replicas: optional number of index replicas to create for availability and scaling.
-    ignore_if_exists: if True, does not error when an index with this name already exists.
+    keys is the field(s)/expression(s) to index, e.g. ["email"] or ["type", "created_at DESC"].
+    condition is an optional WHERE clause for a partial index, e.g. type = 'user'.
+    num_replicas optionally sets the number of index replicas for availability and scaling.
+    Pass ignore_if_exists=True to avoid an error when an index with this name already exists.
 
-    Returns {"success": False, "error": ...} if the index already exists (unless
-    ignore_if_exists=True) or the keys/condition are invalid.
+    Returns {"success": True, "index_name": ..., "deferred": ..., "keyspace": ...} on
+    success, or {"success": False, "error": ...} on failure — e.g. the index already
+    exists (without ignore_if_exists=True) or the keys/condition are invalid.
     """
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
@@ -302,8 +303,10 @@ def create_index(
         logger.info(f"Created index {index_name!r} on {keyspace} (deferred={deferred})")
         return tool_success(index_name=index_name, deferred=deferred, keyspace=keyspace)
     except Exception as e:
-        logger.error(f"Error creating index {index_name!r} on {keyspace}: {e}", exc_info=True)
-        return tool_error(e)
+        logger.error(
+            f"Error creating index {index_name!r} on {keyspace}: {e}", exc_info=True
+        )
+        return tool_error(e, index_name=index_name, keyspace=keyspace)
 
 
 def build_index(
@@ -314,12 +317,16 @@ def build_index(
 ) -> dict[str, Any]:
     """Trigger the build of all deferred indexes on a collection.
 
-    This builds every index in this collection currently in the 'deferred' state — you cannot
-    target a single index by name, and this includes vector indexes if any are deferred (build
-    is not restricted to scalar indexes; only create_index is). If there are no deferred
-    indexes, this is a harmless no-op. After calling this, use list_indexes to check when the
-    index(es) reach the 'online' state — the build runs asynchronously and is not necessarily
-    complete when this call returns.
+    This builds every index in the collection currently in the 'deferred' state — you
+    cannot target a single index by name, and this includes vector indexes if any are
+    deferred (only create_index is restricted to scalar indexes; build is not). If there
+    are no deferred indexes, this is a harmless no-op.
+
+    The build runs asynchronously: success means the build was triggered, not that it has
+    finished. Use list_indexes to check when the index(es) reach the 'online' state.
+
+    Returns {"success": True, "keyspace": ...} on success, or
+    {"success": False, "error": ...} on failure.
     """
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
@@ -332,8 +339,10 @@ def build_index(
         logger.info(f"Triggered build of deferred indexes on {keyspace}")
         return tool_success(keyspace=keyspace)
     except Exception as e:
-        logger.error(f"Error building deferred indexes on {keyspace}: {e}", exc_info=True)
-        return tool_error(e)
+        logger.error(
+            f"Error building deferred indexes on {keyspace}: {e}", exc_info=True
+        )
+        return tool_error(e, keyspace=keyspace)
 
 
 def drop_index(
@@ -346,10 +355,15 @@ def drop_index(
 ) -> dict[str, Any]:
     """Drop an existing GSI index (scalar or vector) from a collection.
 
-    ignore_if_not_exists: if True, does not error when the named index doesn't exist.
+    This permanently removes the index and cannot be undone. Queries that relied on it may
+    become slower or fall back to another index, and the index would have to be recreated
+    (and rebuilt) to restore it. Prefer confirming the index name with list_indexes first.
 
-    Returns {"success": False, "error": ...} if the index does not exist (unless
-    ignore_if_not_exists=True).
+    Pass ignore_if_not_exists=True to avoid an error when the named index doesn't exist.
+
+    Returns {"success": True, "index_name": ..., "keyspace": ...} on success, or
+    {"success": False, "error": ...} on failure — e.g. the index does not exist
+    (without ignore_if_not_exists=True).
     """
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
@@ -365,5 +379,7 @@ def drop_index(
         logger.info(f"Dropped index {index_name!r} on {keyspace}")
         return tool_success(index_name=index_name, keyspace=keyspace)
     except Exception as e:
-        logger.error(f"Error dropping index {index_name!r} on {keyspace}: {e}", exc_info=True)
-        return tool_error(e)
+        logger.error(
+            f"Error dropping index {index_name!r} on {keyspace}: {e}", exc_info=True
+        )
+        return tool_error(e, index_name=index_name, keyspace=keyspace)

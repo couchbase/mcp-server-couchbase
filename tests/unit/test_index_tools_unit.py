@@ -307,7 +307,12 @@ class TestCreateIndex:
         with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
             result = create_index(ctx, "b", "s", "c", "idx1", ["email"])
 
-        assert result == {"success": False, "error": "index already exists"}
+        assert result == {
+            "success": False,
+            "error": "index already exists",
+            "index_name": "idx1",
+            "keyspace": "b.s.c",
+        }
 
 
 class TestBuildIndex:
@@ -337,7 +342,11 @@ class TestBuildIndex:
         with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
             result = build_index(ctx, "b", "s", "c")
 
-        assert result == {"success": False, "error": "connection reset"}
+        assert result == {
+            "success": False,
+            "error": "connection reset",
+            "keyspace": "b.s.c",
+        }
 
 
 class TestDropIndex:
@@ -363,4 +372,9 @@ class TestDropIndex:
         with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
             result = drop_index(ctx, "b", "s", "c", "idx1")
 
-        assert result == {"success": False, "error": "index not found"}
+        assert result == {
+            "success": False,
+            "error": "index not found",
+            "index_name": "idx1",
+            "keyspace": "b.s.c",
+        }
