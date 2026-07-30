@@ -11,7 +11,7 @@ from couchbase.management.options import CreateQueryIndexOptions, DropQueryIndex
 from fastmcp import Context
 
 from ..utils.config import get_settings
-from ..utils.connection import connect_to_bucket
+from ..utils.connection import connect_to_bucket, format_keyspace
 from ..utils.constants import (
     MCP_SERVER_NAME,
     QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION,
@@ -25,13 +25,10 @@ from ..utils.index_utils import (
     validate_connection_settings,
     validate_filter_params,
 )
+from ..utils.responses import tool_error, tool_success
 from .query import run_cluster_query, run_sql_plus_plus_query
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.index")
-
-
-def _keyspace(bucket_name: str, scope_name: str, collection_name: str) -> str:
-    return f"{bucket_name}.{scope_name}.{collection_name}"
 
 
 def get_index_advisor_recommendations(
@@ -270,8 +267,7 @@ def create_index(
 ) -> dict[str, Any]:
     """Create a non-vector (scalar) GSI secondary index on a collection.
 
-    This is the preferred way to create an index — prefer it over a raw SQL++ CREATE INDEX
-    statement via run_sql_plus_plus_query. This tool only creates scalar GSI indexes; it cannot
+    This is the preferred way to create an index. This tool only creates scalar GSI indexes; it cannot
     create vector indexes.
 
     keys: the field(s)/expression(s) to index, e.g. ["email"] or ["type", "created_at DESC"].
@@ -280,12 +276,13 @@ def create_index(
         build_index afterward to trigger the build, then list_indexes to confirm it reaches the
         'online' state. Set False only if you want the build to happen synchronously as part of
         this call.
+    num_replicas: optional number of index replicas to create for availability and scaling.
     ignore_if_exists: if True, does not error when an index with this name already exists.
 
     Returns {"success": False, "error": ...} if the index already exists (unless
     ignore_if_exists=True) or the keys/condition are invalid.
     """
-    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
@@ -303,17 +300,10 @@ def create_index(
             ),
         )
         logger.info(f"Created index {index_name!r} on {keyspace} (deferred={deferred})")
-        return {
-            "success": True,
-            "index_name": index_name,
-            "deferred": deferred,
-            "keyspace": keyspace,
-        }
+        return tool_success(index_name=index_name, deferred=deferred, keyspace=keyspace)
     except Exception as e:
-        logger.error(
-            f"Error creating index {index_name!r} on {keyspace}: {e}", exc_info=True
-        )
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error creating index {index_name!r} on {keyspace}: {e}", exc_info=True)
+        return tool_error(e)
 
 
 def build_index(
@@ -331,7 +321,7 @@ def build_index(
     index(es) reach the 'online' state — the build runs asynchronously and is not necessarily
     complete when this call returns.
     """
-    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
@@ -340,12 +330,10 @@ def build_index(
         index_manager = collection.query_indexes()
         index_manager.build_deferred_indexes()
         logger.info(f"Triggered build of deferred indexes on {keyspace}")
-        return {"success": True}
+        return tool_success(keyspace=keyspace)
     except Exception as e:
-        logger.error(
-            f"Error building deferred indexes on {keyspace}: {e}", exc_info=True
-        )
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error building deferred indexes on {keyspace}: {e}", exc_info=True)
+        return tool_error(e)
 
 
 def drop_index(
@@ -363,7 +351,7 @@ def drop_index(
     Returns {"success": False, "error": ...} if the index does not exist (unless
     ignore_if_not_exists=True).
     """
-    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
@@ -375,9 +363,7 @@ def drop_index(
             DropQueryIndexOptions(ignore_if_not_exists=ignore_if_not_exists),
         )
         logger.info(f"Dropped index {index_name!r} on {keyspace}")
-        return {"success": True, "index_name": index_name}
+        return tool_success(index_name=index_name, keyspace=keyspace)
     except Exception as e:
-        logger.error(
-            f"Error dropping index {index_name!r} on {keyspace}: {e}", exc_info=True
-        )
-        return {"success": False, "error": str(e)}
+        logger.error(f"Error dropping index {index_name!r} on {keyspace}: {e}", exc_info=True)
+        return tool_error(e)
