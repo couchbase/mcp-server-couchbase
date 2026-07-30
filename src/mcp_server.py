@@ -353,8 +353,9 @@ def main(
 ):
     """Couchbase MCP Server"""
 
-    resolved_level, invalid_level = log_level
-    parsed_sinks, invalid_sinks = log_sinks
+    # log_level / log_sinks are the parse results from their Click callbacks:
+    # each carries the resolved value plus any rejected input, which is passed
+    # to configure_logging so the fallback can be reported once handlers exist.
     # Per-level overrides: keep only the levels the operator set explicitly; the
     # rest inherit the global. Rotation-size overrides are in MB, matching the
     # canonical --log-rotation-max-size-mb global.
@@ -379,16 +380,16 @@ def main(
         if value is not None
     }
     configure_logging(
-        level=resolved_level,
-        sinks=parsed_sinks,
+        level=log_level.level,
+        sinks=log_sinks.sinks,
         log_file=log_file,
         log_rotation_max_size_mb=log_rotation_max_size_mb,
         log_max_bytes=log_max_bytes,
         log_backup_count=log_retention_backup_count,
         log_rotation_size_overrides=rotation_size_overrides,
         log_backup_count_overrides=backup_count_overrides,
-        invalid_level=invalid_level,
-        invalid_sinks=invalid_sinks,
+        invalid_level=log_level.invalid_token,
+        invalid_sinks=log_sinks.invalid_tokens,
     )
 
     try:

@@ -13,7 +13,7 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from logging.handlers import RotatingFileHandler
-from typing import Any
+from typing import Any, NamedTuple
 
 import couchbase
 
@@ -205,7 +205,7 @@ def _resolve_per_level_max_bytes(
     return per_level, warnings
 
 
-class _BoundedRotatingFileHandler(RotatingFileHandler):
+class BoundedRotatingFileHandler(RotatingFileHandler):
     """RotatingFileHandler that keeps the live file bounded when backupCount=0.
 
     Stock ``RotatingFileHandler`` with ``backupCount == 0`` reopens the base
@@ -249,7 +249,7 @@ def _attach_per_level_file_handlers(
     ``backup_count_overrides`` value if set, otherwise ``global_backup_count``.
     A count of 0 keeps no rotated backups; only the live file is retained, and it
     is truncated on rollover so it stays bounded by ``maxBytes``
-    (see :class:`_BoundedRotatingFileHandler`).
+    (see :class:`BoundedRotatingFileHandler`).
 
     Returns ``(attached, backup_counts, errors)`` where ``attached`` maps each
     level that got a handler to its file path, ``backup_counts`` maps those same
@@ -280,7 +280,7 @@ def _attach_per_level_file_handlers(
         path = _per_level_path(log_file, lvl_name)
         backup_count = backup_count_overrides.get(lvl_name, global_backup_count)
         try:
-            handler = _BoundedRotatingFileHandler(
+            handler = BoundedRotatingFileHandler(
                 path,
                 maxBytes=max_bytes[lvl_name],
                 backupCount=backup_count,
@@ -303,33 +303,43 @@ def _attach_per_level_file_handlers(
     return attached, backup_counts, errors
 
 
-def parse_log_level(value: str) -> tuple[str, str | None]:
+class ParsedLogLevel(NamedTuple):
+    """Resolved log level plus any rejected input, for deferred warning."""
+
+    level: str
+    invalid_token: str | None
+
+
+class ParsedLogSinks(NamedTuple):
+    """Resolved sink set plus any rejected tokens, for deferred warning."""
+
+    sinks: set[str]
+    invalid_tokens: list[str]
+
+
+def parse_log_level(value: str) -> ParsedLogLevel:
     """Parse a log level value, falling back to the default for invalid input.
 
-    Returns ``(resolved_level, invalid_input)``. When ``value`` matches one of
-    ``ALLOWED_LOG_LEVELS`` (case-insensitive), ``invalid_input`` is ``None``.
-    Otherwise the resolved level is ``DEFAULT_LOG_LEVEL`` and the original
-    input is returned so the caller can surface it via the logger once
-    handlers are wired.
+    When ``value`` matches one of ``ALLOWED_LOG_LEVELS`` (case-insensitive),
+    ``invalid_token`` is ``None``. Otherwise ``level`` is ``DEFAULT_LOG_LEVEL``
+    and the original input is returned as ``invalid_token`` so the caller can
+    surface it via the logger once handlers are wired.
     """
     token = value.strip().upper()
     if token in ALLOWED_LOG_LEVELS:
-        return token, None
-    return DEFAULT_LOG_LEVEL, value
+        return ParsedLogLevel(token, None)
+    return ParsedLogLevel(DEFAULT_LOG_LEVEL, value)
 
 
-def parse_log_sinks(value: str) -> tuple[set[str], list[str]]:
+def parse_log_sinks(value: str) -> ParsedLogSinks:
     """Parse a comma-separated CB_MCP_LOG_SINKS value.
 
     Tokens are case-insensitive and whitespace around them is trimmed. Valid
-    tokens are accumulated; unknown tokens are collected separately so the
-    caller can surface them via the logger once it is configured. If no valid
-    tokens survive, the default sink is used so the server still produces
-    output.
-
-    Returns a tuple ``(sinks, invalid_tokens)`` where ``sinks`` is a non-empty
-    set drawn from ``ALLOWED_LOG_SINKS`` and ``invalid_tokens`` lists any
-    rejected tokens in their original case.
+    tokens are accumulated in ``sinks`` (a non-empty set drawn from
+    ``ALLOWED_LOG_SINKS``); unknown tokens are collected in ``invalid_tokens``
+    (original case) so the caller can surface them via the logger once it is
+    configured. If no valid tokens survive, the default sink is used so the
+    server still produces output.
     """
     sinks: set[str] = set()
     invalid: list[str] = []
@@ -343,7 +353,7 @@ def parse_log_sinks(value: str) -> tuple[set[str], list[str]]:
                 invalid.append(token)
     if not sinks:
         sinks.add(DEFAULT_LOG_SINKS)
-    return sinks, invalid
+    return ParsedLogSinks(sinks, invalid)
 
 
 def configure_logging(
