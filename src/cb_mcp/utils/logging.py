@@ -192,17 +192,16 @@ def _resolve_per_level_max_bytes(
     per_level: dict[str, int] = {}
     for lvl in _PER_LEVEL_FILE_LEVELS:
         size_mb = overrides_mb.get(lvl)
-        if size_mb is None:
-            per_level[lvl] = resolved_global_bytes  # inherit the global
-        elif size_mb == 0:
+        if size_mb:  # explicit, non-zero override (MB) -> convert to bytes
+            per_level[lvl] = max(1, round(size_mb * BYTES_PER_MB))
+            continue
+        if size_mb == 0:  # explicit 0 is invalid (None is silent)
             warnings.append(
                 f"CB_MCP_LOG_{lvl}_ROTATION_MAX_SIZE_MB=0 is not a valid rotation "
                 f"size; falling back to the global rotation size "
                 f"({resolved_global_bytes} bytes)."
             )
-            per_level[lvl] = resolved_global_bytes  # 0 behaves as unset -> inherit
-        else:
-            per_level[lvl] = max(1, round(size_mb * BYTES_PER_MB))
+        per_level[lvl] = resolved_global_bytes  # unset or 0 -> inherit the global
     return per_level, warnings
 
 
@@ -546,24 +545,19 @@ def configure_logging(
         active_backup_counts or "-",
     )
 
+    # Only populate the file-based snapshot fields when file logging actually
+    # succeeded — if the sink is stderr-only, or every per-level handler failed
+    # to open (e.g. an unwritable directory), attached_files is empty and
+    # claiming files/paths would be misleading (and writing them would fail).
+    file_logging_active = bool(file_sink_active and attached_files)
+
     # Record the snapshot so the server-config MCP tool and env-info diagnostic
     # record can read the active configuration without re-deriving it.
     _resolved_config = ResolvedLoggingConfig(
         level=level_name,
         sinks=tuple(sorted(effective_sinks)),
-        log_files=dict(attached_files)
-        if (file_sink_active and attached_files)
-        else None,
-        log_max_bytes=active_max_bytes
-        if (file_sink_active and attached_files)
-        else None,
-        log_backup_counts=active_backup_counts
-        if (file_sink_active and attached_files)
-        else None,
-        # Only claim the file when file logging actually succeeded — if every
-        # per-level handler failed to open (e.g. an unwritable directory),
-        # attached_files is empty and writing it would fail too.
-        server_config_file=server_config_file
-        if (file_sink_active and attached_files)
-        else None,
+        log_files=dict(attached_files) if file_logging_active else None,
+        log_max_bytes=active_max_bytes if file_logging_active else None,
+        log_backup_counts=active_backup_counts if file_logging_active else None,
+        server_config_file=server_config_file if file_logging_active else None,
     )

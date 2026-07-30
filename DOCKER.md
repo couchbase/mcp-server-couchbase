@@ -136,6 +136,8 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_MCP_OAUTH_JWT_AUDIENCE`          | Expected JWT `aud` claim. Required to enable OAuth                                                                                                        | None                                                           |
 | `CB_MCP_OAUTH_JWT_ALGORITHM`         | JWT signing algorithm: one of `RS256/384/512`, `ES256/384/512`, `PS256/384/512`                                                                           | `RS256`                                                        |
 | `CB_MCP_OAUTH_MCP_BASE_URL`          | Public base URL of this server. When set, publishes RFC 9728 Protected Resource Metadata for PRM-aware clients                                            | None                                                           |
+| `CB_MCP_OAUTH_SCOPE_READ_LABEL`      | Override the OAuth scope label treated as 'read' access (advertised in PRM and matched against the token `scope`/`scp` claim). Use when your IdP can't emit the canonical form | `couchbase-mcp:read`                       |
+| `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`     | Override the OAuth scope label treated as 'write' access; same semantics as the read label                                                                | `couchbase-mcp:write`                                          |
 
 ### Disabling Tools
 
@@ -323,6 +325,6 @@ OAuth is configured with the `CB_MCP_OAUTH_*` variables in the [Environment Vari
 
 - OAuth activates only when all three of `CB_MCP_OAUTH_JWT_JWKS_URI`, `CB_MCP_OAUTH_JWT_ISSUER`, and `CB_MCP_OAUTH_JWT_AUDIENCE` are set; setting only some of them fails at startup.
 - Setting `CB_MCP_OAUTH_MCP_BASE_URL` additionally publishes RFC 9728 Protected Resource Metadata so PRM-aware clients can discover the authorization server.
-- Access is gated by two scopes read from the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools, including SQL++) and `couchbase-mcp:write` (KV mutation tools). Full access requires both.
+- Access is gated by two scopes read from the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools, including SQL++) and `couchbase-mcp:write` (KV mutation tools). Full access requires both. If your IdP can't emit those canonical labels, override them with `CB_MCP_OAUTH_SCOPE_READ_LABEL` / `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`.
 
 For full details, see the [documentation](https://mcp-server.couchbase.com/configuration/oauth).

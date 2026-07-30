@@ -115,8 +115,10 @@ def log_environment_info(transport: str, server_settings: Mapping[str, Any]) -> 
     The record is written two ways. First, as pure JSON to a dedicated
     non-rotating file in overwrite mode, so the current
     server config is captured even at INFO (not only DEBUG) and survives
-    rotation of the debug file. Second, it is emitted as a DEBUG log record
-    (with the ``Environment |`` prefix) for live/stderr visibility.
+    rotation of the debug file. This dedicated file is only written when
+    file-based logging is enabled (the ``file`` sink is active). Second, it is emitted as a
+    DEBUG log record (with the ``Environment |`` prefix) for live/stderr
+    visibility.
     """
     resolved_logging = get_resolved_logging_config()
     info: dict[str, Any] = {

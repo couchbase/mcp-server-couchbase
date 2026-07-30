@@ -233,6 +233,20 @@
           "isRequired": false,
           "format": "string",
           "isSecret": false
+        },
+        {
+          "name": "CB_MCP_OAUTH_SCOPE_READ_LABEL",
+          "description": "Override the OAuth scope label the server treats as 'read' access; advertised in PRM and matched against the token's scope/scp claim. Use when your IdP cannot emit the canonical form. Default is couchbase-mcp:read.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_OAUTH_SCOPE_WRITE_LABEL",
+          "description": "Override the OAuth scope label the server treats as 'write' access; same semantics as CB_MCP_OAUTH_SCOPE_READ_LABEL. Default is couchbase-mcp:write.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
         }
       ],
       "packageArguments": [
@@ -483,6 +497,22 @@
           "isRequired": false,
           "format": "string",
           "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--oauth-scope-read-label",
+          "description": "Override the OAuth scope label the server treats as 'read' access; advertised in PRM and matched against the token's scope/scp claim. Use when your IdP cannot emit the canonical form. Default is couchbase-mcp:read.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--oauth-scope-write-label",
+          "description": "Override the OAuth scope label the server treats as 'write' access; same semantics as --oauth-scope-read-label. Default is couchbase-mcp:write.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
         }
       ]
     },
@@ -706,6 +736,20 @@
         {
           "name": "CB_MCP_OAUTH_MCP_BASE_URL",
           "description": "Public base URL of this MCP server. When set, the server publishes RFC 9728 Protected Resource Metadata at <base_url>/.well-known/oauth-protected-resource/mcp so PRM-aware clients can discover the authorization server. Optional.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_OAUTH_SCOPE_READ_LABEL",
+          "description": "Override the OAuth scope label the server treats as 'read' access; advertised in PRM and matched against the token's scope/scp claim. Use when your IdP cannot emit the canonical form. Default is couchbase-mcp:read.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_OAUTH_SCOPE_WRITE_LABEL",
+          "description": "Override the OAuth scope label the server treats as 'write' access; same semantics as CB_MCP_OAUTH_SCOPE_READ_LABEL. Default is couchbase-mcp:write.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
