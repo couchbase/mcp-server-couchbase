@@ -143,7 +143,7 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     envvar="CB_MCP_LOG_FILE",
     default=DEFAULT_LOG_FILE,
     callback=validate_log_path,
-    help="Base path for the per-level log files. One rotating file is written "
+    help="Base file path for the per-level log files. One rotating file is written "
     "per level, derived by inserting the level name: e.g. mcp_server.log -> "
     "mcp_server.debug.log, mcp_server.info.log, mcp_server.warning.log, "
     "mcp_server.error.log (the error file also captures CRITICAL). Only active "
