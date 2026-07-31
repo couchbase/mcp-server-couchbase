@@ -17,4 +17,4 @@ wheels/
 #test coverage file
 .coverage
 
-/tests/accuracy/results
+/tests/accuracy/results/*
