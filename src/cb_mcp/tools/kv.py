@@ -20,10 +20,6 @@ from ..utils.connection import connect_to_bucket
 from ..utils.constants import MCP_SERVER_NAME
 from ..utils.context import get_cluster_connection
 
-# Couchbase server limit: max subdocument operations combined in a single
-# lookup_in (or mutate_in) call.
-MAX_LOOKUP_IN_SPECS = 16
-
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.kv")
 
 
@@ -197,10 +193,11 @@ def sub_document_lookup_in(
     - count_paths: get the number of elements in the array or object at each path (fails
       per-path if the path isn't an array/object).
 
-    At least one of get_paths, exists_paths, or count_paths must be provided, and the
-    combined number of paths across all three cannot exceed 16 (a Couchbase server limit
-    on subdocument operations per call). Paths cannot exceed 1024 characters or 32 levels
-    of nesting. Violating either of these returns {"error": "..."} — no paths are looked up.
+    At least one of get_paths, exists_paths, or count_paths must be provided. As a rule of
+    thumb, keep the combined number of paths across all three to 16 or fewer — Couchbase
+    limits subdocument operations per call, though the exact limit is server-side and may
+    change. If the server rejects the call (too many paths, or another constraint like path
+    length or nesting depth), the whole call fails with {"error": "..."}.
 
     A path that doesn't exist (or otherwise fails, e.g. count on a non-array/object) does
     NOT fail the whole call — it is reported individually as {"success": False, "error": ...}
@@ -237,13 +234,6 @@ def sub_document_lookup_in(
     if not specs:
         error = (
             "At least one of get_paths, exists_paths, or count_paths must be provided"
-        )
-        logger.error(f"Error performing sub-document lookup in {keyspace}: {error}")
-        return {"error": error}
-    if len(specs) > MAX_LOOKUP_IN_SPECS:
-        error = (
-            f"Too many sub-document paths requested ({len(specs)}). Couchbase allows at "
-            f"most {MAX_LOOKUP_IN_SPECS} operations combined in a single lookup_in call."
         )
         logger.error(f"Error performing sub-document lookup in {keyspace}: {error}")
         return {"error": error}
