@@ -17,4 +17,4 @@ wheels/
 #test coverage file
 .coverage
 
-mcp-server-couchbase/tests/accuracy/results/*
+/tests/accuracy/results/*
