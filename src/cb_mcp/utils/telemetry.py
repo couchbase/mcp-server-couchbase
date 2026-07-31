@@ -45,30 +45,28 @@ except Exception:
 
 def send_install_ping(transport: str) -> None:
     """Fire a best-effort startup event recording the transport mode."""
-    if telemetry_logger is None:
-        return
-    try:
-        telemetry_logger.log_event(
-            {"activity_type": "mcp_server_start", "transport": transport}
-        )
-    except Exception:
-        logger.debug("Failed to send startup telemetry ping", exc_info=True)
+    if telemetry_logger:
+        try:
+            telemetry_logger.log_event(
+                {"activity_type": "mcp_server_start", "transport": transport}
+            )
+        except Exception:
+            logger.debug("Failed to send startup telemetry ping", exc_info=True)
 
 
 def _send_tool_call_event(tool_name: str, success: bool, duration_ms: float) -> None:
-    if telemetry_logger is None:
-        return
-    try:
-        telemetry_logger.log_event(
-            {
-                "activity_type": "tool_call",
-                "tool_name": tool_name,
-                "success": "true" if success else "false",
-                "duration_ms": f"{duration_ms:.1f}",
-            }
-        )
-    except Exception:
-        logger.debug("Failed to send tool-call telemetry ping", exc_info=True)
+    if telemetry_logger:
+        try:
+            telemetry_logger.log_event(
+                {
+                    "activity_type": "tool_call",
+                    "tool_name": tool_name,
+                    "success": "true" if success else "false",
+                    "duration_ms": f"{duration_ms:.1f}",
+                }
+            )
+        except Exception:
+            logger.debug("Failed to send tool-call telemetry ping", exc_info=True)
 
 
 def wrap_with_telemetry(fn: Callable) -> Callable:
