@@ -54,7 +54,6 @@ EXPECTED_TOOLS = {
     "get_collections_in_scope",
     "get_scopes_in_bucket",
     "get_document_by_id",
-    "sub_document_lookup_in",
     "upsert_document_by_id",
     "insert_document_by_id",
     "replace_document_by_id",
@@ -88,7 +87,6 @@ TOOLS_BY_CATEGORY = {
     },
     "kv": {
         "get_document_by_id",
-        "sub_document_lookup_in",
         "upsert_document_by_id",
         "insert_document_by_id",
         "replace_document_by_id",
