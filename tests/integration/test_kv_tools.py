@@ -828,3 +828,142 @@ async def test_sub_document_lookup_in_exceeds_16_ops() -> None:
         assert "error" in payload, (
             "Expected an error key when exceeding the 16-op limit"
         )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_lookup_in_document_not_found() -> None:
+    """A document_id that does not exist must return {"error": ...} without
+    raising an MCP-level error."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+    doc_id = f"test_subdoc_notfound_{uuid.uuid4().hex[:8]}"
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "sub_document_lookup_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "get_paths": ["name"],
+            },
+        )
+        payload = extract_payload(response)
+
+        is_error = getattr(response, "isError", None) or getattr(
+            response, "is_error", False
+        )
+        assert not is_error
+        assert "error" in payload, "Expected an error key when document does not exist"
+
+
+@pytest.mark.asyncio
+async def test_sub_document_lookup_in_count_on_scalar_reports_error() -> None:
+    """count on a scalar field (PathMismatchException) must be reported as a
+    per-path error without failing the other requested paths."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_subdoc_countscalar_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Mismatch Test", "tags": ["x", "y"]}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_lookup_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "count_paths": ["name", "tags"],
+            },
+        )
+        payload = extract_payload(response)
+
+        is_error = getattr(response, "isError", None) or getattr(
+            response, "is_error", False
+        )
+        assert not is_error, "PathMismatch on one count path must not fail the whole call"
+        assert payload["count"]["name"]["success"] is False, (
+            "count on a scalar field must report per-path failure"
+        )
+        assert payload["count"]["tags"] == {"success": True, "value": 2}
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_lookup_in_array_index_paths() -> None:
+    """Array index paths (bracket notation and negative indexing) must resolve
+    correctly, including nested paths inside array elements."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_subdoc_arrayidx_{uuid.uuid4().hex[:8]}"
+    doc_content = {
+        "name": "Array Index Test",
+        "reviews": [
+            {"author": "Alice", "rating": 5},
+            {"author": "Bob", "rating": 3},
+        ],
+    }
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_lookup_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "get_paths": ["reviews[0].author", "reviews[-1].rating"],
+            },
+        )
+        payload = extract_payload(response)
+
+        assert payload["get"]["reviews[0].author"] == {"success": True, "value": "Alice"}
+        assert payload["get"]["reviews[-1].rating"] == {"success": True, "value": 3}
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )

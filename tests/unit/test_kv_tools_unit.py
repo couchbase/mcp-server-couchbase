@@ -260,3 +260,23 @@ class TestSubDocumentLookupIn:
             )
 
         assert result == {"error": "connection reset"}
+
+    def test_count_path_mismatch_reported_not_raised(self) -> None:
+        """A PathMismatchException on a count spec (e.g. counting a scalar field)
+        is reported per-path, and other paths in the same call still resolve."""
+        ctx, cluster, collection = _make_ctx_with_collection()
+        collection.lookup_in.return_value = _FakeLookupInResult(
+            [
+                {"error": PathMismatchException("Path mismatch.")},  # count: name (scalar)
+                {"value": 2},  # count: tags (array)
+            ]
+        )
+
+        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+            result = sub_document_lookup_in(
+                ctx, "b", "s", "c", "doc1", count_paths=["name", "tags"]
+            )
+
+        assert result["count"]["name"]["success"] is False
+        assert "error" in result["count"]["name"]
+        assert result["count"]["tags"] == {"success": True, "value": 2}
