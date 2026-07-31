@@ -24,6 +24,8 @@ from pathlib import Path
 import pytest
 from conftest import create_logging_test_session, extract_payload
 
+from cb_mcp.utils.constants import BYTES_PER_MB
+
 
 @pytest.mark.asyncio
 async def test_default_file_sinks_create_per_level_files(tmp_path) -> None:
@@ -272,7 +274,23 @@ async def test_logging_block_exposed_via_mcp_tool(tmp_path) -> None:
     assert log_files["INFO"] == str(tmp_path / "main.info.log")
     assert log_files["DEBUG"] == str(tmp_path / "main.debug.log")
     assert log_files["ERROR"] == str(tmp_path / "main.error.log")
-    assert logging_block["max_bytes"] == 1048576
+    # max_bytes and backup_counts are per-level maps keyed by the active levels
+    # (size reported in bytes; default 1 MB = 1048576).
+    assert logging_block["max_bytes"] == {
+        "DEBUG": BYTES_PER_MB,
+        "INFO": BYTES_PER_MB,
+        "WARNING": BYTES_PER_MB,
+        "ERROR": BYTES_PER_MB,
+    }
+    assert logging_block["backup_counts"] == {
+        "DEBUG": 1,
+        "INFO": 1,
+        "WARNING": 1,
+        "ERROR": 1,
+    }
+    # The dedicated env file is derived from the same --log-file base.
+    assert logging_block["server_config_file"] == str(tmp_path / "main_config.log.json")
+    # The serialised keys are the plural, per-level forms.
     assert "backup_count" not in logging_block
 
 
@@ -357,8 +375,9 @@ async def test_log_file_rotates_when_max_bytes_exceeded(tmp_path) -> None:
     ) as session:
         # Each tool call generates ~tens of bytes of DEBUG records; 40 iterations
         # is generous given the 1 KiB cap on the per-level DEBUG file. Backup
-        # count is fixed at 1 (not configurable), so a single .1 rollover is
-        # what we expect.
+        # count defaults to 1 here (configurable via
+        # CB_MCP_LOG_RETENTION_BACKUP_COUNT), so a single .1 rollover is what we
+        # expect. Higher/zero counts are covered by the retention tests below.
         for _ in range(40):
             await session.call_tool("get_server_configuration_status", arguments={})
 
@@ -406,3 +425,338 @@ async def test_combined_invalid_inputs_degrade_gracefully(tmp_path) -> None:
     assert "foo_sink" in err_text, (
         f"invalid sink fallback missing from error log:\n{err_text}"
     )
+
+
+async def _restart_server_n_times(extra_args: list[str], times: int) -> None:
+    """Boot and cleanly shut down the server ``times`` times with the same args.
+
+    Per-tool-call log volume is effectively zero (the config tool logs nothing),
+    so rotation is driven by the one-time startup records instead. Each restart
+    appends the ~2 KB DEBUG env-info record to the per-level files; with a small
+    ``--log-max-bytes`` that reliably forces rollovers without depending on
+    fragile per-call byte estimates.
+    """
+    for _ in range(times):
+        async with create_logging_test_session(extra_args=extra_args):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_configurable_backup_count_keeps_multiple_backups(tmp_path) -> None:
+    """``--log-retention-backup-count N`` retains up to N rotated backups on disk.
+
+    Req 1 end-to-end: with the count set to 2 and a small byte budget, repeated
+    startups must produce ``.1`` and ``.2`` rotations of the DEBUG file but never
+    ``.3`` — the count both takes effect (>1 backup) and is capped (no N+1).
+    """
+    base_path = tmp_path / "main.log"
+    await _restart_server_n_times(
+        [
+            "--log-level",
+            "DEBUG",
+            "--log-sinks",
+            "file",
+            "--log-file",
+            str(base_path),
+            "--log-max-bytes",
+            "1000",
+            "--log-retention-backup-count",
+            "2",
+        ],
+        times=4,
+    )
+
+    assert (tmp_path / "main.debug.log.1").exists(), "first backup (.1) never created"
+    assert (tmp_path / "main.debug.log.2").exists(), (
+        "second backup (.2) missing — configured count of 2 did not take effect"
+    )
+    # The count is capped at 2: a third backup must never exist.
+    assert not (tmp_path / "main.debug.log.3").exists(), (
+        "backup count cap breached — .3 exists despite count=2"
+    )
+
+
+@pytest.mark.asyncio
+async def test_zero_backup_count_keeps_only_live_file(tmp_path) -> None:
+    """``--log-retention-backup-count 0`` keeps only the live file, still bounded.
+
+    Req 1 behaviour: 0 means no rotated backups. The live file is truncated on
+    rollover (via the bounded handler) instead of growing unbounded, so across
+    repeated startups no ``.N`` files appear and the live file stays bounded
+    rather than accumulating every run's volume.
+    """
+    base_path = tmp_path / "main.log"
+    await _restart_server_n_times(
+        [
+            "--log-level",
+            "DEBUG",
+            "--log-sinks",
+            "file",
+            "--log-file",
+            str(base_path),
+            "--log-max-bytes",
+            "1000",
+            "--log-retention-backup-count",
+            "0",
+        ],
+        times=4,
+    )
+
+    debug_path = tmp_path / "main.debug.log"
+    assert debug_path.exists(), "live DEBUG file missing"
+    # No rotated backups of any level should exist at count=0. Rotated files are
+    # numbered (main.<level>.log.1, .2, ...); the *.log.[0-9]* glob excludes the
+    # dedicated main_config.log.json snapshot.
+    rotated = list(tmp_path.glob("*.log.[0-9]*"))
+    assert not rotated, f"count=0 created rotated backups: {rotated}"
+    # The live file stayed bounded: 4 restarts append ~2 KB each (~8 KB) without
+    # rotation; truncation on rollover keeps it well under that.
+    assert debug_path.stat().st_size <= 4096, (
+        f"live file grew unbounded at count=0: {debug_path.stat().st_size} bytes"
+    )
+
+
+@pytest.mark.asyncio
+async def test_per_level_retention_and_size_via_env_reflected_in_snapshot(
+    tmp_path,
+) -> None:
+    """Per-level size + retention env vars flow through to the MCP tool snapshot.
+
+    Reqs 1 & 2 end-to-end via the ``CB_MCP_LOG_*`` env vars (the config surface
+    operators actually use): sizes are configured in MB via the canonical
+    ``CB_MCP_LOG_ROTATION_MAX_SIZE_MB`` and per-level ``*_ROTATION_MAX_SIZE_MB``, unset
+    levels inherit the global, explicit per-level values win, and
+    ``get_server_configuration_status`` reports the resolved per-level maps
+    (size in bytes).
+    """
+    base_path = tmp_path / "main.log"
+    async with create_logging_test_session(
+        extra_args=[
+            "--log-level",
+            "DEBUG",
+            "--log-sinks",
+            "file",
+            "--log-file",
+            str(base_path),
+        ],
+        env_overrides={
+            "CB_MCP_LOG_ROTATION_MAX_SIZE_MB": "1",  # 1 MB global (canonical)
+            "CB_MCP_LOG_INFO_ROTATION_MAX_SIZE_MB": "2",  # 2 MB INFO override
+            "CB_MCP_LOG_RETENTION_BACKUP_COUNT": "2",
+            "CB_MCP_LOG_ERROR_RETENTION_BACKUP_COUNT": "5",
+        },
+    ) as session:
+        response = await session.call_tool(
+            "get_server_configuration_status", arguments={}
+        )
+        payload = extract_payload(response)
+
+    logging_block = payload["logging"]
+    # Size (bytes): INFO overridden to 2 MB, every other level inherits 1 MB.
+    assert logging_block["max_bytes"] == {
+        "DEBUG": BYTES_PER_MB,
+        "INFO": 2 * BYTES_PER_MB,
+        "WARNING": BYTES_PER_MB,
+        "ERROR": BYTES_PER_MB,
+    }
+    # Retention: ERROR overridden to 5, every other level inherits the 2 global.
+    assert logging_block["backup_counts"] == {
+        "DEBUG": 2,
+        "INFO": 2,
+        "WARNING": 2,
+        "ERROR": 5,
+    }
+
+
+@pytest.mark.asyncio
+async def test_zero_rotation_size_falls_back_to_default_with_warning(tmp_path) -> None:
+    """A rotation size of 0 is rejected at startup: warn + fall back to default.
+
+    0 is invalid (it never means "disable rotation"). The server must still
+    start, log a warning naming the offending variable, and resolve the size to
+    the package default (verified via the tool snapshot). Uses the canonical
+    ``--log-rotation-max-size-mb`` (MB).
+    """
+    base_path = tmp_path / "main.log"
+    stderr_path = tmp_path / "server.stderr"
+    with stderr_path.open("w", encoding="utf-8") as stderr_file:
+        async with create_logging_test_session(
+            extra_args=[
+                "--log-level",
+                "DEBUG",
+                "--log-sinks",
+                "stderr,file",
+                "--log-file",
+                str(base_path),
+                "--log-rotation-max-size-mb",
+                "0",
+            ],
+            stderr_buffer=stderr_file,
+        ) as session:
+            response = await session.call_tool(
+                "get_server_configuration_status", arguments={}
+            )
+            payload = extract_payload(response)
+
+    # The warning names the offending variable and is visible on stderr.
+    stderr_text = stderr_path.read_text()
+    assert "CB_MCP_LOG_ROTATION_MAX_SIZE_MB=0" in stderr_text, (
+        f"missing 0-is-invalid warning on stderr:\n{stderr_text}"
+    )
+    # Every level resolved to the 1 MB package default (1048576 bytes) rather than 0.
+    assert payload["logging"]["max_bytes"] == {
+        "DEBUG": BYTES_PER_MB,
+        "INFO": BYTES_PER_MB,
+        "WARNING": BYTES_PER_MB,
+        "ERROR": BYTES_PER_MB,
+    }
+
+
+@pytest.mark.asyncio
+async def test_deprecated_max_bytes_warns_but_is_honored(tmp_path) -> None:
+    """The deprecated ``--log-max-bytes`` (bytes) still works, with a warning.
+
+    Backward compatibility: existing configs using CB_MCP_LOG_MAX_BYTES keep
+    working (in bytes), but a deprecation warning steers operators to the
+    canonical ``--log-rotation-max-size-mb`` (MB).
+    """
+    base_path = tmp_path / "main.log"
+    stderr_path = tmp_path / "server.stderr"
+    with stderr_path.open("w", encoding="utf-8") as stderr_file:
+        async with create_logging_test_session(
+            extra_args=[
+                "--log-level",
+                "DEBUG",
+                "--log-sinks",
+                "stderr,file",
+                "--log-file",
+                str(base_path),
+                "--log-max-bytes",
+                "4096",
+            ],
+            stderr_buffer=stderr_file,
+        ) as session:
+            response = await session.call_tool(
+                "get_server_configuration_status", arguments={}
+            )
+            payload = extract_payload(response)
+
+    stderr_text = stderr_path.read_text()
+    assert "CB_MCP_LOG_MAX_BYTES is deprecated" in stderr_text, (
+        f"missing deprecation warning on stderr:\n{stderr_text}"
+    )
+    # Honored verbatim (4096 bytes) across every level.
+    assert payload["logging"]["max_bytes"] == {
+        "DEBUG": 4096,
+        "INFO": 4096,
+        "WARNING": 4096,
+        "ERROR": 4096,
+    }
+
+
+@pytest.mark.asyncio
+async def test_fractional_rotation_size_reflected_in_snapshot(tmp_path) -> None:
+    """A fractional MB rotation size (0.5) is accepted and stored as exact bytes."""
+    base_path = tmp_path / "main.log"
+    async with create_logging_test_session(
+        extra_args=[
+            "--log-level",
+            "DEBUG",
+            "--log-sinks",
+            "file",
+            "--log-file",
+            str(base_path),
+        ],
+        env_overrides={"CB_MCP_LOG_ROTATION_MAX_SIZE_MB": "0.5"},
+    ) as session:
+        response = await session.call_tool(
+            "get_server_configuration_status", arguments={}
+        )
+        payload = extract_payload(response)
+
+    # 0.5 MB -> exactly 524288 bytes, no rounding.
+    assert payload["logging"]["max_bytes"] == {
+        "DEBUG": BYTES_PER_MB // 2,
+        "INFO": BYTES_PER_MB // 2,
+        "WARNING": BYTES_PER_MB // 2,
+        "ERROR": BYTES_PER_MB // 2,
+    }
+
+
+@pytest.mark.asyncio
+async def test_env_info_captured_in_dedicated_file_at_info(tmp_path) -> None:
+    """Req 3: the environment snapshot lands in its own file, even at INFO.
+
+    At the default INFO level no DEBUG file is created, yet the dedicated
+    ``_config.log.json`` file must still capture the snapshot — proving it is
+    level-independent and lives outside the rotating per-level files (so a
+    debug-file rotation can't lose it).
+    """
+    base_path = tmp_path / "main.log"
+    async with create_logging_test_session(
+        extra_args=[
+            "--log-sinks",
+            "file",
+            "--log-file",
+            str(base_path),
+        ],
+    ):
+        pass
+
+    server_config_file = tmp_path / "main_config.log.json"
+    assert server_config_file.exists(), "dedicated config file not created at INFO"
+    # No DEBUG file at INFO — the record only survives because it has its own
+    # file, not because it rode along in the (absent) debug log.
+    assert not (tmp_path / "main.debug.log").exists()
+
+    # The file is pure JSON (a single object).
+    parsed = json.loads(server_config_file.read_text())
+    assert "os" in parsed and "python" in parsed and "logging" in parsed
+
+
+@pytest.mark.asyncio
+async def test_server_config_file_survives_across_restarts_as_current_snapshot(
+    tmp_path,
+) -> None:
+    """The config file is overwritten each start, so it always holds one current
+    record and never grows across restarts."""
+    base_path = tmp_path / "main.log"
+    args = ["--log-sinks", "file", "--log-file", str(base_path)]
+    await _restart_server_n_times(args, times=3)
+
+    server_config_file = tmp_path / "main_config.log.json"
+    assert server_config_file.exists()
+    # Overwrite (not append): still a single valid JSON object after three starts.
+    assert isinstance(json.loads(server_config_file.read_text()), dict)
+
+
+@pytest.mark.asyncio
+async def test_config_file_survives_debug_rotation(tmp_path) -> None:
+    """the config snapshot is independent of per-level rotation.
+
+    Even after the DEBUG file rotates (forced with a tiny byte cap so the ~2 KB
+    startup env record rolls it over), the dedicated JSON snapshot is intact and
+    holds current, valid JSON.
+    """
+    base_path = tmp_path / "main.log"
+    # Small byte cap via the deprecated bytes var so the DEBUG env record forces
+    # a rollover; the MB var's 1 MB floor wouldn't rotate on ~2 KB.
+    args = [
+        "--log-level",
+        "DEBUG",
+        "--log-sinks",
+        "file",
+        "--log-file",
+        str(base_path),
+        "--log-max-bytes",
+        "1024",
+    ]
+    await _restart_server_n_times(args, times=3)
+
+    # The DEBUG file rotated (default retention keeps one backup) ...
+    assert (tmp_path / "main.debug.log.1").exists(), "DEBUG file did not rotate"
+    # ... but the dedicated config file survives and holds current, valid JSON.
+    config_file = tmp_path / "main_config.log.json"
+    assert config_file.exists()
+    parsed = json.loads(config_file.read_text())
+    assert "os" in parsed and "logging" in parsed
