@@ -1,21 +1,30 @@
-# Build stage - use official uv image with Python 3.13
+# Stage 1: Build the distribution wheel from source
+FROM ghcr.io/astral-sh/uv:python3.13-trixie-slim AS wheel-builder
+
+WORKDIR /src
+
+COPY pyproject.toml README.md ./
+COPY src/ ./src/
+
+RUN uv build --wheel --out-dir /wheels
+
+# Stage 2: Create venv, install pinned deps from lock file, then install pre-built wheel
 FROM ghcr.io/astral-sh/uv:python3.13-trixie-slim AS builder
 
-# Set uv configuration
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 
 WORKDIR /build
 
-# Copy dependency files for caching
-COPY pyproject.toml README.md ./
-COPY src/ ./src/
+COPY pyproject.toml README.md uv.lock ./
 
-# Create virtual environment and install dependencies
+COPY --from=wheel-builder /wheels/ /wheels/
+
 RUN uv venv /opt/venv && \
-    uv pip install --python /opt/venv/bin/python .
+    UV_PROJECT_ENVIRONMENT=/opt/venv uv sync --frozen --no-install-project && \
+    uv pip install --python /opt/venv/bin/python --no-deps /wheels/couchbase_mcp_server-*.whl
 
-# Runtime stage - use Python image with same version as builder
+# Runtime stage
 FROM python:3.13-slim-trixie AS runtime
 
 # Accept build arguments for labels
@@ -35,7 +44,7 @@ RUN useradd --system --uid 1001 mcpuser
 
 WORKDIR /app
 
-# Copy virtual environment and application from builder
+# Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
 
 # Set up Python environment
