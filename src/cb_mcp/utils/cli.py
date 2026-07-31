@@ -17,14 +17,19 @@ from logging import getLogger
 import click
 
 from .constants import MCP_SERVER_NAME
-from .logging import parse_log_level, parse_log_sinks
+from .logging import (
+    ParsedLogLevel,
+    ParsedLogSinks,
+    parse_log_level,
+    parse_log_sinks,
+)
 
 logger = getLogger(f"{MCP_SERVER_NAME}.utils.cli")
 
 
 def validate_log_level(
     ctx: click.Context, param: click.Parameter, value: str
-) -> tuple[str, str | None]:
+) -> ParsedLogLevel:
     """Click callback for ``--log-level``.
 
     Delegates to :func:`parse_log_level`, which falls back to the default
@@ -36,7 +41,7 @@ def validate_log_level(
 
 def validate_log_sinks(
     ctx: click.Context, param: click.Parameter, value: str
-) -> tuple[set[str], list[str]]:
+) -> ParsedLogSinks:
     """Click callback for ``--log-sinks``.
 
     Delegates to :func:`parse_log_sinks`, which keeps valid tokens, collects
