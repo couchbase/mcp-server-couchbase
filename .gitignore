@@ -16,3 +16,5 @@ wheels/
 *.log.*
 #test coverage file
 .coverage
+
+/tests/accuracy/results/*

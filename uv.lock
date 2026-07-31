@@ -329,6 +329,7 @@ dependencies = [
     { name = "couchbase" },
     { name = "fastmcp" },
     { name = "lark-sqlpp" },
+    { name = "reo-census" },
 ]
 
 [package.optional-dependencies]
@@ -352,6 +353,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = "==9.1.1" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = "==1.4.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.0.0" },
+    { name = "reo-census", specifier = ">=0.1.3,<0.2.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.16.0" },
 ]
 provides-extras = ["dev"]
@@ -1571,6 +1573,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/22/f5/df4e9027acead3ecc63e50fe1e36aca1523e1719559c499951bb4b53188f/referencing-0.37.0.tar.gz", hash = "sha256:44aefc3142c5b842538163acb373e24cce6632bd54bdb01b21ad5863489f50d8", size = 78036, upload-time = "2025-10-13T15:30:48.871Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2c/58/ca301544e1fa93ed4f80d724bf5b194f6e4b945841c5bfd555878eea9fcb/referencing-0.37.0-py3-none-any.whl", hash = "sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231", size = 26766, upload-time = "2025-10-13T15:30:47.625Z" },
+]
+
+[[package]]
+name = "reo-census"
+version = "0.1.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/79/4d/a86d93d9c634f088cd4e88fd686630a96ee45a2686ee029d59882b0cc345/reo_census-0.1.3.tar.gz", hash = "sha256:07b2aa01aa0a7734c01cc43ec3393afabfaa3746772126e1e7b761c40603044d", size = 8420, upload-time = "2026-06-12T12:05:59.006Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/16/0f/00d8bad9e8543fc7ed133c5507318336a3620951ffd6c15a2cac76b80019/reo_census-0.1.3-py3-none-any.whl", hash = "sha256:d4a32e383c4019b6d8d40b899c3040971e4e2507c14e23632a9cab551dce4c79", size = 6786, upload-time = "2026-06-12T12:05:57.455Z" },
 ]
 
 [[package]]
