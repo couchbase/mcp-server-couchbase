@@ -34,30 +34,32 @@ try:
     except PackageNotFoundError:
         _package_version = "0.0.0"
 
-    _logger = ReoEventLogger(
+    telemetry_logger = ReoEventLogger(
         package_name=_PACKAGE_NAME,
         package_version=_package_version,
     )
 except Exception:
     logger.debug("reo-census unavailable; telemetry disabled", exc_info=True)
-    _logger = None
+    telemetry_logger = None
 
 
 def send_install_ping(transport: str) -> None:
     """Fire a best-effort startup event recording the transport mode."""
-    if _logger is None:
+    if telemetry_logger is None:
         return
     try:
-        _logger.log_event({"activity_type": "mcp_server_start", "transport": transport})
+        telemetry_logger.log_event(
+            {"activity_type": "mcp_server_start", "transport": transport}
+        )
     except Exception:
         logger.debug("Failed to send startup telemetry ping", exc_info=True)
 
 
 def _send_tool_call_event(tool_name: str, success: bool, duration_ms: float) -> None:
-    if _logger is None:
+    if telemetry_logger is None:
         return
     try:
-        _logger.log_event(
+        telemetry_logger.log_event(
             {
                 "activity_type": "tool_call",
                 "tool_name": tool_name,
@@ -77,11 +79,11 @@ def wrap_with_telemetry(fn: Callable) -> Callable:
     confirmation/scope-check wrapping) so the recorded duration/success
     reflects only the tool's own execution.
 
-    When telemetry is unavailable (``_logger`` is ``None`` at wrap time), the
+    When telemetry is unavailable (``telemetry_logger`` is ``None`` at wrap time), the
     original function is returned unchanged rather than a wrapper that would
     just do timing work for an event that never sends.
     """
-    if _logger is None:
+    if telemetry_logger is None:
         return fn
 
     if inspect.iscoroutinefunction(fn):
