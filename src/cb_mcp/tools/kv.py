@@ -239,9 +239,9 @@ def sub_document_lookup_in(
         return {"error": error}
 
     cluster = get_cluster_connection(ctx)
-    bucket = connect_to_bucket(cluster, bucket_name)
 
     try:
+        bucket = connect_to_bucket(cluster, bucket_name)
         logger.debug(f"Performing sub-document lookup in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
         result = collection.lookup_in(document_id, specs)
