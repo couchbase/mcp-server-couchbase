@@ -244,7 +244,7 @@ PRs without testing evidence will be sent back for it before review.
 
 ### PR Checklist
 
-- [ ] Linked to an issue (required for new tools). The issue can be on JIRA (preferred for internal contributors)/GitHub
+- [ ] Linked to an issue (required for new tools). The issue can be on JIRA (preferred for internal contributors) or GitHub.
 - [ ] Uses the Couchbase SDK (REST fallback justified in the description, if any)
 - [ ] Works on both Capella and self-managed Couchbase Server
 - [ ] No changes to `cb_mcp.core` contracts / managed MCP interfaces (or discussed first)
