@@ -1482,3 +1482,235 @@ async def test_sub_document_lookup_in_count_on_scalar_reports_error() -> None:
         )
         assert payload["count"]["tags"]["success"] is True
         assert payload["count"]["tags"]["value"] == 2
+
+
+@pytest.mark.asyncio
+async def test_sub_document_mutate_in_replace() -> None:
+    """Verify sub_document_mutate_in can replace existing fields."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_mutate_replace_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Test Hotel", "status": "pending"}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "replace_specs": [{"path": "status", "value": "confirmed"}],
+            },
+        )
+        payload = extract_payload(response)
+
+        assert payload["replace"]["status"]["success"] is True
+
+        get_response = await session.call_tool(
+            "get_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+        get_payload = extract_payload(get_response)
+        assert get_payload["status"] == "confirmed"
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_mutate_in_array_append() -> None:
+    """Verify sub_document_mutate_in can append values to arrays."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_mutate_array_append_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Test Hotel", "tags": ["wifi", "parking"]}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "array_append_specs": [
+                    {"path": "tags", "values": ["gym", "spa"]}
+                ],
+            },
+        )
+        payload = extract_payload(response)
+
+        assert payload["array_append"]["tags"]["success"] is True
+
+        get_response = await session.call_tool(
+            "get_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+        get_payload = extract_payload(get_response)
+        assert get_payload["tags"] == ["wifi", "parking", "gym", "spa"]
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_mutate_in_counter() -> None:
+    """Verify sub_document_mutate_in can increment and decrement counters."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_mutate_counter_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Test Hotel", "reviews_count": 0}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "counter_specs": [
+                    {"path": "reviews_count", "delta": 5}
+                ],
+            },
+        )
+        payload = extract_payload(response)
+
+        assert payload["counter"]["reviews_count"]["success"] is True
+        assert payload["counter"]["reviews_count"]["value"] == 5
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_mutate_in_remove() -> None:
+    """Verify sub_document_mutate_in can remove fields from documents."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_mutate_remove_{uuid.uuid4().hex[:8]}"
+    doc_content = {
+        "name": "Test Hotel",
+        "deprecated_field": "should be removed",
+    }
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_mutate_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "remove_paths": ["deprecated_field"],
+            },
+        )
+        payload = extract_payload(response)
+
+        assert payload["remove"]["deprecated_field"]["success"] is True
+
+        get_response = await session.call_tool(
+            "get_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+        get_payload = extract_payload(get_response)
+        assert "deprecated_field" not in get_payload
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
