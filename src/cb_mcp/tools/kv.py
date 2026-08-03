@@ -309,67 +309,57 @@ def sub_document_mutate_in(
     create_parents: bool = False,
 ) -> dict[str, Any]:
     """Modify parts of an EXISTING document without rewriting the whole thing, using
-    Couchbase sub-document mutation operations. The document itself must already exist —
-    this tool does not create it (use upsert_document_by_id first if it doesn't exist yet).
+    Couchbase sub-document mutation operations. The document must already exist — use
+    upsert_document_by_id first if it doesn't.
 
     Use this instead of upsert_document_by_id/replace_document_by_id when you only need to
     change, add, or remove a few fields — AND you already know the exact field path(s) to
-    mutate (e.g. from a prior get_document_by_id or sub_document_lookup_in call on this same
-    document, from the user explicitly naming the field, or from a known/confirmed schema
-    for this collection). Do NOT guess field paths.
+    mutate (e.g. from a prior get_document_by_id or sub_document_lookup_in call, from the
+    user explicitly naming the field, or from a known schema). Do NOT guess field paths.
 
-    IMPORTANT — atomicity: a single mutate_in call is all-or-nothing. If ANY requested spec
-    fails (e.g. an insert on a path that already exists, a replace on a path that doesn't),
-    the ENTIRE call fails and NONE of the requested mutations are applied — unlike
-    sub_document_lookup_in, there is no partial success across specs in one call.
+    IMPORTANT — atomicity: a mutate_in call is all-or-nothing. If ANY requested spec fails
+    (e.g. an insert on a path that already exists), the ENTIRE call fails and NONE of the
+    mutations are applied — unlike sub_document_lookup_in, there is no partial success.
 
     Provide one or more of the following lists. Each path uses Couchbase's dot/bracket path
     syntax (e.g. "address.city", "tags[0]", "tags[-1]" for the last array element):
     - upsert_specs: [{"path": str, "value": <any JSON value>}, ...] — set the value at each
       path, creating the field if it doesn't exist.
     - insert_specs: [{"path": str, "value": <any JSON value>}, ...] — create the field at
-      each path; fails (the whole call) if a path already exists.
+      each path; fails if a path already exists.
     - replace_specs: [{"path": str, "value": <any JSON value>}, ...] — set the value at each
-      path; fails (the whole call) if a path does not already exist.
-    - remove_paths: [str, ...] — delete the field at each path; fails (the whole call) if a
-      path does not exist.
+      path; fails if a path doesn't already exist.
+    - remove_paths: [str, ...] — delete the field at each path; fails if a path doesn't exist.
     - array_append_specs / array_prepend_specs: [{"path": str, "values": [<any JSON value>,
       ...]}, ...] — add one or more values to the end/start of the array at each path.
     - array_insert_specs: [{"path": str, "values": [<any JSON value>, ...]}, ...] — insert
       one or more values at a specific array index; path must point at an index, e.g.
       "tags[2]".
     - array_add_unique_specs: [{"path": str, "value": <scalar: str|int|float|bool>}, ...] —
-      add a single scalar value to the array at each path only if it isn't already present;
-      fails (the whole call) if the value is already in the array.
+      add a scalar value to the array at each path only if it isn't already present; fails
+      if the value is already in the array.
     - counter_specs: [{"path": str, "delta": int}, ...] — increment (delta >= 0) or
-      decrement (delta < 0) the integer at each path by delta, returning the new value.
-      The existing value and the result must fit in a signed 64-bit integer
-      (-9223372036854775807 to 9223372036854775807) — this is a narrower range than
-      full-document counters, and unlike full-document counters this fails (the whole
-      call) on overflow/underflow instead of wrapping or silently clamping to 0. If the
-      field doesn't exist yet, it is created (and its parents, if create_parents=True).
+      decrement (delta < 0) the integer at each path by delta, returning the new value. If
+      the field doesn't exist yet, it is created (and its parents, if create_parents=True).
 
     create_parents: if True, missing intermediate path segments are created automatically
-    for upsert_specs, insert_specs, array_append_specs, array_prepend_specs,
-    array_insert_specs, array_add_unique_specs, and counter_specs. It has no effect on
-    replace_specs or remove_paths, which always require the full path to already exist.
+    for every category except replace_specs and remove_paths, which always require the full
+    path to already exist.
 
-    At least one spec must be provided, and the combined number of specs across all
-    categories cannot exceed 16 (a Couchbase server limit on subdocument operations per
-    call, shared with sub_document_lookup_in). Paths cannot exceed 1024 characters or 32
-    levels of nesting. Violating either of these returns {"error": "..."} and nothing is
-    mutated.
+    At least one spec must be provided. As a rule of thumb, keep the combined number of
+    specs across all categories to 16 or fewer — Couchbase limits subdocument operations
+    per call, though the exact limit is server-side and may change. If the server rejects
+    the call, the whole call fails with {"error": "..."} and nothing is mutated.
 
-    Returns a dict with a key for each category that was requested (only requested
-    categories are included), each mapping path -> {"success": true} (or, for
-    counter_specs, {"success": true, "value": <new value>}):
+    Returns a dict with a key for each requested category, mapping path -> {"success": true}
+    (or, for counter_specs, {"success": true, "value": <new value>}):
     {
         "upsert": {"<path>": {"success": true}},
         "counter": {"<path>": {"success": true, "value": <new value>}},
         ...
     }
-    On a connection/mutation failure, or an invalid request (no specs / too many specs),
-    returns {"error": "<message>"} instead and no mutations are applied.
+    On a connection/mutation failure, or an invalid request, returns {"error": "<message>"}
+    instead and no mutations are applied.
     """
     keyspace = _keyspace(bucket_name, scope_name, collection_name)
 
