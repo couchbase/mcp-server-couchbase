@@ -233,23 +233,6 @@ class TestSubDocumentLookupIn:
         assert "error" in result
         collection.lookup_in.assert_not_called()
 
-    def test_exceeds_16_ops_returns_error(self) -> None:
-        """More than 16 combined paths exceeds the Couchbase server limit."""
-        ctx, cluster, collection = _make_ctx_with_collection()
-
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            result = sub_document_lookup_in(
-                ctx,
-                "b",
-                "s",
-                "c",
-                "doc1",
-                get_paths=[f"field{i}" for i in range(17)],
-            )
-
-        assert "error" in result
-        collection.lookup_in.assert_not_called()
-
     def test_lookup_in_sdk_error_returns_error(self) -> None:
         """An unexpected SDK/connection error is logged and returned, not raised."""
         ctx, cluster, collection = _make_ctx_with_collection()
@@ -452,23 +435,6 @@ class TestSubDocumentMutateIn:
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
             result = sub_document_mutate_in(ctx, "b", "s", "c", "doc1")
-
-        assert "error" in result
-        collection.mutate_in.assert_not_called()
-
-    def test_exceeds_16_ops_returns_error(self) -> None:
-        """More than 16 combined specs exceeds the Couchbase server limit."""
-        ctx, cluster, collection = _make_ctx_with_collection()
-
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            result = sub_document_mutate_in(
-                ctx,
-                "b",
-                "s",
-                "c",
-                "doc1",
-                upsert_specs=[{"path": f"field{i}", "value": i} for i in range(17)],
-            )
 
         assert "error" in result
         collection.mutate_in.assert_not_called()

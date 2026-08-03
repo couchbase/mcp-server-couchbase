@@ -801,37 +801,6 @@ async def test_sub_document_lookup_in_no_paths_returns_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sub_document_lookup_in_exceeds_16_ops() -> None:
-    """Requesting more than 16 combined paths must report an error in the
-    payload without failing the MCP call itself."""
-    bucket = require_test_bucket()
-    scope = get_test_scope()
-    collection = get_test_collection()
-    doc_id = f"test_subdoc_toomany_{uuid.uuid4().hex[:8]}"
-
-    async with create_mcp_session() as session:
-        response = await session.call_tool(
-            "sub_document_lookup_in",
-            arguments={
-                "bucket_name": bucket,
-                "scope_name": scope,
-                "collection_name": collection,
-                "document_id": doc_id,
-                "get_paths": [f"field{i}" for i in range(17)],
-            },
-        )
-        payload = extract_payload(response)
-
-        is_error = getattr(response, "isError", None) or getattr(
-            response, "is_error", False
-        )
-        assert not is_error
-        assert "error" in payload, (
-            "Expected an error key when exceeding the 16-op limit"
-        )
-
-
-@pytest.mark.asyncio
 async def test_sub_document_mutate_in_upsert() -> None:
     """Verify sub_document_mutate_in can upsert a new field into an existing doc."""
     bucket = require_test_bucket()
@@ -1376,37 +1345,6 @@ async def test_sub_document_mutate_in_no_specs_returns_error() -> None:
         )
         assert not is_error
         assert "error" in payload, "Expected an error key when no specs are provided"
-
-
-@pytest.mark.asyncio
-async def test_sub_document_mutate_in_exceeds_16_ops() -> None:
-    """Requesting more than 16 combined mutation specs must report an error in
-    the payload without failing the MCP call itself."""
-    bucket = require_test_bucket()
-    scope = get_test_scope()
-    collection = get_test_collection()
-    doc_id = f"test_mutate_toomany_{uuid.uuid4().hex[:8]}"
-
-    async with create_mcp_session() as session:
-        response = await session.call_tool(
-            "sub_document_mutate_in",
-            arguments={
-                "bucket_name": bucket,
-                "scope_name": scope,
-                "collection_name": collection,
-                "document_id": doc_id,
-                "upsert_specs": [{"path": f"field{i}", "value": i} for i in range(17)],
-            },
-        )
-        payload = extract_payload(response)
-
-        is_error = getattr(response, "isError", None) or getattr(
-            response, "is_error", False
-        )
-        assert not is_error
-        assert "error" in payload, (
-            "Expected an error key when exceeding the 16-op limit"
-        )
 
 
 @pytest.mark.asyncio

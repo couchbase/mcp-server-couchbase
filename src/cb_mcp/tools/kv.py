@@ -21,10 +21,6 @@ from ..utils.connection import connect_to_bucket
 from ..utils.constants import MCP_SERVER_NAME
 from ..utils.context import get_cluster_connection
 
-# Couchbase server limit: max subdocument operations combined in a single
-# lookup_in or mutate_in call.
-MAX_SUBDOC_SPECS = 16
-
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.kv")
 
 
@@ -248,13 +244,6 @@ def sub_document_lookup_in(
         )
         logger.error(f"Error performing sub-document lookup in {keyspace}: {error}")
         return {"error": error}
-    if len(specs) > MAX_SUBDOC_SPECS:
-        error = (
-            f"Too many sub-document paths requested ({len(specs)}). Couchbase allows at "
-            f"most {MAX_SUBDOC_SPECS} operations combined in a single lookup_in call."
-        )
-        logger.error(f"Error performing sub-document lookup in {keyspace}: {error}")
-        return {"error": error}
 
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
@@ -443,13 +432,6 @@ def sub_document_mutate_in(
 
     if not specs:
         error = "At least one mutation spec must be provided"
-        logger.error(f"Error performing sub-document mutation in {keyspace}: {error}")
-        return {"error": error}
-    if len(specs) > MAX_SUBDOC_SPECS:
-        error = (
-            f"Too many sub-document mutations requested ({len(specs)}). Couchbase allows "
-            f"at most {MAX_SUBDOC_SPECS} operations combined in a single mutate_in call."
-        )
         logger.error(f"Error performing sub-document mutation in {keyspace}: {error}")
         return {"error": error}
 
