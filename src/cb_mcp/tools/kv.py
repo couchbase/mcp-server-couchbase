@@ -200,15 +200,15 @@ def sub_document_lookup_in(
     length or nesting depth), the whole call fails with {"error": "..."}.
 
     A path that doesn't exist (or otherwise fails, e.g. count on a non-array/object) does
-    NOT fail the whole call — it is reported individually as {"success": False, "error": ...}
-    in the returned dict so the other requested paths can still be resolved.
+    NOT fail the whole call — it is reported individually as {"error": ...} in the
+    returned dict so the other requested paths can still be resolved.
 
     Returns a dict with a key for each category that was requested (only requested
     categories are included):
     {
-        "get": {"<path>": {"success": true, "value": <value>} | {"success": false, "error": "..."}},
-        "exists": {"<path>": true | false},
-        "count": {"<path>": {"success": true, "value": <count>} | {"success": false, "error": "..."}},
+        "get": {"<path>": {"value": <value>} | {"error": "..."}},
+        "exists": {"<path>": {"value": true | false} | {"error": "..."}},
+        "count": {"<path>": {"value": <count>} | {"error": "..."}},
     }
     On a connection/lookup failure, or an invalid request (no paths / too many paths),
     returns {"error": "<message>"} instead.
@@ -254,20 +254,15 @@ def sub_document_lookup_in(
     response: dict[str, Any] = {}
     for index, (op, path) in enumerate(spec_meta):
         bucket_for_op = response.setdefault(op, {})
-        if op == "exists":
-            try:
-                bucket_for_op[path] = result.exists(index)
-            except CouchbaseException as e:
-                bucket_for_op[path] = {"success": False, "error": str(e)}
-            continue
         try:
-            value = result.content_as[lambda v: v](index)
-            bucket_for_op[path] = {"success": True, "value": value}
+            if op == "exists":
+                bucket_for_op[path] = {"value": result.exists(index)}
+            else:
+                # Identity transform: return the raw value at the path as whatever
+                # JSON type it is (get), or the element count (count).
+                bucket_for_op[path] = {"value": result.content_as[lambda v: v](index)}
         except CouchbaseException as e:
-            bucket_for_op[path] = {
-                "success": False,
-                "error": str(e),
-            }
+            bucket_for_op[path] = {"error": str(e)}
 
     logger.info(f"Successfully performed sub-document lookup in {keyspace}")
     return response

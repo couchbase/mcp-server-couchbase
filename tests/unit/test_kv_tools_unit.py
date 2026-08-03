@@ -184,9 +184,9 @@ class TestSubDocumentLookupIn:
         ]
         collection.lookup_in.assert_called_once_with("doc1", expected_specs)
         assert result == {
-            "get": {"address.city": {"success": True, "value": "Austin"}},
-            "exists": {"tags": True},
-            "count": {"tags": {"success": True, "value": 3}},
+            "get": {"address.city": {"value": "Austin"}},
+            "exists": {"tags": {"value": True}},
+            "count": {"tags": {"value": 3}},
         }
 
     def test_missing_get_path_reported_not_raised(self) -> None:
@@ -201,7 +201,6 @@ class TestSubDocumentLookupIn:
                 ctx, "b", "s", "c", "doc1", get_paths=["missing.path"]
             )
 
-        assert result["get"]["missing.path"]["success"] is False
         assert "error" in result["get"]["missing.path"]
 
     def test_exists_path_error_reported_not_raised(self) -> None:
@@ -218,7 +217,6 @@ class TestSubDocumentLookupIn:
             )
 
         assert result["exists"]["bad.path"] == {
-            "success": False,
             "error": str(PathMismatchException("Path mismatch.")),
         }
 
@@ -250,7 +248,9 @@ class TestSubDocumentLookupIn:
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.lookup_in.return_value = _FakeLookupInResult(
             [
-                {"error": PathMismatchException("Path mismatch.")},  # count: name (scalar)
+                {
+                    "error": PathMismatchException("Path mismatch.")
+                },  # count: name (scalar)
                 {"value": 2},  # count: tags (array)
             ]
         )
@@ -260,6 +260,5 @@ class TestSubDocumentLookupIn:
                 ctx, "b", "s", "c", "doc1", count_paths=["name", "tags"]
             )
 
-        assert result["count"]["name"]["success"] is False
         assert "error" in result["count"]["name"]
-        assert result["count"]["tags"] == {"success": True, "value": 2}
+        assert result["count"]["tags"] == {"value": 2}

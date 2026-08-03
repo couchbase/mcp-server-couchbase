@@ -555,8 +555,8 @@ async def test_sub_document_lookup_in_get_paths() -> None:
         )
         payload = extract_payload(response)
 
-        assert payload["get"]["name"] == {"success": True, "value": "Subdoc Test"}
-        assert payload["get"]["address.city"] == {"success": True, "value": "Austin"}
+        assert payload["get"]["name"] == {"value": "Subdoc Test"}
+        assert payload["get"]["address.city"] == {"value": "Austin"}
 
         await session.call_tool(
             "delete_document_by_id",
@@ -603,8 +603,8 @@ async def test_sub_document_lookup_in_exists_paths() -> None:
         )
         payload = extract_payload(response)
 
-        assert payload["exists"]["tags"] is True
-        assert payload["exists"]["nickname"] is False
+        assert payload["exists"]["tags"] == {"value": True}
+        assert payload["exists"]["nickname"] == {"value": False}
 
         await session.call_tool(
             "delete_document_by_id",
@@ -651,7 +651,7 @@ async def test_sub_document_lookup_in_count_paths() -> None:
         )
         payload = extract_payload(response)
 
-        assert payload["count"]["tags"] == {"success": True, "value": 3}
+        assert payload["count"]["tags"] == {"value": 3}
 
         await session.call_tool(
             "delete_document_by_id",
@@ -700,9 +700,9 @@ async def test_sub_document_lookup_in_combined_ops() -> None:
         )
         payload = extract_payload(response)
 
-        assert payload["get"]["name"] == {"success": True, "value": "Combined Test"}
-        assert payload["exists"]["active"] is True
-        assert payload["count"]["tags"] == {"success": True, "value": 2}
+        assert payload["get"]["name"] == {"value": "Combined Test"}
+        assert payload["exists"]["active"] == {"value": True}
+        assert payload["count"]["tags"] == {"value": 2}
 
         await session.call_tool(
             "delete_document_by_id",
@@ -754,11 +754,8 @@ async def test_sub_document_lookup_in_missing_path_reports_error_not_raise() -> 
         )
 
         assert not is_error, "A missing sub-path must not fail the whole call"
-        assert payload["get"]["name"] == {
-            "success": True,
-            "value": "Partial Failure Test",
-        }
-        assert payload["get"]["does.not.exist"]["success"] is False
+        assert payload["get"]["name"] == {"value": "Partial Failure Test"}
+        assert "error" in payload["get"]["does.not.exist"]
 
         await session.call_tool(
             "delete_document_by_id",
@@ -866,11 +863,13 @@ async def test_sub_document_lookup_in_count_on_scalar_reports_error() -> None:
         is_error = getattr(response, "isError", None) or getattr(
             response, "is_error", False
         )
-        assert not is_error, "PathMismatch on one count path must not fail the whole call"
-        assert payload["count"]["name"]["success"] is False, (
+        assert not is_error, (
+            "PathMismatch on one count path must not fail the whole call"
+        )
+        assert "error" in payload["count"]["name"], (
             "count on a scalar field must report per-path failure"
         )
-        assert payload["count"]["tags"] == {"success": True, "value": 2}
+        assert payload["count"]["tags"] == {"value": 2}
 
         await session.call_tool(
             "delete_document_by_id",
@@ -924,8 +923,8 @@ async def test_sub_document_lookup_in_array_index_paths() -> None:
         )
         payload = extract_payload(response)
 
-        assert payload["get"]["reviews[0].author"] == {"success": True, "value": "Alice"}
-        assert payload["get"]["reviews[-1].rating"] == {"success": True, "value": 3}
+        assert payload["get"]["reviews[0].author"] == {"value": "Alice"}
+        assert payload["get"]["reviews[-1].rating"] == {"value": 3}
 
         await session.call_tool(
             "delete_document_by_id",
