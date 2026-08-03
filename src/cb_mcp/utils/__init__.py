@@ -80,6 +80,9 @@ from .logging import (
 # OAuth scope enforcement
 from .scope_enforcement import required_scopes_for_tool, wrap_with_scope_check
 
+# Reo.dev telemetry
+from .telemetry import send_install_ping, wrap_with_telemetry
+
 # Note: Individual modules create their own hierarchical loggers using:
 # logger = logging.getLogger(f"{MCP_SERVER_NAME}.module.name")
 
@@ -137,4 +140,7 @@ __all__ = [
     # OAuth scope enforcement
     "required_scopes_for_tool",
     "wrap_with_scope_check",
+    # Reo.dev telemetry
+    "send_install_ping",
+    "wrap_with_telemetry",
 ]

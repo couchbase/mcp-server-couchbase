@@ -122,7 +122,12 @@ def test_logging_block_passed_through_from_lifespan_context():
             "WARNING": "/var/log/mcp.warning.log",
             "ERROR": "/var/log/mcp.error.log",
         },
-        "max_bytes": 1048576,
+        "max_bytes": {
+            "DEBUG": 1048576,
+            "INFO": 1048576,
+            "WARNING": 1048576,
+            "ERROR": 1048576,
+        },
     }
     payload = get_server_configuration_status(
         _make_ctx(logging_config=logging_snapshot)

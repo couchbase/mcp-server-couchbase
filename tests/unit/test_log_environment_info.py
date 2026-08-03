@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 
+import cb_mcp.utils.logging as logmod
 from cb_mcp.utils.constants import MCP_SERVER_NAME
 from cb_mcp.utils.environment import log_environment_info
 
@@ -59,9 +60,16 @@ def _capture_env_record(server_settings=None) -> logging.LogRecord:
     # configured — otherwise we'd see noise in pytest output and risk
     # tripping caplog-based assertions elsewhere.
     env_logger.propagate = False
+    # These tests pin the DEBUG-record payload contract only; force the snapshot
+    # to None so ``log_environment_info`` doesn't also try to write a dedicated
+    # env file (which would add a second captured record). The file-write path
+    # is covered by test_env_snapshot_written_to_dedicated_file.
+    prev_resolved = logmod._resolved_config
+    logmod._resolved_config = None
     try:
         log_environment_info(transport="http", server_settings=server_settings)
     finally:
+        logmod._resolved_config = prev_resolved
         env_logger.removeHandler(handler)
         env_logger.setLevel(prev_level)
         env_logger.propagate = prev_propagate
@@ -173,3 +181,69 @@ def test_config_block_captures_oauth_coordinates():
     assert config["oauth_mcp_base_url"] == "https://mcp.example.com"
     assert config["oauth_scope_read_label"] == "couchbase-mcp/read"
     assert config["oauth_scope_write_label"] == "couchbase-mcp/write"
+
+
+def _snapshot_with_config_file(config_path) -> logmod.ResolvedLoggingConfig:
+    return logmod.ResolvedLoggingConfig(
+        level="INFO",
+        sinks=("file",),
+        log_files={"INFO": "ignored.info.log"},
+        log_max_bytes={"INFO": 1048576},
+        log_backup_counts={"INFO": 1},
+        server_config_file=str(config_path),
+    )
+
+
+def test_config_snapshot_written_to_dedicated_file(tmp_path):
+    """When ``server_config_file`` is set, the snapshot is written there as JSON.
+
+    Note the logger is at INFO (not DEBUG) here: the dedicated file must be
+    written regardless of level, unlike the DEBUG-gated stderr record.
+    """
+    config_path = tmp_path / "mcp_server_config.log.json"
+    prev = logmod._resolved_config
+    logmod._resolved_config = _snapshot_with_config_file(config_path)
+    try:
+        log_environment_info(
+            transport="stdio", server_settings={"read_only_mode": True}
+        )
+    finally:
+        logmod._resolved_config = prev
+
+    assert config_path.exists(), "dedicated config file was not written"
+    # The file is pure JSON (no "Environment |" prefix).
+    payload = json.loads(config_path.read_text())
+    assert payload["transport"] == "stdio"
+
+
+def test_config_file_overwritten_not_appended(tmp_path):
+    """Each start overwrites the file so it always holds the current run — it
+    never grows across restarts (immune to rotation by construction)."""
+    config_path = tmp_path / "mcp_server_config.log.json"
+    prev = logmod._resolved_config
+    logmod._resolved_config = _snapshot_with_config_file(config_path)
+    try:
+        log_environment_info(
+            transport="stdio", server_settings={"read_only_mode": True}
+        )
+        log_environment_info(transport="http", server_settings={"read_only_mode": True})
+    finally:
+        logmod._resolved_config = prev
+
+    # Still a single valid JSON object (overwritten, not appended), newest run.
+    payload = json.loads(config_path.read_text())
+    assert payload["transport"] == "http"
+
+
+def test_no_config_file_written_when_snapshot_absent(tmp_path):
+    """With no resolved snapshot (server_config_file None) no file is created."""
+    config_path = tmp_path / "mcp_server_config.log.json"
+    prev = logmod._resolved_config
+    logmod._resolved_config = None
+    try:
+        log_environment_info(
+            transport="stdio", server_settings={"read_only_mode": True}
+        )
+    finally:
+        logmod._resolved_config = prev
+    assert not config_path.exists()

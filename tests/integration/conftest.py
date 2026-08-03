@@ -58,6 +58,11 @@ EXPECTED_TOOLS = {
     "insert_document_by_id",
     "replace_document_by_id",
     "delete_document_by_id",
+    # Scope/collection management (write) tools
+    "create_scope",
+    "create_collection",
+    "delete_scope",
+    "delete_collection",
     "get_schema_for_collection",
     "run_sql_plus_plus_query",
     "explain_sql_plus_plus_query",
@@ -100,6 +105,12 @@ TOOLS_BY_CATEGORY = {
     "index": {
         "list_indexes",
         "get_index_advisor_recommendations",
+    },
+    "management": {
+        "create_scope",
+        "create_collection",
+        "delete_scope",
+        "delete_collection",
     },
     "performance": {
         "get_longest_running_queries",
@@ -154,6 +165,10 @@ TOOL_REQUIRED_PARAMS = {
     "run_sql_plus_plus_query": ["bucket_name", "scope_name", "query"],
     "explain_sql_plus_plus_query": ["bucket_name", "scope_name", "query"],
     "get_index_advisor_recommendations": ["bucket_name", "scope_name", "query"],
+    "create_scope": ["bucket_name", "scope_name"],
+    "create_collection": ["bucket_name", "scope_name", "collection_name"],
+    "delete_scope": ["bucket_name", "scope_name"],
+    "delete_collection": ["bucket_name", "scope_name", "collection_name"],
 }
 
 # Default timeout (seconds) to guard against hangs when the Couchbase cluster
