@@ -696,6 +696,10 @@ Notes
 - Couchbase does not review or evaluate the quality or accuracy of such outputs, and such outputs may not reflect Couchbase's views.
 - You are solely responsible for determining whether to use large language models and related technology, and for complying with any license terms, terms of use, and your organization's policies governing your use of the same.
 
+## Usage Data Collection
+
+This product automatically collects usage and performance data (such as product name and version) and browser information (such as IP address) (collectively, "Usage Data"). Couchbase uses Usage Data, along with other data you may provide to Couchbase (such as your user name or email address), to develop and improve our products as well as inform our sales and marketing programs. We do not access or collect any data you store in Couchbase products. We use Usage Data to understand aggregate usage patterns and make our products more useful to you.  For more information on how Couchbase collects, protects, and processes information, please refer to the Couchbase Privacy Policy viewable at https://www.couchbase.com/privacy-policy.
+
 ## Troubleshooting Tips
 
 - Ensure the path to your MCP server repository is correct in the configuration if running from source.
