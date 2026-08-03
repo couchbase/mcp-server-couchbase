@@ -6,11 +6,21 @@ This module contains all the MCP tools for Couchbase operations.
 Tool Categories:
 - READ_ONLY_TOOLS: Tools that only read data (always available)
 - KV_WRITE_TOOLS: KV tools that modify data (disabled when READ_ONLY_MODE=True)
+- COLLECTION_WRITE_TOOLS: Scope/collection management tools that modify data
+  (disabled when READ_ONLY_MODE=True)
 """
 
 from collections.abc import Callable
 
 from mcp.types import ToolAnnotations
+
+# Scope/collection management tools
+from .collection_management import (
+    create_collection,
+    create_scope,
+    delete_collection,
+    delete_scope,
+)
 
 # Index tools
 from .index import get_index_advisor_recommendations, list_indexes
@@ -86,8 +96,16 @@ KV_WRITE_TOOLS = [
     delete_document_by_id,
 ]
 
+# Scope/collection management write tools - disabled when READ_ONLY_MODE is True
+COLLECTION_WRITE_TOOLS = [
+    create_scope,
+    create_collection,
+    delete_scope,
+    delete_collection,
+]
+
 # List of all tools for easy registration (kept for backward compatibility)
-ALL_TOOLS = READ_ONLY_TOOLS + KV_WRITE_TOOLS
+ALL_TOOLS = READ_ONLY_TOOLS + KV_WRITE_TOOLS + COLLECTION_WRITE_TOOLS
 
 # Tool annotations for MCP clients (readOnlyHint, destructiveHint, etc.)
 TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
@@ -121,6 +139,11 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "insert_document_by_id": ToolAnnotations(idempotentHint=True),
     "replace_document_by_id": ToolAnnotations(idempotentHint=True),
     "delete_document_by_id": ToolAnnotations(destructiveHint=True, idempotentHint=True),
+    # Scope/collection management write tools
+    "create_scope": ToolAnnotations(),
+    "create_collection": ToolAnnotations(),
+    "delete_scope": ToolAnnotations(destructiveHint=True),
+    "delete_collection": ToolAnnotations(destructiveHint=True),
 }
 
 
@@ -133,8 +156,9 @@ def get_tools(read_only_mode: bool = True) -> list[Callable]:
     tools = list(READ_ONLY_TOOLS)
 
     if not read_only_mode:
-        # KV write tools are only loaded when READ_ONLY_MODE is False
+        # Write tools are only loaded when READ_ONLY_MODE is False
         tools.extend(KV_WRITE_TOOLS)
+        tools.extend(COLLECTION_WRITE_TOOLS)
 
     return tools
 
@@ -152,6 +176,10 @@ __all__ = [
     "insert_document_by_id",
     "replace_document_by_id",
     "delete_document_by_id",
+    "create_scope",
+    "create_collection",
+    "delete_scope",
+    "delete_collection",
     "get_schema_for_collection",
     "run_sql_plus_plus_query",
     "explain_sql_plus_plus_query",
@@ -168,6 +196,7 @@ __all__ = [
     # Tool categories
     "READ_ONLY_TOOLS",
     "KV_WRITE_TOOLS",
+    "COLLECTION_WRITE_TOOLS",
     # Tool annotations
     "TOOL_ANNOTATIONS",
     # Convenience

@@ -19,9 +19,58 @@ from .client import AccuracyTestingClient
 SetupHook = Callable[[AccuracyTestingClient], Awaitable[None]]
 
 
-def doc_id(prefix: str) -> str:
-    """A unique-per-run document id, e.g. ``acc_get_1a2b3c4d``."""
+def unique_name(prefix: str) -> str:
+    """A unique-per-run identifier, e.g. ``acc_scope_1a2b3c4d`` — usable as a
+    document id, throwaway scope name, or collection name."""
     return f"{prefix}_{uuid.uuid4().hex[:8]}"
+
+
+# Alias kept for call sites that seed documents — same generator, doc-specific name.
+doc_id = unique_name
+
+
+def seed_scope(bucket: str, scope: str) -> SetupHook:
+    """Return a hook that creates ``scope`` in ``bucket`` (silently)."""
+
+    async def _hook(client: AccuracyTestingClient) -> None:
+        await client.call_tool_silent(
+            "create_scope",
+            {"bucket_name": bucket, "scope_name": scope},
+        )
+
+    return _hook
+
+
+def seed_collection(bucket: str, scope: str, collection: str) -> SetupHook:
+    """Return a hook that creates ``collection`` in ``scope`` (silently)."""
+
+    async def _hook(client: AccuracyTestingClient) -> None:
+        await client.call_tool_silent(
+            "create_collection",
+            {
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+            },
+        )
+
+    return _hook
+
+
+def drop_scope(bucket: str, scope: str) -> SetupHook:
+    """Return a hook that deletes ``scope`` (silently, best-effort).
+
+    Cascades to every collection within the scope, so it doubles as the
+    teardown for anything a case created under a throwaway scope.
+    """
+
+    async def _hook(client: AccuracyTestingClient) -> None:
+        await client.call_tool_silent(
+            "delete_scope",
+            {"bucket_name": bucket, "scope_name": scope},
+        )
+
+    return _hook
 
 
 def seed_document(

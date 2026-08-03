@@ -34,6 +34,10 @@ For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couc
 | `get_collections_in_scope` | Get a list of all the collections in a specified scope and bucket. Note that this tool requires the cluster to have Query service. |
 | `get_scopes_and_collections_in_bucket` | Get a list of all the scopes and collections in the specified bucket |
 | `get_schema_for_collection` | Get the structure for a collection |
+| `create_scope` | Create a new scope in a bucket (Couchbase Server 7.6+ and Capella). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `create_collection` | Create a new collection in an existing scope (Couchbase Server 7.6+ and Capella). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `delete_scope` | Delete a scope and all its collections from a bucket — permanent. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `delete_collection` | Delete a collection and all its documents from a scope — permanent. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 
 ### Document KV operations tools
 
@@ -569,7 +573,7 @@ OAuth is configured with the `CB_MCP_OAUTH_*` variables listed in [Additional Co
 
 - OAuth activates only when all three of `CB_MCP_OAUTH_JWT_JWKS_URI`, `CB_MCP_OAUTH_JWT_ISSUER`, and `CB_MCP_OAUTH_JWT_AUDIENCE` are set; setting only some of them fails at startup.
 - Setting `CB_MCP_OAUTH_MCP_BASE_URL` additionally publishes RFC 9728 Protected Resource Metadata so PRM-aware clients can discover the authorization server.
-- Access is gated by two scopes read from the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools, including SQL++) and `couchbase-mcp:write` (KV mutation tools). Full access requires both. If your IdP can't emit those canonical labels, override them with `CB_MCP_OAUTH_SCOPE_READ_LABEL` / `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`.
+- Access is gated by two scopes read from the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools, including SQL++) and `couchbase-mcp:write` (KV mutation and scope/collection management tools). Full access requires both. If your IdP can't emit those canonical labels, override them with `CB_MCP_OAUTH_SCOPE_READ_LABEL` / `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`.
 
 ```bash
 uvx couchbase-mcp-server \
