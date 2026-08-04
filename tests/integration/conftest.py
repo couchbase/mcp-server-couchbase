@@ -41,6 +41,7 @@ __all__ = [
     "get_test_bucket",
     "get_test_collection",
     "get_test_scope",
+    "is_error_response",
     "require_test_bucket",
 ]
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
