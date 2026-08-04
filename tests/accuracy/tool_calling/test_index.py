@@ -12,6 +12,7 @@ Covers:
 from __future__ import annotations
 
 import json
+import uuid
 
 import pytest
 
@@ -22,6 +23,8 @@ from accuracy.sdk import (
     OpenAIAgent,
     run_accuracy_case,
 )
+from accuracy.sdk.client import AccuracyTestingClient
+from accuracy.sdk.runner import SetupHook
 from accuracy.sdk.types import ExpectedToolCall
 
 
@@ -32,6 +35,47 @@ def _optional() -> Matcher:
 def _contains(*needles: str) -> Matcher:
     lowered = [n.lower() for n in needles]
     return Matcher.string(lambda value: all(n in value.lower() for n in lowered))
+
+
+def _create_index(
+    bucket: str, scope: str, collection: str, index_name: str
+) -> SetupHook:
+    """Return a hook that creates a (deferred) index silently, so a case acting
+    on an existing index (build/drop) is self-contained and doesn't depend on
+    the create case having run first."""
+
+    async def _hook(client: AccuracyTestingClient) -> None:
+        await client.call_tool_silent(
+            "create_index",
+            {
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "index_name": index_name,
+                "keys": ["email"],
+            },
+        )
+
+    return _hook
+
+
+def _drop_index(bucket: str, scope: str, collection: str, index_name: str) -> SetupHook:
+    """Return a hook that drops an index silently (ignoring if already gone), so
+    a case leaves no index behind whether or not the model dropped it."""
+
+    async def _hook(client: AccuracyTestingClient) -> None:
+        await client.call_tool_silent(
+            "drop_index",
+            {
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "index_name": index_name,
+                "ignore_if_not_exists": True,
+            },
+        )
+
+    return _hook
 
 
 def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]:
@@ -156,13 +200,14 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
         )
     )
 
+    create_index_name = f"idx_email_{uuid.uuid4().hex[:8]}"
     cases.append(
         AccuracyCase(
             test_id="create_index_on_field",
             prompt=(
                 f"Create an index on the 'email' field for the '{collection}' "
                 f"collection in scope '{scope}' of bucket '{bucket}'. Call the "
-                f"index 'idx_email_test'."
+                f"index '{create_index_name}'."
             ),
             expected_tools=[
                 ExpectedToolCall(
@@ -176,9 +221,12 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
                     },
                 ),
             ],
+            # The model creates it; drop it afterward so the case leaves no state.
+            cleanup=_drop_index(bucket, scope, collection, create_index_name),
         )
     )
 
+    build_index_name = f"idx_build_{uuid.uuid4().hex[:8]}"
     cases.append(
         AccuracyCase(
             test_id="build_deferred_indexes",
@@ -196,14 +244,19 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
                     },
                 ),
             ],
+            # Seed a deferred index so there is something to build — independent
+            # of the create case.
+            seed=_create_index(bucket, scope, collection, build_index_name),
+            cleanup=_drop_index(bucket, scope, collection, build_index_name),
         )
     )
 
+    drop_index_name = f"idx_drop_{uuid.uuid4().hex[:8]}"
     cases.append(
         AccuracyCase(
             test_id="drop_index_by_name",
             prompt=(
-                f"Drop the index named 'idx_email_test' on the '{collection}' "
+                f"Drop the index named '{drop_index_name}' on the '{collection}' "
                 f"collection in scope '{scope}' of bucket '{bucket}'."
             ),
             expected_tools=[
@@ -213,10 +266,14 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
                         "bucket_name": bucket,
                         "scope_name": scope,
                         "collection_name": collection,
-                        "index_name": "idx_email_test",
+                        "index_name": drop_index_name,
                     },
                 ),
             ],
+            # Seed the index so there is something to drop; cleanup is a no-op
+            # once the model has dropped it (ignore_if_not_exists).
+            seed=_create_index(bucket, scope, collection, drop_index_name),
+            cleanup=_drop_index(bucket, scope, collection, drop_index_name),
         )
     )
 

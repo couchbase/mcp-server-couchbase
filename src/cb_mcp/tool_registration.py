@@ -36,7 +36,7 @@ def prepare_tools_for_registration(
     (stdio / unauthenticated), so ``enforce_scopes`` only affects whether
     the wrapper is installed — not whether it does work per call.
     """
-    # When read_only_mode is True, KV write tools are not loaded.
+    # When read_only_mode is True, write tools (KV and Index) are not loaded.
     tools = get_tools(read_only_mode=read_only_mode)
 
     loaded_tool_names = {tool.__name__ for tool in tools}
