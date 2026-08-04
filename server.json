@@ -123,8 +123,78 @@
           "isSecret": false
         },
         {
+          "name": "CB_MCP_LOG_ROTATION_MAX_SIZE_MB",
+          "description": "Global maximum size in MB per-level log file before it rotates, inherited by every level unless overridden by a per-level CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE_MB. A value of 0 is invalid and falls back to the default (1 MB) with a startup warning. Default is 1 (1 MB).",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
           "name": "CB_MCP_LOG_MAX_BYTES",
-          "description": "Maximum size in bytes per per-level log file before it rotates. Default is 1048576 (1 MB).",
+          "description": "[DEPRECATED] Global rotation size in bytes; use CB_MCP_LOG_ROTATION_MAX_SIZE_MB (MB) instead. Still honored for backward compatibility but ignored when CB_MCP_LOG_ROTATION_MAX_SIZE_MB is also set. A value of 0 is invalid and falls back to the default with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the ERROR log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for ERROR; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the WARNING log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for WARNING; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_INFO_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the INFO log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for INFO; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the DEBUG log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for DEBUG; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_RETENTION_BACKUP_COUNT",
+          "description": "Number of rotated backup files kept per-level log file, excluding the live file. Applies to every level unless overridden per level. Set to 0 to keep only the live file (still capped by the rotation size). Default is 1.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_ERROR_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the ERROR log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for ERROR; inherits it when unset.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_WARNING_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the WARNING log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for WARNING; inherits it when unset.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_INFO_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the INFO log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for INFO; inherits it when unset.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_DEBUG_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the DEBUG log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for DEBUG; inherits it when unset.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
@@ -160,6 +230,20 @@
         {
           "name": "CB_MCP_OAUTH_MCP_BASE_URL",
           "description": "Public base URL of this MCP server. When set, the server publishes RFC 9728 Protected Resource Metadata at <base_url>/.well-known/oauth-protected-resource/mcp so PRM-aware clients can discover the authorization server. Optional.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_OAUTH_SCOPE_READ_LABEL",
+          "description": "Override the OAuth scope label the server treats as 'read' access; advertised in PRM and matched against the token's scope/scp claim. Use when your IdP cannot emit the canonical form. Default is couchbase-mcp:read.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_OAUTH_SCOPE_WRITE_LABEL",
+          "description": "Override the OAuth scope label the server treats as 'write' access; same semantics as CB_MCP_OAUTH_SCOPE_READ_LABEL. Default is couchbase-mcp:write.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -288,8 +372,88 @@
         },
         {
           "type": "named",
+          "name": "--log-rotation-max-size-mb",
+          "description": "Global maximum size in MB per-level log file before it rotates, inherited by every level unless overridden by a per-level --log-<level>-rotation-max-size-mb. A value of 0 is invalid and falls back to the default (1 MB) with a startup warning. Default is 1 (1 MB).",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "type": "named",
           "name": "--log-max-bytes",
-          "description": "Maximum size in bytes per per-level log file before it rotates. Default is 1048576 (1 MB).",
+          "description": "[DEPRECATED] Global rotation size in bytes; use --log-rotation-max-size-mb (MB) instead. Still honored for backward compatibility but ignored when --log-rotation-max-size-mb is also set. A value of 0 is invalid and falls back to the default with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--log-error-rotation-max-size-mb",
+          "description": "Rotation size in MB for the ERROR log file. Overrides --log-rotation-max-size-mb for ERROR; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--log-warning-rotation-max-size-mb",
+          "description": "Rotation size in MB for the WARNING log file. Overrides --log-rotation-max-size-mb for WARNING; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--log-info-rotation-max-size-mb",
+          "description": "Rotation size in MB for the INFO log file. Overrides --log-rotation-max-size-mb for INFO; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--log-debug-rotation-max-size-mb",
+          "description": "Rotation size in MB for the DEBUG log file. Overrides --log-rotation-max-size-mb for DEBUG; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--log-retention-backup-count",
+          "description": "Number of rotated backup files kept per-level log file, excluding the live file. Applies to every level unless overridden per level. Set to 0 to keep only the live file (still capped by the rotation size). Default is 1.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--log-error-retention-backup-count",
+          "description": "Rotated backups kept for the ERROR log file. Overrides --log-retention-backup-count for ERROR; inherits it when unset.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--log-warning-retention-backup-count",
+          "description": "Rotated backups kept for the WARNING log file. Overrides --log-retention-backup-count for WARNING; inherits it when unset.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--log-info-retention-backup-count",
+          "description": "Rotated backups kept for the INFO log file. Overrides --log-retention-backup-count for INFO; inherits it when unset.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--log-debug-retention-backup-count",
+          "description": "Rotated backups kept for the DEBUG log file. Overrides --log-retention-backup-count for DEBUG; inherits it when unset.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
@@ -330,6 +494,22 @@
           "type": "named",
           "name": "--oauth-mcp-base-url",
           "description": "Public base URL of this MCP server. When set, the server publishes RFC 9728 Protected Resource Metadata at <base_url>/.well-known/oauth-protected-resource/mcp so PRM-aware clients can discover the authorization server. Optional.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--oauth-scope-read-label",
+          "description": "Override the OAuth scope label the server treats as 'read' access; advertised in PRM and matched against the token's scope/scp claim. Use when your IdP cannot emit the canonical form. Default is couchbase-mcp:read.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--oauth-scope-write-label",
+          "description": "Override the OAuth scope label the server treats as 'write' access; same semantics as --oauth-scope-read-label. Default is couchbase-mcp:write.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -449,8 +629,78 @@
           "isSecret": false
         },
         {
+          "name": "CB_MCP_LOG_ROTATION_MAX_SIZE_MB",
+          "description": "Global maximum size in MB per-level log file before it rotates, inherited by every level unless overridden by a per-level CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE_MB. A value of 0 is invalid and falls back to the default (1 MB) with a startup warning. Default is 1 (1 MB).",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
           "name": "CB_MCP_LOG_MAX_BYTES",
-          "description": "Maximum size in bytes per per-level log file before it rotates. Default is 1048576 (1 MB).",
+          "description": "[DEPRECATED] Global rotation size in bytes; use CB_MCP_LOG_ROTATION_MAX_SIZE_MB (MB) instead. Still honored for backward compatibility but ignored when CB_MCP_LOG_ROTATION_MAX_SIZE_MB is also set. A value of 0 is invalid and falls back to the default with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the ERROR log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for ERROR; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the WARNING log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for WARNING; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_INFO_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the INFO log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for INFO; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE_MB",
+          "description": "Rotation size in MB for the DEBUG log file. Overrides CB_MCP_LOG_ROTATION_MAX_SIZE_MB for DEBUG; inherits it when unset. 0 is invalid and falls back to the inherited global with a startup warning.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_RETENTION_BACKUP_COUNT",
+          "description": "Number of rotated backup files kept per-level log file, excluding the live file. Applies to every level unless overridden per level. Set to 0 to keep only the live file (still capped by the rotation size). Default is 1.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_ERROR_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the ERROR log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for ERROR; inherits it when unset.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_WARNING_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the WARNING log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for WARNING; inherits it when unset.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_INFO_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the INFO log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for INFO; inherits it when unset.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_LOG_DEBUG_RETENTION_BACKUP_COUNT",
+          "description": "Rotated backups kept for the DEBUG log file. Overrides CB_MCP_LOG_RETENTION_BACKUP_COUNT for DEBUG; inherits it when unset.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
@@ -486,6 +736,20 @@
         {
           "name": "CB_MCP_OAUTH_MCP_BASE_URL",
           "description": "Public base URL of this MCP server. When set, the server publishes RFC 9728 Protected Resource Metadata at <base_url>/.well-known/oauth-protected-resource/mcp so PRM-aware clients can discover the authorization server. Optional.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_OAUTH_SCOPE_READ_LABEL",
+          "description": "Override the OAuth scope label the server treats as 'read' access; advertised in PRM and matched against the token's scope/scp claim. Use when your IdP cannot emit the canonical form. Default is couchbase-mcp:read.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_OAUTH_SCOPE_WRITE_LABEL",
+          "description": "Override the OAuth scope label the server treats as 'write' access; same semantics as CB_MCP_OAUTH_SCOPE_READ_LABEL. Default is couchbase-mcp:write.",
           "isRequired": false,
           "format": "string",
           "isSecret": false

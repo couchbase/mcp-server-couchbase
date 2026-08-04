@@ -30,9 +30,13 @@ QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION = 8
 # Logging Configuration
 # Change this to DEBUG, WARNING, ERROR as needed
 DEFAULT_LOG_LEVEL = "INFO"
-DEFAULT_LOG_MAX_BYTES = 1 * 1024 * 1024  # 1 MB
-# Keep one rotated backup per level file. Not user-configurable in 1.0 (no CLI
-# flag / env var); configure_logging still accepts the value internally.
+# Rotation sizes are configured in MB and converted to bytes with this factor.
+BYTES_PER_MB = 1024 * 1024
+# Effective rotation size when no size variable is set, and the fallback for an
+# invalid 0.
+DEFAULT_LOG_MAX_BYTES = 1 * BYTES_PER_MB  # 1 MB
+# Rotated backups kept per level when no retention variable is set; 0 keeps only
+# the live file.
 DEFAULT_LOG_BACKUP_COUNT = 1
 ALLOWED_LOG_LEVELS = ("OFF", "DEBUG", "INFO", "WARNING", "ERROR")
 DEFAULT_LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
