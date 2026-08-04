@@ -63,6 +63,45 @@ def _is_explain_statement(query: str) -> bool:
     return re.match(r"^EXPLAIN\s", normalized) is not None
 
 
+# Top-level SQL++ grammar rules that only read data. Every other statement
+# class — DML, DDL, and DCL (GRANT/REVOKE) — is treated as a write.
+_READ_ONLY_STATEMENT_RULES = frozenset({"dql_statement", "utility_statement"})
+
+
+def _blocked_write_kind(parsed_query: Any) -> str | None:
+    """Classify a parsed SQL++ statement for the read-only write guard.
+
+    Returns ``None`` when every top-level statement only reads data (a DQL or
+    utility statement such as SELECT/INFER/ADVISE). Otherwise returns a short
+    label describing why the query is blocked: ``"data"`` (DML), ``"structure"``
+    (DDL), ``"privilege"`` (DCL — GRANT/REVOKE), or a generic ``"write"``.
+
+    Deny-by-default: the block decision comes from the read-only allow-list, not
+    from enumerating forbidden classes. lark-sqlpp's ``modifies_data`` /
+    ``modifies_structure`` only visit DML/DDL nodes, so DCL statements slip past
+    them (both return False for GRANT/REVOKE); classifying by the top-level rule
+    instead closes that gap and also blocks any future non-read statement class.
+    When lark-sqlpp gains a dedicated DCL checker we can fold it into the label
+    here, but the guard no longer depends on it.
+    """
+    categories = {
+        str(child.data)
+        for node in parsed_query.iter_subtrees()
+        if node.data == "statement"
+        for child in node.children
+        if hasattr(child, "data")
+    }
+    if categories and categories <= _READ_ONLY_STATEMENT_RULES:
+        return None
+    if modifies_data(parsed_query):
+        return "data"
+    if modifies_structure(parsed_query):
+        return "structure"
+    if "dcl_statement" in categories:
+        return "privilege"
+    return "write"
+
+
 def run_sql_plus_plus_query(
     ctx: Context,
     bucket_name: str,
@@ -118,11 +157,9 @@ def run_sql_plus_plus_query(
         # EXPLAIN statements are always safe to execute and should bypass write checks.
         if block_query_writes and not _is_explain_statement(query):
             parsed_query = parse_sqlpp(query)
-            data_modification_query = modifies_data(parsed_query)
-            structure_modification_query = modifies_structure(parsed_query)
+            kind = _blocked_write_kind(parsed_query)
 
-            if data_modification_query or structure_modification_query:
-                kind = "data" if data_modification_query else "structure"
+            if kind is not None:
                 if lacks_write_scope and not read_only_mode:
                     # lacks_write_scope implies token is not None here.
                     held_scopes = sorted(set(token.scopes or []))
@@ -136,7 +173,7 @@ def run_sql_plus_plus_query(
                 logger.error(msg)
                 raise ValueError(msg)
 
-        # Run the query if it is not a data or structure modification query.
+        # Reached only for read-only queries (or when writes are allowed).
         # Forward named parameters only when provided so existing callers that
         # pass none keep the exact previous behaviour.
         result = (
