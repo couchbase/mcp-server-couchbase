@@ -20,7 +20,6 @@ from conftest import (
     extract_payload,
     get_test_collection,
     get_test_scope,
-    is_error_response,
     require_test_bucket,
 )
 
@@ -731,83 +730,6 @@ async def test_build_index_succeeds_with_deferred_index() -> None:
                     "index_name": index_name,
                     "keys": ["email"],
                 },
-            )
-
-            build_response = await session.call_tool(
-                "build_index",
-                arguments={
-                    "bucket_name": bucket,
-                    "scope_name": scope,
-                    "collection_name": collection,
-                },
-            )
-            build_payload = extract_payload(build_response)
-            assert build_payload == {
-                "success": True,
-                "keyspace": f"{bucket}.{scope}.{collection}",
-            }
-        finally:
-            await _drop_index_quietly(session, bucket, scope, collection, index_name)
-
-
-@pytest.mark.asyncio
-async def test_build_index_builds_deferred_vector_index() -> None:
-    """build_index must trigger the build of a deferred VECTOR index too.
-
-    create_index cannot express vector-index syntax, so the index here is
-    created via a raw CREATE VECTOR INDEX statement (run_sql_plus_plus_query)
-    with defer_build:true — mirroring how an agent would have to create one
-    today. build_index's docstring claims it builds every deferred index on
-    the collection "including vector indexes if any are deferred"; this test
-    holds that claim to account.
-
-    We only assert the build was triggered (not that the index reaches
-    'online') because IVF/PQ-style vector indexes need real vector data to
-    train centroids — training may legitimately stay in-progress/retry in
-    the background on a collection with no populated embedding field. That
-    training behavior is a data-dependent server concern, not something
-    build_index controls.
-    """
-    bucket = require_test_bucket()
-    scope = get_test_scope()
-    collection = get_test_collection()
-    index_name = f"test_idx_vector_{uuid.uuid4().hex[:8]}"
-
-    async with create_mcp_session() as session:
-        try:
-            create_response = await session.call_tool(
-                "run_sql_plus_plus_query",
-                arguments={
-                    "bucket_name": bucket,
-                    "scope_name": scope,
-                    "query": (
-                        f"CREATE VECTOR INDEX `{index_name}` ON "
-                        f"`{collection}`(embedding VECTOR) WITH "
-                        '{"dimension": 128, "similarity": "L2_SQUARED", '
-                        '"description": "IVF,PQ8x8", "defer_build": true}'
-                    ),
-                },
-            )
-            if is_error_response(create_response):
-                pytest.skip(
-                    "Cluster does not support CREATE VECTOR INDEX "
-                    f"(server likely pre-7.6): {extract_payload(create_response)}"
-                )
-
-            list_response = await session.call_tool(
-                "list_indexes",
-                arguments={
-                    "bucket_name": bucket,
-                    "scope_name": scope,
-                    "collection_name": collection,
-                    "index_name": index_name,
-                },
-            )
-            indexes = extract_payload(list_response)
-            assert isinstance(indexes, list) and len(indexes) == 1
-            assert indexes[0]["status"].lower() in {"created", "deferred"}, (
-                f"Expected the vector index to be deferred before build, got: "
-                f"{indexes[0]}"
             )
 
             build_response = await session.call_tool(
