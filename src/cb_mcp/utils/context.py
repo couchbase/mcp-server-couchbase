@@ -20,8 +20,8 @@ class AppContext:
             captured once at lifespan startup. Tools should read values
             from here via :func:`cb_mcp.utils.config.get_settings` rather than
             reaching for a module global.
-        read_only_mode: When True, all write operations (KV and Query) are
-            disabled and KV write tools are not loaded.
+        read_only_mode: When True, all write operations (KV, Query, and index
+            management) are disabled and KV and index write tools are not loaded.
         logging_config: Optional snapshot of the active logging configuration,
             populated by the server entrypoint after configuring its loggers.
     """
