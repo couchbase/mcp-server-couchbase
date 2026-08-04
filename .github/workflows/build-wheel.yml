@@ -1,43 +1,27 @@
-name: PyPI Release
+name: Build Wheel
 
 # Description:
-# Triggered automatically after the Build Wheel workflow succeeds,
-# or manually via workflow_dispatch after QE sign-off on TestPyPI.
-# Triggers a Jenkins job to publish the wheel to the production PyPI registry.
+# Builds the distribution wheel via Jenkins.
+# Triggered automatically on version tag pushes or manually via workflow_dispatch.
+# Downstream workflows (Test PyPI Release, PyPI Release) trigger on successful completion.
 
 on:
-  workflow_run:
-    workflows: ["Build Wheel"]
-    types: [completed]
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*" # Match tags like v0.1.0, v1.2.3, v1.2.3-alpha.1
   workflow_dispatch:
     inputs:
       version:
         type: string
         required: true
-        description: version tag name to release (e.g. v1.2.3)
+        description: version tag name
 
 jobs:
-  upload-to-pypi:
-    name: Upload to PyPI via Jenkins
+  create-wheel:
+    name: Build wheel via Jenkins
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
-    permissions:
-      contents: write
     steps:
-      - name: Download version artifact
-        if: github.event_name == 'workflow_run'
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: release-version
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.workflow_run.id }}
-
-      - name: Read version from artifact
-        if: github.event_name == 'workflow_run'
-        id: artifact-version
-        run: echo "version=$(cat version.txt)" >> "$GITHUB_OUTPUT"
-
       - name: Trigger Jenkins Job
         run: |
           set -eo pipefail
@@ -46,7 +30,6 @@ jobs:
             "$JENKINS_BASE_URL/job/$JOB_NAME/buildWithParameters" \
             -d "PRODUCT=${PRODUCT}" \
             -d "VERSION=${VERSION}" \
-            -d "REPO=${REPO}" \
             --user "$JENKINS_USER:$JENKINS_API_TOKEN" \
             --fail -s -D - -o /dev/null | grep -i "location:" | cut -d' ' -f2 | tr -d '\r')
 
@@ -64,6 +47,7 @@ jobs:
             response=$(curl -s --user "${JENKINS_USER}:${JENKINS_API_TOKEN}" \
               "${queued_job_url}/api/json")
 
+            # .executable.url is the source of truth: it appears once the build starts.
             build_url=$(echo "$response" | jq -r '.executable.url // empty')
             if [ -n "${build_url}" ]; then
               echo "Build URL: ${build_url}"
@@ -88,8 +72,6 @@ jobs:
             echo "Check job status at: ${JENKINS_BASE_URL}/job/${JOB_NAME}"
             exit 1
           fi
-
-          echo "Build started. Check progress at: ${build_url}"
 
           echo "Polling for build completion..."
           while true; do
@@ -116,13 +98,14 @@ jobs:
           JENKINS_USER: ${{ secrets.SERVER_JENKINS_USERNAME }}
           JENKINS_API_TOKEN: ${{ secrets.SERVER_JENKINS_PAT }}
           PRODUCT: "mcp-server-couchbase"
-          VERSION: ${{ github.event.inputs.version || steps.artifact-version.outputs.version || github.event.workflow_run.head_branch }}
-          REPO: "pypi"
-          JOB_NAME: "PyPI-publish"
+          VERSION: ${{ github.event.inputs.version || github.ref_name }}
+          JOB_NAME: "wheel-build"
 
-      - name: Generate changelog and create release
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+      - name: Save version for downstream workflows
+        run: echo "${{ github.event.inputs.version || github.ref_name }}" > version.txt
+
+      - name: Upload version artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          generate_release_notes: true
-          prerelease: false
-          files: dist/*
+          name: release-version
+          path: version.txt
