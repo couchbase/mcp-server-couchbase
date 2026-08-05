@@ -95,3 +95,23 @@ def test_evaluate_query_plan_detects_non_covering_index() -> None:
     assert "non_covering_index" in issues
     # No primary scan present — only the non-covering finding should fire.
     assert "primary_index_scan" not in issues
+
+
+def test_evaluate_query_plan_detects_non_covering_index_with_versioned_fetch() -> None:
+    """A versioned Fetch operator (e.g. Fetch3) should still be detected."""
+    plan = {
+        "#operator": "Sequence",
+        "~children": [
+            {
+                "#operator": "IndexScan3",
+                "index": "idx_users_status",
+                "keyspace": "users",
+            },
+            {"#operator": "Fetch3", "keyspace": "users"},
+        ],
+    }
+
+    evaluation = evaluate_query_plan(plan)
+
+    issues = {finding["issue"] for finding in evaluation["findings"]}
+    assert "non_covering_index" in issues
