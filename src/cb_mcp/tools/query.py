@@ -12,7 +12,7 @@ from fastmcp import Context
 from fastmcp.server.dependencies import get_access_token
 from lark_sqlpp import modifies_data, modifies_structure, parse_sqlpp
 
-from ..utils.connection import connect_to_bucket
+from ..utils.connection import connect_to_bucket, format_keyspace
 from ..utils.constants import MCP_SERVER_NAME, SCOPE_WRITE
 from ..utils.context import get_cluster_connection
 from ..utils.query_utils import (
@@ -32,7 +32,7 @@ def get_schema_for_collection(
     schema = {"collection_name": collection_name, "schema": []}
     try:
         logger.debug(
-            f"Inferring schema for {bucket_name}.{scope_name}.{collection_name}"
+            f"Inferring schema for {format_keyspace(bucket_name, scope_name, collection_name)}"
         )
         query = f"INFER `{collection_name}`"
         result = run_sql_plus_plus_query(ctx, bucket_name, scope_name, query)
@@ -40,12 +40,12 @@ def get_schema_for_collection(
         if result:
             schema["schema"] = result[0]
         logger.info(
-            f"Retrieved schema for {bucket_name}.{scope_name}.{collection_name}"
+            f"Retrieved schema for {format_keyspace(bucket_name, scope_name, collection_name)}"
         )
     except Exception as e:
         logger.error(
             f"Error getting schema for "
-            f"{bucket_name}.{scope_name}.{collection_name}: {e}",
+            f"{format_keyspace(bucket_name, scope_name, collection_name)}: {e}",
             exc_info=True,
         )
         raise
@@ -82,6 +82,10 @@ def run_sql_plus_plus_query(
     Example:
         query = "SELECT * FROM users WHERE age > 18"
         # Incorrect: "SELECT * FROM bucket.scope.users WHERE age > 18"
+
+    For creating a new index, prefer the create_index tool over a raw CREATE INDEX statement
+    here — it defers the build by default and tells you the recommended next step. Use
+    list_indexes to check whether an index is online before relying on it in a query plan.
     """
     cluster = get_cluster_connection(ctx)
 

@@ -72,3 +72,8 @@ def connect_to_bucket(cluster: Cluster, bucket_name: str) -> Bucket:
     except Exception as e:
         logger.error(f"Failed to connect to bucket '{bucket_name}': {e}", exc_info=True)
         raise
+
+
+def format_keyspace(bucket_name: str, scope_name: str, collection_name: str) -> str:
+    """Render a ``bucket.scope.collection`` keyspace string for log context."""
+    return f"{bucket_name}.{scope_name}.{collection_name}"
