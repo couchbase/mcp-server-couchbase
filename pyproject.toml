@@ -92,6 +92,7 @@ select = [
     "PIE",  # flake8-pie
     "PL",   # Pylint
     "RUF",  # Ruff-specific rules
+    "S",    # flake8-bandit
 ]
 
 # Disable specific rules that might be too strict for your project
@@ -113,9 +114,32 @@ dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
 [tool.ruff.lint.per-file-ignores]
 # Tests can use magic values and have longer names
-"test_*.py" = ["PLR2004", "N802"]
+# S101: assert is the standard pytest idiom, not a security issue here.
+# S106/S108: dummy credentials and /tmp paths in test fixtures, not real secrets.
+# S110/S112/S603/S607: intentional except-pass/continue in skip logic and
+# subprocess calls with hardcoded (not attacker-controlled) arguments.
+# S608: SQL++ query strings built from trusted, hardcoded test fixture values.
+"test_*.py" = [
+    "PLR2004",
+    "N802",
+    "S101",
+    "S106",
+    "S108",
+    "S110",
+    "S112",
+    "S603",
+    "S607",
+    "S608",
+]
+# conftest.py/_harness.py helpers use the same trusted subprocess/except-pass/
+# assert patterns as tests.
+"conftest.py" = ["S112", "S607"]
+"_harness.py" = ["S101"]
 # Config files can have longer names
 "**/config.py" = ["N802"]
+# Dev-only data-seeding script: queries/URLs are built from internal,
+# hardcoded values, not attacker-controlled input.
+"scripts/setup_test_data.py" = ["S110", "S310", "S608"]
 
 [tool.ruff.lint.isort]
 # Organize imports
