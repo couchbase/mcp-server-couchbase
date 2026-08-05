@@ -40,6 +40,7 @@ For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couc
 | Tool Name | Description |
 | --------- | ----------- |
 | `get_document_by_id` | Get a document by ID from a specified scope and collection |
+| `sub_document_lookup_in` | Look up parts of a document (specific fields, existence checks, or array/object counts) by path without fetching the whole document |
 | `upsert_document_by_id` | Upsert a document by ID to a specified scope and collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `insert_document_by_id` | Insert a new document by ID (fails if document exists). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `replace_document_by_id` | Replace an existing document by ID (fails if document doesn't exist). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |

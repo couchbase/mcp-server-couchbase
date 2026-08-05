@@ -174,18 +174,11 @@ def sub_document_lookup_in(
     get_document_by_id call on this same document, from the user explicitly naming the
     field, or from a known/confirmed schema for this collection).
 
-    IMPORTANT: Do NOT guess field paths. This tool has no knowledge of the document's
-    schema — it does not know whether a field exists, what it's named, or how it's
-    nested. A question phrased in plain English does NOT tell you the underlying field
-    name or shape (a question about "how many X" could map to a top-level count field
-    like "x_count" rather than a nested array like "x.items") — do not infer a path
-    from the wording of the question. Unless you already know the exact path from a
-    prior get_document_by_id call on this same document, from the user explicitly
-    naming the field, or from a known/confirmed schema for this collection, call
-    get_document_by_id first (or instead) — a guessed path that doesn't exist returns a
-    per-path error here rather than the real data, and reporting "not found" for a
-    wrong guess is worse than just fetching the whole document and reading the right
-    field.
+    IMPORTANT: Do NOT guess field paths. If you don't already know the document's exact
+    field names/structure, call get_document_by_id first (or instead) — a guessed path
+    that doesn't exist returns a per-path error here rather than the real data, and
+    reporting "not found" for a wrong guess is worse than just fetching the whole
+    document and reading the right field.
 
     Provide one or more of the following. Each is a list of sub-document paths using
     Couchbase's dot/bracket path syntax (e.g. "address.city", "tags[0]", "tags[-1]" for
@@ -196,21 +189,22 @@ def sub_document_lookup_in(
     - count_paths: get the number of elements in the array or object at each path (fails
       per-path if the path isn't an array/object).
 
-    At least one of get_paths, exists_paths, or count_paths must be provided, and the
-    combined number of paths across all three cannot exceed 16 (a Couchbase server limit
-    on subdocument operations per call). Paths cannot exceed 1024 characters or 32 levels
-    of nesting. Violating either of these returns {"error": "..."} — no paths are looked up.
+    At least one of get_paths, exists_paths, or count_paths must be provided. As a rule of
+    thumb, keep the combined number of paths across all three to 16 or fewer — Couchbase
+    limits subdocument operations per call, though the exact limit is server-side and may
+    change. If the server rejects the call (too many paths, or another constraint like path
+    length or nesting depth), the whole call fails with {"error": "..."}.
 
     A path that doesn't exist (or otherwise fails, e.g. count on a non-array/object) does
-    NOT fail the whole call — it is reported individually as {"success": False, "error": ...}
-    in the returned dict so the other requested paths can still be resolved.
+    NOT fail the whole call — it is reported individually as {"error": ...} in the
+    returned dict so the other requested paths can still be resolved.
 
     Returns a dict with a key for each category that was requested (only requested
     categories are included):
     {
-        "get": {"<path>": {"success": true, "value": <value>} | {"success": false, "error": "..."}},
-        "exists": {"<path>": true | false},
-        "count": {"<path>": {"success": true, "value": <count>} | {"success": false, "error": "..."}},
+        "get": {"<path>": {"value": <value>} | {"error": "..."}},
+        "exists": {"<path>": {"value": true | false} | {"error": "..."}},
+        "count": {"<path>": {"value": <count>} | {"error": "..."}},
     }
     On a connection/lookup failure, or an invalid request (no paths / too many paths),
     returns {"error": "<message>"} instead.
@@ -256,20 +250,15 @@ def sub_document_lookup_in(
     response: dict[str, Any] = {}
     for index, (op, path) in enumerate(spec_meta):
         bucket_for_op = response.setdefault(op, {})
-        if op == "exists":
-            try:
-                bucket_for_op[path] = result.exists(index)
-            except CouchbaseException as e:
-                bucket_for_op[path] = {"success": False, "error": str(e)}
-            continue
         try:
-            value = result.content_as[lambda v: v](index)
-            bucket_for_op[path] = {"success": True, "value": value}
+            if op == "exists":
+                bucket_for_op[path] = {"value": result.exists(index)}
+            else:
+                # Identity transform: return the raw value at the path as whatever
+                # JSON type it is (get), or the element count (count).
+                bucket_for_op[path] = {"value": result.content_as[lambda v: v](index)}
         except CouchbaseException as e:
-            bucket_for_op[path] = {
-                "success": False,
-                "error": str(e),
-            }
+            bucket_for_op[path] = {"error": str(e)}
 
     logger.info(f"Successfully performed sub-document lookup in {keyspace}")
     return response
