@@ -56,7 +56,7 @@ async def test_create_and_delete_scope() -> None:
                     arguments={"bucket_name": bucket, "scope_name": scope},
                 )
             )
-            assert created["status"] == "success", f"create_scope failed: {created}"
+            assert created["success"] is True, f"create_scope failed: {created}"
             assert scope in await _scopes_and_collections(session, bucket)
 
             deleted = extract_payload(
@@ -65,7 +65,7 @@ async def test_create_and_delete_scope() -> None:
                     arguments={"bucket_name": bucket, "scope_name": scope},
                 )
             )
-            assert deleted["status"] == "success", f"delete_scope failed: {deleted}"
+            assert deleted["success"] is True, f"delete_scope failed: {deleted}"
             assert scope not in await _scopes_and_collections(session, bucket)
         finally:
             await _delete_scope_quietly(session, bucket, scope)
@@ -86,8 +86,8 @@ async def test_create_and_delete_collection() -> None:
                         "create_scope",
                         arguments={"bucket_name": bucket, "scope_name": scope},
                     )
-                )["status"]
-                == "success"
+                )["success"]
+                is True
             )
 
             created = extract_payload(
@@ -100,9 +100,7 @@ async def test_create_and_delete_collection() -> None:
                     },
                 )
             )
-            assert created["status"] == "success", (
-                f"create_collection failed: {created}"
-            )
+            assert created["success"] is True, f"create_collection failed: {created}"
             assert collection in (await _scopes_and_collections(session, bucket)).get(
                 scope, []
             )
@@ -117,9 +115,7 @@ async def test_create_and_delete_collection() -> None:
                     },
                 )
             )
-            assert deleted["status"] == "success", (
-                f"delete_collection failed: {deleted}"
-            )
+            assert deleted["success"] is True, f"delete_collection failed: {deleted}"
             assert collection not in (
                 await _scopes_and_collections(session, bucket)
             ).get(scope, [])
@@ -141,7 +137,7 @@ async def test_create_scope_already_exists_returns_error() -> None:
                     arguments={"bucket_name": bucket, "scope_name": scope},
                 )
             )
-            assert first["status"] == "success"
+            assert first["success"] is True
 
             duplicate = extract_payload(
                 await session.call_tool(
@@ -149,7 +145,7 @@ async def test_create_scope_already_exists_returns_error() -> None:
                     arguments={"bucket_name": bucket, "scope_name": scope},
                 )
             )
-            assert duplicate["status"] == "error"
+            assert duplicate["success"] is False
             assert "error" in duplicate
         finally:
             await _delete_scope_quietly(session, bucket, scope)
@@ -168,7 +164,7 @@ async def test_delete_nonexistent_scope_returns_error() -> None:
                 arguments={"bucket_name": bucket, "scope_name": scope},
             )
         )
-        assert result["status"] == "error"
+        assert result["success"] is False
         assert "error" in result
 
 
@@ -190,5 +186,5 @@ async def test_create_collection_in_missing_scope_returns_error() -> None:
                 },
             )
         )
-        assert result["status"] == "error"
+        assert result["success"] is False
         assert "error" in result

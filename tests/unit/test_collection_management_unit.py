@@ -43,7 +43,7 @@ class TestCreateScope:
             result = create_scope(ctx, "b", "s")
 
         cm.create_scope.assert_called_once_with("s")
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["bucket_name"] == "b"
         assert result["scope_name"] == "s"
 
@@ -53,7 +53,7 @@ class TestCreateScope:
         with patch(_GET_CLUSTER, return_value=cluster):
             result = create_scope(ctx, "b", "s")
 
-        assert result["status"] == "error"
+        assert result["success"] is False
         assert result["error"] == "scope already exists"
 
 
@@ -64,7 +64,7 @@ class TestCreateCollection:
             result = create_collection(ctx, "b", "s", "c")
 
         cm.create_collection.assert_called_once_with("s", "c")
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["collection_name"] == "c"
 
     def test_sdk_error_returns_error_envelope_not_raised(self) -> None:
@@ -73,7 +73,7 @@ class TestCreateCollection:
         with patch(_GET_CLUSTER, return_value=cluster):
             result = create_collection(ctx, "b", "s", "c")
 
-        assert result["status"] == "error"
+        assert result["success"] is False
         assert result["error"] == "collection already exists"
 
 
@@ -84,7 +84,7 @@ class TestDeleteScope:
             result = delete_scope(ctx, "b", "s")
 
         cm.drop_scope.assert_called_once_with("s")
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["scope_name"] == "s"
 
     def test_sdk_error_returns_error_envelope_not_raised(self) -> None:
@@ -93,7 +93,7 @@ class TestDeleteScope:
         with patch(_GET_CLUSTER, return_value=cluster):
             result = delete_scope(ctx, "b", "s")
 
-        assert result["status"] == "error"
+        assert result["success"] is False
         assert result["error"] == "scope not found"
 
 
@@ -104,7 +104,7 @@ class TestDeleteCollection:
             result = delete_collection(ctx, "b", "s", "c")
 
         cm.drop_collection.assert_called_once_with("s", "c")
-        assert result["status"] == "success"
+        assert result["success"] is True
         assert result["collection_name"] == "c"
 
     def test_sdk_error_returns_error_envelope_not_raised(self) -> None:
@@ -113,5 +113,5 @@ class TestDeleteCollection:
         with patch(_GET_CLUSTER, return_value=cluster):
             result = delete_collection(ctx, "b", "s", "c")
 
-        assert result["status"] == "error"
+        assert result["success"] is False
         assert result["error"] == "collection not found"
