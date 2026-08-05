@@ -9,6 +9,7 @@ This module tests:
 
 from cb_mcp.tools import (
     ALL_TOOLS,
+    INDEX_WRITE_TOOLS,
     KV_WRITE_TOOLS,
     READ_ONLY_TOOLS,
     get_tools,
@@ -23,6 +24,13 @@ KV_WRITE_TOOL_NAMES = {
     "replace_document_by_id",
     "delete_document_by_id",
     "sub_document_mutate_in",
+}
+
+# Index management write tool names that should be disabled when READ_ONLY_MODE=True
+INDEX_WRITE_TOOL_NAMES = {
+    "create_index",
+    "build_index",
+    "drop_index",
 }
 
 # Read-only tool names that should always be available (21 tools)
@@ -71,21 +79,35 @@ class TestToolCategories:
         tool_names = {tool.__name__ for tool in KV_WRITE_TOOLS}
         assert tool_names == KV_WRITE_TOOL_NAMES
 
+    def test_index_write_tools_defined(self):
+        """Verify INDEX_WRITE_TOOLS list is properly defined."""
+        assert len(INDEX_WRITE_TOOLS) == 3
+        tool_names = {tool.__name__ for tool in INDEX_WRITE_TOOLS}
+        assert tool_names == INDEX_WRITE_TOOL_NAMES
+
     def test_all_tools_is_union(self):
-        """Verify ALL_TOOLS is the union of READ_ONLY_TOOLS and KV_WRITE_TOOLS."""
-        expected_count = len(READ_ONLY_TOOLS) + len(KV_WRITE_TOOLS)
+        """Verify ALL_TOOLS is the union of READ_ONLY_TOOLS, KV_WRITE_TOOLS, and
+        INDEX_WRITE_TOOLS."""
+        expected_count = (
+            len(READ_ONLY_TOOLS) + len(KV_WRITE_TOOLS) + len(INDEX_WRITE_TOOLS)
+        )
         assert len(ALL_TOOLS) == expected_count
 
         all_tool_names = {tool.__name__ for tool in ALL_TOOLS}
-        expected_names = READ_ONLY_TOOL_NAMES | KV_WRITE_TOOL_NAMES
+        expected_names = (
+            READ_ONLY_TOOL_NAMES | KV_WRITE_TOOL_NAMES | INDEX_WRITE_TOOL_NAMES
+        )
         assert all_tool_names == expected_names
 
     def test_no_overlap_between_categories(self):
-        """Verify there's no overlap between READ_ONLY_TOOLS and KV_WRITE_TOOLS."""
+        """Verify there's no overlap between READ_ONLY_TOOLS, KV_WRITE_TOOLS, and
+        INDEX_WRITE_TOOLS."""
         read_only_names = {tool.__name__ for tool in READ_ONLY_TOOLS}
         kv_write_names = {tool.__name__ for tool in KV_WRITE_TOOLS}
-        overlap = read_only_names & kv_write_names
-        assert overlap == set(), f"Unexpected overlap: {overlap}"
+        index_write_names = {tool.__name__ for tool in INDEX_WRITE_TOOLS}
+        assert read_only_names & kv_write_names == set()
+        assert read_only_names & index_write_names == set()
+        assert kv_write_names & index_write_names == set()
 
 
 class TestGetToolsTruthTable:
@@ -102,7 +124,7 @@ class TestGetToolsTruthTable:
     """
 
     def test_read_only_mode_true(self):
-        """READ_ONLY_MODE=True: No KV write tools."""
+        """READ_ONLY_MODE=True: No KV or index write tools."""
         tools = get_tools(read_only_mode=True)
         tool_names = {tool.__name__ for tool in tools}
 
@@ -113,25 +135,35 @@ class TestGetToolsTruthTable:
         for kv_write_name in KV_WRITE_TOOL_NAMES:
             assert kv_write_name not in tool_names
 
+        # Index write tools should NOT be present
+        for index_write_name in INDEX_WRITE_TOOL_NAMES:
+            assert index_write_name not in tool_names
+
     def test_read_only_mode_false(self):
-        """READ_ONLY_MODE=False: All tools loaded including KV write tools."""
+        """READ_ONLY_MODE=False: All tools loaded including KV and index write tools."""
         tools = get_tools(read_only_mode=False)
         tool_names = {tool.__name__ for tool in tools}
 
-        # Should have all tools (read-only + KV write)
-        expected_names = READ_ONLY_TOOL_NAMES | KV_WRITE_TOOL_NAMES
+        # Should have all tools (read-only + KV write + index write)
+        expected_names = (
+            READ_ONLY_TOOL_NAMES | KV_WRITE_TOOL_NAMES | INDEX_WRITE_TOOL_NAMES
+        )
         assert tool_names == expected_names
 
         # KV write tools should be present
         for kv_write_name in KV_WRITE_TOOL_NAMES:
             assert kv_write_name in tool_names
 
+        # Index write tools should be present
+        for index_write_name in INDEX_WRITE_TOOL_NAMES:
+            assert index_write_name in tool_names
+
 
 class TestGetToolsDefaults:
     """Tests for get_tools() default parameter values."""
 
     def test_default_is_read_only(self):
-        """Verify default behavior is read-only (no KV write tools)."""
+        """Verify default behavior is read-only (no KV or index write tools)."""
         tools = get_tools()  # Using defaults
         tool_names = {tool.__name__ for tool in tools}
 
@@ -141,6 +173,10 @@ class TestGetToolsDefaults:
         # KV write tools should NOT be present by default
         for kv_write_name in KV_WRITE_TOOL_NAMES:
             assert kv_write_name not in tool_names
+
+        # Index write tools should NOT be present by default
+        for index_write_name in INDEX_WRITE_TOOL_NAMES:
+            assert index_write_name not in tool_names
 
     def test_default_read_only_mode_is_true(self):
         """Verify read_only_mode defaults to True."""
@@ -165,11 +201,17 @@ class TestToolCounts:
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        assert len(tools) == 26  # Expected total count (21 read-only + 5 KV write)
+        assert (
+            len(tools) == 29
+        )  # Expected total count (21 read-only + 5 KV write + 3 index write)
 
     def test_kv_write_tools_count(self):
         """Verify exactly 5 KV write tools exist."""
         assert len(KV_WRITE_TOOLS) == 5
+
+    def test_index_write_tools_count(self):
+        """Verify exactly 3 index write tools exist."""
+        assert len(INDEX_WRITE_TOOLS) == 3
 
 
 class TestReadOnlyModeToolFiltering:
@@ -198,6 +240,24 @@ class TestReadOnlyModeToolFiltering:
         tools = get_tools(read_only_mode=True)
         tool_names = {tool.__name__ for tool in tools}
         assert "delete_document_by_id" not in tool_names
+
+    def test_create_index_tool_filtered_in_read_only_mode(self):
+        """Verify create_index is filtered in read-only mode."""
+        tools = get_tools(read_only_mode=True)
+        tool_names = {tool.__name__ for tool in tools}
+        assert "create_index" not in tool_names
+
+    def test_build_index_tool_filtered_in_read_only_mode(self):
+        """Verify build_index is filtered in read-only mode."""
+        tools = get_tools(read_only_mode=True)
+        tool_names = {tool.__name__ for tool in tools}
+        assert "build_index" not in tool_names
+
+    def test_drop_index_tool_filtered_in_read_only_mode(self):
+        """Verify drop_index is filtered in read-only mode."""
+        tools = get_tools(read_only_mode=True)
+        tool_names = {tool.__name__ for tool in tools}
+        assert "drop_index" not in tool_names
 
     def test_get_document_always_available(self):
         """Verify get_document_by_id is always available (read operation)."""

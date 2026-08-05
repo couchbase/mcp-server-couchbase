@@ -17,16 +17,11 @@ import couchbase.subdocument as subdoc
 from couchbase.exceptions import CouchbaseException
 from fastmcp import Context
 
-from ..utils.connection import connect_to_bucket
+from ..utils.connection import connect_to_bucket, format_keyspace
 from ..utils.constants import MCP_SERVER_NAME
 from ..utils.context import get_cluster_connection
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.kv")
-
-
-def _keyspace(bucket_name: str, scope_name: str, collection_name: str) -> str:
-    """Render a ``bucket.scope.collection`` keyspace string for log context."""
-    return f"{bucket_name}.{scope_name}.{collection_name}"
 
 
 def get_document_by_id(
@@ -39,7 +34,7 @@ def get_document_by_id(
     """Get a document by its ID from the specified scope and collection.
     If the document is not found, it will raise an exception."""
 
-    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
@@ -69,7 +64,7 @@ def upsert_document_by_id(
     DO NOT use this as a fallback when insert_document_by_id or replace_document_by_id fails.
 
     Returns True on success, False on failure."""
-    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
@@ -92,7 +87,7 @@ def delete_document_by_id(
 ) -> bool:
     """Delete a document by its ID.
     Returns True on success, False on failure."""
-    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
@@ -120,7 +115,7 @@ def insert_document_by_id(
     Report the failure to the user. They can choose to 'replace' or 'upsert' if desired.
 
     Returns True on success, False on failure (including if document already exists)."""
-    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
@@ -148,7 +143,7 @@ def replace_document_by_id(
     Report the failure to the user. They can choose to 'insert' or 'upsert' if desired.
 
     Returns True on success, False on failure (including if document does not exist)."""
-    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
@@ -236,7 +231,7 @@ def sub_document_lookup_in(
         specs.append(subdoc.count(path))
         spec_meta.append(("count", path))
 
-    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
 
     if not specs:
         error = (
@@ -350,7 +345,7 @@ def sub_document_mutate_in(
     On a connection/mutation failure, or an invalid request, returns {"error": "<message>"}
     instead and no mutations are applied.
     """
-    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
 
     specs: list[Any] = []
     spec_meta: list[tuple[str, str]] = []

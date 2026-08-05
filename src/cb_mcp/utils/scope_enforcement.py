@@ -3,11 +3,12 @@ Per-tool OAuth scope enforcement.
 
 FastMCP's ``JWTVerifier`` exposes only a single, server-wide ``required_scopes``
 gate. The Couchbase MCP server needs finer granularity: ``couchbase-mcp:read``
-should permit read-only tools, ``couchbase-mcp:write`` should permit KV
-mutations only, and (deliberately) neither scope alone unlocks the other —
-SCOPE_WRITE on its own cannot reach read tools or SQL++. This module wraps
-each tool with a scope check that runs inside FastMCP's request context after
-token validation has already populated the access token.
+should permit read-only tools, ``couchbase-mcp:write`` should permit write
+tools (KV mutations, index management) only, and (deliberately) neither scope
+alone unlocks the other — SCOPE_WRITE on its own cannot reach read tools or
+SQL++. This module wraps each tool with a scope check that runs inside
+FastMCP's request context after token validation has already populated the
+access token.
 
 The wrapper is a no-op when no token is present in context (stdio transport
 or OAuth not configured), so wrapping is safe to apply unconditionally and
@@ -44,8 +45,8 @@ def required_scopes_for_tool(
     """Return the set of scopes a token must hold to invoke ``tool_name``.
 
     Categorization rule (deliberately strict, matches the spec):
-      - Names in ``write_tool_names`` (the KV mutation tools) require
-        ``SCOPE_WRITE`` and ONLY ``SCOPE_WRITE``.
+      - Names in ``write_tool_names`` (KV mutation tools, index management
+        tools) require ``SCOPE_WRITE`` and ONLY ``SCOPE_WRITE``.
       - Every other tool — including ``run_sql_plus_plus_query`` and other
         read-only tools — requires ``SCOPE_READ``.
 
