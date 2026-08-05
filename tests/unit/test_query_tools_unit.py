@@ -20,6 +20,7 @@ import pytest
 from lark_sqlpp import modifies_data, modifies_structure, parse_sqlpp
 
 from cb_mcp.tools.query import (
+    _blocked_write_kind,
     _run_query_tool_with_empty_message,
     explain_sql_plus_plus_query,
     get_schema_for_collection,
@@ -76,6 +77,38 @@ class TestRunSqlPlusPlusQueryReadOnly:
             ValueError, match="Structure modification query is not allowed"
         ):
             run_sql_plus_plus_query(ctx, "b", "s", "CREATE INDEX idx ON users(name)")
+
+        scope.query.assert_not_called()
+
+    def test_grant_blocked_in_read_only_mode(self) -> None:
+        """GRANT (SQL++ DCL) in read-only mode must raise before hitting the cluster.
+
+        Regression guard for the read-only bypass reported against DCL: lark-sqlpp
+        classifies GRANT/REVOKE as neither data nor structure modification, so the
+        old ``modifies_data``/``modifies_structure`` gate let them through. The
+        deny-by-default guard must now block them.
+        """
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+
+        with pytest.raises(
+            ValueError, match="Privilege modification query is not allowed"
+        ):
+            run_sql_plus_plus_query(
+                ctx, "b", "s", "GRANT cluster_admin ON default TO attacker_user"
+            )
+
+        scope.query.assert_not_called()
+
+    def test_revoke_blocked_in_read_only_mode(self) -> None:
+        """REVOKE (SQL++ DCL) in read-only mode must also be blocked."""
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+
+        with pytest.raises(
+            ValueError, match="Privilege modification query is not allowed"
+        ):
+            run_sql_plus_plus_query(
+                ctx, "b", "s", "REVOKE query_select ON `travel-sample` FROM alice"
+            )
 
         scope.query.assert_not_called()
 
@@ -291,6 +324,59 @@ class TestCollectionExpressionReadOnlyGuard:
 
         assert result == [{"ok": 1}]
         scope.query.assert_called_once()
+
+
+class TestBlockedWriteKind:
+    """Deny-by-default classification behind the read-only write guard.
+
+    ``_blocked_write_kind`` returns None only for genuine reads (DQL/utility)
+    and a label for everything else, so the guard blocks by allow-list rather
+    than by enumerating forbidden statement classes.
+    """
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "SELECT * FROM users LIMIT 1",
+            "INFER `users`",
+            "ADVISE SELECT * FROM users",
+        ],
+    )
+    def test_read_only_statements_return_none(self, query: str) -> None:
+        assert _blocked_write_kind(parse_sqlpp(query)) is None
+
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [
+            ("UPDATE users SET age = 25", "data"),
+            ("DELETE FROM users WHERE id = 1", "data"),
+            ("CREATE INDEX idx ON users(name)", "structure"),
+            ("DROP INDEX users.idx", "structure"),
+            ("GRANT cluster_admin ON default TO attacker_user", "privilege"),
+            ("REVOKE query_select ON `travel-sample` FROM alice", "privilege"),
+        ],
+    )
+    def test_write_statements_are_labeled(self, query: str, expected: str) -> None:
+        assert _blocked_write_kind(parse_sqlpp(query)) == expected
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "GRANT query_select ON `travel-sample` TO alice",
+            "REVOKE query_select ON `travel-sample` FROM alice",
+        ],
+    )
+    def test_dcl_slips_past_lark_but_guard_catches_it(self, query: str) -> None:
+        """The upstream lark-sqlpp gap the advisory reported: modifies_data and
+        modifies_structure both return False for GRANT/REVOKE. Our top-level-rule
+        classification must still flag them so the guard does not fall through.
+        """
+        tree = parse_sqlpp(query)
+        # Document the upstream gap (root cause lives in lark-sqlpp).
+        assert modifies_data(tree) is False
+        assert modifies_structure(tree) is False
+        # Our guard closes it regardless.
+        assert _blocked_write_kind(tree) == "privilege"
 
 
 def test_array_slice_projection_with_is_not_missing_parses() -> None:
