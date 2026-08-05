@@ -41,6 +41,7 @@ __all__ = [
     "get_test_bucket",
     "get_test_collection",
     "get_test_scope",
+    "is_error_response",
     "require_test_bucket",
 ]
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -68,6 +69,9 @@ EXPECTED_TOOLS = {
     "explain_sql_plus_plus_query",
     "get_index_advisor_recommendations",
     "list_indexes",
+    "create_index",
+    "build_index",
+    "drop_index",
     "get_cluster_health_and_services",
     # Performance analysis tools
     "get_longest_running_queries",
@@ -105,6 +109,9 @@ TOOLS_BY_CATEGORY = {
     "index": {
         "list_indexes",
         "get_index_advisor_recommendations",
+        "create_index",
+        "build_index",
+        "drop_index",
     },
     "management": {
         "create_scope",
@@ -169,6 +176,15 @@ TOOL_REQUIRED_PARAMS = {
     "create_collection": ["bucket_name", "scope_name", "collection_name"],
     "delete_scope": ["bucket_name", "scope_name"],
     "delete_collection": ["bucket_name", "scope_name", "collection_name"],
+    "create_index": [
+        "bucket_name",
+        "scope_name",
+        "collection_name",
+        "index_name",
+        "keys",
+    ],
+    "build_index": ["bucket_name", "scope_name", "collection_name"],
+    "drop_index": ["bucket_name", "scope_name", "collection_name", "index_name"],
 }
 
 # Default timeout (seconds) to guard against hangs when the Couchbase cluster

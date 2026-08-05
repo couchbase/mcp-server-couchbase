@@ -7,11 +7,53 @@ the tool output rather than against fixed values.
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 
 from accuracy.sdk import ResultCase
+from accuracy.sdk.client import AccuracyTestingClient
+from accuracy.sdk.runner import SetupHook
 
 from ._harness import assert_result_case
+
+
+def _create_deferred_index(
+    bucket: str, scope: str, collection: str, index_name: str
+) -> SetupHook:
+    """Return a hook that creates a deferred index (silently)."""
+
+    async def _hook(client: AccuracyTestingClient) -> None:
+        await client.call_tool_silent(
+            "create_index",
+            {
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "index_name": index_name,
+                "keys": ["email"],
+            },
+        )
+
+    return _hook
+
+
+def _drop_index(bucket: str, scope: str, collection: str, index_name: str) -> SetupHook:
+    """Return a hook that drops an index (silently, ignoring if already gone)."""
+
+    async def _hook(client: AccuracyTestingClient) -> None:
+        await client.call_tool_silent(
+            "drop_index",
+            {
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "index_name": index_name,
+                "ignore_if_not_exists": True,
+            },
+        )
+
+    return _hook
 
 
 def _build_cases(bucket: str, scope: str, collection: str) -> list[ResultCase]:
@@ -63,6 +105,52 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[ResultCase]:
         )
     )
 
+    create_index_name = f"idx_email_result_test_{uuid.uuid4().hex[:8]}"
+    cases.append(
+        ResultCase(
+            test_id="create_index_reports_deferred_and_next_step",
+            prompt=(
+                f"Create an index named '{create_index_name}' on the 'email' "
+                f"field of the '{collection}' collection in scope '{scope}' of "
+                f"bucket '{bucket}', then tell me its current status."
+            ),
+            expectation=(
+                "The answer must reflect that the index was created and is in "
+                "the deferred/not-yet-built state (the create_index tool "
+                "defaults to deferred=True), and should mention that building "
+                "it (or checking again later) is needed before it's usable. "
+                "FAIL if the answer claims the index is already online/built "
+                "immediately after creation, or fabricates a status the tool "
+                "did not report."
+            ),
+            cleanup=_drop_index(bucket, scope, collection, create_index_name),
+        )
+    )
+
+    build_index_name = f"idx_build_result_test_{uuid.uuid4().hex[:8]}"
+    cases.append(
+        ResultCase(
+            test_id="build_index_reports_via_list_indexes",
+            prompt=(
+                f"There is a deferred index named '{build_index_name}' on the "
+                f"'{collection}' collection in scope '{scope}' of bucket "
+                f"'{bucket}'. Build it now and tell me whether it's online yet."
+            ),
+            expectation=(
+                "The answer must be grounded in an actual status check (e.g. "
+                "list_indexes) rather than assuming the build finished the "
+                "moment build_index was called — the build is asynchronous. "
+                "PASS if the answer reports whatever state the tools actually "
+                "returned (deferred, building, or online) without claiming "
+                "certainty the tools didn't provide. FAIL if the answer "
+                "asserts the index is online without having checked, or "
+                "invents a status the tool output didn't contain."
+            ),
+            seed=_create_deferred_index(bucket, scope, collection, build_index_name),
+            cleanup=_drop_index(bucket, scope, collection, build_index_name),
+        )
+    )
+
     return cases
 
 
@@ -74,6 +162,8 @@ def index_cases(test_bucket: str, test_scope: str, test_collection: str):
 INDEX_RESULT_CASE_IDS = [
     "list_indexes_faithful",
     "index_advisor_faithful",
+    "create_index_reports_deferred_and_next_step",
+    "build_index_reports_via_list_indexes",
 ]
 
 

@@ -4,11 +4,15 @@ Integration tests for index.py tools.
 Tests for:
 - list_indexes
 - get_index_advisor_recommendations
+- create_index
+- build_index
+- drop_index
 """
 
 from __future__ import annotations
 
 import re
+import uuid
 
 import pytest
 from conftest import (
@@ -26,6 +30,22 @@ _REQUIRED_REST_KEYS: frozenset[str] = frozenset(
 
 # Query-side top-level keys we read in process_index_data_from_query.
 _REQUIRED_QUERY_TOPLEVEL_KEYS: frozenset[str] = frozenset({"name", "state", "metadata"})
+
+
+async def _drop_index_quietly(
+    session, bucket: str, scope: str, collection: str, index_name: str
+) -> None:
+    """Best-effort cleanup drop for test teardown (no error if already gone)."""
+    await session.call_tool(
+        "drop_index",
+        arguments={
+            "bucket_name": bucket,
+            "scope_name": scope,
+            "collection_name": collection,
+            "index_name": index_name,
+            "ignore_if_not_exists": True,
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -583,3 +603,266 @@ async def test_get_index_advisor_with_single_quoted_string() -> None:
                 f"Query with single quotes should either be escaped correctly "
                 f"or fail with a clear error. Got: {payload}"
             )
+
+
+@pytest.mark.asyncio
+async def test_create_index_deferred_by_default() -> None:
+    """create_index without deferred= must default to deferred=True, and the
+    index must show up as not-yet-built via list_indexes (status 'created' on
+    newer clusters, 'deferred' on older ones)."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+    index_name = f"test_idx_{uuid.uuid4().hex[:8]}"
+
+    async with create_mcp_session() as session:
+        try:
+            response = await session.call_tool(
+                "create_index",
+                arguments={
+                    "bucket_name": bucket,
+                    "scope_name": scope,
+                    "collection_name": collection,
+                    "index_name": index_name,
+                    "keys": ["email"],
+                },
+            )
+            payload = extract_payload(response)
+
+            assert payload["success"] is True, f"create_index failed: {payload}"
+            assert payload["deferred"] is True
+            assert payload["index_name"] == index_name
+
+            list_response = await session.call_tool(
+                "list_indexes",
+                arguments={
+                    "bucket_name": bucket,
+                    "scope_name": scope,
+                    "collection_name": collection,
+                    "index_name": index_name,
+                },
+            )
+            indexes = extract_payload(list_response)
+            assert isinstance(indexes, list) and len(indexes) == 1
+            # A deferred (not-yet-built) index reports status "created" on newer
+            # clusters and "deferred" on older ones — accept either.
+            assert indexes[0]["status"].lower() in {"created", "deferred"}
+        finally:
+            await _drop_index_quietly(session, bucket, scope, collection, index_name)
+
+
+@pytest.mark.asyncio
+async def test_create_index_ignore_if_exists() -> None:
+    """Recreating an existing index without ignore_if_exists must return a
+    log-and-return error dict, not raise; with ignore_if_exists=True it must
+    succeed."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+    index_name = f"test_idx_{uuid.uuid4().hex[:8]}"
+
+    async with create_mcp_session() as session:
+        try:
+            first = await session.call_tool(
+                "create_index",
+                arguments={
+                    "bucket_name": bucket,
+                    "scope_name": scope,
+                    "collection_name": collection,
+                    "index_name": index_name,
+                    "keys": ["email"],
+                },
+            )
+            assert extract_payload(first)["success"] is True
+
+            duplicate = await session.call_tool(
+                "create_index",
+                arguments={
+                    "bucket_name": bucket,
+                    "scope_name": scope,
+                    "collection_name": collection,
+                    "index_name": index_name,
+                    "keys": ["email"],
+                },
+            )
+            duplicate_payload = extract_payload(duplicate)
+            assert duplicate_payload["success"] is False
+            assert "error" in duplicate_payload
+
+            ignored = await session.call_tool(
+                "create_index",
+                arguments={
+                    "bucket_name": bucket,
+                    "scope_name": scope,
+                    "collection_name": collection,
+                    "index_name": index_name,
+                    "keys": ["email"],
+                    "ignore_if_exists": True,
+                },
+            )
+            assert extract_payload(ignored)["success"] is True
+        finally:
+            await _drop_index_quietly(session, bucket, scope, collection, index_name)
+
+
+@pytest.mark.asyncio
+async def test_build_index_succeeds_with_deferred_index() -> None:
+    """build_index must succeed on a collection that has a deferred index.
+
+    We assert only the synchronous build trigger — not that the index reaches
+    'online' — because the build runs asynchronously and may not be complete
+    when the call returns. The result-validation eval covers the "check
+    list_indexes for the real state" behaviour separately.
+    """
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+    index_name = f"test_idx_{uuid.uuid4().hex[:8]}"
+
+    async with create_mcp_session() as session:
+        try:
+            await session.call_tool(
+                "create_index",
+                arguments={
+                    "bucket_name": bucket,
+                    "scope_name": scope,
+                    "collection_name": collection,
+                    "index_name": index_name,
+                    "keys": ["email"],
+                },
+            )
+
+            build_response = await session.call_tool(
+                "build_index",
+                arguments={
+                    "bucket_name": bucket,
+                    "scope_name": scope,
+                    "collection_name": collection,
+                },
+            )
+            build_payload = extract_payload(build_response)
+            assert build_payload == {
+                "success": True,
+                "keyspace": f"{bucket}.{scope}.{collection}",
+            }
+        finally:
+            await _drop_index_quietly(session, bucket, scope, collection, index_name)
+
+
+@pytest.mark.asyncio
+async def test_build_index_no_deferred_indexes() -> None:
+    """build_index on a collection with nothing deferred is a harmless
+    no-op — the SDK doesn't error when there's nothing to build."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "build_index",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+            },
+        )
+        payload = extract_payload(response)
+
+        assert payload == {
+            "success": True,
+            "keyspace": f"{bucket}.{scope}.{collection}",
+        }
+
+
+@pytest.mark.asyncio
+async def test_drop_index() -> None:
+    """drop_index must remove a non-deferred index; list_indexes must no
+    longer report it afterward."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+    index_name = f"test_idx_{uuid.uuid4().hex[:8]}"
+
+    async with create_mcp_session() as session:
+        try:
+            await session.call_tool(
+                "create_index",
+                arguments={
+                    "bucket_name": bucket,
+                    "scope_name": scope,
+                    "collection_name": collection,
+                    "index_name": index_name,
+                    "keys": ["email"],
+                    "deferred": False,
+                },
+            )
+
+            drop_response = await session.call_tool(
+                "drop_index",
+                arguments={
+                    "bucket_name": bucket,
+                    "scope_name": scope,
+                    "collection_name": collection,
+                    "index_name": index_name,
+                },
+            )
+            drop_payload = extract_payload(drop_response)
+            assert drop_payload == {
+                "success": True,
+                "index_name": index_name,
+                "keyspace": f"{bucket}.{scope}.{collection}",
+            }
+
+            list_response = await session.call_tool(
+                "list_indexes",
+                arguments={
+                    "bucket_name": bucket,
+                    "scope_name": scope,
+                    "collection_name": collection,
+                    "index_name": index_name,
+                },
+            )
+            indexes = extract_payload(list_response)
+            assert indexes is None or (
+                isinstance(indexes, list) and len(indexes) == 0
+            ), f"Expected no results after drop, got: {indexes}"
+        finally:
+            # The drop above is the action under test; if an assertion fails
+            # before it lands, this makes sure the index doesn't leak.
+            await _drop_index_quietly(session, bucket, scope, collection, index_name)
+
+
+@pytest.mark.asyncio
+async def test_drop_index_ignore_if_not_exists() -> None:
+    """Dropping a nonexistent index errors unless ignore_if_not_exists=True."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+    index_name = f"test_idx_missing_{uuid.uuid4().hex[:8]}"
+
+    async with create_mcp_session() as session:
+        without_flag = await session.call_tool(
+            "drop_index",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "index_name": index_name,
+            },
+        )
+        without_flag_payload = extract_payload(without_flag)
+        assert without_flag_payload["success"] is False
+        assert "error" in without_flag_payload
+
+        with_flag = await session.call_tool(
+            "drop_index",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "index_name": index_name,
+                "ignore_if_not_exists": True,
+            },
+        )
+        with_flag_payload = extract_payload(with_flag)
+        assert with_flag_payload["success"] is True

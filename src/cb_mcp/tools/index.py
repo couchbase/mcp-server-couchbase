@@ -7,9 +7,11 @@ This module contains tools for listing and managing indexes in the Couchbase clu
 import logging
 from typing import Any
 
+from couchbase.management.options import CreateQueryIndexOptions, DropQueryIndexOptions
 from fastmcp import Context
 
 from ..utils.config import get_settings
+from ..utils.connection import connect_to_bucket, format_keyspace
 from ..utils.constants import (
     MCP_SERVER_NAME,
     QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION,
@@ -23,6 +25,7 @@ from ..utils.index_utils import (
     validate_connection_settings,
     validate_filter_params,
 )
+from ..utils.responses import tool_error, tool_success
 from .query import run_cluster_query, run_sql_plus_plus_query
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.index")
@@ -248,3 +251,135 @@ def list_indexes(
     except Exception as e:
         logger.error(f"Error listing indexes: {e}", exc_info=True)
         raise
+
+
+def create_index(
+    ctx: Context,
+    bucket_name: str,
+    scope_name: str,
+    collection_name: str,
+    index_name: str,
+    keys: list[str],
+    deferred: bool = True,
+    condition: str | None = None,
+    num_replicas: int | None = None,
+    ignore_if_exists: bool = False,
+) -> dict[str, Any]:
+    """Create a non-vector (scalar) GSI secondary index on a collection.
+    This is the preferred way to create a scalar index — use it instead of a raw CREATE
+    INDEX statement via run_sql_plus_plus_query. It only creates scalar GSI indexes; it
+    cannot create vector indexes.
+
+    By default the index is created deferred (not built). The recommended next step is to
+    call build_index to trigger the build, then list_indexes to confirm it reaches the
+    'online' state.
+
+    keys is the field(s)/expression(s) to index, e.g. ["email"] or ["type", "created_at DESC"].
+    condition is an optional WHERE clause for a partial index, e.g. type = 'user'.
+    num_replicas optionally sets the number of index replicas for availability and scaling.
+    Pass ignore_if_exists=True to avoid an error when an index with this name already exists.
+
+    Returns {"success": True, "index_name": ..., "deferred": ..., "keyspace": ...} on
+    success, or {"success": False, "error": ...} on failure — e.g. the index already
+    exists (without ignore_if_exists=True) or the keys/condition are invalid.
+    """
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    cluster = get_cluster_connection(ctx)
+    bucket = connect_to_bucket(cluster, bucket_name)
+    try:
+        logger.debug(f"Creating index {index_name!r} on {keyspace}")
+        collection = bucket.scope(scope_name).collection(collection_name)
+        index_manager = collection.query_indexes()
+        index_manager.create_index(
+            index_name,
+            keys,
+            CreateQueryIndexOptions(
+                deferred=deferred,
+                condition=condition,
+                num_replicas=num_replicas,
+                ignore_if_exists=ignore_if_exists,
+            ),
+        )
+        logger.info(f"Created index {index_name!r} on {keyspace} (deferred={deferred})")
+        return tool_success(index_name=index_name, deferred=deferred, keyspace=keyspace)
+    except Exception as e:
+        logger.error(
+            f"Error creating index {index_name!r} on {keyspace}: {e}", exc_info=True
+        )
+        return tool_error(e, index_name=index_name, keyspace=keyspace)
+
+
+def build_index(
+    ctx: Context,
+    bucket_name: str,
+    scope_name: str,
+    collection_name: str,
+) -> dict[str, Any]:
+    """Trigger the build of all deferred indexes on a collection.
+
+    This builds every index in the collection currently in the 'deferred' state — you
+    cannot target a single index by name, and this includes vector indexes if any are
+    deferred (only create_index is restricted to scalar indexes; build is not). If there
+    are no deferred indexes, this is a harmless no-op.
+
+    The build runs asynchronously: success means the build was triggered, not that it has
+    finished. Use list_indexes to check when the index(es) reach the 'online' state.
+
+    Returns {"success": True, "keyspace": ...} on success, or
+    {"success": False, "error": ...} on failure.
+    """
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    cluster = get_cluster_connection(ctx)
+    bucket = connect_to_bucket(cluster, bucket_name)
+    try:
+        logger.debug(f"Building deferred indexes on {keyspace}")
+        collection = bucket.scope(scope_name).collection(collection_name)
+        index_manager = collection.query_indexes()
+        index_manager.build_deferred_indexes()
+        logger.info(f"Triggered build of deferred indexes on {keyspace}")
+        return tool_success(keyspace=keyspace)
+    except Exception as e:
+        logger.error(
+            f"Error building deferred indexes on {keyspace}: {e}", exc_info=True
+        )
+        return tool_error(e, keyspace=keyspace)
+
+
+def drop_index(
+    ctx: Context,
+    bucket_name: str,
+    scope_name: str,
+    collection_name: str,
+    index_name: str,
+    ignore_if_not_exists: bool = False,
+) -> dict[str, Any]:
+    """Drop an existing GSI index (scalar or vector) from a collection.
+
+    This permanently removes the index and cannot be undone. Queries that relied on it may
+    become slower or fall back to another index, and the index would have to be recreated
+    (and rebuilt) to restore it. Prefer confirming the index name with list_indexes first.
+
+    Pass ignore_if_not_exists=True to avoid an error when the named index doesn't exist.
+
+    Returns {"success": True, "index_name": ..., "keyspace": ...} on success, or
+    {"success": False, "error": ...} on failure — e.g. the index does not exist
+    (without ignore_if_not_exists=True).
+    """
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    cluster = get_cluster_connection(ctx)
+    bucket = connect_to_bucket(cluster, bucket_name)
+    try:
+        logger.debug(f"Dropping index {index_name!r} on {keyspace}")
+        collection = bucket.scope(scope_name).collection(collection_name)
+        index_manager = collection.query_indexes()
+        index_manager.drop_index(
+            index_name,
+            DropQueryIndexOptions(ignore_if_not_exists=ignore_if_not_exists),
+        )
+        logger.info(f"Dropped index {index_name!r} on {keyspace}")
+        return tool_success(index_name=index_name, keyspace=keyspace)
+    except Exception as e:
+        logger.error(
+            f"Error dropping index {index_name!r} on {keyspace}: {e}", exc_info=True
+        )
+        return tool_error(e, index_name=index_name, keyspace=keyspace)
