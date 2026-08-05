@@ -225,6 +225,11 @@ class TestParseDisabledToolsSecurity:
 
         Path(f.name).unlink()
 
+    def test_invalid_tool_names_are_named(self, caplog):
+        """A misspelled tool name must be named so operators can spot it."""
+        parse_tool_names("get_document_by_id,delete_documnt_by_id", VALID_TOOL_NAMES)
+        assert "delete_documnt_by_id" in caplog.text
+
 
 class TestParseDisabledToolsEdgeCases:
     """Tests for edge cases."""
