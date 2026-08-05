@@ -3,6 +3,7 @@ Integration tests for kv.py tools.
 
 Tests for:
 - get_document_by_id
+- sub_document_lookup_in
 - upsert_document_by_id
 - insert_document_by_id
 - replace_document_by_id
@@ -517,4 +518,420 @@ async def test_upsert_to_nonexistent_bucket_raises_error() -> None:
             f"Upsert to non-existent bucket must raise an error, not return False. "
             f"Got payload={payload}, isError={is_error}. "
             f"This exposes Bug #1: KV tools swallow exceptions."
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_lookup_in_get_paths() -> None:
+    """Verify sub_document_lookup_in fetches individual field values."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_subdoc_get_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Subdoc Test", "address": {"city": "Austin"}, "value": 42}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_lookup_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "get_paths": ["name", "address.city"],
+            },
+        )
+        payload = extract_payload(response)
+
+        assert payload["get"]["name"] == {"value": "Subdoc Test"}
+        assert payload["get"]["address.city"] == {"value": "Austin"}
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_lookup_in_exists_paths() -> None:
+    """Verify sub_document_lookup_in checks presence without fetching values."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_subdoc_exists_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Exists Test", "tags": ["a", "b"]}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_lookup_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "exists_paths": ["tags", "nickname"],
+            },
+        )
+        payload = extract_payload(response)
+
+        assert payload["exists"]["tags"] == {"value": True}
+        assert payload["exists"]["nickname"] == {"value": False}
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_lookup_in_count_paths() -> None:
+    """Verify sub_document_lookup_in returns the element count of an array."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_subdoc_count_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Count Test", "tags": ["a", "b", "c"]}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_lookup_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "count_paths": ["tags"],
+            },
+        )
+        payload = extract_payload(response)
+
+        assert payload["count"]["tags"] == {"value": 3}
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_lookup_in_combined_ops() -> None:
+    """Verify get, exists, and count can be combined in a single call."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_subdoc_combined_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Combined Test", "tags": ["a", "b"], "active": True}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_lookup_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "get_paths": ["name"],
+                "exists_paths": ["active"],
+                "count_paths": ["tags"],
+            },
+        )
+        payload = extract_payload(response)
+
+        assert payload["get"]["name"] == {"value": "Combined Test"}
+        assert payload["exists"]["active"] == {"value": True}
+        assert payload["count"]["tags"] == {"value": 2}
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_lookup_in_missing_path_reports_error_not_raise() -> None:
+    """A path that doesn't exist on an otherwise-real document must be reported
+    per-path as a failure, without failing the other requested paths."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_subdoc_missing_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Partial Failure Test"}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_lookup_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "get_paths": ["name", "does.not.exist"],
+            },
+        )
+        payload = extract_payload(response)
+        is_error = getattr(response, "isError", None) or getattr(
+            response, "is_error", False
+        )
+
+        assert not is_error, "A missing sub-path must not fail the whole call"
+        assert payload["get"]["name"] == {"value": "Partial Failure Test"}
+        assert "error" in payload["get"]["does.not.exist"]
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_lookup_in_no_paths_returns_error() -> None:
+    """Calling with no get/exists/count paths at all must report an error in the
+    payload without failing the MCP call itself."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+    doc_id = f"test_subdoc_nopaths_{uuid.uuid4().hex[:8]}"
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "sub_document_lookup_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+        payload = extract_payload(response)
+
+        is_error = getattr(response, "isError", None) or getattr(
+            response, "is_error", False
+        )
+        assert not is_error
+        assert "error" in payload, "Expected an error key when no paths are provided"
+
+
+@pytest.mark.asyncio
+async def test_sub_document_lookup_in_document_not_found() -> None:
+    """A document_id that does not exist must return {"error": ...} without
+    raising an MCP-level error."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+    doc_id = f"test_subdoc_notfound_{uuid.uuid4().hex[:8]}"
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "sub_document_lookup_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "get_paths": ["name"],
+            },
+        )
+        payload = extract_payload(response)
+
+        is_error = getattr(response, "isError", None) or getattr(
+            response, "is_error", False
+        )
+        assert not is_error
+        assert "error" in payload, "Expected an error key when document does not exist"
+
+
+@pytest.mark.asyncio
+async def test_sub_document_lookup_in_count_on_scalar_reports_error() -> None:
+    """count on a scalar field (PathMismatchException) must be reported as a
+    per-path error without failing the other requested paths."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_subdoc_countscalar_{uuid.uuid4().hex[:8]}"
+    doc_content = {"name": "Mismatch Test", "tags": ["x", "y"]}
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_lookup_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "count_paths": ["name", "tags"],
+            },
+        )
+        payload = extract_payload(response)
+
+        is_error = getattr(response, "isError", None) or getattr(
+            response, "is_error", False
+        )
+        assert not is_error, (
+            "PathMismatch on one count path must not fail the whole call"
+        )
+        assert "error" in payload["count"]["name"], (
+            "count on a scalar field must report per-path failure"
+        )
+        assert payload["count"]["tags"] == {"value": 2}
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_sub_document_lookup_in_array_index_paths() -> None:
+    """Array index paths (bracket notation and negative indexing) must resolve
+    correctly, including nested paths inside array elements."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    doc_id = f"test_subdoc_arrayidx_{uuid.uuid4().hex[:8]}"
+    doc_content = {
+        "name": "Array Index Test",
+        "reviews": [
+            {"author": "Alice", "rating": 5},
+            {"author": "Bob", "rating": 3},
+        ],
+    }
+
+    async with create_mcp_session() as session:
+        await session.call_tool(
+            "upsert_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "document_content": doc_content,
+            },
+        )
+
+        response = await session.call_tool(
+            "sub_document_lookup_in",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+                "get_paths": ["reviews[0].author", "reviews[-1].rating"],
+            },
+        )
+        payload = extract_payload(response)
+
+        assert payload["get"]["reviews[0].author"] == {"value": "Alice"}
+        assert payload["get"]["reviews[-1].rating"] == {"value": 3}
+
+        await session.call_tool(
+            "delete_document_by_id",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "document_id": doc_id,
+            },
         )

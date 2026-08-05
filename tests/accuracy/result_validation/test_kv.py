@@ -5,6 +5,10 @@ values. Writes (insert/upsert/replace/delete) use faithfulness — the tool
 returns success/failure and the answer must report that outcome correctly
 without fabricating data. A non-existent get must not hallucinate.
 
+sub_document_lookup_in cases mirror the get cases (exact seeded value, exact
+count, no hallucination on a missing field) but ask for field-existence,
+value, and array-count questions that only need a sub-document read.
+
 Seeded values use invented tokens (e.g. country 'Zubrowka') so an answer that
 didn't actually read the document can't fabricate them.
 """
@@ -211,6 +215,89 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[ResultCase]:
         )
     )
 
+    # --- sub_document_lookup_in: exists + value (seeded) -----------------
+    subdoc_exists_id = doc_id("rv_subdoc_exists")
+    cases.append(
+        ResultCase(
+            test_id="sub_document_exists_and_value",
+            prompt=(
+                f"Without fetching the whole document, tell me whether document "
+                f"'{subdoc_exists_id}' in bucket '{bucket}', scope '{scope}', "
+                f"collection '{collection}' has a 'callsign' field, and if so what "
+                "its value is."
+            ),
+            expectation=(
+                "The 'callsign' field exists and its value is 'ZUB1'. The answer "
+                "must state the field exists and give the exact value 'ZUB1'. A "
+                "different value, or claiming the field is absent, is incorrect."
+            ),
+            seed=seed_document(
+                bucket,
+                scope,
+                collection,
+                subdoc_exists_id,
+                {"name": "Zubrowka Air", "callsign": "ZUB1"},
+            ),
+            cleanup=delete_document(bucket, scope, collection, subdoc_exists_id),
+        )
+    )
+
+    # --- sub_document_lookup_in: count (seeded) ---------------------------
+    subdoc_count_id = doc_id("rv_subdoc_count")
+    cases.append(
+        ResultCase(
+            test_id="sub_document_count",
+            prompt=(
+                f"How many entries are in the 'routes' array of document "
+                f"'{subdoc_count_id}' in bucket '{bucket}', scope '{scope}', "
+                f"collection '{collection}'?"
+            ),
+            expectation=(
+                "The 'routes' array has exactly 4 entries. The answer must state "
+                "the count is 4. Any other number, or no number, is incorrect."
+            ),
+            seed=seed_document(
+                bucket,
+                scope,
+                collection,
+                subdoc_count_id,
+                {
+                    "name": "Novigrad Wings",
+                    "routes": ["NVG-ZUB", "ZUB-NVG", "NVG-RED", "RED-NVG"],
+                },
+            ),
+            cleanup=delete_document(bucket, scope, collection, subdoc_count_id),
+        )
+    )
+
+    # --- sub_document_lookup_in: missing field -> must NOT hallucinate ---
+    subdoc_missing_id = doc_id("rv_subdoc_missing")
+    cases.append(
+        ResultCase(
+            test_id="sub_document_missing_field_no_hallucination",
+            prompt=(
+                f"Does document '{subdoc_missing_id}' in bucket '{bucket}', scope "
+                f"'{scope}', collection '{collection}' have a field called "
+                "'loyalty_tier'? If so, what is its value?"
+            ),
+            expectation=(
+                "The document exists but has no 'loyalty_tier' field. This checks "
+                "ONE property: no hallucination. PASS if the answer states the "
+                "field does not exist / is not present, and does NOT invent a "
+                "value for it. FAIL ONLY if it fabricates a value or claims the "
+                "field exists."
+            ),
+            seed=seed_document(
+                bucket,
+                scope,
+                collection,
+                subdoc_missing_id,
+                {"name": "Redania Regional"},
+            ),
+            cleanup=delete_document(bucket, scope, collection, subdoc_missing_id),
+        )
+    )
+
     return cases
 
 
@@ -228,6 +315,9 @@ KV_RESULT_CASE_IDS = [
     "upsert_reports_success",
     "replace_reports_success",
     "delete_reports_success",
+    "sub_document_exists_and_value",
+    "sub_document_count",
+    "sub_document_missing_field_no_hallucination",
 ]
 
 

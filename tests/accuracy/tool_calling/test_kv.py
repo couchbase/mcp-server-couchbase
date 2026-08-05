@@ -4,6 +4,8 @@ Cases:
   - get / insert / upsert / replace / delete (one each)
   - multi-step (get → upsert)
   - negative selection (a "read-only" prompt must not call delete)
+  - sub_document_lookup_in selected over get_document_by_id for exists/count/
+    single-field prompts
 """
 
 from __future__ import annotations
@@ -245,6 +247,98 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
         )
     )
 
+    exists_id = _doc_id("acc_subdoc_exists")
+    cases.append(
+        AccuracyCase(
+            test_id="sub_document_lookup_in_exists",
+            prompt=(
+                f"Without fetching its full contents, check whether document "
+                f"'{exists_id}' in bucket '{bucket}', scope '{scope}', collection "
+                f"'{collection}' has a field called 'nickname'."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="sub_document_lookup_in",
+                    parameters={
+                        "bucket_name": bucket,
+                        "scope_name": scope,
+                        "collection_name": collection,
+                        "document_id": exists_id,
+                        "exists_paths": Matcher.any_value(),
+                    },
+                ),
+            ],
+            seed=_seed_doc(
+                bucket, scope, collection, exists_id, {"name": "Exists Test"}
+            ),
+            cleanup=_delete_doc(bucket, scope, collection, exists_id),
+        )
+    )
+
+    count_id = _doc_id("acc_subdoc_count")
+    cases.append(
+        AccuracyCase(
+            test_id="sub_document_lookup_in_count",
+            prompt=(
+                f"How many items are in the 'tags' array of document '{count_id}' "
+                f"in bucket '{bucket}', scope '{scope}', collection '{collection}'? "
+                "Don't fetch the whole document."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="sub_document_lookup_in",
+                    parameters={
+                        "bucket_name": bucket,
+                        "scope_name": scope,
+                        "collection_name": collection,
+                        "document_id": count_id,
+                        "count_paths": Matcher.any_value(),
+                    },
+                ),
+            ],
+            seed=_seed_doc(
+                bucket,
+                scope,
+                collection,
+                count_id,
+                {"name": "Count Test", "tags": ["a", "b", "c"]},
+            ),
+            cleanup=_delete_doc(bucket, scope, collection, count_id),
+        )
+    )
+
+    field_id = _doc_id("acc_subdoc_get")
+    cases.append(
+        AccuracyCase(
+            test_id="sub_document_lookup_in_get_field_not_whole_doc",
+            prompt=(
+                f"I only need the 'city' field nested under 'address' in document "
+                f"'{field_id}' (bucket '{bucket}', scope '{scope}', collection "
+                f"'{collection}'). Don't fetch the whole document, just that field."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="sub_document_lookup_in",
+                    parameters={
+                        "bucket_name": bucket,
+                        "scope_name": scope,
+                        "collection_name": collection,
+                        "document_id": field_id,
+                        "get_paths": Matcher.any_value(),
+                    },
+                ),
+            ],
+            seed=_seed_doc(
+                bucket,
+                scope,
+                collection,
+                field_id,
+                {"name": "Field Test", "address": {"city": "Austin"}},
+            ),
+            cleanup=_delete_doc(bucket, scope, collection, field_id),
+        )
+    )
+
     return cases
 
 
@@ -262,6 +356,9 @@ KV_CASE_IDS = [
     "get_then_upsert_multistep",
     "read_only_prompt_uses_get_only",
     "conversational_lookup_document",
+    "sub_document_lookup_in_exists",
+    "sub_document_lookup_in_count",
+    "sub_document_lookup_in_get_field_not_whole_doc",
 ]
 
 

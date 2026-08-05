@@ -28,6 +28,7 @@ from .kv import (
     get_document_by_id,
     insert_document_by_id,
     replace_document_by_id,
+    sub_document_lookup_in,
     upsert_document_by_id,
 )
 
@@ -66,8 +67,9 @@ READ_ONLY_TOOLS = [
     get_collections_in_scope,
     get_scopes_in_bucket,
     get_cluster_health_and_services,
-    # KV read tool
+    # KV read tools
     get_document_by_id,
+    sub_document_lookup_in,
     # Query tools (read operations)
     get_schema_for_collection,
     run_sql_plus_plus_query,  # Write protection handled at runtime via read_only_mode
@@ -113,8 +115,9 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_collections_in_scope": ToolAnnotations(readOnlyHint=True),
     "get_scopes_in_bucket": ToolAnnotations(readOnlyHint=True),
     "get_cluster_health_and_services": ToolAnnotations(readOnlyHint=True),
-    # KV read tool
+    # KV read tools
     "get_document_by_id": ToolAnnotations(readOnlyHint=True),
+    "sub_document_lookup_in": ToolAnnotations(readOnlyHint=True),
     # Query tools
     "get_schema_for_collection": ToolAnnotations(readOnlyHint=True),
     "run_sql_plus_plus_query": ToolAnnotations(),
@@ -167,6 +170,7 @@ __all__ = [
     "get_scopes_in_bucket",
     "get_buckets_in_cluster",
     "get_document_by_id",
+    "sub_document_lookup_in",
     "upsert_document_by_id",
     "insert_document_by_id",
     "replace_document_by_id",
