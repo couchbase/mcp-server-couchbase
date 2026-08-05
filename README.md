@@ -34,6 +34,10 @@ For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couc
 | `get_collections_in_scope` | Get a list of all the collections in a specified scope and bucket. Note that this tool requires the cluster to have Query service. |
 | `get_scopes_and_collections_in_bucket` | Get a list of all the scopes and collections in the specified bucket |
 | `get_schema_for_collection` | Get the structure for a collection |
+| `create_scope` | Create a new scope in a bucket (Couchbase Server 7.6+ and Capella). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `create_collection` | Create a new collection in an existing scope (Couchbase Server 7.6+ and Capella). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `delete_scope` | Delete a scope and all its collections from a bucket — permanent. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `delete_collection` | Delete a collection and all its documents from a scope — permanent. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 
 ### Document KV operations tools
 
@@ -55,7 +59,7 @@ For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couc
 | `create_index` | Create a scalar (non-vector) GSI secondary index on a collection. Deferred by default — call `build_index` afterward to build it. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `build_index` | Trigger the build of all deferred indexes on a collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `drop_index` | Drop a GSI index (scalar or vector) from a collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
-| `run_sql_plus_plus_query` | Run a [SQL++ query](https://www.couchbase.com/sqlplusplus/) on a specified scope.<br><br>Queries are automatically scoped to the specified bucket and scope, so use collection names directly (e.g., `SELECT * FROM users` instead of `SELECT * FROM bucket.scope.users`).<br><br>`CB_MCP_READ_ONLY_MODE` is `true` by default, which means that **all write operations (KV, Query, and index management)** are disabled. When enabled, KV and index write tools are not loaded and SQL++ queries that modify data are blocked. |
+| `run_sql_plus_plus_query` | Run a [SQL++ query](https://www.couchbase.com/sqlplusplus/) on a specified scope.<br><br>Queries are automatically scoped to the specified bucket and scope, so use collection names directly (e.g., `SELECT * FROM users` instead of `SELECT * FROM bucket.scope.users`).<br><br>`CB_MCP_READ_ONLY_MODE` is `true` by default, which means that **all write operations (KV, Query, scope/collection management, and index management)** are disabled. When enabled, KV, collection management, and index write tools are not loaded and SQL++ queries that modify data are blocked. |
 | `explain_sql_plus_plus_query` | Generate and evaluate an EXPLAIN plan for a SQL++ query. Returns query metadata, extracted plan, and plan evaluation findings. |
 
 ### Query performance analysis tools
@@ -178,7 +182,7 @@ The server can be configured using environment variables or command line argumen
 | `CB_CLIENT_CERT_PATH` | `--client-cert-path` | Path to the client certificate file for mTLS authentication | **Required if using mTLS (or Username and Password required)** |
 | `CB_CLIENT_KEY_PATH` | `--client-key-path` | Path to the client key file for mTLS authentication | **Required if using mTLS (or Username and Password required)** |
 | `CB_CA_CERT_PATH` | `--ca-cert-path` | Path to server root certificate for TLS if server is configured with a self-signed/untrusted certificate. This will not be required if you are connecting to Capella | |
-| `CB_MCP_READ_ONLY_MODE` | `--read-only-mode` | Prevent all data modifications (KV, Query, and index management). When enabled, KV and index write tools are not loaded. | `true` |
+| `CB_MCP_READ_ONLY_MODE` | `--read-only-mode` | Prevent all data modifications (KV, Query, scope/collection management, and index management). When enabled, KV, collection management, and index write tools are not loaded. | `true` |
 | `CB_MCP_TRANSPORT` | `--transport` | Transport mode: `stdio`, `http`, `sse` | `stdio` |
 | `CB_MCP_HOST` | `--host` | Host for HTTP/SSE transport modes | `127.0.0.1` |
 | `CB_MCP_PORT` | `--port` | Port for HTTP/SSE transport modes | `8000` |
@@ -210,8 +214,8 @@ The server can be configured using environment variables or command line argumen
 
 **`CB_MCP_READ_ONLY_MODE`** is the single switch controlling write operations:
 
-- When `true` (default): All write operations (KV, Query, and index management) are disabled. KV write tools (upsert, insert, replace, delete) and index write tools (create_index, build_index, drop_index) are **not loaded** and will not be available to the LLM, and SQL++ queries that modify data or structure are blocked.
-- When `false`: KV and index write tools are loaded and SQL++ data/structure modification queries are allowed.
+- When `true` (default): All write operations (KV, Query, scope/collection management, and index management) are disabled. KV write tools (upsert, insert, replace, delete), scope/collection management write tools (create_scope, create_collection, delete_scope, delete_collection), and index write tools (create_index, build_index, drop_index) are **not loaded** and will not be available to the LLM, and SQL++ queries that modify data or structure are blocked.
+- When `false`: KV, scope/collection management, and index write tools are loaded and SQL++ data/structure modification queries are allowed.
 
 This is the recommended safe default to prevent inadvertent data modifications by LLMs.
 
@@ -573,7 +577,7 @@ OAuth is configured with the `CB_MCP_OAUTH_*` variables listed in [Additional Co
 
 - OAuth activates only when all three of `CB_MCP_OAUTH_JWT_JWKS_URI`, `CB_MCP_OAUTH_JWT_ISSUER`, and `CB_MCP_OAUTH_JWT_AUDIENCE` are set; setting only some of them fails at startup.
 - Setting `CB_MCP_OAUTH_MCP_BASE_URL` additionally publishes RFC 9728 Protected Resource Metadata so PRM-aware clients can discover the authorization server.
-- Access is gated by two scopes read from the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools, including SQL++) and `couchbase-mcp:write` (write tools: KV mutations and index management). Full access requires both. If your IdP can't emit those canonical labels, override them with `CB_MCP_OAUTH_SCOPE_READ_LABEL` / `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`.
+- Access is gated by two scopes read from the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools, including SQL++) and `couchbase-mcp:write` (write tools: KV mutations, scope/collection management, and index management). Full access requires both. If your IdP can't emit those canonical labels, override them with `CB_MCP_OAUTH_SCOPE_READ_LABEL` / `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`.
 
 ```bash
 uvx couchbase-mcp-server \

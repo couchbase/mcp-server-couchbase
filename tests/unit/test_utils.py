@@ -833,6 +833,26 @@ class TestConnectionModule:
                 client_key_path="/path/to/missing.key",
             )
 
+    def test_connect_to_couchbase_cluster_only_cert_path(self) -> None:
+        """Verify ValueError raised when only client_cert_path is provided."""
+        with pytest.raises(ValueError, match="must be provided together"):
+            connect_to_couchbase_cluster(
+                connection_string="couchbases://localhost",
+                username="admin",
+                password="password",
+                client_cert_path="/path/to/client.pem",
+            )
+
+    def test_connect_to_couchbase_cluster_only_key_path(self) -> None:
+        """Verify ValueError raised when only client_key_path is provided."""
+        with pytest.raises(ValueError, match="must be provided together"):
+            connect_to_couchbase_cluster(
+                connection_string="couchbases://localhost",
+                username="admin",
+                password="password",
+                client_key_path="/path/to/client.key",
+            )
+
     def test_connect_to_couchbase_cluster_connection_failure(self) -> None:
         """Verify exceptions are re-raised on connection failure."""
         with (
