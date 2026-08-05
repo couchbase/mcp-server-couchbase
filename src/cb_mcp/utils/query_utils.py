@@ -60,7 +60,7 @@ def evaluate_query_plan(plan: dict[str, Any] | None) -> dict[str, Any]:
 
     has_primary_scan = any(op.startswith("PrimaryScan") for op in operators)
     has_secondary_index_scan = any(op.startswith("IndexScan") for op in operators)
-    has_fetch = "Fetch" in operator_counts
+    has_fetch = any(op.startswith("Fetch") for op in operators)
 
     if has_primary_scan:
         findings.append(
