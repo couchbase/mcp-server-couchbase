@@ -11,6 +11,7 @@ Tests for:
 
 from __future__ import annotations
 
+import os
 import threading
 from unittest.mock import MagicMock, patch
 
@@ -832,6 +833,26 @@ class TestConnectionModule:
                 client_key_path="/path/to/missing.key",
             )
 
+    def test_connect_to_couchbase_cluster_only_cert_path(self) -> None:
+        """Verify ValueError raised when only client_cert_path is provided."""
+        with pytest.raises(ValueError, match="must be provided together"):
+            connect_to_couchbase_cluster(
+                connection_string="couchbases://localhost",
+                username="admin",
+                password="password",
+                client_cert_path="/path/to/client.pem",
+            )
+
+    def test_connect_to_couchbase_cluster_only_key_path(self) -> None:
+        """Verify ValueError raised when only client_key_path is provided."""
+        with pytest.raises(ValueError, match="must be provided together"):
+            connect_to_couchbase_cluster(
+                connection_string="couchbases://localhost",
+                username="admin",
+                password="password",
+                client_key_path="/path/to/client.key",
+            )
+
     def test_connect_to_couchbase_cluster_connection_failure(self) -> None:
         """Verify exceptions are re-raised on connection failure."""
         with (
@@ -1434,7 +1455,7 @@ class TestGetCapellaRootCAPath:
             result = _get_capella_root_ca_path()
 
         # Path must end with the expected filename and the certs/ dir.
-        assert result.endswith("certs/capella_root_ca.pem")
+        assert result.endswith(os.path.join("certs", "capella_root_ca.pem"))
 
     def test_returns_fallback_path_even_when_file_missing(self) -> None:
         """If both the resource lookup AND the fallback file are missing,
@@ -1451,7 +1472,7 @@ class TestGetCapellaRootCAPath:
         ):
             result = _get_capella_root_ca_path()
 
-        assert result.endswith("certs/capella_root_ca.pem")
+        assert result.endswith(os.path.join("certs", "capella_root_ca.pem"))
 
 
 class TestFetchIndexesFromRestApi:

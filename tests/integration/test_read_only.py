@@ -75,6 +75,42 @@ async def test_read_only_mode_blocks_dml_query_at_runtime() -> None:
 
 
 @pytest.mark.asyncio
+async def test_read_only_mode_blocks_dcl_grant_at_runtime() -> None:
+    """In read-only mode, run_sql_plus_plus_query must reject DCL (GRANT/REVOKE).
+
+    GRANT/REVOKE are neither DML nor DDL, so lark-sqlpp's modifies_data /
+    modifies_structure checkers never flag them. The deny-by-default guard must
+    block them at the MCP layer before they reach the cluster — regression guard
+    for the reported read-only bypass.
+    """
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+
+    async with create_mcp_session(extra_env=READ_ONLY_ENV) as session:
+        response = await session.call_tool(
+            "run_sql_plus_plus_query",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                # Targets a nonexistent user so the statement is harmless even if
+                # the guard regressed. The message assertion below confirms it was
+                # blocked by the read-only guard, not merely rejected cluster-side.
+                "query": "GRANT query_select ON default TO __nonexistent_user_for_test__",
+            },
+        )
+
+        assert is_error_response(response), (
+            "DCL (GRANT) must fail in read-only mode. "
+            f"Got non-error response: {extract_payload(response)}"
+        )
+        payload = str(extract_payload(response))
+        assert "read-only mode" in payload, (
+            "GRANT must be blocked by the read-only guard, not merely rejected "
+            f"cluster-side. Error payload: {payload}"
+        )
+
+
+@pytest.mark.asyncio
 async def test_read_only_mode_allows_explain_of_dml_query() -> None:
     """EXPLAIN of a DML query must pass through even in read-only mode."""
     bucket = require_test_bucket()

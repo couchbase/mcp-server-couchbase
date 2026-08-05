@@ -41,6 +41,7 @@ __all__ = [
     "get_test_bucket",
     "get_test_collection",
     "get_test_scope",
+    "is_error_response",
     "require_test_bucket",
 ]
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -54,15 +55,24 @@ EXPECTED_TOOLS = {
     "get_collections_in_scope",
     "get_scopes_in_bucket",
     "get_document_by_id",
+    "sub_document_lookup_in",
     "upsert_document_by_id",
     "insert_document_by_id",
     "replace_document_by_id",
     "delete_document_by_id",
+    # Scope/collection management (write) tools
+    "create_scope",
+    "create_collection",
+    "delete_scope",
+    "delete_collection",
     "get_schema_for_collection",
     "run_sql_plus_plus_query",
     "explain_sql_plus_plus_query",
     "get_index_advisor_recommendations",
     "list_indexes",
+    "create_index",
+    "build_index",
+    "drop_index",
     "get_cluster_health_and_services",
     # Performance analysis tools
     "get_longest_running_queries",
@@ -87,6 +97,7 @@ TOOLS_BY_CATEGORY = {
     },
     "kv": {
         "get_document_by_id",
+        "sub_document_lookup_in",
         "upsert_document_by_id",
         "insert_document_by_id",
         "replace_document_by_id",
@@ -100,6 +111,15 @@ TOOLS_BY_CATEGORY = {
     "index": {
         "list_indexes",
         "get_index_advisor_recommendations",
+        "create_index",
+        "build_index",
+        "drop_index",
+    },
+    "management": {
+        "create_scope",
+        "create_collection",
+        "delete_scope",
+        "delete_collection",
     },
     "performance": {
         "get_longest_running_queries",
@@ -154,6 +174,19 @@ TOOL_REQUIRED_PARAMS = {
     "run_sql_plus_plus_query": ["bucket_name", "scope_name", "query"],
     "explain_sql_plus_plus_query": ["bucket_name", "scope_name", "query"],
     "get_index_advisor_recommendations": ["bucket_name", "scope_name", "query"],
+    "create_scope": ["bucket_name", "scope_name"],
+    "create_collection": ["bucket_name", "scope_name", "collection_name"],
+    "delete_scope": ["bucket_name", "scope_name"],
+    "delete_collection": ["bucket_name", "scope_name", "collection_name"],
+    "create_index": [
+        "bucket_name",
+        "scope_name",
+        "collection_name",
+        "index_name",
+        "keys",
+    ],
+    "build_index": ["bucket_name", "scope_name", "collection_name"],
+    "drop_index": ["bucket_name", "scope_name", "collection_name", "index_name"],
 }
 
 # Default timeout (seconds) to guard against hangs when the Couchbase cluster

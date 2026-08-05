@@ -5,18 +5,41 @@ Covers:
 - get_index_advisor_recommendations error propagation.
 - list_indexes REST-API path with return_raw_index_stats=True.
 - list_indexes top-level error propagation.
+- create_index / build_index / drop_index happy paths and log-and-return error handling.
 """
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from cb_mcp.tools.index import (
+    build_index,
+    create_index,
+    drop_index,
     get_index_advisor_recommendations,
     list_indexes,
 )
+
+
+def _make_ctx_with_index_manager() -> tuple[SimpleNamespace, MagicMock, MagicMock]:
+    """Build a Context plus its underlying cluster + index manager mock.
+
+    Returns (ctx, cluster, index_manager) so each test can program the
+    manager's individual ops via ``index_manager.<op>.side_effect``.
+    """
+    cluster = MagicMock()
+    bucket = MagicMock()
+    collection = MagicMock()
+    index_manager = MagicMock()
+    collection.query_indexes.return_value = index_manager
+    bucket.scope.return_value.collection.return_value = collection
+    cluster.bucket.return_value = bucket
+
+    ctx = SimpleNamespace()
+    return ctx, cluster, index_manager
 
 
 class TestGetIndexAdvisorRecommendations:
@@ -228,3 +251,144 @@ class TestListIndexesErrorPropagation:
             pytest.raises(Exception, match="cluster down"),
         ):
             list_indexes(mock_ctx)
+
+
+class TestCreateIndex:
+    """create_index happy path and log-and-return error handling."""
+
+    def test_creates_deferred_by_default(self) -> None:
+        """deferred defaults to True and is threaded through to the SDK options."""
+        ctx, cluster, index_manager = _make_ctx_with_index_manager()
+
+        with (
+            patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster),
+            patch("cb_mcp.tools.index.CreateQueryIndexOptions") as mock_options,
+        ):
+            result = create_index(ctx, "b", "s", "c", "idx1", ["email"])
+
+        assert result == {
+            "success": True,
+            "index_name": "idx1",
+            "deferred": True,
+            "keyspace": "b.s.c",
+        }
+        args, _kwargs = index_manager.create_index.call_args
+        assert args[0] == "idx1"
+        assert args[1] == ["email"]
+        # Assert on the kwargs forwarded to the options constructor rather than
+        # subscripting the constructed instance (which couples to the SDK's
+        # dict-subclass representation).
+        mock_options.assert_called_once_with(
+            deferred=True, condition=None, num_replicas=None, ignore_if_exists=False
+        )
+
+    def test_options_forwarded(self) -> None:
+        """condition, num_replicas, and ignore_if_exists all reach the SDK options."""
+        ctx, cluster, _index_manager = _make_ctx_with_index_manager()
+
+        with (
+            patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster),
+            patch("cb_mcp.tools.index.CreateQueryIndexOptions") as mock_options,
+        ):
+            create_index(
+                ctx,
+                "b",
+                "s",
+                "c",
+                "idx1",
+                ["type"],
+                deferred=False,
+                condition="type = 'user'",
+                num_replicas=1,
+                ignore_if_exists=True,
+            )
+
+        mock_options.assert_called_once_with(
+            deferred=False,
+            condition="type = 'user'",
+            num_replicas=1,
+            ignore_if_exists=True,
+        )
+
+    def test_sdk_error_returns_error_dict_not_raised(self) -> None:
+        """An existing-index error must be caught, logged, and returned — not raised."""
+        ctx, cluster, index_manager = _make_ctx_with_index_manager()
+        index_manager.create_index.side_effect = Exception("index already exists")
+
+        with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
+            result = create_index(ctx, "b", "s", "c", "idx1", ["email"])
+
+        assert result == {
+            "success": False,
+            "error": "index already exists",
+            "index_name": "idx1",
+            "keyspace": "b.s.c",
+        }
+
+
+class TestBuildIndex:
+    """build_index happy path and log-and-return error handling.
+
+    build_index does not pre-check for deferred indexes — it just calls
+    build_deferred_indexes() and lets the SDK decide whether there's
+    anything to do (a harmless no-op when there's nothing deferred).
+    """
+
+    def test_triggers_build(self) -> None:
+        """Happy path calls build_deferred_indexes exactly once."""
+        ctx, cluster, index_manager = _make_ctx_with_index_manager()
+
+        with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
+            result = build_index(ctx, "b", "s", "c")
+
+        assert result == {"success": True, "keyspace": "b.s.c"}
+        index_manager.build_deferred_indexes.assert_called_once()
+        index_manager.get_all_indexes.assert_not_called()
+
+    def test_sdk_error_returns_error_dict_not_raised(self) -> None:
+        """An SDK failure building indexes must be caught and returned."""
+        ctx, cluster, index_manager = _make_ctx_with_index_manager()
+        index_manager.build_deferred_indexes.side_effect = Exception("connection reset")
+
+        with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
+            result = build_index(ctx, "b", "s", "c")
+
+        assert result == {
+            "success": False,
+            "error": "connection reset",
+            "keyspace": "b.s.c",
+        }
+
+
+class TestDropIndex:
+    """drop_index happy path and log-and-return error handling."""
+
+    def test_drops_index(self) -> None:
+        """Happy path forwards index_name and ignore_if_not_exists to the SDK."""
+        ctx, cluster, index_manager = _make_ctx_with_index_manager()
+
+        with (
+            patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster),
+            patch("cb_mcp.tools.index.DropQueryIndexOptions") as mock_options,
+        ):
+            result = drop_index(ctx, "b", "s", "c", "idx1", ignore_if_not_exists=True)
+
+        assert result == {"success": True, "index_name": "idx1", "keyspace": "b.s.c"}
+        args, _kwargs = index_manager.drop_index.call_args
+        assert args[0] == "idx1"
+        mock_options.assert_called_once_with(ignore_if_not_exists=True)
+
+    def test_sdk_error_returns_error_dict_not_raised(self) -> None:
+        """A not-found error (without ignore_if_not_exists) must be caught and returned."""
+        ctx, cluster, index_manager = _make_ctx_with_index_manager()
+        index_manager.drop_index.side_effect = Exception("index not found")
+
+        with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
+            result = drop_index(ctx, "b", "s", "c", "idx1")
+
+        assert result == {
+            "success": False,
+            "error": "index not found",
+            "index_name": "idx1",
+            "keyspace": "b.s.c",
+        }

@@ -12,18 +12,15 @@ This module contains tools for document operations by ID:
 import logging
 from typing import Any
 
+import couchbase.subdocument as subdoc
+from couchbase.exceptions import CouchbaseException
 from fastmcp import Context
 
-from ..utils.connection import connect_to_bucket
+from ..utils.connection import connect_to_bucket, format_keyspace
 from ..utils.constants import MCP_SERVER_NAME
 from ..utils.context import get_cluster_connection
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.kv")
-
-
-def _keyspace(bucket_name: str, scope_name: str, collection_name: str) -> str:
-    """Render a ``bucket.scope.collection`` keyspace string for log context."""
-    return f"{bucket_name}.{scope_name}.{collection_name}"
 
 
 def get_document_by_id(
@@ -36,7 +33,7 @@ def get_document_by_id(
     """Get a document by its ID from the specified scope and collection.
     If the document is not found, it will raise an exception."""
 
-    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
@@ -66,7 +63,7 @@ def upsert_document_by_id(
     DO NOT use this as a fallback when insert_document_by_id or replace_document_by_id fails.
 
     Returns True on success, False on failure."""
-    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
@@ -89,7 +86,7 @@ def delete_document_by_id(
 ) -> bool:
     """Delete a document by its ID.
     Returns True on success, False on failure."""
-    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
@@ -117,7 +114,7 @@ def insert_document_by_id(
     Report the failure to the user. They can choose to 'replace' or 'upsert' if desired.
 
     Returns True on success, False on failure (including if document already exists)."""
-    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
@@ -145,7 +142,7 @@ def replace_document_by_id(
     Report the failure to the user. They can choose to 'insert' or 'upsert' if desired.
 
     Returns True on success, False on failure (including if document does not exist)."""
-    keyspace = _keyspace(bucket_name, scope_name, collection_name)
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
@@ -157,3 +154,110 @@ def replace_document_by_id(
     except Exception as e:
         logger.error(f"Error replacing document in {keyspace}: {e}", exc_info=True)
         return False
+
+
+def sub_document_lookup_in(
+    ctx: Context,
+    bucket_name: str,
+    scope_name: str,
+    collection_name: str,
+    document_id: str,
+    get_paths: list[str] | None = None,
+    exists_paths: list[str] | None = None,
+    count_paths: list[str] | None = None,
+) -> dict[str, Any]:
+    """Look up parts of a document without fetching the whole thing, using Couchbase
+    sub-document operations. Use this instead of get_document_by_id when you only need
+    a few fields, a presence check, or the size of an array/object inside a document —
+    AND you already know the exact field path(s) to look up (e.g. from a prior
+    get_document_by_id call on this same document, from the user explicitly naming the
+    field, or from a known/confirmed schema for this collection).
+
+    IMPORTANT: Do NOT guess field paths. If you don't already know the document's exact
+    field names/structure, call get_document_by_id first (or instead) — a guessed path
+    that doesn't exist returns a per-path error here rather than the real data, and
+    reporting "not found" for a wrong guess is worse than just fetching the whole
+    document and reading the right field.
+
+    Provide one or more of the following. Each is a list of sub-document paths using
+    Couchbase's dot/bracket path syntax (e.g. "address.city", "tags[0]", "tags[-1]" for
+    the last array element):
+    - get_paths: fetch the VALUE at each path.
+    - exists_paths: check whether each path exists, without fetching its value (cheaper
+      than get_paths — no payload transfer — when you only need a yes/no answer).
+    - count_paths: get the number of elements in the array or object at each path (fails
+      per-path if the path isn't an array/object).
+
+    At least one of get_paths, exists_paths, or count_paths must be provided. As a rule of
+    thumb, keep the combined number of paths across all three to 16 or fewer — Couchbase
+    limits subdocument operations per call, though the exact limit is server-side and may
+    change. If the server rejects the call (too many paths, or another constraint like path
+    length or nesting depth), the whole call fails with {"error": "..."}.
+
+    A path that doesn't exist (or otherwise fails, e.g. count on a non-array/object) does
+    NOT fail the whole call — it is reported individually as {"error": ...} in the
+    returned dict so the other requested paths can still be resolved.
+
+    Returns a dict with a key for each category that was requested (only requested
+    categories are included):
+    {
+        "get": {"<path>": {"value": <value>} | {"error": "..."}},
+        "exists": {"<path>": {"value": true | false} | {"error": "..."}},
+        "count": {"<path>": {"value": <count>} | {"error": "..."}},
+    }
+    On a connection/lookup failure, or an invalid request (no paths / too many paths),
+    returns {"error": "<message>"} instead.
+    """
+    get_paths = get_paths or []
+    exists_paths = exists_paths or []
+    count_paths = count_paths or []
+
+    specs: list[Any] = []
+    spec_meta: list[tuple[str, str]] = []
+    for path in get_paths:
+        specs.append(subdoc.get(path))
+        spec_meta.append(("get", path))
+    for path in exists_paths:
+        specs.append(subdoc.exists(path))
+        spec_meta.append(("exists", path))
+    for path in count_paths:
+        specs.append(subdoc.count(path))
+        spec_meta.append(("count", path))
+
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+
+    if not specs:
+        error = (
+            "At least one of get_paths, exists_paths, or count_paths must be provided"
+        )
+        logger.error(f"Error performing sub-document lookup in {keyspace}: {error}")
+        return {"error": error}
+
+    cluster = get_cluster_connection(ctx)
+    bucket = connect_to_bucket(cluster, bucket_name)
+
+    try:
+        logger.debug(f"Performing sub-document lookup in {keyspace}")
+        collection = bucket.scope(scope_name).collection(collection_name)
+        result = collection.lookup_in(document_id, specs)
+    except Exception as e:
+        logger.error(
+            f"Error performing sub-document lookup in {keyspace}: {e}", exc_info=True
+        )
+        return {"error": str(e)}
+
+    response: dict[str, Any] = {}
+    for index, (op, path) in enumerate(spec_meta):
+        bucket_for_op = response.setdefault(op, {})
+        try:
+            if op == "exists":
+                bucket_for_op[path] = {"value": result.exists(index)}
+            else:
+                # Identity transform: return the raw value at the path as whatever
+                # JSON type it is (get), or the element count (count).
+                bucket_for_op[path] = {"value": result.content_as[lambda v: v](index)}
+        except CouchbaseException as e:
+            bucket_for_op[path] = {"error": str(e)}
+
+    logger.info(f"Successfully performed sub-document lookup in {keyspace}")
+    return response

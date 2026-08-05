@@ -6,14 +6,31 @@ This module contains all the MCP tools for Couchbase operations.
 Tool Categories:
 - READ_ONLY_TOOLS: Tools that only read data (always available)
 - KV_WRITE_TOOLS: KV tools that modify data (disabled when READ_ONLY_MODE=True)
+- COLLECTION_WRITE_TOOLS: Scope/collection management tools that modify data
+  (disabled when READ_ONLY_MODE=True)
+- INDEX_WRITE_TOOLS: Index management tools that modify data (disabled when READ_ONLY_MODE=True)
 """
 
 from collections.abc import Callable
 
 from mcp.types import ToolAnnotations
 
+# Scope/collection management tools
+from .collection_management import (
+    create_collection,
+    create_scope,
+    delete_collection,
+    delete_scope,
+)
+
 # Index tools
-from .index import get_index_advisor_recommendations, list_indexes
+from .index import (
+    build_index,
+    create_index,
+    drop_index,
+    get_index_advisor_recommendations,
+    list_indexes,
+)
 
 # Key-Value tools
 from .kv import (
@@ -21,6 +38,7 @@ from .kv import (
     get_document_by_id,
     insert_document_by_id,
     replace_document_by_id,
+    sub_document_lookup_in,
     upsert_document_by_id,
 )
 
@@ -59,8 +77,9 @@ READ_ONLY_TOOLS = [
     get_collections_in_scope,
     get_scopes_in_bucket,
     get_cluster_health_and_services,
-    # KV read tool
+    # KV read tools
     get_document_by_id,
+    sub_document_lookup_in,
     # Query tools (read operations)
     get_schema_for_collection,
     run_sql_plus_plus_query,  # Write protection handled at runtime via read_only_mode
@@ -86,8 +105,25 @@ KV_WRITE_TOOLS = [
     delete_document_by_id,
 ]
 
+# Scope/collection management write tools - disabled when READ_ONLY_MODE is True
+COLLECTION_WRITE_TOOLS = [
+    create_scope,
+    create_collection,
+    delete_scope,
+    delete_collection,
+]
+
+# Index write tools - disabled when READ_ONLY_MODE is True
+INDEX_WRITE_TOOLS = [
+    create_index,
+    build_index,
+    drop_index,
+]
+
 # List of all tools for easy registration (kept for backward compatibility)
-ALL_TOOLS = READ_ONLY_TOOLS + KV_WRITE_TOOLS
+ALL_TOOLS = (
+    READ_ONLY_TOOLS + KV_WRITE_TOOLS + COLLECTION_WRITE_TOOLS + INDEX_WRITE_TOOLS
+)
 
 # Tool annotations for MCP clients (readOnlyHint, destructiveHint, etc.)
 TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
@@ -99,8 +135,9 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_collections_in_scope": ToolAnnotations(readOnlyHint=True),
     "get_scopes_in_bucket": ToolAnnotations(readOnlyHint=True),
     "get_cluster_health_and_services": ToolAnnotations(readOnlyHint=True),
-    # KV read tool
+    # KV read tools
     "get_document_by_id": ToolAnnotations(readOnlyHint=True),
+    "sub_document_lookup_in": ToolAnnotations(readOnlyHint=True),
     # Query tools
     "get_schema_for_collection": ToolAnnotations(readOnlyHint=True),
     "run_sql_plus_plus_query": ToolAnnotations(),
@@ -121,6 +158,15 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "insert_document_by_id": ToolAnnotations(idempotentHint=True),
     "replace_document_by_id": ToolAnnotations(idempotentHint=True),
     "delete_document_by_id": ToolAnnotations(destructiveHint=True, idempotentHint=True),
+    # Scope/collection management write tools
+    "create_scope": ToolAnnotations(),
+    "create_collection": ToolAnnotations(),
+    "delete_scope": ToolAnnotations(destructiveHint=True),
+    "delete_collection": ToolAnnotations(destructiveHint=True),
+    # Index write tools
+    "create_index": ToolAnnotations(),
+    "build_index": ToolAnnotations(idempotentHint=True),
+    "drop_index": ToolAnnotations(destructiveHint=True),
 }
 
 
@@ -133,8 +179,10 @@ def get_tools(read_only_mode: bool = True) -> list[Callable]:
     tools = list(READ_ONLY_TOOLS)
 
     if not read_only_mode:
-        # KV write tools are only loaded when READ_ONLY_MODE is False
+        # Write tools are only loaded when READ_ONLY_MODE is False
         tools.extend(KV_WRITE_TOOLS)
+        tools.extend(COLLECTION_WRITE_TOOLS)
+        tools.extend(INDEX_WRITE_TOOLS)
 
     return tools
 
@@ -148,15 +196,23 @@ __all__ = [
     "get_scopes_in_bucket",
     "get_buckets_in_cluster",
     "get_document_by_id",
+    "sub_document_lookup_in",
     "upsert_document_by_id",
     "insert_document_by_id",
     "replace_document_by_id",
     "delete_document_by_id",
+    "create_scope",
+    "create_collection",
+    "delete_scope",
+    "delete_collection",
     "get_schema_for_collection",
     "run_sql_plus_plus_query",
     "explain_sql_plus_plus_query",
     "get_index_advisor_recommendations",
     "list_indexes",
+    "create_index",
+    "build_index",
+    "drop_index",
     "get_cluster_health_and_services",
     "get_queries_not_selective",
     "get_queries_not_using_covering_index",
@@ -168,6 +224,8 @@ __all__ = [
     # Tool categories
     "READ_ONLY_TOOLS",
     "KV_WRITE_TOOLS",
+    "COLLECTION_WRITE_TOOLS",
+    "INDEX_WRITE_TOOLS",
     # Tool annotations
     "TOOL_ANNOTATIONS",
     # Convenience

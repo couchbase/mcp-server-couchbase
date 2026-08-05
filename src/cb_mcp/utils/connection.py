@@ -44,6 +44,11 @@ def connect_to_couchbase_cluster(
                 key_path=client_key_path,
                 trust_store_path=ca_cert_path,
             )
+        elif client_cert_path or client_key_path:
+            raise ValueError(
+                "Both client_cert_path and client_key_path must be provided together "
+                "for certificate authentication; only one was set."
+            )
         else:
             logger.debug("Using username/password authentication")
             auth = PasswordAuthenticator(username, password, cert_path=ca_cert_path)
@@ -72,3 +77,8 @@ def connect_to_bucket(cluster: Cluster, bucket_name: str) -> Bucket:
     except Exception as e:
         logger.error(f"Failed to connect to bucket '{bucket_name}': {e}", exc_info=True)
         raise
+
+
+def format_keyspace(bucket_name: str, scope_name: str, collection_name: str) -> str:
+    """Render a ``bucket.scope.collection`` keyspace string for log context."""
+    return f"{bucket_name}.{scope_name}.{collection_name}"

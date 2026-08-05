@@ -24,7 +24,7 @@ def get_settings(ctx: Context) -> Mapping[str, Any]:
 def _parse_file(file_path: Path, valid_tool_names: set[str]) -> set[str]:
     """Parse tool names from a file (one tool per line)."""
     tools: set[str] = set()
-    invalid_count = 0
+    invalid: set[str] = set()
     try:
         with open(file_path) as f:
             for raw_line in f:
@@ -34,32 +34,30 @@ def _parse_file(file_path: Path, valid_tool_names: set[str]) -> set[str]:
                 if name in valid_tool_names:
                     tools.add(name)
                 else:
-                    invalid_count += 1
-        if invalid_count > 0:
+                    invalid.add(name)
+        if invalid:
             logger.warning(
-                f"Ignored {invalid_count} invalid tool name(s) from file: {file_path}"
+                f"Ignored invalid tool name(s) from file {file_path}: {sorted(invalid)}"
             )
         logger.debug(f"Loaded {len(tools)} tool name(s) from file: {file_path}")
     except OSError as e:
-        logger.warning(f"Failed to read tool names file {file_path}: {e}")
+        logger.error(f"Failed to read tool names file {file_path.resolve()}: {e}")
     return tools
 
 
 def _parse_comma_separated(value: str, valid_tool_names: set[str]) -> set[str]:
     """Parse comma-separated tool names."""
     tools: set[str] = set()
-    invalid_count = 0
+    invalid: set[str] = set()
     for part in value.split(","):
         name = part.strip()
         if name:
             if name in valid_tool_names:
                 tools.add(name)
             else:
-                invalid_count += 1
-    if invalid_count > 0:
-        logger.warning(
-            f"Ignored {invalid_count} invalid tool name(s) from comma-separated input"
-        )
+                invalid.add(name)
+    if invalid:
+        logger.warning(f"Ignored invalid tool name(s): {sorted(invalid)}")
     logger.debug(f"Parsed tool names from comma-separated string: {tools}")
     return tools
 
