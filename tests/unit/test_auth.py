@@ -368,6 +368,30 @@ class TestSqlPlusPlusScopeGate:
                 "CREATE INDEX foo ON c(name)",
             )
 
+    def test_read_only_token_blocks_dcl_grant(self):
+        """DCL (GRANT/REVOKE) via SQL++ also requires :write, not just :read.
+
+        Regression guard for the reported read-only bypass: GRANT/REVOKE are
+        neither DML nor DDL, so a :read-only token could otherwise escalate
+        privileges through SQL++.
+        """
+        ctx = _ctx_with_modes(read_only_mode=False)
+        token = SimpleNamespace(scopes=[SCOPE_READ])
+
+        with (
+            patch("cb_mcp.tools.query.get_access_token", return_value=token),
+            patch("cb_mcp.tools.query.get_cluster_connection"),
+            patch("cb_mcp.tools.query.connect_to_bucket"),
+            pytest.raises(PermissionError) as excinfo,
+        ):
+            run_sql_plus_plus_query(
+                ctx,
+                "b",
+                "s",
+                "GRANT cluster_admin ON default TO attacker_user",
+            )
+        assert SCOPE_WRITE in str(excinfo.value)
+
     def test_both_scopes_allow_writes_through_sqlpp(self):
         """A token with BOTH scopes can mutate via SQL++ (subject to CB RBAC)."""
         ctx = _ctx_with_modes(read_only_mode=False)
