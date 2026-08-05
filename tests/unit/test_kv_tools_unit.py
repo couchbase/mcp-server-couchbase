@@ -5,7 +5,7 @@ The integration suite covers happy paths and the "document already exists"
 cover the unexpected-SDK-error branches that can't reliably be triggered
 end-to-end:
 
-- upsert_document_by_id returns False on unexpected exception.
+- upsert_document_by_id returns {"success": False, "error": ...} on unexpected exception.
 - insert / replace / delete error branches (parallel coverage).
 """
 
@@ -52,67 +52,71 @@ class TestUpsertDocument:
     """upsert_document_by_id error branch."""
 
     def test_returns_false_on_sdk_error(self) -> None:
-        """An unexpected SDK error must be swallowed and surfaced as False —
-        callers rely on the boolean return rather than exception handling."""
+        """An unexpected SDK error must be swallowed and surfaced with its
+        reason — callers rely on the structured return rather than exception
+        handling."""
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.upsert.side_effect = Exception("transient error")
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
             result = upsert_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
 
-        assert result is False
+        assert result == {"success": False, "error": "transient error"}
         collection.upsert.assert_called_once_with("doc1", {"a": 1})
 
     def test_returns_true_on_success(self) -> None:
-        """Happy path returns True after invoking collection.upsert."""
+        """Happy path returns {"success": True} after invoking collection.upsert."""
         ctx, cluster, _collection = _make_ctx_with_collection()
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
             result = upsert_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
 
-        assert result is True
+        assert result == {"success": True}
 
 
 class TestInsertDocument:
     """insert_document_by_id error branch (parallels upsert)."""
 
     def test_returns_false_on_sdk_error(self) -> None:
-        """Document-exists or any other SDK error must return False."""
+        """Document-exists or any other SDK error must return a failure dict
+        with the reason."""
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.insert.side_effect = Exception("DocumentExistsException")
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
             result = insert_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
 
-        assert result is False
+        assert result == {"success": False, "error": "DocumentExistsException"}
 
 
 class TestReplaceDocument:
     """replace_document_by_id error branch (parallels upsert)."""
 
     def test_returns_false_on_sdk_error(self) -> None:
-        """Document-not-found or any other SDK error must return False."""
+        """Document-not-found or any other SDK error must return a failure
+        dict with the reason."""
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.replace.side_effect = Exception("DocumentNotFoundException")
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
             result = replace_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
 
-        assert result is False
+        assert result == {"success": False, "error": "DocumentNotFoundException"}
 
 
 class TestDeleteDocument:
     """delete_document_by_id error branch (parallels upsert)."""
 
     def test_returns_false_on_sdk_error(self) -> None:
-        """Document-not-found or any other SDK error must return False."""
+        """Document-not-found or any other SDK error must return a failure
+        dict with the reason."""
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.remove.side_effect = Exception("DocumentNotFoundException")
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
             result = delete_document_by_id(ctx, "b", "s", "c", "doc1")
 
-        assert result is False
+        assert result == {"success": False, "error": "DocumentNotFoundException"}
 
 
 class _FakeLookupInResult:
