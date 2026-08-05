@@ -11,6 +11,7 @@ Tests for:
 
 from __future__ import annotations
 
+import os
 import threading
 from unittest.mock import MagicMock, patch
 
@@ -1434,7 +1435,7 @@ class TestGetCapellaRootCAPath:
             result = _get_capella_root_ca_path()
 
         # Path must end with the expected filename and the certs/ dir.
-        assert result.endswith("certs/capella_root_ca.pem")
+        assert result.endswith(os.path.join("certs", "capella_root_ca.pem"))
 
     def test_returns_fallback_path_even_when_file_missing(self) -> None:
         """If both the resource lookup AND the fallback file are missing,
@@ -1451,7 +1452,7 @@ class TestGetCapellaRootCAPath:
         ):
             result = _get_capella_root_ca_path()
 
-        assert result.endswith("certs/capella_root_ca.pem")
+        assert result.endswith(os.path.join("certs", "capella_root_ca.pem"))
 
 
 class TestFetchIndexesFromRestApi:
