@@ -49,8 +49,10 @@ async def test_upsert_document_by_id() -> None:
         )
         payload = extract_payload(response)
 
-        # upsert returns True on success
-        assert payload is True, f"Expected True on upsert success, got {payload}"
+        # upsert returns {"success": True} on success
+        assert payload == {"success": True}, (
+            f"Expected success on upsert, got {payload}"
+        )
 
         # Clean up: delete the test document
         await session.call_tool(
@@ -153,8 +155,10 @@ async def test_delete_document_by_id() -> None:
         )
         payload = extract_payload(response)
 
-        # delete returns True on success
-        assert payload is True, f"Expected True on delete success, got {payload}"
+        # delete returns {"success": True} on success
+        assert payload == {"success": True}, (
+            f"Expected success on delete, got {payload}"
+        )
 
 
 @pytest.mark.asyncio
@@ -245,8 +249,10 @@ async def test_insert_document_by_id() -> None:
         )
         payload = extract_payload(response)
 
-        # insert returns True on success
-        assert payload is True, f"Expected True on insert success, got {payload}"
+        # insert returns {"success": True} on success
+        assert payload == {"success": True}, (
+            f"Expected success on insert, got {payload}"
+        )
 
         # Verify the document was created correctly
         get_response = await session.call_tool(
@@ -310,8 +316,11 @@ async def test_insert_document_fails_if_exists() -> None:
         )
         payload = extract_payload(response)
 
-        # insert returns False when document already exists
-        assert payload is False, "Insert should return False when document exists"
+        # insert returns {"success": False, "error": ...} when document already exists
+        assert payload.get("success") is False, (
+            f"Insert should fail when document exists, got {payload}"
+        )
+        assert "error" in payload
 
         # Clean up
         await session.call_tool(
@@ -362,8 +371,10 @@ async def test_replace_document_by_id() -> None:
         )
         payload = extract_payload(response)
 
-        # replace returns True on success
-        assert payload is True, f"Expected True on replace success, got {payload}"
+        # replace returns {"success": True} on success
+        assert payload == {"success": True}, (
+            f"Expected success on replace, got {payload}"
+        )
 
         # Verify the replacement
         get_response = await session.call_tool(
@@ -416,10 +427,11 @@ async def test_replace_document_fails_if_not_exists() -> None:
         )
         payload = extract_payload(response)
 
-        # replace returns False when document doesn't exist
-        assert payload is False, (
-            "Replace should return False when document doesn't exist"
+        # replace returns {"success": False, "error": ...} when document doesn't exist
+        assert payload.get("success") is False, (
+            f"Replace should fail when document doesn't exist, got {payload}"
         )
+        assert "error" in payload
 
 
 @pytest.mark.asyncio
@@ -477,10 +489,11 @@ async def test_delete_document_fails_if_not_exists() -> None:
         )
         payload = extract_payload(response)
 
-        # delete returns False when document doesn't exist
-        assert payload is False, (
-            "Delete should return False when document doesn't exist"
+        # delete returns {"success": False, "error": ...} when document doesn't exist
+        assert payload.get("success") is False, (
+            f"Delete should fail when document doesn't exist, got {payload}"
         )
+        assert "error" in payload
 
 
 @pytest.mark.asyncio
