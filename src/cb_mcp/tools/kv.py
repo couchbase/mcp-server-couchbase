@@ -461,7 +461,7 @@ def sub_document_mutate_in(
                 try:
                     new_value = read_new_value()
                     break
-                except Exception:
+                except Exception:  # noqa: S112 (expected fallback attempt, not a swallowed bug)
                     continue
 
             if new_value is None:
