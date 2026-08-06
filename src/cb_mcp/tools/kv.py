@@ -411,12 +411,12 @@ def sub_document_mutate_in(
             spec_meta.append(("remove", path))
     except (KeyError, TypeError, CouchbaseException) as e:
         error = f"Invalid mutation spec: {e}"
-        logger.error(f"Error building sub-document mutation for {keyspace}: {error}")
+        logger.warning(f"Error building sub-document mutation for {keyspace}: {error}")
         return {"error": error}
 
     if not specs:
         error = "At least one mutation spec must be provided"
-        logger.error(f"Error performing sub-document mutation in {keyspace}: {error}")
+        logger.warning(f"Error performing sub-document mutation in {keyspace}: {error}")
         return {"error": error}
 
     cluster = get_cluster_connection(ctx)
