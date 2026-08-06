@@ -445,11 +445,26 @@ def sub_document_mutate_in(
             # The installed SDK constructs MutateInResult without a transcoder
             # (unlike LookupInResult), which makes content_as always raise for
             # mutate_in results — fall back to decoding the raw field value.
-            try:
-                new_value = result.content_as[int](index)
-            except Exception:
-                raw_value = result._orig.raw_result["fields"][index]["value"]
-                new_value = int(json.loads(raw_value))
+            new_value = None
+            for read_new_value in (
+                lambda index=index: result.content_as[int](index),
+                lambda index=index: int(
+                    json.loads(result._orig.raw_result["fields"][index]["value"])
+                ),
+            ):
+                try:
+                    new_value = read_new_value()
+                    break
+                except Exception:
+                    continue
+
+            if new_value is None:
+                logger.warning(
+                    f"Counter mutation at '{path}' in {keyspace} committed but "
+                    "its new value could not be read from the SDK result."
+                )
+                bucket_for_op[path] = {"success": True}
+                continue
             bucket_for_op[path] = {"success": True, "value": new_value}
             continue
         bucket_for_op[path] = {"success": True}
