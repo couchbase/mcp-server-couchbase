@@ -38,7 +38,7 @@ DEFAULT_LOG_MAX_BYTES = 1 * BYTES_PER_MB  # 1 MB
 # Rotated backups kept per level when no retention variable is set; 0 keeps only
 # the live file.
 DEFAULT_LOG_BACKUP_COUNT = 1
-ALLOWED_LOG_LEVELS = ("OFF", "DEBUG", "INFO", "WARNING", "ERROR")
+ALLOWED_LOG_LEVELS = ("OFF", "TRACE", "DEBUG", "INFO", "WARNING", "ERROR")
 DEFAULT_LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 # ISO 8601 local time with UTC offset (e.g. 2026-06-09T18:08:49+0530).
 # Milliseconds are intentionally omitted; we can switch to a sub-second

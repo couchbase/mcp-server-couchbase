@@ -27,6 +27,9 @@ class TestParseLogLevel:
     def test_off_is_valid(self):
         assert parse_log_level("OFF") == ("OFF", None)
 
+    def test_trace_is_valid(self):
+        assert parse_log_level("trace") == ("TRACE", None)
+
     def test_whitespace_trimmed_before_validation(self):
         assert parse_log_level("  info  ") == ("INFO", None)
 
