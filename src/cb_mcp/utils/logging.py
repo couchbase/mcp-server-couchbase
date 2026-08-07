@@ -112,8 +112,8 @@ def _level_filter(*levelnos: int):
     """Return a filter that keeps only records whose level is one of ``levelnos``.
 
     One file per level means each handler accepts just its own level, so a
-    WARNING never lands in the INFO file and vice versa. The DEBUG file accepts 
-    TRACE too, since TRACE has no file of its own.
+    WARNING never lands in the INFO file and vice versa. The DEBUG file also
+    accepts TRACE, since TRACE has no file of its own.
     """
     allowed = frozenset(levelnos)
 
