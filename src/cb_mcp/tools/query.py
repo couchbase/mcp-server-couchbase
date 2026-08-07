@@ -23,6 +23,11 @@ from ..utils.query_utils import (
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.query")
 
 
+def safe_ident(name: str) -> str:
+    """Backtick-quote a SQL++ identifier, doubling embedded backticks."""
+    return "`" + name.replace("`", "``") + "`"
+
+
 def get_schema_for_collection(
     ctx: Context, bucket_name: str, scope_name: str, collection_name: str
 ) -> dict[str, Any]:
@@ -34,7 +39,7 @@ def get_schema_for_collection(
         logger.debug(
             f"Inferring schema for {format_keyspace(bucket_name, scope_name, collection_name)}"
         )
-        query = f"INFER `{collection_name}`"
+        query = f"INFER {safe_ident(collection_name)}"
         result = run_sql_plus_plus_query(ctx, bucket_name, scope_name, query)
         # Result is a list of list of schemas. We convert it to a list of schemas.
         if result:

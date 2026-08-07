@@ -1382,6 +1382,42 @@ class TestDetermineSSLCapella:
 
         assert result == "/fake/capella_root_ca.pem"
 
+    def test_capella_detected_with_port_and_query_params(self) -> None:
+        """Ports and query parameters must not break Capella detection."""
+        capella_conn = "couchbases://cb.abc123.cloud.couchbase.com:11207?network=auto"
+
+        with (
+            patch(
+                "cb_mcp.utils.index_utils._get_capella_root_ca_path",
+                return_value="/fake/capella_root_ca.pem",
+            ),
+            patch(
+                "cb_mcp.utils.index_utils.os.path.exists",
+                return_value=True,
+            ),
+        ):
+            result = _determine_ssl_verification(capella_conn, None)
+
+        assert result == "/fake/capella_root_ca.pem"
+
+    def test_capella_detected_with_query_params_only(self) -> None:
+        """Query parameters without a port must not break Capella detection."""
+        capella_conn = "couchbases://cb.abc123.cloud.couchbase.com?network=external"
+
+        with (
+            patch(
+                "cb_mcp.utils.index_utils._get_capella_root_ca_path",
+                return_value="/fake/capella_root_ca.pem",
+            ),
+            patch(
+                "cb_mcp.utils.index_utils.os.path.exists",
+                return_value=True,
+            ),
+        ):
+            result = _determine_ssl_verification(capella_conn, None)
+
+        assert result == "/fake/capella_root_ca.pem"
+
     def test_capella_falls_back_to_system_bundle_when_missing(self) -> None:
         """If the bundled Capella CA cannot be located on disk, fall back
         to the system CA bundle (verify=True) so connections still work."""

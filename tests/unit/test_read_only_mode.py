@@ -24,7 +24,7 @@ KV_WRITE_TOOL_NAMES = {
     "insert_document_by_id",
     "replace_document_by_id",
     "delete_document_by_id",
-    "sub_document_mutate_in",
+    "mutate_subdocument",
 }
 
 # Scope/collection management write tool names that should be disabled when
@@ -55,7 +55,7 @@ READ_ONLY_TOOL_NAMES = {
     "get_cluster_health_and_services",
     # KV read tools (2)
     "get_document_by_id",
-    "sub_document_lookup_in",
+    "lookup_subdocument",
     # Query tools (3)
     "get_schema_for_collection",
     "run_sql_plus_plus_query",

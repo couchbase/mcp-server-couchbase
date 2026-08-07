@@ -21,9 +21,9 @@ from couchbase.exceptions import PathMismatchException, PathNotFoundException
 from cb_mcp.tools.kv import (
     delete_document_by_id,
     insert_document_by_id,
+    lookup_subdocument,
+    mutate_subdocument,
     replace_document_by_id,
-    sub_document_lookup_in,
-    sub_document_mutate_in,
     upsert_document_by_id,
 )
 
@@ -123,7 +123,7 @@ class TestDeleteDocument:
 
 class _FakeLookupInResult:
     """Mimics the parts of couchbase.result.LookupInResult exercised by
-    sub_document_lookup_in: ``.exists(index)`` and ``.content_as[type](index)``.
+    lookup_subdocument: ``.exists(index)`` and ``.content_as[type](index)``.
 
     ``entries`` is a list positionally aligned with the specs passed to
     ``lookup_in`` — each entry is either ``{"value": <value>}`` (success) or
@@ -157,7 +157,7 @@ class _FakeLookupInResult:
 
 
 class TestSubDocumentLookupIn:
-    """sub_document_lookup_in: spec building, result grouping, and error handling."""
+    """lookup_subdocument: spec building, result grouping, and error handling."""
 
     def test_combined_ops_success(self) -> None:
         """get + exists + count in one call build the right spec list and
@@ -172,7 +172,7 @@ class TestSubDocumentLookupIn:
         )
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            result = sub_document_lookup_in(
+            result = lookup_subdocument(
                 ctx,
                 "b",
                 "s",
@@ -203,7 +203,7 @@ class TestSubDocumentLookupIn:
         )
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            result = sub_document_lookup_in(
+            result = lookup_subdocument(
                 ctx, "b", "s", "c", "doc1", get_paths=["missing.path"]
             )
 
@@ -218,7 +218,7 @@ class TestSubDocumentLookupIn:
         )
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            result = sub_document_lookup_in(
+            result = lookup_subdocument(
                 ctx, "b", "s", "c", "doc1", exists_paths=["bad.path"]
             )
 
@@ -231,7 +231,7 @@ class TestSubDocumentLookupIn:
         ctx, cluster, collection = _make_ctx_with_collection()
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            result = sub_document_lookup_in(ctx, "b", "s", "c", "doc1")
+            result = lookup_subdocument(ctx, "b", "s", "c", "doc1")
 
         assert "error" in result
         collection.lookup_in.assert_not_called()
@@ -242,9 +242,7 @@ class TestSubDocumentLookupIn:
         collection.lookup_in.side_effect = Exception("connection reset")
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            result = sub_document_lookup_in(
-                ctx, "b", "s", "c", "doc1", get_paths=["name"]
-            )
+            result = lookup_subdocument(ctx, "b", "s", "c", "doc1", get_paths=["name"])
 
         assert result == {"error": "connection reset"}
 
@@ -262,7 +260,7 @@ class TestSubDocumentLookupIn:
         )
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            result = sub_document_lookup_in(
+            result = lookup_subdocument(
                 ctx, "b", "s", "c", "doc1", count_paths=["name", "tags"]
             )
 
@@ -271,11 +269,11 @@ class TestSubDocumentLookupIn:
 
 
 class TestSubDocumentMutateIn:
-    """sub_document_mutate_in: spec building, atomic error handling, and result shaping."""
+    """mutate_subdocument: spec building, atomic error handling, and result shaping."""
 
     class _FakeMutateInResult:
         """Mimics the parts of couchbase.result.MutateInResult exercised by
-        sub_document_mutate_in for reading back a counter's new value.
+        mutate_subdocument for reading back a counter's new value.
 
         ``content_as_works`` models whether the installed SDK's ``content_as``
         actually works for mutate_in results (it doesn't in the version this
@@ -323,7 +321,7 @@ class TestSubDocumentMutateIn:
         )
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            result = sub_document_mutate_in(
+            result = mutate_subdocument(
                 ctx,
                 "b",
                 "s",
@@ -356,7 +354,7 @@ class TestSubDocumentMutateIn:
         )
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            result = sub_document_mutate_in(
+            result = mutate_subdocument(
                 ctx,
                 "b",
                 "s",
@@ -373,7 +371,7 @@ class TestSubDocumentMutateIn:
         ctx, cluster, collection = _make_ctx_with_collection()
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            sub_document_mutate_in(
+            mutate_subdocument(
                 ctx,
                 "b",
                 "s",
@@ -395,7 +393,7 @@ class TestSubDocumentMutateIn:
         )
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            result = sub_document_mutate_in(
+            result = mutate_subdocument(
                 ctx,
                 "b",
                 "s",
@@ -413,7 +411,7 @@ class TestSubDocumentMutateIn:
         ctx, cluster, collection = _make_ctx_with_collection()
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            sub_document_mutate_in(
+            mutate_subdocument(
                 ctx,
                 "b",
                 "s",
@@ -439,7 +437,7 @@ class TestSubDocumentMutateIn:
         collection.mutate_in.side_effect = sdk_error
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            result = sub_document_mutate_in(
+            result = mutate_subdocument(
                 ctx,
                 "b",
                 "s",
@@ -458,7 +456,7 @@ class TestSubDocumentMutateIn:
         ctx, cluster, collection = _make_ctx_with_collection()
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            result = sub_document_mutate_in(ctx, "b", "s", "c", "doc1")
+            result = mutate_subdocument(ctx, "b", "s", "c", "doc1")
 
         assert "error" in result
         collection.mutate_in.assert_not_called()
@@ -469,7 +467,7 @@ class TestSubDocumentMutateIn:
         ctx, cluster, collection = _make_ctx_with_collection()
 
         with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
-            result = sub_document_mutate_in(
+            result = mutate_subdocument(
                 ctx, "b", "s", "c", "doc1", upsert_specs=[{"path": "a"}]
             )
 
