@@ -163,7 +163,7 @@ def replace_document_by_id(
         return tool_error(e)
 
 
-def sub_document_lookup_in(
+def lookup_subdocument(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
@@ -270,7 +270,7 @@ def sub_document_lookup_in(
     return response
 
 
-def sub_document_mutate_in(
+def mutate_subdocument(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
@@ -293,12 +293,12 @@ def sub_document_mutate_in(
 
     Use this instead of upsert_document_by_id/replace_document_by_id when you only need to
     change, add, or remove a few fields — AND you already know the exact field path(s) to
-    mutate (e.g. from a prior get_document_by_id or sub_document_lookup_in call, from the
+    mutate (e.g. from a prior get_document_by_id or lookup_subdocument call, from the
     user explicitly naming the field, or from a known schema). Do NOT guess field paths.
 
     IMPORTANT — atomicity: a mutate_in call is all-or-nothing. If ANY requested spec fails
     (e.g. an insert on a path that already exists), the ENTIRE call fails and NONE of the
-    mutations are applied — unlike sub_document_lookup_in, there is no partial success.
+    mutations are applied — unlike lookup_subdocument, there is no partial success.
 
     Provide one or more of the following lists. Each path uses Couchbase's dot/bracket path
     syntax (e.g. "address.city", "tags[0]", "tags[-1]" for the last array element):
@@ -461,7 +461,7 @@ def sub_document_mutate_in(
                 try:
                     new_value = read_new_value()
                     break
-                except Exception:
+                except Exception:  # noqa: S112 (expected fallback attempt, not a swallowed bug)
                     continue
 
             if new_value is None:

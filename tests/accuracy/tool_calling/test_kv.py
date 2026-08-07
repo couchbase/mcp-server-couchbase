@@ -4,9 +4,9 @@ Cases:
   - get / insert / upsert / replace / delete (one each)
   - multi-step (get → upsert)
   - negative selection (a "read-only" prompt must not call delete)
-  - sub_document_lookup_in selected over get_document_by_id for exists/count/
+  - lookup_subdocument selected over get_document_by_id for exists/count/
     single-field prompts
-  - sub_document_mutate_in selected over upsert_document_by_id for single-field
+  - mutate_subdocument selected over upsert_document_by_id for single-field
     set/append/increment prompts
 """
 
@@ -252,7 +252,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
     exists_id = _doc_id("acc_subdoc_exists")
     cases.append(
         AccuracyCase(
-            test_id="sub_document_lookup_in_exists",
+            test_id="lookup_subdocument_exists",
             prompt=(
                 f"Without fetching its full contents, check whether document "
                 f"'{exists_id}' in bucket '{bucket}', scope '{scope}', collection "
@@ -260,7 +260,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="sub_document_lookup_in",
+                    tool_name="lookup_subdocument",
                     parameters={
                         "bucket_name": bucket,
                         "scope_name": scope,
@@ -280,7 +280,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
     count_id = _doc_id("acc_subdoc_count")
     cases.append(
         AccuracyCase(
-            test_id="sub_document_lookup_in_count",
+            test_id="lookup_subdocument_count",
             prompt=(
                 f"How many items are in the 'tags' array of document '{count_id}' "
                 f"in bucket '{bucket}', scope '{scope}', collection '{collection}'? "
@@ -288,7 +288,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="sub_document_lookup_in",
+                    tool_name="lookup_subdocument",
                     parameters={
                         "bucket_name": bucket,
                         "scope_name": scope,
@@ -312,7 +312,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
     field_id = _doc_id("acc_subdoc_get")
     cases.append(
         AccuracyCase(
-            test_id="sub_document_lookup_in_get_field_not_whole_doc",
+            test_id="lookup_subdocument_get_field_not_whole_doc",
             prompt=(
                 f"I only need the 'city' field nested under 'address' in document "
                 f"'{field_id}' (bucket '{bucket}', scope '{scope}', collection "
@@ -320,7 +320,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="sub_document_lookup_in",
+                    tool_name="lookup_subdocument",
                     parameters={
                         "bucket_name": bucket,
                         "scope_name": scope,
@@ -344,7 +344,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
     mutate_upsert_id = _doc_id("acc_mutate_upsert")
     cases.append(
         AccuracyCase(
-            test_id="sub_document_mutate_in_upsert_single_field",
+            test_id="mutate_subdocument_upsert_single_field",
             prompt=(
                 f"On document '{mutate_upsert_id}' in bucket '{bucket}', scope "
                 f"'{scope}', collection '{collection}', just set its 'status' "
@@ -353,7 +353,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="sub_document_mutate_in",
+                    tool_name="mutate_subdocument",
                     parameters={
                         "bucket_name": bucket,
                         "scope_name": scope,
@@ -373,7 +373,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
     mutate_append_id = _doc_id("acc_mutate_append")
     cases.append(
         AccuracyCase(
-            test_id="sub_document_mutate_in_array_append",
+            test_id="mutate_subdocument_array_append",
             prompt=(
                 f"Append the value 'urgent' to the 'tags' array of document "
                 f"'{mutate_append_id}' in bucket '{bucket}', scope '{scope}', "
@@ -381,7 +381,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="sub_document_mutate_in",
+                    tool_name="mutate_subdocument",
                     parameters={
                         "bucket_name": bucket,
                         "scope_name": scope,
@@ -405,7 +405,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
     mutate_counter_id = _doc_id("acc_mutate_counter")
     cases.append(
         AccuracyCase(
-            test_id="sub_document_mutate_in_counter",
+            test_id="mutate_subdocument_counter",
             prompt=(
                 f"Increment the 'views' counter of document '{mutate_counter_id}' "
                 f"in bucket '{bucket}', scope '{scope}', collection '{collection}' "
@@ -413,7 +413,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="sub_document_mutate_in",
+                    tool_name="mutate_subdocument",
                     parameters={
                         "bucket_name": bucket,
                         "scope_name": scope,
@@ -451,12 +451,12 @@ KV_CASE_IDS = [
     "get_then_upsert_multistep",
     "read_only_prompt_uses_get_only",
     "conversational_lookup_document",
-    "sub_document_lookup_in_exists",
-    "sub_document_lookup_in_count",
-    "sub_document_lookup_in_get_field_not_whole_doc",
-    "sub_document_mutate_in_upsert_single_field",
-    "sub_document_mutate_in_array_append",
-    "sub_document_mutate_in_counter",
+    "lookup_subdocument_exists",
+    "lookup_subdocument_count",
+    "lookup_subdocument_get_field_not_whole_doc",
+    "mutate_subdocument_upsert_single_field",
+    "mutate_subdocument_array_append",
+    "mutate_subdocument_counter",
 ]
 
 
