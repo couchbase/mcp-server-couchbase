@@ -280,8 +280,10 @@ def create_index(
     Pass ignore_if_exists=True to avoid an error when an index with this name already exists.
 
     Returns {"success": True, "index_name": ..., "deferred": ..., "keyspace": ...} on
-    success, or {"success": False, "error": ...} on failure — e.g. the index already
-    exists (without ignore_if_exists=True) or the keys/condition are invalid.
+    success; when deferred is True the result also includes a "next_step" hint noting the
+    index must be built (via build_index) before it is usable. On failure returns
+    {"success": False, "error": ...} — e.g. the index already exists (without
+    ignore_if_exists=True) or the keys/condition are invalid.
     """
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
@@ -301,7 +303,13 @@ def create_index(
             ),
         )
         logger.info(f"Created index {index_name!r} on {keyspace} (deferred={deferred})")
-        return tool_success(index_name=index_name, deferred=deferred, keyspace=keyspace)
+        result = {"index_name": index_name, "deferred": deferred, "keyspace": keyspace}
+        if deferred:
+            result["next_step"] = (
+                f"Index '{index_name}' was created deferred and is NOT yet usable. "
+                "Call build_index to build it, then list_indexes to confirm it reaches 'online'."
+            )
+        return tool_success(**result)
     except Exception as e:
         logger.error(
             f"Error creating index {index_name!r} on {keyspace}: {e}", exc_info=True
