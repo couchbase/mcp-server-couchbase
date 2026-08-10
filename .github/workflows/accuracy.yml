@@ -197,7 +197,7 @@ jobs:
           CB_MCP_TEST_SCOPE: inventory
           CB_MCP_TEST_COLLECTION: airline
           PYTHONPATH: src
-          # OpenAI / eval config (model defaults to gpt-5.5
+          # OpenAI / eval config (model defaults to gpt-5.5)
           # when inputs.model is empty, e.g. on tag-triggered runs).
           # CB_ACCURACY_RUN_ID is set in the previous step via $GITHUB_ENV.
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-# GPT-5 and the o-series are reasoning models: they reject any non-default
+# GPT-5* and the listed o-series models are reasoning models: they reject any non-default
 # ``temperature`` with a 400 (only the default of 1 is accepted). Classic chat
 # models (gpt-4o, gpt-4.1, ...) accept a custom value.
 _FIXED_TEMPERATURE_PREFIXES = ("gpt-5", "o1", "o3", "o4")
