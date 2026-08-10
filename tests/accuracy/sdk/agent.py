@@ -21,6 +21,8 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from .openai_compat import supports_custom_temperature
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_SYSTEM_PROMPT = "\n".join(
@@ -67,7 +69,10 @@ class OpenAIAgent:
         self.model = model
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._max_steps = max_steps
-        self._temperature = temperature
+        # Reasoning models (gpt-5*, o-series) reject a custom temperature.
+        self._temperature = (
+            temperature if supports_custom_temperature(model) else None
+        )
 
         system_parts: list[str] = []
         if system_prompt is None:
