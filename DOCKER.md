@@ -20,7 +20,7 @@ Documentation: <https://mcp-server.couchbase.com>
 | --------- | ----------- |
 | `get_server_configuration_status` | Get the server status and configuration without connecting to the cluster — reports read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration |
 | `test_cluster_connection` | Check the cluster credentials by connecting to the cluster |
-| `get_cluster_health_and_services` | Get cluster health status and list of all running services |
+| `get_cluster_health_and_services` | Get cluster health status and list of all running services, optionally filtered to specific services via `service_types` |
 
 ### Data model & schema discovery tools
 
