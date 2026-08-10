@@ -7,7 +7,7 @@ Covers:
   - get_scopes_in_bucket
   - get_collections_in_scope
   - get_scopes_and_collections_in_bucket
-  - get_cluster_health_and_services
+  - get_cluster_health_and_services (including service_types filtering)
 """
 
 from __future__ import annotations
@@ -178,6 +178,25 @@ def _build_cases(bucket: str, scope: str) -> list[AccuracyCase]:
 
     cases.append(
         AccuracyCase(
+            test_id="get_cluster_health_and_services_query_service_only",
+            prompt=(
+                "Check right now whether just the query service on my Couchbase "
+                "cluster is reachable — don't check any other service."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_cluster_health_and_services",
+                    parameters={
+                        "bucket_name": _optional_bucket(),
+                        "service_types": ["query"],
+                    },
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
             test_id="conversational_what_buckets_do_i_have",
             prompt="What buckets do I actually have on this Couchbase cluster?",
             expected_tools=[
@@ -223,6 +242,7 @@ SERVER_CASE_IDS = [
     "get_scopes_and_collections_in_bucket",
     "get_cluster_health_and_services_no_bucket",
     "get_cluster_health_and_services_with_bucket",
+    "get_cluster_health_and_services_query_service_only",
     "conversational_what_buckets_do_i_have",
     "conversational_is_everything_healthy",
 ]

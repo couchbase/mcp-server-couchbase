@@ -7,7 +7,7 @@ Tests for:
 - get_scopes_in_bucket
 - get_scopes_and_collections_in_bucket
 - get_collections_in_scope
-- get_cluster_health_and_services
+- get_cluster_health_and_services (including service_types filtering)
 - test_cluster_connection
 """
 
@@ -140,6 +140,35 @@ async def test_get_cluster_health_and_services_with_bucket() -> None:
         assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
         assert payload.get("status") == "success", f"Expected success status: {payload}"
         assert "data" in payload, "Expected 'data' key with health info"
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_health_and_services_with_service_types() -> None:
+    """Verify get_cluster_health_and_services filters by service_types."""
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "get_cluster_health_and_services",
+            arguments={"service_types": ["query"]},
+        )
+        payload = extract_payload(response)
+
+        assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
+        assert payload.get("status") == "success", f"Expected success status: {payload}"
+        assert "data" in payload, "Expected 'data' key with health info"
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_health_and_services_invalid_service_type() -> None:
+    """An unrecognized service_types entry must return an error envelope."""
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "get_cluster_health_and_services",
+            arguments={"service_types": ["not_a_real_service"]},
+        )
+        payload = extract_payload(response)
+
+        assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
+        assert payload.get("status") == "error", f"Expected error status: {payload}"
 
 
 @pytest.mark.asyncio
