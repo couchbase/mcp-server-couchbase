@@ -266,12 +266,12 @@ class TestCreateIndex:
         ):
             result = create_index(ctx, "b", "s", "c", "idx1", ["email"])
 
-        assert result == {
-            "success": True,
-            "index_name": "idx1",
-            "deferred": True,
-            "keyspace": "b.s.c",
-        }
+        assert result["success"] is True
+        assert result["index_name"] == "idx1"
+        assert result["deferred"] is True
+        assert result["keyspace"] == "b.s.c"
+        # Deferred creates carry a next-step hint pointing at build_index.
+        assert "build_index" in result["next_step"]
         args, _kwargs = index_manager.create_index.call_args
         assert args[0] == "idx1"
         assert args[1] == ["email"]

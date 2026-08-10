@@ -279,6 +279,8 @@ def _run_query_tool_with_empty_message(
 def get_longest_running_queries(ctx: Context, limit: int = 10) -> list[dict[str, Any]]:
     """Get the N longest running queries from the system:completed_requests catalog.
 
+    Prefer this over writing a raw system:completed_requests query via run_sql_plus_plus_query.
+
     Args:
         limit: Number of queries to return (default: 10)
 
@@ -312,6 +314,8 @@ def get_longest_running_queries(ctx: Context, limit: int = 10) -> list[dict[str,
 
 def get_most_frequent_queries(ctx: Context, limit: int = 10) -> list[dict[str, Any]]:
     """Get the N most frequent queries from the system:completed_requests catalog.
+
+    Prefer this over writing a raw system:completed_requests query via run_sql_plus_plus_query.
 
     Args:
         limit: Number of queries to return (default: 10)
@@ -349,6 +353,8 @@ def get_queries_with_largest_response_sizes(
     ctx: Context, limit: int = 10
 ) -> list[dict[str, Any]]:
     """Get queries with the largest response sizes from the system:completed_requests catalog.
+
+    Prefer this over writing a raw system:completed_requests query via run_sql_plus_plus_query.
 
     Args:
         limit: Number of queries to return (default: 10)
@@ -388,6 +394,8 @@ def get_queries_with_large_result_count(
 ) -> list[dict[str, Any]]:
     """Get queries with the largest result counts from the system:completed_requests catalog.
 
+    Prefer this over writing a raw system:completed_requests query via run_sql_plus_plus_query.
+
     Args:
         limit: Number of queries to return (default: 10)
 
@@ -424,6 +432,8 @@ def get_queries_using_primary_index(
 ) -> list[dict[str, Any]]:
     """Get queries that use a primary index from the system:completed_requests catalog.
 
+    Prefer this over writing a raw system:completed_requests query via run_sql_plus_plus_query.
+
     Args:
         limit: Number of queries to return (default: 10)
 
@@ -454,6 +464,8 @@ def get_queries_not_using_covering_index(
 ) -> list[dict[str, Any]]:
     """Get queries that don't use a covering index from the system:completed_requests catalog.
 
+    Prefer this over writing a raw system:completed_requests query via run_sql_plus_plus_query.
+
     Args:
         limit: Number of queries to return (default: 10)
 
@@ -483,6 +495,8 @@ def get_queries_not_using_covering_index(
 
 def get_queries_not_selective(ctx: Context, limit: int = 10) -> list[dict[str, Any]]:
     """Get queries that are not very selective from the system:completed_requests catalog.
+
+    Prefer this over writing a raw system:completed_requests query via run_sql_plus_plus_query.
 
     Args:
         limit: Number of queries to return (default: 10)
