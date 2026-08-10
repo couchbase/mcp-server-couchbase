@@ -50,8 +50,8 @@ def _build_cases() -> list[AccuracyCase]:
         AccuracyCase(
             test_id="get_longest_running_queries_default",
             prompt=(
-                "Which SQL++ queries have been running the longest on average? "
-                "Use the cluster's completed_requests history."
+                "Which SQL++ queries have been running the longest on average "
+                "across this cluster?"
             ),
             expected_tools=[
                 ExpectedToolCall(
