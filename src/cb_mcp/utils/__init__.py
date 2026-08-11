@@ -20,16 +20,21 @@ from .config import (
 
 # Connection utilities
 from .connection import (
+    connect_to_analytics_cluster,
     connect_to_bucket,
     connect_to_couchbase_cluster,
 )
 
 # Constants
 from .constants import (
+    ALLOWED_CONNECTION_MODES,
     ALLOWED_LOG_LEVELS,
     ALLOWED_LOG_SINKS,
     ALLOWED_OAUTH_ALGORITHMS,
     ALLOWED_TRANSPORTS,
+    CONNECTION_MODE_ANALYTICS,
+    CONNECTION_MODE_OPERATIONAL,
+    DEFAULT_CONNECTION_MODE,
     DEFAULT_HOST,
     DEFAULT_LOG_BACKUP_COUNT,
     DEFAULT_LOG_FILE,
@@ -66,6 +71,7 @@ from .environment import log_environment_info
 # Index utilities
 from .index_utils import (
     fetch_indexes_from_rest_api,
+    is_capella_connection_string,
 )
 
 # Logging
@@ -92,6 +98,7 @@ __all__ = [
     "parse_tool_names",
     # Connection
     "connect_to_couchbase_cluster",
+    "connect_to_analytics_cluster",
     "connect_to_bucket",
     # Context
     "AppContext",
@@ -100,9 +107,14 @@ __all__ = [
     "get_logging_config",
     # Index utilities
     "fetch_indexes_from_rest_api",
+    "is_capella_connection_string",
     # Constants
     "MCP_SERVER_NAME",
     "DEFAULT_READ_ONLY_MODE",
+    "CONNECTION_MODE_OPERATIONAL",
+    "CONNECTION_MODE_ANALYTICS",
+    "ALLOWED_CONNECTION_MODES",
+    "DEFAULT_CONNECTION_MODE",
     "DEFAULT_TRANSPORT",
     "DEFAULT_LOG_LEVEL",
     "DEFAULT_LOG_MAX_BYTES",

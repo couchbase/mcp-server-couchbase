@@ -4,16 +4,26 @@ Couchbase MCP Tools
 This module contains all the MCP tools for Couchbase operations.
 
 Tool Categories:
-- READ_ONLY_TOOLS: Tools that only read data (always available)
+- READ_ONLY_TOOLS: Operational tools that only read data (available in
+  connection_mode="operational")
 - KV_WRITE_TOOLS: KV tools that modify data (disabled when READ_ONLY_MODE=True)
 - COLLECTION_WRITE_TOOLS: Scope/collection management tools that modify data
   (disabled when READ_ONLY_MODE=True)
 - INDEX_WRITE_TOOLS: Index management tools that modify data (disabled when READ_ONLY_MODE=True)
+- ANALYTICS_READ_ONLY_TOOLS / ANALYTICS_WRITE_TOOLS: Enterprise Analytics
+  tools (see tools/analytics.py), available only in
+  connection_mode="analytics".
+
+connection_mode is mutually exclusive: operational tool families above are
+only loaded in connection_mode="operational", and the analytics families are
+only loaded in connection_mode="analytics" — see get_tools().
 """
 
 from collections.abc import Callable
 
 from mcp.types import ToolAnnotations
+
+from ..utils.constants import CONNECTION_MODE_ANALYTICS, DEFAULT_CONNECTION_MODE
 
 # Scope/collection management tools
 from .collection_management import (
@@ -122,7 +132,14 @@ INDEX_WRITE_TOOLS = [
     drop_index,
 ]
 
-# List of all tools for easy registration (kept for backward compatibility)
+# Enterprise Analytics tools - available only in connection_mode="analytics".
+ANALYTICS_READ_ONLY_TOOLS: list[Callable] = []
+ANALYTICS_WRITE_TOOLS: list[Callable] = []
+
+# List of all operational tools for easy registration (kept for backward
+# compatibility). Deliberately excludes the ANALYTICS_* lists above — this
+# name predates connection_mode and its consumers assume "all tools" means
+# "all operational tools".
 ALL_TOOLS = (
     READ_ONLY_TOOLS + KV_WRITE_TOOLS + COLLECTION_WRITE_TOOLS + INDEX_WRITE_TOOLS
 )
@@ -173,12 +190,30 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
 }
 
 
-def get_tools(read_only_mode: bool = True) -> list[Callable]:
+def get_tools(
+    read_only_mode: bool = True,
+    connection_mode: str = DEFAULT_CONNECTION_MODE,
+) -> list[Callable]:
     """Get the list of tools based on the mode settings.
 
-    This function determines which tools should be loaded based on the
-    READ_ONLY_MODE setting. When read_only_mode is True, write tools are excluded.
+    connection_mode selects which family of tools is even in play:
+    "operational" (default) loads the tools for Couchbase Operational;
+    "analytics" loads only ANALYTICS_READ_ONLY_TOOLS/ANALYTICS_WRITE_TOOLS
+    instead — the two families are mutually exclusive, never merged. Within
+    whichever family is selected, read_only_mode still governs whether write
+    tools are included.
+
+    Note: ANALYTICS_READ_ONLY_TOOLS/ANALYTICS_WRITE_TOOLS are currently empty
+    (no EA tools are implemented yet — see tools/analytics.py), so
+    connection_mode="analytics" currently returns an empty list. That is
+    expected for now, not a bug.
     """
+    if connection_mode == CONNECTION_MODE_ANALYTICS:
+        tools = list(ANALYTICS_READ_ONLY_TOOLS)
+        if not read_only_mode:
+            tools.extend(ANALYTICS_WRITE_TOOLS)
+        return tools
+
     tools = list(READ_ONLY_TOOLS)
 
     if not read_only_mode:
@@ -230,6 +265,8 @@ __all__ = [
     "KV_WRITE_TOOLS",
     "COLLECTION_WRITE_TOOLS",
     "INDEX_WRITE_TOOLS",
+    "ANALYTICS_READ_ONLY_TOOLS",
+    "ANALYTICS_WRITE_TOOLS",
     # Tool annotations
     "TOOL_ANNOTATIONS",
     # Convenience

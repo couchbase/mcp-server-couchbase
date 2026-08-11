@@ -9,13 +9,19 @@ This module tests:
 
 from cb_mcp.tools import (
     ALL_TOOLS,
+    ANALYTICS_READ_ONLY_TOOLS,
+    ANALYTICS_WRITE_TOOLS,
     COLLECTION_WRITE_TOOLS,
     INDEX_WRITE_TOOLS,
     KV_WRITE_TOOLS,
     READ_ONLY_TOOLS,
     get_tools,
 )
-from cb_mcp.utils.constants import DEFAULT_READ_ONLY_MODE
+from cb_mcp.utils.constants import (
+    CONNECTION_MODE_ANALYTICS,
+    CONNECTION_MODE_OPERATIONAL,
+    DEFAULT_READ_ONLY_MODE,
+)
 from cb_mcp.utils.context import AppContext
 
 # KV write tool names that should be disabled when READ_ONLY_MODE=True
@@ -383,3 +389,71 @@ class TestConstantsDefault:
         """Verify DEFAULT_READ_ONLY_MODE constant is True."""
 
         assert DEFAULT_READ_ONLY_MODE is True
+
+
+class TestGetToolsConnectionMode:
+    """Tests for get_tools() connection_mode gating.
+
+    connection_mode="analytics" is mutually exclusive with the operational
+    tool families above — it loads ANALYTICS_READ_ONLY_TOOLS/
+    ANALYTICS_WRITE_TOOLS instead, never a mix of both families. Both
+    analytics lists are currently empty placeholders (no EA tools are
+    implemented yet — see cb_mcp/tools/analytics.py), so analytics mode
+    intentionally returns an empty tool list for now.
+    """
+
+    def test_default_connection_mode_is_operational(self):
+        """Omitting connection_mode behaves exactly like the pre-existing default."""
+        tools = get_tools(read_only_mode=True)
+        tool_names = {tool.__name__ for tool in tools}
+        assert tool_names == READ_ONLY_TOOL_NAMES
+
+    def test_operational_mode_explicit_matches_default(self):
+        """Passing connection_mode='operational' explicitly is unchanged from default."""
+        tools = get_tools(
+            read_only_mode=True, connection_mode=CONNECTION_MODE_OPERATIONAL
+        )
+        tool_names = {tool.__name__ for tool in tools}
+        assert tool_names == READ_ONLY_TOOL_NAMES
+
+    def test_analytics_mode_read_only_returns_empty(self):
+        """analytics mode + read_only_mode=True: no tools (placeholder list is empty)."""
+        tools = get_tools(
+            read_only_mode=True, connection_mode=CONNECTION_MODE_ANALYTICS
+        )
+        assert tools == []
+
+    def test_analytics_mode_write_enabled_returns_empty(self):
+        """analytics mode + read_only_mode=False: still no tools (both lists empty)."""
+        tools = get_tools(
+            read_only_mode=False, connection_mode=CONNECTION_MODE_ANALYTICS
+        )
+        assert tools == []
+
+    def test_analytics_mode_never_includes_operational_tools(self):
+        """No operational tool sneaks into the analytics tool list."""
+        tools = get_tools(
+            read_only_mode=False, connection_mode=CONNECTION_MODE_ANALYTICS
+        )
+        tool_names = {tool.__name__ for tool in tools}
+        assert tool_names.isdisjoint(READ_ONLY_TOOL_NAMES)
+        assert tool_names.isdisjoint(KV_WRITE_TOOL_NAMES)
+        assert tool_names.isdisjoint(COLLECTION_WRITE_TOOL_NAMES)
+        assert tool_names.isdisjoint(INDEX_WRITE_TOOL_NAMES)
+
+    def test_analytics_tool_lists_are_currently_empty_placeholders(self):
+        """Documents the intentional interim state; update once EA tools land."""
+        assert ANALYTICS_READ_ONLY_TOOLS == []
+        assert ANALYTICS_WRITE_TOOLS == []
+
+
+class TestAppContextConnectionMode:
+    """Tests for AppContext.connection_mode."""
+
+    def test_app_context_connection_mode_default_operational(self):
+        context = AppContext()
+        assert context.connection_mode == CONNECTION_MODE_OPERATIONAL
+
+    def test_app_context_can_set_connection_mode_analytics(self):
+        context = AppContext(connection_mode=CONNECTION_MODE_ANALYTICS)
+        assert context.connection_mode == CONNECTION_MODE_ANALYTICS

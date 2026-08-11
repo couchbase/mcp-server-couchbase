@@ -5,10 +5,16 @@ Tool registration orchestration shared across MCP implementations.
 import logging
 from collections.abc import Callable
 
-from .tools import COLLECTION_WRITE_TOOLS, INDEX_WRITE_TOOLS, KV_WRITE_TOOLS, get_tools
+from .tools import (
+    ANALYTICS_WRITE_TOOLS,
+    COLLECTION_WRITE_TOOLS,
+    INDEX_WRITE_TOOLS,
+    KV_WRITE_TOOLS,
+    get_tools,
+)
 from .utils import wrap_with_telemetry
 from .utils.config import parse_tool_names
-from .utils.constants import MCP_SERVER_NAME
+from .utils.constants import DEFAULT_CONNECTION_MODE, MCP_SERVER_NAME
 from .utils.elicitation import wrap_with_confirmation
 from .utils.scope_enforcement import (
     TOOL_SCOPE_HINTS,
@@ -24,6 +30,7 @@ def prepare_tools_for_registration(
     disabled_tools: str | None,
     confirmation_required_tools: str | None,
     enforce_scopes: bool = False,
+    connection_mode: str = DEFAULT_CONNECTION_MODE,
 ) -> tuple[list[Callable], set[str], set[str]]:
     """Prepare final tool list and confirmation configuration for registration.
 
@@ -42,8 +49,10 @@ def prepare_tools_for_registration(
     the tool, so it never emits a tool-call event.
     """
     # When read_only_mode is True, write tools (KV, collection management, and
-    # index management) are not loaded.
-    tools = get_tools(read_only_mode=read_only_mode)
+    # index management) are not loaded. When connection_mode is "analytics",
+    # only Enterprise Analytics tools are loaded and none of the operational tool families below
+    # are exposed.
+    tools = get_tools(read_only_mode=read_only_mode, connection_mode=connection_mode)
 
     loaded_tool_names = {tool.__name__ for tool in tools}
     disabled_tool_names = parse_tool_names(disabled_tools, loaded_tool_names)
@@ -82,7 +91,10 @@ def prepare_tools_for_registration(
 
     write_tool_names = {
         fn.__name__
-        for fn in KV_WRITE_TOOLS + COLLECTION_WRITE_TOOLS + INDEX_WRITE_TOOLS
+        for fn in KV_WRITE_TOOLS
+        + COLLECTION_WRITE_TOOLS
+        + INDEX_WRITE_TOOLS
+        + ANALYTICS_WRITE_TOOLS
     }
 
     final_tools: list[Callable] = []

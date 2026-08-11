@@ -12,7 +12,7 @@ from fastmcp import Context
 
 from ..utils.config import get_settings
 from ..utils.connection import connect_to_bucket
-from ..utils.constants import MCP_SERVER_NAME
+from ..utils.constants import DEFAULT_CONNECTION_MODE, MCP_SERVER_NAME
 from ..utils.context import (
     get_cluster_connection,
     get_cluster_provider,
@@ -37,6 +37,7 @@ def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
     configuration = {
         **provider_config,
         "read_only_mode": settings.get("read_only_mode", True),
+        "connection_mode": settings.get("connection_mode", DEFAULT_CONNECTION_MODE),
         "disabled_tools": sorted(settings.get("disabled_tools", set())),
         "confirmation_required_tools": sorted(
             settings.get("confirmation_required_tools", set())

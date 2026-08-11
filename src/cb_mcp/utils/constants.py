@@ -7,6 +7,16 @@ DEFAULT_TRANSPORT = "stdio"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 
+# Connection Modes
+# The server talks to either the operational Data/Query/Index services (via
+# the `couchbase` SDK) or Enterprise Analytics (via the separate
+# `couchbase_analytics` SDK) — never both in the same process. See
+# cb_mcp/utils/connection.py for the two distinct connection paths.
+CONNECTION_MODE_OPERATIONAL = "operational"
+CONNECTION_MODE_ANALYTICS = "analytics"
+ALLOWED_CONNECTION_MODES = [CONNECTION_MODE_OPERATIONAL, CONNECTION_MODE_ANALYTICS]
+DEFAULT_CONNECTION_MODE = CONNECTION_MODE_OPERATIONAL
+
 # Allowed Transport Types
 ALLOWED_TRANSPORTS = ["stdio", "http", "sse"]
 NETWORK_TRANSPORTS = ["http", "sse"]

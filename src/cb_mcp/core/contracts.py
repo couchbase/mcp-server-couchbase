@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
 from couchbase.cluster import Cluster
+from couchbase_analytics.cluster import Cluster as AnalyticsCluster
 from fastmcp import Context
 
 
@@ -26,8 +27,15 @@ class ClusterProvider(Protocol):
 
     """
 
-    def get_cluster(self, ctx: Context) -> Cluster:
-        """Return (or begin returning) a cluster for this request."""
+    def get_cluster(self, ctx: Context) -> Cluster | AnalyticsCluster:
+        """Return (or begin returning) a cluster for this request.
+
+        The concrete type depends on the provider's configured
+        ``connection_mode``: the operational ``couchbase.cluster.Cluster``,
+        or the unrelated ``couchbase_analytics.cluster.Cluster`` in
+        Enterprise Analytics mode. A single provider instance only ever
+        returns one of the two, never a mix.
+        """
         ...
 
     def close(self) -> None:
@@ -40,8 +48,8 @@ class ClusterProvider(Protocol):
         Must not include secrets — return ``_configured`` booleans instead.
         Returned keys are merged into the top-level ``configuration`` dict of
         ``get_server_configuration_status``; implementations must not reuse
-        server-level key names (``read_only_mode``, ``disabled_tools``,
-        ``confirmation_required_tools``) since those are
+        server-level key names (``read_only_mode``, ``connection_mode``,
+        ``disabled_tools``, ``confirmation_required_tools``) since those are
         owned by the server and would silently override any provider value.
         Implementations may use ``ctx`` to return per-caller configuration
         (e.g., per-API-key in managed implementations) or ignore it (static implementations).

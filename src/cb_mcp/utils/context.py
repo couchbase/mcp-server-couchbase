@@ -6,6 +6,7 @@ from couchbase.cluster import Cluster
 from fastmcp import Context
 
 from ..core.contracts import ClusterProvider
+from .constants import DEFAULT_CONNECTION_MODE
 
 
 @dataclass
@@ -22,6 +23,10 @@ class AppContext:
             reaching for a module global.
         read_only_mode: When True, all write operations (KV, Query, and index
             management) are disabled and KV and index write tools are not loaded.
+        connection_mode: "operational" (default) or "analytics" — selects
+            which cluster/SDK the active ``cluster_provider`` connects to and
+            which tool family is loaded (see ``tools.get_tools``). The two
+            modes are mutually exclusive within a single server process.
         logging_config: Optional snapshot of the active logging configuration,
             populated by the server entrypoint after configuring its loggers.
     """
@@ -29,6 +34,7 @@ class AppContext:
     cluster_provider: ClusterProvider | None = None
     settings: Mapping[str, Any] = field(default_factory=dict)
     read_only_mode: bool = True
+    connection_mode: str = DEFAULT_CONNECTION_MODE
     logging_config: Mapping[str, Any] | None = None
 
 
@@ -49,7 +55,17 @@ def get_logging_config(ctx: Context) -> Mapping[str, Any] | None:
 
 
 def get_cluster_connection(ctx: Context) -> Cluster:
-    """Return the Couchbase cluster for this request via the provider."""
+    """Return the active Couchbase cluster connection for this request.
+
+    The concrete type depends on ``AppContext.connection_mode``: in
+    "operational" mode (default) this is a ``couchbase.cluster.Cluster``; in
+    "analytics" mode it's a ``couchbase_analytics.cluster.Cluster`` instead
+    — a distinct, unrelated class from the separate Enterprise Analytics SDK
+    (see ``utils.connection.connect_to_analytics_cluster``). Only one mode is
+    active per server process, so callers already know which type to expect
+    from the tool family they belong to (operational tools vs.
+    ``tools/analytics.py``) — this function does not disambiguate for you.
+    """
     provider = get_cluster_provider(ctx)
     if provider is None:
         raise RuntimeError(

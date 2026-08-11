@@ -15,8 +15,11 @@ from cb_mcp.auth import OAuthConfigError, resolve_oauth
 from cb_mcp.tool_registration import prepare_tools_for_registration
 from cb_mcp.tools import TOOL_ANNOTATIONS
 from cb_mcp.utils import (
+    ALLOWED_CONNECTION_MODES,
     ALLOWED_OAUTH_ALGORITHMS,
     ALLOWED_TRANSPORTS,
+    CONNECTION_MODE_ANALYTICS,
+    DEFAULT_CONNECTION_MODE,
     DEFAULT_HOST,
     DEFAULT_LOG_BACKUP_COUNT,
     DEFAULT_LOG_FILE,
@@ -34,6 +37,7 @@ from cb_mcp.utils import (
     AppContext,
     configure_logging,
     get_resolved_logging_config,
+    is_capella_connection_string,
     log_environment_info,
     send_install_ping,
     validate_log_level,
@@ -85,6 +89,20 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     type=bool,
     default=DEFAULT_READ_ONLY_MODE,
     help="Enable read-only mode. When True, all write operations (KV and Query) are disabled and KV write tools are not loaded. Set to False to enable write operations.",
+)
+@click.option(
+    "--connection-mode",
+    envvar="CB_MCP_CONNECTION_MODE",
+    type=click.Choice(ALLOWED_CONNECTION_MODES),
+    default=DEFAULT_CONNECTION_MODE,
+    help="Which Couchbase service the server connects to: 'operational' (default, "
+    "the Data/Query/Index services via the couchbase SDK) or 'analytics' "
+    "(Enterprise Analytics via the separate couchbase_analytics SDK). Mutually "
+    "exclusive — only one is active per server process, and only that mode's "
+    "tools are loaded. 'analytics' mode is self-managed clusters only; it is "
+    "rejected at startup against a Capella connection string. The connection "
+    "string format also differs: couchbase(s):// for operational, http(s):// "
+    "for analytics.",
 )
 @click.option(
     "--transport",
@@ -324,6 +342,7 @@ def main(
     client_cert_path,
     client_key_path,
     read_only_mode,
+    connection_mode,
     transport,
     host,
     port,
@@ -406,6 +425,20 @@ def main(
     except OAuthConfigError as e:
         raise click.UsageError(str(e)) from e
 
+    # Enterprise Analytics support is currently self-managed clusters only —
+    # Capella's EA offering has known load-balancer issues, so we refuse to
+    # start rather than let a user hit them at request time.
+    if (
+        connection_mode == CONNECTION_MODE_ANALYTICS
+        and connection_string
+        and is_capella_connection_string(connection_string)
+    ):
+        raise click.UsageError(
+            "connection_mode=analytics is only supported against self-managed "
+            "Enterprise Analytics clusters. The configured connection string "
+            f"({connection_string}) points at Capella, which is not yet supported."
+        )
+
     (
         final_tools,
         configured_confirmation_tool_names,
@@ -415,6 +448,7 @@ def main(
         disabled_tools=disabled_tools,
         confirmation_required_tools=confirmation_required_tools,
         enforce_scopes=auth is not None,
+        connection_mode=connection_mode,
     )
 
     # CLI-resolved configuration lives on AppContext, not in a module global.
@@ -427,6 +461,7 @@ def main(
         "client_cert_path": client_cert_path,
         "client_key_path": client_key_path,
         "read_only_mode": read_only_mode,
+        "connection_mode": connection_mode,
         "transport": transport,
         "host": host,
         "port": port,
@@ -452,7 +487,7 @@ def main(
         """Build the lifespan AppContext with settings captured from the CLI."""
         logger.info(
             f"MCP server initialized in lazy mode for tool discovery. "
-            f"Modes: (read_only_mode={read_only_mode})"
+            f"Modes: (read_only_mode={read_only_mode}, connection_mode={connection_mode})"
         )
         # Diagnostic snapshot for customer support. Filtered at INFO; visible
         # whenever the user runs with --log-level DEBUG.
@@ -466,6 +501,7 @@ def main(
             cluster_provider=StaticClusterProvider(settings=settings),
             settings=settings,
             read_only_mode=read_only_mode,
+            connection_mode=connection_mode,
             logging_config=resolved_logging.as_dict() if resolved_logging else None,
         )
         try:
@@ -484,8 +520,16 @@ def main(
     mcp = FastMCP(MCP_SERVER_NAME, lifespan=app_lifespan, auth=auth)
 
     logger.info(
-        f"Registering {len(final_tools)} tool(s) with modes (read_only_mode={read_only_mode})"
+        f"Registering {len(final_tools)} tool(s) with modes "
+        f"(read_only_mode={read_only_mode}, connection_mode={connection_mode})"
     )
+    if connection_mode == CONNECTION_MODE_ANALYTICS and not final_tools:
+        # Expected for now: Enterprise Analytics tools aren't implemented yet
+        # (see cb_mcp/tools/analytics.py) — this isn't a misconfiguration.
+        logger.warning(
+            "connection_mode=analytics is active but no Enterprise Analytics "
+            "tools are registered yet; the server will expose zero tools."
+        )
 
     # Register tools; FastMCP 3.x add_tool has no annotations kwarg, so wrap first.
     for tool in final_tools:

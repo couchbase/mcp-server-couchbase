@@ -6,6 +6,10 @@ from couchbase.auth import CertificateAuthenticator, PasswordAuthenticator
 from couchbase.bucket import Bucket
 from couchbase.cluster import Cluster
 from couchbase.options import ClusterOptions
+from couchbase_analytics.cluster import Cluster as AnalyticsCluster
+from couchbase_analytics.credential import Credential as AnalyticsCredential
+from couchbase_analytics.options import ClusterOptions as AnalyticsClusterOptions
+from couchbase_analytics.options import SecurityOptions as AnalyticsSecurityOptions
 
 from .constants import MCP_SERVER_NAME
 
@@ -62,6 +66,53 @@ def connect_to_couchbase_cluster(
         return cluster
     except Exception as e:
         logger.error(f"Failed to connect to Couchbase cluster: {e}", exc_info=True)
+        raise
+
+
+def connect_to_analytics_cluster(
+    connection_string: str,
+    username: str,
+    password: str,
+    ca_cert_path: str | None = None,
+) -> AnalyticsCluster:
+    """Connect to a Couchbase Enterprise Analytics (EA) cluster.
+
+    EA is reached through the separate `couchbase_analytics` SDK package, not
+    `couchbase` — the `AnalyticsCluster` returned here is a distinct class
+    from the operational `couchbase.cluster.Cluster` returned by
+    `connect_to_couchbase_cluster`, with its own API (`execute_query`, no
+    `.bucket()`/`.query()`/`.collection()`). Do not pass it to helpers
+    written for the operational SDK, e.g. `connect_to_bucket`.
+
+    EA support is self-managed-only — `mcp_server.py`'s `connection_mode`
+    startup guard rejects Capella connection strings before this function is
+    ever called. Because of that, we explicitly disable
+    `SecurityOptions.trust_only_capella` here rather than leave it at the
+    SDK's own default (`True`): a self-managed cluster's certificate would
+    otherwise always fail verification, since the default trusts only
+    Capella's CA.
+
+    If the connection fails, it will raise an exception.
+    """
+    try:
+        logger.info("Connecting to Enterprise Analytics cluster...")
+        credential = AnalyticsCredential.from_username_and_password(username, password)
+        security_options = AnalyticsSecurityOptions(
+            trust_only_capella=False,
+            **({"trust_only_pem_file": ca_cert_path} if ca_cert_path else {}),
+        )
+        options = AnalyticsClusterOptions(security_options=security_options)
+
+        cluster = AnalyticsCluster.create_instance(
+            connection_string, credential, options
+        )
+
+        logger.info("Successfully connected to Enterprise Analytics cluster")
+        return cluster
+    except Exception as e:
+        logger.error(
+            f"Failed to connect to Enterprise Analytics cluster: {e}", exc_info=True
+        )
         raise
 
 
