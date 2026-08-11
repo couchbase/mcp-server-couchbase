@@ -110,9 +110,11 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[ResultCase]:
         ResultCase(
             test_id="create_index_reports_deferred_and_next_step",
             prompt=(
-                f"Create an index named '{create_index_name}' on the 'email' "
-                f"field of the '{collection}' collection in scope '{scope}' of "
-                f"bucket '{bucket}', then tell me its current status."
+                f"Create a deferred index (do not build it yet) named "
+                f"'{create_index_name}' on the 'email' field of the "
+                f"'{collection}' collection in scope '{scope}' of bucket "
+                f"'{bucket}', then tell me its current status and whether I "
+                f"need to do anything before I can use it."
             ),
             expectation=(
                 "The answer must reflect that the index was created and is in "
