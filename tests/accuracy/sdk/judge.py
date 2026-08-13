@@ -26,6 +26,8 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from .openai_compat import supports_custom_temperature
+
 logger = logging.getLogger(__name__)
 
 # Each tool result is truncated to this many characters before being shown
@@ -139,7 +141,10 @@ class LLMJudge:
     ) -> None:
         self.model = model
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-        self._temperature = temperature
+        # Reasoning models (gpt-5*, o-series) reject a custom temperature.
+        self._temperature = (
+            temperature if supports_custom_temperature(model) else None
+        )
 
     async def evaluate(
         self,

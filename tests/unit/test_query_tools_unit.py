@@ -26,6 +26,7 @@ from cb_mcp.tools.query import (
     get_schema_for_collection,
     run_cluster_query,
     run_sql_plus_plus_query,
+    safe_ident,
 )
 
 
@@ -200,6 +201,48 @@ class TestGetSchemaForCollection:
 
         result = get_schema_for_collection(ctx, "b", "s", "users")
         assert result == {"collection_name": "users", "schema": []}
+
+    def test_escapes_embedded_backtick_in_collection_name(self) -> None:
+        """A collection_name containing a backtick must not be able to close
+        the identifier early and inject a second SQL++ statement.
+
+        read_only_mode=False here to isolate query construction from the
+        separate, pre-existing lark_sqlpp INFER-parsing quirk covered by
+        test_infer_with_doubled_backtick_is_unparseable_by_write_guard below.
+        """
+        ctx, _, scope = _make_ctx(read_only_mode=False)
+        scope.query.return_value = iter([])
+        malicious_name = "x`; DELETE FROM `users"
+
+        get_schema_for_collection(ctx, "b", "s", malicious_name)
+
+        query = scope.query.call_args[0][0]
+        assert query == "INFER `x``; DELETE FROM ``users`"
+
+    def test_infer_with_doubled_backtick_is_unparseable_by_write_guard(self) -> None:
+        """Known lark_sqlpp limitation: its INFER grammar rule can't parse a
+        doubled-backtick escaped identifier (unlike its SELECT/FROM rule, which
+        can). Under the default read_only_mode=True, this means a
+        collection_name containing a backtick fails loudly via the write-guard
+        parse step rather than executing — fail-safe, not a security
+        regression, since real Couchbase collection names can't contain
+        backticks anyway."""
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+        scope.query.return_value = iter([])
+        malicious_name = "x`; DELETE FROM `users"
+
+        with pytest.raises(Exception, match="terminal"):
+            get_schema_for_collection(ctx, "b", "s", malicious_name)
+
+
+class TestSafeIdent:
+    """safe_ident: backtick-quoting for SQL++ identifiers."""
+
+    def test_wraps_plain_identifier_in_backticks(self) -> None:
+        assert safe_ident("users") == "`users`"
+
+    def test_doubles_embedded_backticks(self) -> None:
+        assert safe_ident("x`; DELETE FROM `users") == "`x``; DELETE FROM ``users`"
 
 
 class TestRunClusterQuery:

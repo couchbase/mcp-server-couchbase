@@ -24,6 +24,7 @@ KV_WRITE_TOOL_NAMES = {
     "insert_document_by_id",
     "replace_document_by_id",
     "delete_document_by_id",
+    "mutate_subdocument",
 }
 
 # Scope/collection management write tool names that should be disabled when
@@ -54,7 +55,7 @@ READ_ONLY_TOOL_NAMES = {
     "get_cluster_health_and_services",
     # KV read tools (2)
     "get_document_by_id",
-    "sub_document_lookup_in",
+    "lookup_subdocument",
     # Query tools (3)
     "get_schema_for_collection",
     "run_sql_plus_plus_query",
@@ -84,7 +85,7 @@ class TestToolCategories:
 
     def test_kv_write_tools_defined(self):
         """Verify KV_WRITE_TOOLS list is properly defined."""
-        assert len(KV_WRITE_TOOLS) == 4
+        assert len(KV_WRITE_TOOLS) == 5
         tool_names = {tool.__name__ for tool in KV_WRITE_TOOLS}
         assert tool_names == KV_WRITE_TOOL_NAMES
 
@@ -229,13 +230,13 @@ class TestToolCounts:
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (21 read-only + 4 KV write + 4 collection write
+        # Expected total count (21 read-only + 5 KV write + 4 collection write
         # + 3 index write)
-        assert len(tools) == 32
+        assert len(tools) == 33
 
     def test_kv_write_tools_count(self):
-        """Verify exactly 4 KV write tools exist."""
-        assert len(KV_WRITE_TOOLS) == 4
+        """Verify exactly 5 KV write tools exist."""
+        assert len(KV_WRITE_TOOLS) == 5
 
     def test_collection_write_tools_count(self):
         """Verify exactly 4 collection management write tools exist."""

@@ -126,9 +126,8 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     default=DEFAULT_LOG_LEVEL,
     callback=validate_log_level,
     help="Logging level for MCP server and Couchbase SDK. Allowed values: "
-    "off, debug, info, warning, error. Use 'off' to disable logging "
-    "entirely. Invalid values fall back to the default with an error "
-    "log entry.",
+    "off, debug, info, warning, error. Use 'off' to disable logging entirely. Invalid values fall "
+    "back to the default with an error log entry.",
 )
 @click.option(
     "--log-sinks",

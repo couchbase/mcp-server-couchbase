@@ -109,6 +109,25 @@ class TestPerLevelFileSink:
         rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
         assert len(rotating) == 4
 
+    def test_trace_records_fold_into_debug_file(self, tmp_path):
+        # TRACE has no file of its own: at TRACE the same four files attach as at
+        # DEBUG, and TRACE records land in the DEBUG file.
+        _call(level="TRACE", sinks={"file"}, log_file=str(tmp_path / "main.log"))
+        logger = logging.getLogger(MCP_SERVER_NAME)
+        assert logger.level == logmod.LEVEL_TRACE
+        rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
+        assert len(rotating) == 4
+        snap = get_resolved_logging_config()
+        assert snap is not None
+        assert set(snap.log_files or {}) == {"DEBUG", "INFO", "WARNING", "ERROR"}
+
+        # A TRACE record must be written to the DEBUG file and no other level file.
+        logger.log(logmod.LEVEL_TRACE, "trace-marker")
+        for h in rotating:
+            h.flush()
+        assert "trace-marker" in (tmp_path / "main.debug.log").read_text()
+        assert "trace-marker" not in (tmp_path / "main.info.log").read_text()
+
     def test_levels_below_threshold_get_no_file(self, tmp_path):
         # At WARNING threshold, DEBUG/INFO files must not be created.
         _call(level="WARNING", sinks={"file"}, log_file=str(tmp_path / "main.log"))
@@ -289,6 +308,14 @@ class TestSdkLevelPropagation:
     def test_sdk_configured_with_matching_debug_level(self, mock_sdk_configure_logging):
         _call(level="DEBUG", sinks={"stderr"})
         mock_sdk_configure_logging.assert_called_with(MCP_SERVER_NAME, logging.DEBUG)
+
+    def test_sdk_configured_with_trace_level(self, mock_sdk_configure_logging):
+        # The whole point of trace: the SDK's C++ core level is set to 5 so its
+        # logs surface through the MCP server.
+        _call(level="TRACE", sinks={"stderr"})
+        mock_sdk_configure_logging.assert_called_with(
+            MCP_SERVER_NAME, logmod.LEVEL_TRACE
+        )
 
     def test_sdk_configured_with_matching_warning_level(
         self, mock_sdk_configure_logging

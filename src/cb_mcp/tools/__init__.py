@@ -37,8 +37,9 @@ from .kv import (
     delete_document_by_id,
     get_document_by_id,
     insert_document_by_id,
+    lookup_subdocument,
+    mutate_subdocument,
     replace_document_by_id,
-    sub_document_lookup_in,
     upsert_document_by_id,
 )
 
@@ -79,7 +80,7 @@ READ_ONLY_TOOLS = [
     get_cluster_health_and_services,
     # KV read tools
     get_document_by_id,
-    sub_document_lookup_in,
+    lookup_subdocument,
     # Query tools (read operations)
     get_schema_for_collection,
     run_sql_plus_plus_query,  # Write protection handled at runtime via read_only_mode
@@ -103,6 +104,7 @@ KV_WRITE_TOOLS = [
     insert_document_by_id,
     replace_document_by_id,
     delete_document_by_id,
+    mutate_subdocument,
 ]
 
 # Scope/collection management write tools - disabled when READ_ONLY_MODE is True
@@ -137,7 +139,7 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_cluster_health_and_services": ToolAnnotations(readOnlyHint=True),
     # KV read tools
     "get_document_by_id": ToolAnnotations(readOnlyHint=True),
-    "sub_document_lookup_in": ToolAnnotations(readOnlyHint=True),
+    "lookup_subdocument": ToolAnnotations(readOnlyHint=True),
     # Query tools
     "get_schema_for_collection": ToolAnnotations(readOnlyHint=True),
     "run_sql_plus_plus_query": ToolAnnotations(),
@@ -158,6 +160,7 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "insert_document_by_id": ToolAnnotations(idempotentHint=True),
     "replace_document_by_id": ToolAnnotations(idempotentHint=True),
     "delete_document_by_id": ToolAnnotations(destructiveHint=True, idempotentHint=True),
+    "mutate_subdocument": ToolAnnotations(destructiveHint=True),
     # Scope/collection management write tools
     "create_scope": ToolAnnotations(),
     "create_collection": ToolAnnotations(),
@@ -196,7 +199,8 @@ __all__ = [
     "get_scopes_in_bucket",
     "get_buckets_in_cluster",
     "get_document_by_id",
-    "sub_document_lookup_in",
+    "lookup_subdocument",
+    "mutate_subdocument",
     "upsert_document_by_id",
     "insert_document_by_id",
     "replace_document_by_id",

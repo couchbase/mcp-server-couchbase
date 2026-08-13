@@ -44,11 +44,12 @@ For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couc
 | Tool Name | Description |
 | --------- | ----------- |
 | `get_document_by_id` | Get a document by ID from a specified scope and collection |
-| `sub_document_lookup_in` | Look up parts of a document (specific fields, existence checks, or array/object counts) by path without fetching the whole document |
+| `lookup_subdocument` | Look up parts of a document (specific fields, existence checks, or array/object counts) by path without fetching the whole document |
 | `upsert_document_by_id` | Upsert a document by ID to a specified scope and collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `insert_document_by_id` | Insert a new document by ID (fails if document exists). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `replace_document_by_id` | Replace an existing document by ID (fails if document doesn't exist). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `delete_document_by_id` | Delete a document by ID from a specified scope and collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `mutate_subdocument` | Modify parts of an existing document (upsert, insert, replace, remove, array ops, counters) by path without rewriting the whole document. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 
 ### Query and indexing tools
 
@@ -214,7 +215,7 @@ The server can be configured using environment variables or command line argumen
 
 **`CB_MCP_READ_ONLY_MODE`** is the single switch controlling write operations:
 
-- When `true` (default): All write operations (KV, Query, scope/collection management, and index management) are disabled. KV write tools (upsert, insert, replace, delete), scope/collection management write tools (create_scope, create_collection, delete_scope, delete_collection), and index write tools (create_index, build_index, drop_index) are **not loaded** and will not be available to the LLM, and SQL++ queries that modify data or structure are blocked.
+- When `true` (default): All write operations (KV, Query, scope/collection management, and index management) are disabled. KV write tools (upsert, insert, replace, delete, sub-document mutate), scope/collection management write tools (create_scope, create_collection, delete_scope, delete_collection), and index write tools (create_index, build_index, drop_index) are **not loaded** and will not be available to the LLM, and SQL++ queries that modify data or structure are blocked.
 - When `false`: KV, scope/collection management, and index write tools are loaded and SQL++ data/structure modification queries are allowed.
 
 This is the recommended safe default to prevent inadvertent data modifications by LLMs.

@@ -30,6 +30,12 @@ from .constants import (
     MCP_SERVER_NAME,
 )
 
+# TRACE sits below DEBUG and matches the Couchbase SDK's own TRACE=5. The SDK
+# registers this name when it is imported, but register it here too so the level
+# resolves regardless of import order and without depending on that side effect.
+LEVEL_TRACE = 5
+logging.addLevelName(LEVEL_TRACE, "TRACE")
+
 # When the file sink is active, one rotating file is written per log level so
 # operators can isolate, e.g., just the errors. Ordered low → high.
 _PER_LEVEL_FILE_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
@@ -102,15 +108,17 @@ def get_resolved_logging_config() -> ResolvedLoggingConfig | None:
     return _resolved_config
 
 
-def _exact_level_filter(levelno: int):
-    """Return a filter that keeps only records whose level is exactly ``levelno``.
+def _level_filter(*levelnos: int):
+    """Return a filter that keeps only records whose level is one of ``levelnos``.
 
-    One file per level means each handler must accept just its own level, so a
-    WARNING never lands in the INFO file and vice versa.
+    One file per level means each handler accepts just its own level, so a
+    WARNING never lands in the INFO file and vice versa. The DEBUG file also
+    accepts TRACE, since TRACE has no file of its own.
     """
+    allowed = frozenset(levelnos)
 
     def _filter(record: logging.LogRecord) -> bool:
-        return record.levelno == levelno
+        return record.levelno in allowed
 
     return _filter
 
@@ -295,8 +303,12 @@ def _attach_per_level_file_handlers(
             # The ERROR file is the catch-all for ERROR and above, so CRITICAL
             # records land here too rather than in a separate file.
             handler.setLevel(logging.ERROR)
+        elif lvl_name == "DEBUG":
+            # The DEBUG file also captures the more-verbose TRACE records; TRACE
+            # has no file of its own and is only emitted at --log-level=trace.
+            handler.addFilter(_level_filter(LEVEL_TRACE, logging.DEBUG))
         else:
-            handler.addFilter(_exact_level_filter(lvl_no))
+            handler.addFilter(_level_filter(lvl_no))
         logger.addHandler(handler)
         attached[lvl_name] = path
         backup_counts[lvl_name] = backup_count
