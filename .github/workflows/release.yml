@@ -120,6 +120,15 @@ jobs:
           REPO: "pypi"
           JOB_NAME: "PyPI-publish"
 
+      - name: Save version for downstream workflows
+        run: echo "${{ github.event.inputs.version || steps.artifact-version.outputs.version || github.event.workflow_run.head_branch }}" > version.txt
+
+      - name: Upload version artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-version
+          path: version.txt
+
       - name: Generate changelog and create release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
