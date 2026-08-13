@@ -1,107 +1,32 @@
 name: Test PyPI Release
 
-# Description:
-# Upload wheel to TestPyPI via Jenkins.
-# Triggered automatically after the Build Wheel workflow succeeds,
-# or manually via workflow_dispatch.
-
 on:
-  workflow_run:
-    workflows: ["Build Wheel"]
-    types: [completed]
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*" # Match tags like v0.1.0, v1.2.3, v1.2.3-alpha.1
   workflow_dispatch:
-    inputs:
-      version:
-        type: string
-        required: true
-        description: version tag name
 
 jobs:
-  upload-to-testpypi:
-    name: Upload to TestPyPI via Jenkins
+  test-pypi-publish:
+    name: Build and publish Python distributions to Test PyPI
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      id-token: write # Required for trusted publishing
+
     steps:
-      - name: Download version artifact
-        if: github.event_name == 'workflow_run'
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install uv with python 3.11
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
-          name: release-version
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.workflow_run.id }}
+          version: latest
+          python-version: 3.11
 
-      - name: Read version from artifact
-        if: github.event_name == 'workflow_run'
-        id: artifact-version
-        run: echo "version=$(cat version.txt)" >> "$GITHUB_OUTPUT"
+      - name: Build package
+        run: uv build
 
-      - name: Trigger Jenkins Job
-        run: |
-          set -eo pipefail
-          # Trigger job and capture queue location
-          queued_job_url=$(curl -X POST \
-            "$JENKINS_BASE_URL/job/$JOB_NAME/buildWithParameters" \
-            -d "PRODUCT=${PRODUCT}" \
-            -d "VERSION=${VERSION}" \
-            -d "REPO=${REPO}" \
-            --user "$JENKINS_USER:$JENKINS_API_TOKEN" \
-            --fail -s -D - -o /dev/null | grep -i "location:" | cut -d' ' -f2 | tr -d '\r')
-
-          echo "Queued job URL: ${queued_job_url}"
-
-          # If queued_job_url begins with http, convert to https
-          if [[ "$queued_job_url" =~ ^http: ]]; then
-            queued_job_url="https:${queued_job_url:5}"
-          fi
-          echo "Queued job URL after conversion: ${queued_job_url}"
-
-          echo "Waiting for build to start..."
-          build_url=""
-          for (( count=0; count<60; count++ )); do
-            response=$(curl -s --user "${JENKINS_USER}:${JENKINS_API_TOKEN}" \
-              "${queued_job_url}/api/json")
-
-            build_url=$(echo "$response" | jq -r '.executable.url // empty')
-            if [ -n "${build_url}" ]; then
-              echo "Build URL: ${build_url}"
-              break
-            fi
-
-            stuck=$(echo "$response" | jq -r '.stuck // false')
-            why=$(echo "$response" | jq -r '.why // empty')
-            echo "Build not started yet (stuck=${stuck}): ${why}"
-
-            if [[ "${stuck}" == "true" ]]; then
-              echo "Jenkins reports the queued item is stuck; giving up."
-              echo "Check job status at: ${JENKINS_BASE_URL}/job/${JOB_NAME}"
-              exit 1
-            fi
-
-            sleep 10
-          done
-
-          if [ -z "${build_url}" ]; then
-            echo "Unable to determine URL for the jenkins run."
-            echo "Check job status at: ${JENKINS_BASE_URL}/job/${JOB_NAME}"
-            exit 1
-          fi
-
-          echo "Build started. Check progress at: ${build_url}"
-        env:
-          JENKINS_BASE_URL: "https://server.jenkins.couchbase.com"
-          JENKINS_USER: ${{ secrets.SERVER_JENKINS_USERNAME }}
-          JENKINS_API_TOKEN: ${{ secrets.SERVER_JENKINS_PAT }}
-          PRODUCT: "mcp-server-couchbase"
-          VERSION: ${{ github.event.inputs.version || steps.artifact-version.outputs.version || github.event.workflow_run.head_branch }}
-          REPO: "testpypi"
-          JOB_NAME: "PyPI-publish"
-
-      - name: Save version for downstream workflows
-        run: echo "${{ github.event.inputs.version || steps.artifact-version.outputs.version || github.event.workflow_run.head_branch }}" > version.txt
-
-      - name: Upload version artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - name: Publish package to TestPyPI
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
-          name: release-version
-          path: version.txt
+          repository-url: https://test.pypi.org/legacy/
