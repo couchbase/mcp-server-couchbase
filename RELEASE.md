@@ -138,19 +138,22 @@ git push origin v0.5.2
 
 ### 5. Automated Pipeline
 
-Once the tag is pushed, three GitHub Actions workflows run **in parallel/sequence**:
+Once the tag is pushed, the following GitHub Actions workflows run sequentially:
 
-1. **PyPI Release**
-   - Builds Python package
-   - Publishes to PyPI as `couchbase-mcp-server`
-   - Creates GitHub Release with changelog
+1. **Release and Build Python Wheels**
+   - Creates GitHub Release with auto-generated changelog
+   - Triggers a Jenkins job to build the distribution wheel
 
-2. **Docker Build**
-   - Builds multi-architecture images (amd64, arm64)
-   - Pushes to Docker Hub as `couchbase/mcp-server`
-   - Updates Docker Hub description
+2. **Test PyPI Upload** and **PyPI Upload** (both triggered in parallel after step 1)
+   - Test PyPI Upload publishes to TestPyPI via Jenkins for QE validation
+   - PyPI Upload publishes the wheel to production PyPI as `couchbase-mcp-server` via Jenkins
 
-3. **MCP Registry Update** (runs after Docker completes)
+3. **Docker Build** (triggered after PyPI Upload completes)
+   - Triggers a Jenkins job to publish `couchbase/mcp-server` to Docker Hub
+   - Stable releases (`vX.Y.Z`) are tagged with both the version and `latest`
+   - Pre-releases are tagged with the version only
+
+4. **MCP Registry Update** (runs after Docker completes)
    - Waits for both PyPI and Docker to complete
    - Validates version consistency
    - Publishes to MCP Registry
