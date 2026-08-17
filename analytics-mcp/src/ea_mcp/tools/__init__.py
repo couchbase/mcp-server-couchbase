@@ -1,0 +1,45 @@
+"""Enterprise Analytics (EA) prototype MCP tools.
+
+Flat tool set — no read/write split, no read-only-mode gating, unlike the
+parent ``cb_mcp.tools`` package. All 5 tools are registered unconditionally.
+"""
+
+from collections.abc import Callable
+
+from mcp.types import ToolAnnotations
+
+from .metadata import (
+    get_collections_in_scope,
+    get_databases_in_cluster,
+    get_schema_for_collection,
+    get_scopes_in_database,
+)
+from .query import run_query_sync
+
+TOOLS: list[Callable] = [
+    get_databases_in_cluster,
+    get_scopes_in_database,
+    get_collections_in_scope,
+    get_schema_for_collection,
+    run_query_sync,
+]
+
+TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
+    "get_databases_in_cluster": ToolAnnotations(readOnlyHint=True),
+    "get_scopes_in_database": ToolAnnotations(readOnlyHint=True),
+    "get_collections_in_scope": ToolAnnotations(readOnlyHint=True),
+    "get_schema_for_collection": ToolAnnotations(readOnlyHint=True),
+    # run_query_sync can carry DDL/DML per the tool spec, so it gets no
+    # readOnlyHint (matches run_sql_plus_plus_query in the parent server).
+    "run_query_sync": ToolAnnotations(),
+}
+
+__all__ = [
+    "TOOLS",
+    "TOOL_ANNOTATIONS",
+    "get_collections_in_scope",
+    "get_databases_in_cluster",
+    "get_schema_for_collection",
+    "get_scopes_in_database",
+    "run_query_sync",
+]
