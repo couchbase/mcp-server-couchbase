@@ -20,5 +20,5 @@ Couchbase is a distributed NoSQL/multi-model database. This server implements th
 - Primary language/runtime: Python 3.10+, installed via `uv`/`uvx`
 - Default safety posture: `CB_MCP_READ_ONLY_MODE=true` — write tools are not loaded unless explicitly disabled
 - Works with both Couchbase Capella (managed) and self-managed Couchbase Server
-- Supports Claude Desktop, Cursor, Windsurf, VS Code, and JetBrains AI Assistant/Junie as MCP clients
+- Supports Claude Desktop, Cursor, Windsurf, GitHub Copilot (in VS Code), and JetBrains AI Assistant/Junie as MCP clients
 - Community-maintained by Couchbase, not covered by the standard Couchbase support portal
