@@ -11,10 +11,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ea_mcp.tools.metadata import (
+    MAX_SCHEMA_SAMPLE_SIZE,
     get_collections_in_scope,
     get_databases_in_cluster,
     get_schema_for_collection,
     get_scopes_in_database,
+    safe_ident,
 )
 
 
@@ -135,3 +137,58 @@ class TestGetSchemaForCollection:
             pytest.raises(Exception, match="boom"),
         ):
             get_schema_for_collection(ctx, "Default", "Default", "eatest_coll")
+
+    def test_rejects_non_positive_sample_size(self) -> None:
+        ctx, cluster = _make_ctx_with_cluster()
+
+        with (
+            patch("ea_mcp.tools.metadata.get_cluster_connection", return_value=cluster),
+            pytest.raises(ValueError, match="sample_size must be positive"),
+        ):
+            get_schema_for_collection(
+                ctx, "Default", "Default", "eatest_coll", sample_size=0
+            )
+
+        cluster.execute_query.assert_not_called()
+
+    def test_clamps_sample_size_to_max(self) -> None:
+        ctx, cluster = _make_ctx_with_cluster()
+        cluster.execute_query.return_value.get_all_rows.return_value = []
+
+        with patch(
+            "ea_mcp.tools.metadata.get_cluster_connection", return_value=cluster
+        ):
+            get_schema_for_collection(
+                ctx,
+                "Default",
+                "Default",
+                "eatest_coll",
+                sample_size=MAX_SCHEMA_SAMPLE_SIZE * 10,
+            )
+
+        query_options = cluster.execute_query.call_args[0][1]
+        assert (
+            query_options["named_parameters"]["sample_size"] == MAX_SCHEMA_SAMPLE_SIZE
+        )
+
+    def test_escapes_identifiers_containing_backticks(self) -> None:
+        ctx, cluster = _make_ctx_with_cluster()
+        cluster.execute_query.return_value.get_all_rows.return_value = []
+
+        with patch(
+            "ea_mcp.tools.metadata.get_cluster_connection", return_value=cluster
+        ):
+            get_schema_for_collection(ctx, "db`.`evil", "s", "c")
+
+        query = cluster.execute_query.call_args[0][0]
+        # Each embedded backtick must be doubled (escaped), not left able to
+        # close the identifier early.
+        assert "`db``.``evil`.`s`.`c`" in query
+
+
+class TestSafeIdent:
+    def test_passes_through_plain_identifier(self) -> None:
+        assert safe_ident("my_scope") == "`my_scope`"
+
+    def test_doubles_embedded_backticks(self) -> None:
+        assert safe_ident("weird`name") == "`weird``name`"

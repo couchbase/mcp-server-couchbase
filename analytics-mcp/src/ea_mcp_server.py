@@ -2,7 +2,8 @@
 
 Deliberately minimal: no OAuth, no scope enforcement, no read-only-mode
 toggle, no telemetry/confirmation wrapping. Just enough plumbing to register
-the 7 EA tools and let unit/integration tests run against them.
+the EA tools (see ea_mcp.tools.TOOLS) and let unit/integration tests run
+against them.
 """
 
 import logging
@@ -51,6 +52,7 @@ def main(connection_string: str, username: str, password: str) -> None:
             yield AppContext(cluster=cluster)
         finally:
             logger.info("Closing Enterprise Analytics MCP server")
+            cluster.shutdown()
 
     mcp = FastMCP(MCP_SERVER_NAME, lifespan=app_lifespan)
 

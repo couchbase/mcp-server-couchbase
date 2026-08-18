@@ -16,6 +16,19 @@ from ..connection import get_cluster_connection
 
 logger = logging.getLogger("ea-mcp-server.tools.metadata")
 
+# SQL++ has no bind-parameter support for identifiers (only for values), so
+# database/scope/collection names must be safely quoted before being
+# interpolated into a keyspace string. Backtick-quoting alone isn't enough —
+# a name containing a backtick could otherwise break out of the identifier
+# and inject arbitrary SQL++ (matches the parent mcp-server-couchbase's
+# safe_ident() convention in src/cb_mcp/tools/query.py).
+MAX_SCHEMA_SAMPLE_SIZE = 10_000
+
+
+def safe_ident(name: str) -> str:
+    """Backtick-quote a SQL++ identifier, doubling embedded backticks."""
+    return "`" + name.replace("`", "``") + "`"
+
 
 def get_databases_in_cluster(ctx: Context) -> list[dict[str, Any]]:
     """List all databases in the Enterprise Analytics cluster.
@@ -115,11 +128,19 @@ def get_schema_for_collection(
     """Infer the JSON schema of a collection by sampling documents.
 
     Samples up to sample_size documents from the collection and reports each
-    field's inferred type and how many sampled documents had it.
+    field's inferred type and how many sampled documents had it. sample_size
+    must be positive and is capped at MAX_SCHEMA_SAMPLE_SIZE.
 
     Returns a list of rows, each with field, data_type, and occurrences.
     """
-    keyspace = f"`{database_name}`.`{scope_name}`.`{collection_name}`"
+    if sample_size <= 0:
+        raise ValueError(f"sample_size must be positive, got {sample_size}")
+    sample_size = min(sample_size, MAX_SCHEMA_SAMPLE_SIZE)
+
+    keyspace = (
+        f"{safe_ident(database_name)}.{safe_ident(scope_name)}."
+        f"{safe_ident(collection_name)}"
+    )
     query = (
         f"SELECT p.name AS field, t AS data_type, COUNT(*) AS occurrences "
         f"FROM (SELECT VALUE d FROM {keyspace} AS d LIMIT $sample_size) AS d "
