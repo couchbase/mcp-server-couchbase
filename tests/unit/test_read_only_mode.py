@@ -53,7 +53,7 @@ READ_ONLY_TOOL_NAMES = {
     "get_collections_in_scope",
     "get_scopes_in_bucket",
     "get_cluster_health_and_services",
-    "get_cluster_diagnostics_stats",
+    "get_cluster_diagnostics_report",
     # KV read tools (2)
     "get_document_by_id",
     "lookup_subdocument",

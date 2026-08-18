@@ -8,7 +8,7 @@ Tests for:
 - get_scopes_and_collections_in_bucket
 - get_collections_in_scope
 - get_cluster_health_and_services
-- get_cluster_diagnostics_stats
+- get_cluster_diagnostics_report
 - test_cluster_connection
 """
 
@@ -144,11 +144,11 @@ async def test_get_cluster_health_and_services_with_bucket() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_cluster_diagnostics_stats() -> None:
-    """Verify get_cluster_diagnostics_stats returns the SDK's diagnostics report."""
+async def test_get_cluster_diagnostics_report() -> None:
+    """Verify get_cluster_diagnostics_report returns the SDK's diagnostics report."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "get_cluster_diagnostics_stats", arguments={}
+            "get_cluster_diagnostics_report", arguments={}
         )
         payload = extract_payload(response)
 

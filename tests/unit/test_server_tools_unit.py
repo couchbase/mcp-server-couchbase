@@ -8,7 +8,7 @@ reached against a live cluster:
 - get_scopes_and_collections_in_bucket re-raises SDK errors.
 - get_scopes_in_bucket re-raises SDK errors.
 - get_cluster_health_and_services returns an error envelope on ping failure.
-- get_cluster_diagnostics_stats returns an error envelope on diagnostics failure.
+- get_cluster_diagnostics_report returns an error envelope on diagnostics failure.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from cb_mcp.tools.server import (
-    get_cluster_diagnostics_stats,
+    get_cluster_diagnostics_report,
     get_cluster_health_and_services,
     get_scopes_and_collections_in_bucket,
     get_scopes_in_bucket,
@@ -290,8 +290,8 @@ class TestGetClusterHealthAndServices:
         assert result["data"] == {"services": {"kv": []}}
 
 
-class TestGetClusterDiagnosticsStats:
-    """get_cluster_diagnostics_stats: error envelope and happy path."""
+class TestGetClusterDiagnosticsReport:
+    """get_cluster_diagnostics_report: error envelope and happy path."""
 
     def test_returns_error_envelope_on_failure(self) -> None:
         """A diagnostics failure must be reported as a structured error response."""
@@ -303,7 +303,7 @@ class TestGetClusterDiagnosticsStats:
             "cb_mcp.tools.server.get_cluster_connection",
             return_value=cluster,
         ):
-            result = get_cluster_diagnostics_stats(ctx)
+            result = get_cluster_diagnostics_report(ctx)
 
         assert result["status"] == "error"
         assert "diagnostics failed" in result["error"]
@@ -323,7 +323,7 @@ class TestGetClusterDiagnosticsStats:
             "cb_mcp.tools.server.get_cluster_connection",
             return_value=cluster,
         ):
-            result = get_cluster_diagnostics_stats(ctx)
+            result = get_cluster_diagnostics_report(ctx)
 
         cluster.diagnostics.assert_called_once()
         assert result["status"] == "success"

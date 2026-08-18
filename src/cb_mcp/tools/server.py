@@ -231,7 +231,7 @@ def get_cluster_health_and_services(
         }
 
 
-def get_cluster_diagnostics_stats(ctx: Context) -> dict[str, Any]:
+def get_cluster_diagnostics_report(ctx: Context) -> dict[str, Any]:
     """Check whether the client's connections were already broken, and for how long.
 
     Unlike get_cluster_health_and_services (which actively pings each service right now),
