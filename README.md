@@ -24,6 +24,7 @@ For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couc
 | `get_server_configuration_status` | Get the server status and configuration without connecting to the cluster — reports read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration |
 | `test_cluster_connection` | Check the cluster credentials by connecting to the cluster |
 | `get_cluster_health_and_services` | Get cluster health status and list of all running services |
+| `get_cluster_diagnostics_report` | Get the SDK's cached connection diagnostics — whether connections were already broken and for how long, without any active network probing |
 
 ### Data model & schema discovery tools
 

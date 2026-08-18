@@ -8,6 +8,7 @@ Covers:
   - get_collections_in_scope
   - get_scopes_and_collections_in_bucket
   - get_cluster_health_and_services
+  - get_cluster_diagnostics_report
 """
 
 from __future__ import annotations
@@ -178,6 +179,23 @@ def _build_cases(bucket: str, scope: str) -> list[AccuracyCase]:
 
     cases.append(
         AccuracyCase(
+            test_id="get_cluster_diagnostics_report",
+            prompt=(
+                "Without actively pinging anything, check the SDK's own connection "
+                "diagnostics: has any connection already been broken, and if so for "
+                "how long has it been in that state?"
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_cluster_diagnostics_report",
+                    parameters={},
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
             test_id="conversational_what_buckets_do_i_have",
             prompt="What buckets do I actually have on this Couchbase cluster?",
             expected_tools=[
@@ -223,6 +241,7 @@ SERVER_CASE_IDS = [
     "get_scopes_and_collections_in_bucket",
     "get_cluster_health_and_services_no_bucket",
     "get_cluster_health_and_services_with_bucket",
+    "get_cluster_diagnostics_report",
     "conversational_what_buckets_do_i_have",
     "conversational_is_everything_healthy",
 ]

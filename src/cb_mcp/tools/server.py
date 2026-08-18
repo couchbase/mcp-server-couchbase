@@ -229,3 +229,45 @@ def get_cluster_health_and_services(
             "error": str(e),
             "message": "Failed to get cluster health and services information",
         }
+
+
+def get_cluster_diagnostics_report(ctx: Context) -> dict[str, Any]:
+    """Check whether the client's connections were already broken, and for how long.
+
+    Unlike get_cluster_health_and_services (which actively pings each service right now),
+    this reports the SDK's own cached connection state without performing any network I/O.
+    It's cheap enough to call frequently, but it's only as fresh as the last time the SDK
+    actually talked to each node — it won't proactively detect a service that just went down
+    if nothing has touched it since. Use get_cluster_health_and_services instead when you need
+    a live, right-now reachability check; there's also no way to filter this report to specific
+    services the way that tool's ping can, since no I/O means nothing to filter.
+
+    For each known endpoint, reports which service it belongs to, its remote/local addresses,
+    connection state, and last_activity — how long it's been since that connection last saw
+    traffic. Also reports an overall online/degraded/offline cluster state.
+
+    This call makes no request to the server at all, so it needs no specific RBAC role beyond
+    whatever the initial cluster connection already required — unlike an active ping, it isn't
+    gated on KV/Query/Search or Cluster Admin privileges.
+
+    Returns:
+    - Diagnostics report with per-endpoint connection state and overall cluster state
+    """
+    try:
+        cluster = get_cluster_connection(ctx)
+        logger.debug("Retrieving cluster diagnostics")
+        diagnostics_result = cluster.diagnostics()
+        result = diagnostics_result.as_json()
+
+        logger.info("Retrieved cluster diagnostics information")
+        return {
+            "status": "success",
+            "data": json.loads(result),
+        }
+    except Exception as e:
+        logger.error(f"Error getting cluster diagnostics: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to get cluster diagnostics information",
+        }

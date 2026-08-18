@@ -8,6 +8,7 @@ Tests for:
 - get_scopes_and_collections_in_bucket
 - get_collections_in_scope
 - get_cluster_health_and_services
+- get_cluster_diagnostics_report
 - test_cluster_connection
 """
 
@@ -140,6 +141,20 @@ async def test_get_cluster_health_and_services_with_bucket() -> None:
         assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
         assert payload.get("status") == "success", f"Expected success status: {payload}"
         assert "data" in payload, "Expected 'data' key with health info"
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_diagnostics_report() -> None:
+    """Verify get_cluster_diagnostics_report returns the SDK's diagnostics report."""
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "get_cluster_diagnostics_report", arguments={}
+        )
+        payload = extract_payload(response)
+
+        assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
+        assert payload.get("status") == "success", f"Expected success status: {payload}"
+        assert "data" in payload, "Expected 'data' key with diagnostics info"
 
 
 @pytest.mark.asyncio

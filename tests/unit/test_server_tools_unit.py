@@ -8,6 +8,7 @@ reached against a live cluster:
 - get_scopes_and_collections_in_bucket re-raises SDK errors.
 - get_scopes_in_bucket re-raises SDK errors.
 - get_cluster_health_and_services returns an error envelope on ping failure.
+- get_cluster_diagnostics_report returns an error envelope on diagnostics failure.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from cb_mcp.tools.server import (
+    get_cluster_diagnostics_report,
     get_cluster_health_and_services,
     get_scopes_and_collections_in_bucket,
     get_scopes_in_bucket,
@@ -286,3 +288,43 @@ class TestGetClusterHealthAndServices:
         cluster.ping.assert_not_called()
         assert result["status"] == "success"
         assert result["data"] == {"services": {"kv": []}}
+
+
+class TestGetClusterDiagnosticsReport:
+    """get_cluster_diagnostics_report: error envelope and happy path."""
+
+    def test_returns_error_envelope_on_failure(self) -> None:
+        """A diagnostics failure must be reported as a structured error response."""
+        cluster = MagicMock()
+        cluster.diagnostics.side_effect = Exception("diagnostics failed")
+        ctx = _make_ctx(cluster=cluster)
+
+        with patch(
+            "cb_mcp.tools.server.get_cluster_connection",
+            return_value=cluster,
+        ):
+            result = get_cluster_diagnostics_report(ctx)
+
+        assert result["status"] == "error"
+        assert "diagnostics failed" in result["error"]
+        assert "Failed to get cluster diagnostics" in result["message"]
+
+    def test_returns_success_envelope_with_diagnostics_data(self) -> None:
+        """Happy path returns the SDK's diagnostics report under 'data'."""
+        cluster = MagicMock()
+        diagnostics_result = MagicMock()
+        diagnostics_result.as_json.return_value = (
+            '{"state": "online", "services": {"kv": []}}'
+        )
+        cluster.diagnostics.return_value = diagnostics_result
+        ctx = _make_ctx(cluster=cluster)
+
+        with patch(
+            "cb_mcp.tools.server.get_cluster_connection",
+            return_value=cluster,
+        ):
+            result = get_cluster_diagnostics_report(ctx)
+
+        cluster.diagnostics.assert_called_once()
+        assert result["status"] == "success"
+        assert result["data"] == {"state": "online", "services": {"kv": []}}
