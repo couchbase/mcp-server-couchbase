@@ -12,6 +12,9 @@ from .cli import (
     validate_scope_label,
 )
 
+# Tool-execution concurrency
+from .concurrency import apply_thread_pool_limit
+
 # Configuration utilities
 from .config import (
     get_settings,
@@ -41,6 +44,7 @@ from .constants import (
     DEFAULT_PORT,
     DEFAULT_READ_ONLY_MODE,
     DEFAULT_TRANSPORT,
+    DEFAULT_WORKERS,
     MCP_SERVER_NAME,
     NETWORK_TRANSPORTS,
     NETWORK_TRANSPORTS_SDK_MAPPING,
@@ -77,6 +81,17 @@ from .logging import (
     parse_log_sinks,
 )
 
+# Multi-worker (multi-process) support
+from .multiprocess import (
+    WORKER_APP_IMPORT_STRING,
+    WorkerConfigError,
+    export_worker_config,
+    load_worker_config,
+    resolve_worker_settings,
+    uvicorn_log_level,
+    worker_log_file,
+)
+
 # OAuth scope enforcement
 from .scope_enforcement import required_scopes_for_tool, wrap_with_scope_check
 
@@ -90,6 +105,8 @@ __all__ = [
     # Config
     "get_settings",
     "parse_tool_names",
+    # Tool-execution concurrency
+    "apply_thread_pool_limit",
     # Connection
     "connect_to_couchbase_cluster",
     "connect_to_bucket",
@@ -114,9 +131,18 @@ __all__ = [
     "ALLOWED_LOG_SINKS",
     "DEFAULT_HOST",
     "DEFAULT_PORT",
+    "DEFAULT_WORKERS",
     "ALLOWED_TRANSPORTS",
     "NETWORK_TRANSPORTS",
     "NETWORK_TRANSPORTS_SDK_MAPPING",
+    # Multi-worker support
+    "WORKER_APP_IMPORT_STRING",
+    "WorkerConfigError",
+    "export_worker_config",
+    "load_worker_config",
+    "resolve_worker_settings",
+    "uvicorn_log_level",
+    "worker_log_file",
     # Logging
     "ResolvedLoggingConfig",
     "configure_logging",

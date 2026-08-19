@@ -43,6 +43,13 @@ _SAFE_SETTINGS_KEYS = (
     "transport",
     "host",
     "port",
+    # Serving topology: how many processes share this deployment's port, how
+    # many tool calls each runs at once, and whether HTTP sessions are
+    # stateless. All three change how throughput, latency, and session-scoped
+    # behaviour should be read in a support ticket.
+    "workers",
+    "thread_pool_size",
+    "stateless_http",
     "disabled_tools",
     "confirmation_required_tools",
     "connection_string",

@@ -37,6 +37,13 @@ def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
     configuration = {
         **provider_config,
         "read_only_mode": settings.get("read_only_mode", True),
+        # Serving topology. Defaults describe a single stateful process, which
+        # is what a host that doesn't populate these keys is running.
+        "workers": settings.get("workers", 1),
+        # The concurrency ceiling that actually took effect, recorded at
+        # startup; None only if the host never applied one.
+        "thread_pool_size": settings.get("thread_pool_size"),
+        "stateless_http": settings.get("stateless_http", False),
         "disabled_tools": sorted(settings.get("disabled_tools", set())),
         "confirmation_required_tools": sorted(
             settings.get("confirmation_required_tools", set())

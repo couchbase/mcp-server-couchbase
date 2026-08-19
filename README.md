@@ -188,6 +188,9 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_TRANSPORT` | `--transport` | Transport mode: `stdio`, `http`, `sse` | `stdio` |
 | `CB_MCP_HOST` | `--host` | Host for HTTP/SSE transport modes | `127.0.0.1` |
 | `CB_MCP_PORT` | `--port` | Port for HTTP/SSE transport modes | `8000` |
+| `CB_MCP_WORKERS` | `--workers` | Number of server worker processes. A single process is limited to roughly one CPU core, so raise this to use more cores (see [Scaling with Multiple Worker Processes](#scaling-with-multiple-worker-processes)). Values above 1 require `--transport=http` | `1` |
+| `CB_MCP_THREAD_POOL_SIZE` | `--thread-pool-size` | Maximum tool calls executed concurrently per worker process (see [Tuning Tool-Call Concurrency](#tuning-tool-call-concurrency)). Raises the concurrency ceiling, not CPU-bound throughput | `40` |
+| `CB_MCP_STATELESS_HTTP` | `--stateless-http` | Handle each HTTP request with a fresh MCP transport instead of keeping per-session state in the server. Only honored with `--transport=http` | `true` when `--workers` > 1, otherwise `false` |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Elicitation/Confirmation Required Tools](#elicitationconfirmation-for-tool-calls)) | None |
 | `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
@@ -525,6 +528,57 @@ uvx couchbase-mcp-server \
 ```
 
 The server will be available on <http://localhost:8000/mcp>. This can be used in MCP clients supporting streamable http transport mode such as Cursor.
+
+### Scaling with Multiple Worker Processes
+
+A single server process is limited to roughly **one CPU core**, regardless of how many cores the host has. Python executes bytecode under the Global Interpreter Lock, and the server runs its tools on a thread pool inside one process, so those threads contend for the same lock. Giving the process more cores does not raise its throughput ceiling; running more processes does.
+
+Use `--workers` to serve the streamable HTTP transport from several processes:
+
+```bash
+uvx couchbase-mcp-server \
+  --connection-string='<couchbase_connection_string>' \
+  --username='<database_username>' \
+  --password='<database_password>' \
+  --transport=http \
+  --workers=4
+```
+
+The workers share a single listening socket, so the endpoint is unchanged (`http://localhost:8000/mcp`) and no reverse proxy or load balancer is needed — the kernel distributes connections across the workers. A supervising parent process starts the workers, restarts any that exit unexpectedly, and shuts the group down on `SIGTERM`/`SIGINT`.
+
+Notes:
+
+- **Start with one worker per available CPU core**, then measure. Throughput is also bounded by your Couchbase cluster and by the size of the results your tools return, so more workers than cores rarely helps.
+- **Each worker opens its own connection to Couchbase**, lazily on its first tool call. Size your cluster's connection limits accordingly.
+- **Stateless HTTP is required and enabled automatically.** Because a client's requests may be handled by different workers, per-session state cannot be held in one worker's memory; each request is served with a fresh MCP transport. Passing `--stateless-http=false` together with `--workers` above 1 is rejected at startup.
+- **Only the streamable HTTP transport supports multiple workers.** `stdio` serves exactly one client over one pipe pair, and `sse` pins a client to the process holding its event stream; `--workers` above 1 with either is rejected at startup.
+- **Log files are written per worker** when the `file` sink is enabled: each worker inserts its process ID into the configured path (`mcp_server.log` becomes `mcp_server.<pid>.info.log` and so on), because separate processes cannot safely rotate the same file. The supervisor writes the un-suffixed set. A restarted worker starts a new set of files under its new process ID, so prune old files if you run with a long-lived deployment.
+- `get_server_configuration_status` reports the active `workers` and `stateless_http` values, so you can confirm what a running deployment is doing.
+
+### Tuning Tool-Call Concurrency
+
+Tool calls run on a thread pool, and `--thread-pool-size` caps how many execute **concurrently per worker process** (default `40`). Requests past the cap are still accepted; they wait for a slot.
+
+```bash
+uvx couchbase-mcp-server \
+  --connection-string='<couchbase_connection_string>' \
+  --username='<database_username>' \
+  --password='<database_password>' \
+  --transport=http \
+  --workers=4 \
+  --thread-pool-size=80    # 4 x 80 = 320 concurrent tool calls
+```
+
+**This raises the concurrency ceiling, not CPU-bound throughput.** A single process executes Python bytecode on about one core no matter how many threads it has, so for CPU-bound calls a larger pool only moves the queue from the pool to the interpreter lock. Benchmarking this server's read-heavy mix against a local cluster at 40 versus 160 threads moved throughput by ~3% while making the latency tail worse. Use `--workers` to add CPU capacity; use `--thread-pool-size` when calls are *waiting* rather than computing.
+
+Raise it when:
+
+- **Calls spend their time blocked on the cluster** — a high-latency or cross-region link, where a thread holds a slot but burns no CPU.
+- **Slow tools are delaying fast ones.** A long-running query occupying slots makes quick KV reads queue behind it; more slots decouple them.
+
+How to tell which situation you are in: watch per-worker CPU under load. **CPU pinned near 100% means the interpreter lock is the limit** and more threads will not help — add workers instead. **CPU well below 100% while p95 latency climbs means the pool is the limit** and raising it should help.
+
+Costs of raising it: more concurrent operations against your Couchbase cluster, more memory for thread stacks, and more context switching (which is what degraded the tail in the benchmark above). `get_server_configuration_status` reports the limit that actually took effect, so you can confirm what a running deployment is using.
 
 ### MCP Client Configuration
 

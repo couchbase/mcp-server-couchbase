@@ -3,11 +3,15 @@ Couchbase MCP Server
 """
 
 import logging
-from collections.abc import AsyncIterator
+import os
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
+from typing import Any
 
 import click
+import uvicorn
 from fastmcp import FastMCP
+from fastmcp.server.http import StarletteWithLifespan
 from fastmcp.tools import FunctionTool
 
 # Reusable tools and utilities from the cb_mcp package
@@ -26,26 +30,297 @@ from cb_mcp.utils import (
     DEFAULT_PORT,
     DEFAULT_READ_ONLY_MODE,
     DEFAULT_TRANSPORT,
+    DEFAULT_WORKERS,
     MCP_SERVER_NAME,
     NETWORK_TRANSPORTS,
     NETWORK_TRANSPORTS_SDK_MAPPING,
     SCOPE_READ,
     SCOPE_WRITE,
+    WORKER_APP_IMPORT_STRING,
     AppContext,
+    WorkerConfigError,
+    apply_thread_pool_limit,
     configure_logging,
+    export_worker_config,
     get_resolved_logging_config,
+    load_worker_config,
     log_environment_info,
+    resolve_worker_settings,
     send_install_ping,
+    uvicorn_log_level,
     validate_log_level,
     validate_log_path,
     validate_log_sinks,
     validate_scope_label,
+    worker_log_file,
 )
 
 # Standalone-host provider implementation
 from providers.static import StaticClusterProvider
 
 logger = logging.getLogger(MCP_SERVER_NAME)
+
+
+def configure_logging_from_params(
+    params: Mapping[str, Any], log_file: str | None = None
+) -> None:
+    """Wire up logging from the resolved Click params.
+
+    Split out of ``main`` so a ``--workers`` child process, which is spawned as
+    a fresh interpreter and never parses the CLI, can replay the parent's
+    logging configuration from the serialized params rather than resolving it a
+    second, subtly different way.
+
+    ``log_file`` overrides ``params["log_file"]``; workers pass a PID-suffixed
+    path so they never share a rotating file handle.
+    """
+    # log_level / log_sinks are the parse results from their Click callbacks:
+    # each carries the resolved value plus any rejected input, which is passed
+    # to configure_logging so the fallback can be reported once handlers exist.
+    # Per-level overrides: keep only the levels the operator set explicitly; the
+    # rest inherit the global. Rotation-size overrides are in MB, matching the
+    # canonical --log-rotation-max-size-mb global.
+    rotation_size_overrides = {
+        level: value
+        for level, value in (
+            ("ERROR", params["log_error_rotation_max_size_mb"]),
+            ("WARNING", params["log_warning_rotation_max_size_mb"]),
+            ("INFO", params["log_info_rotation_max_size_mb"]),
+            ("DEBUG", params["log_debug_rotation_max_size_mb"]),
+        )
+        if value is not None
+    }
+    backup_count_overrides = {
+        level: value
+        for level, value in (
+            ("ERROR", params["log_error_retention_backup_count"]),
+            ("WARNING", params["log_warning_retention_backup_count"]),
+            ("INFO", params["log_info_retention_backup_count"]),
+            ("DEBUG", params["log_debug_retention_backup_count"]),
+        )
+        if value is not None
+    }
+    log_level = params["log_level"]
+    log_sinks = params["log_sinks"]
+    configure_logging(
+        level=log_level.level,
+        sinks=log_sinks.sinks,
+        log_file=params["log_file"] if log_file is None else log_file,
+        log_rotation_max_size_mb=params["log_rotation_max_size_mb"],
+        log_max_bytes=params["log_max_bytes"],
+        log_backup_count=params["log_retention_backup_count"],
+        log_rotation_size_overrides=rotation_size_overrides,
+        log_backup_count_overrides=backup_count_overrides,
+        invalid_level=log_level.invalid_token,
+        invalid_sinks=log_sinks.invalid_tokens,
+    )
+
+
+def resolve_oauth_from_params(params: Mapping[str, Any]):
+    """Resolve the OAuth options out of a params mapping.
+
+    Wraps :func:`cb_mcp.auth.resolve_oauth` so the server build and the
+    supervisor's fail-fast validation cannot drift apart on which params feed
+    it. Raises ``OAuthConfigError`` on an incomplete configuration.
+    """
+    return resolve_oauth(
+        transport=params["transport"],
+        jwks_uri=params["oauth_jwks_uri"],
+        issuer=params["oauth_issuer"],
+        audience=params["oauth_audience"],
+        algorithm=params["oauth_algorithm"],
+        base_url=params["oauth_mcp_base_url"],
+        scope_read=params["oauth_scope_read"],
+        scope_write=params["oauth_scope_write"],
+    )
+
+
+def build_mcp_server(params: Mapping[str, Any]) -> FastMCP:
+    """Build the FastMCP instance described by the resolved Click params.
+
+    Shared by the single-process path and by every ``--workers`` child, so both
+    register the same tools, enforce the same modes, and expose the same
+    configuration to ``get_server_configuration_status``.
+
+    Reads two keys that ``main`` resolves before calling: ``stateless_http``
+    (already a bool, never ``None``) and the optional ``send_startup_ping``,
+    which the ``--workers`` supervisor sets to False so one startup telemetry
+    event is emitted for the deployment instead of one per worker.
+
+    Raises ``OAuthConfigError`` when the OAuth options are incomplete; ``main``
+    converts that into a usage error.
+    """
+    transport = params["transport"]
+    read_only_mode = params["read_only_mode"]
+
+    auth = resolve_oauth_from_params(params)
+
+    (
+        final_tools,
+        configured_confirmation_tool_names,
+        disabled_tool_names,
+    ) = prepare_tools_for_registration(
+        read_only_mode=read_only_mode,
+        disabled_tools=params["disabled_tools"],
+        confirmation_required_tools=params["confirmation_required_tools"],
+        enforce_scopes=auth is not None,
+    )
+
+    # CLI-resolved configuration lives on AppContext, not in a module global.
+    # This lets FastMCP's threadpool workers read it through ``ctx``.
+    settings = {
+        "connection_string": params["connection_string"],
+        "username": params["username"],
+        "password": params["password"],
+        "ca_cert_path": params["ca_cert_path"],
+        "client_cert_path": params["client_cert_path"],
+        "client_key_path": params["client_key_path"],
+        "read_only_mode": read_only_mode,
+        "transport": transport,
+        "host": params["host"],
+        "port": params["port"],
+        # Serving topology. ``workers`` is the size of the process group this
+        # server belongs to, so an operator reading the diagnostic can tell a
+        # single-process deployment from one worker of several.
+        "workers": params["workers"],
+        "stateless_http": params["stateless_http"],
+        # Replaced during lifespan startup with the limit that actually took
+        # effect, so this reports the real ceiling rather than the configured
+        # one (which is None whenever the operator left it to the runtime).
+        "thread_pool_size": params["thread_pool_size"],
+        # OAuth resource-server config (non-secret IdP coordinates), captured
+        # for the env-info diagnostic and get_server_configuration_status.
+        # ``oauth_enabled`` is whether OAuth is active: resolve_oauth returns
+        # None for non-http transports even when JWT settings are present.
+        "oauth_enabled": auth is not None,
+        "oauth_jwks_uri": params["oauth_jwks_uri"],
+        "oauth_issuer": params["oauth_issuer"],
+        "oauth_audience": params["oauth_audience"],
+        "oauth_algorithm": params["oauth_algorithm"],
+        "oauth_mcp_base_url": params["oauth_mcp_base_url"],
+        "oauth_scope_read_label": params["oauth_scope_read"],
+        "oauth_scope_write_label": params["oauth_scope_write"],
+        "disabled_tools": disabled_tool_names,
+        "confirmation_required_tools": configured_confirmation_tool_names,
+    }
+    send_startup_ping = params.get("send_startup_ping", True)
+
+    @asynccontextmanager
+    async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
+        """Build the lifespan AppContext with settings captured from the CLI."""
+        logger.info(
+            f"MCP server initialized in lazy mode for tool discovery. "
+            f"Modes: (read_only_mode={read_only_mode})"
+        )
+        # Tool calls run on the AnyIO thread pool, so its size caps how many
+        # execute concurrently in this process. Applied here because the limiter
+        # is run-scoped: it exists only inside the event loop, and each worker
+        # process has its own. Record what took effect before the diagnostic is
+        # written so support sees the real ceiling.
+        settings["thread_pool_size"] = apply_thread_pool_limit(
+            params["thread_pool_size"]
+        )
+        logger.info(
+            f"Tool-call concurrency limit: {settings['thread_pool_size']} per process"
+        )
+        # Diagnostic snapshot for customer support. Filtered at INFO; visible
+        # whenever the user runs with --log-level DEBUG.
+        log_environment_info(transport, settings)
+        if send_startup_ping:
+            send_install_ping(transport)
+        # Hand the resolved logging snapshot to AppContext so shared tools
+        # (e.g. get_server_configuration_status) can surface it without
+        # coupling to our specific logging module.
+        resolved_logging = get_resolved_logging_config()
+        app_context = AppContext(
+            cluster_provider=StaticClusterProvider(settings=settings),
+            settings=settings,
+            read_only_mode=read_only_mode,
+            logging_config=resolved_logging.as_dict() if resolved_logging else None,
+        )
+        try:
+            yield app_context
+        except Exception as e:
+            logger.error(f"Error in app lifespan: {e}", exc_info=True)
+            raise
+        finally:
+            if app_context.cluster_provider:
+                app_context.cluster_provider.close()
+            logger.info("Closing MCP server")
+
+    mcp = FastMCP(MCP_SERVER_NAME, lifespan=app_lifespan, auth=auth)
+
+    logger.info(
+        f"Registering {len(final_tools)} tool(s) with modes (read_only_mode={read_only_mode})"
+    )
+
+    # Register tools; FastMCP 3.x add_tool has no annotations kwarg, so wrap first.
+    for tool in final_tools:
+        annotations = TOOL_ANNOTATIONS.get(tool.__name__)
+        tool_obj = FunctionTool.from_function(tool, annotations=annotations)
+        mcp.add_tool(tool_obj)
+
+    logger.info(f"Registered {len(final_tools)} tool(s)")
+
+    return mcp
+
+
+def create_app() -> StarletteWithLifespan:
+    """ASGI application factory, called once inside each worker process.
+
+    Referenced by import string (``mcp_server:create_app``) because Uvicorn
+    spawns workers as fresh interpreters and so cannot inherit an already-built
+    app object. The worker recovers the parent's resolved configuration from the
+    environment, re-establishes logging under its own PID, and builds its own
+    FastMCP instance — including, on first tool call, its own Couchbase cluster
+    connection.
+
+    Not a supported entrypoint for an external ASGI server: without the
+    configuration the ``--workers`` supervisor publishes, this raises.
+    """
+    params = load_worker_config()
+    configure_logging_from_params(
+        params, log_file=worker_log_file(params["log_file"], os.getpid())
+    )
+    logger.info(
+        f"Worker process {os.getpid()} starting "
+        f"(of {params['workers']} worker(s), stateless_http=True)"
+    )
+    mcp = build_mcp_server(params)
+    # Session state cannot be shared between processes, so multi-worker mode is
+    # always stateless; resolve_worker_settings has already rejected any
+    # combination that says otherwise.
+    return mcp.http_app(stateless_http=True)
+
+
+def run_workers(params: Mapping[str, Any]) -> None:
+    """Serve the streamable HTTP transport from a group of worker processes.
+
+    Publishes the resolved configuration for the workers to pick up, then hands
+    process supervision to Uvicorn: it binds the listening socket once, spawns
+    ``workers`` children that accept from it, restarts any that die, and
+    forwards shutdown signals. The kernel load-balances connections across the
+    children, so this needs no reverse proxy in front.
+    """
+    workers = params["workers"]
+    logger.info(
+        f"Starting {workers} worker process(es) on "
+        f"{params['host']}:{params['port']} (stateless HTTP)"
+    )
+    export_worker_config(params)
+    uvicorn.run(
+        WORKER_APP_IMPORT_STRING,
+        factory=True,
+        host=params["host"],
+        port=params["port"],
+        workers=workers,
+        # Our AppContext (and therefore the Couchbase connection) is created by
+        # the app's lifespan, so it must run in every worker.
+        lifespan="on",
+        # Matches the value FastMCP uses for its own single-process server.
+        timeout_graceful_shutdown=2,
+        log_level=uvicorn_log_level(params["log_level"].level),
+    )
 
 
 @click.command(context_settings={"show_default": True})
@@ -104,6 +379,42 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     envvar="CB_MCP_PORT",
     default=DEFAULT_PORT,
     help="Port to run the server on.",
+)
+@click.option(
+    "--workers",
+    envvar="CB_MCP_WORKERS",
+    type=click.IntRange(min=1),
+    default=DEFAULT_WORKERS,
+    help="Number of server worker processes. One process is limited to about "
+    "one CPU core by the Python GIL, so raise this to use more cores; a good "
+    "starting point is the number of cores available to the server. Values "
+    "above 1 require --transport=http and run in stateless HTTP mode. The "
+    "workers share one listening socket, so --host/--port are unchanged.",
+)
+@click.option(
+    "--thread-pool-size",
+    envvar="CB_MCP_THREAD_POOL_SIZE",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Maximum number of tool calls executed concurrently per worker "
+    "process. Tool calls run on a thread pool; requests past this limit wait "
+    "for a slot. Raise it when calls spend their time waiting on the cluster "
+    "(high-latency links) or when slow tools delay fast ones queued behind "
+    "them. It does not raise CPU-bound throughput — one process is limited to "
+    "about one core either way; use --workers for that. Unset leaves the AnyIO "
+    "default (40). With --workers N the effective total is N times this value.",
+)
+@click.option(
+    "--stateless-http",
+    "stateless_http",
+    envvar="CB_MCP_STATELESS_HTTP",
+    type=bool,
+    default=None,
+    help="Handle each HTTP request with a fresh MCP transport instead of "
+    "keeping per-session state in the server. Defaults to True when "
+    "--workers is above 1 (required, since sessions are not shared between "
+    "worker processes) and False otherwise. Only honored with "
+    "--transport=http.",
 )
 @click.option(
     "--disabled-tools",
@@ -327,6 +638,9 @@ def main(
     transport,
     host,
     port,
+    workers,
+    thread_pool_size,
+    stateless_http,
     disabled_tools,
     confirmation_required_tools,
     oauth_jwks_uri,
@@ -351,151 +665,73 @@ def main(
     log_info_retention_backup_count,
     log_debug_retention_backup_count,
 ):
-    """Couchbase MCP Server"""
+    """Couchbase MCP Server
 
-    # log_level / log_sinks are the parse results from their Click callbacks:
-    # each carries the resolved value plus any rejected input, which is passed
-    # to configure_logging so the fallback can be reported once handlers exist.
-    # Per-level overrides: keep only the levels the operator set explicitly; the
-    # rest inherit the global. Rotation-size overrides are in MB, matching the
-    # canonical --log-rotation-max-size-mb global.
-    rotation_size_overrides = {
-        level: value
-        for level, value in (
-            ("ERROR", log_error_rotation_max_size_mb),
-            ("WARNING", log_warning_rotation_max_size_mb),
-            ("INFO", log_info_rotation_max_size_mb),
-            ("DEBUG", log_debug_rotation_max_size_mb),
-        )
-        if value is not None
-    }
-    backup_count_overrides = {
-        level: value
-        for level, value in (
-            ("ERROR", log_error_retention_backup_count),
-            ("WARNING", log_warning_retention_backup_count),
-            ("INFO", log_info_retention_backup_count),
-            ("DEBUG", log_debug_retention_backup_count),
-        )
-        if value is not None
-    }
-    configure_logging(
-        level=log_level.level,
-        sinks=log_sinks.sinks,
-        log_file=log_file,
-        log_rotation_max_size_mb=log_rotation_max_size_mb,
-        log_max_bytes=log_max_bytes,
-        log_backup_count=log_retention_backup_count,
-        log_rotation_size_overrides=rotation_size_overrides,
-        log_backup_count_overrides=backup_count_overrides,
-        invalid_level=log_level.invalid_token,
-        invalid_sinks=log_sinks.invalid_tokens,
-    )
+    The options are declared above and resolved by Click into ``ctx.params``.
+    Config-consuming work is delegated with that mapping rather than with
+    individual arguments, because a ``--workers`` child process rebuilds the
+    server from a serialized copy of it and never parses the CLI itself.
+    """
+    configure_logging_from_params(ctx.params)
+
+    # Whether the operator named --stateless-http themselves. The distinction is
+    # lost below, where resolve_worker_settings turns the "None means decide for
+    # me" default into a concrete bool.
+    stateless_http_requested = stateless_http is not None
 
     try:
-        auth = resolve_oauth(
+        workers, stateless_http = resolve_worker_settings(
+            workers=workers,
+            stateless_http=stateless_http,
             transport=transport,
-            jwks_uri=oauth_jwks_uri,
-            issuer=oauth_issuer,
-            audience=oauth_audience,
-            algorithm=oauth_algorithm,
-            base_url=oauth_mcp_base_url,
-            scope_read=oauth_scope_read,
-            scope_write=oauth_scope_write,
         )
-    except OAuthConfigError as e:
+    except WorkerConfigError as e:
         raise click.UsageError(str(e)) from e
 
-    (
-        final_tools,
-        configured_confirmation_tool_names,
-        disabled_tool_names,
-    ) = prepare_tools_for_registration(
-        read_only_mode=read_only_mode,
-        disabled_tools=disabled_tools,
-        confirmation_required_tools=confirmation_required_tools,
-        enforce_scopes=auth is not None,
-    )
+    # Write the resolved topology back so there is one source of truth for it:
+    # the server built here, the config handed to worker processes, and the
+    # support diagnostics all read these two keys.
+    ctx.params["workers"] = workers
+    ctx.params["stateless_http"] = stateless_http
 
-    # CLI-resolved configuration lives on AppContext, not in a module global.
-    # This lets FastMCP's threadpool workers read it through ``ctx``.
-    settings = {
-        "connection_string": connection_string,
-        "username": username,
-        "password": password,
-        "ca_cert_path": ca_cert_path,
-        "client_cert_path": client_cert_path,
-        "client_key_path": client_key_path,
-        "read_only_mode": read_only_mode,
-        "transport": transport,
-        "host": host,
-        "port": port,
-        # OAuth resource-server config (non-secret IdP coordinates), captured
-        # for the env-info diagnostic and get_server_configuration_status.
-        # ``oauth_enabled`` is whether OAuth is active: resolve_oauth returns
-        # None for non-http transports even when JWT settings are present.
-        "oauth_enabled": auth is not None,
-        "oauth_jwks_uri": oauth_jwks_uri,
-        "oauth_issuer": oauth_issuer,
-        "oauth_audience": oauth_audience,
-        "oauth_algorithm": oauth_algorithm,
-        "oauth_mcp_base_url": oauth_mcp_base_url,
-        "oauth_scope_read_label": oauth_scope_read,
-        "oauth_scope_write_label": oauth_scope_write,
-        "disabled_tools": disabled_tool_names,
-        "confirmation_required_tools": configured_confirmation_tool_names,
-    }
-    ctx.obj = settings
+    if stateless_http_requested and transport not in NETWORK_TRANSPORTS:
+        logger.warning(
+            "--stateless-http/CB_MCP_STATELESS_HTTP is only honored for network "
+            "transports; ignoring it for transport=%s.",
+            transport,
+        )
 
-    @asynccontextmanager
-    async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
-        """Build the lifespan AppContext with settings captured from the CLI."""
-        logger.info(
-            f"MCP server initialized in lazy mode for tool discovery. "
-            f"Modes: (read_only_mode={read_only_mode})"
-        )
-        # Diagnostic snapshot for customer support. Filtered at INFO; visible
-        # whenever the user runs with --log-level DEBUG.
-        log_environment_info(transport, settings)
-        send_install_ping(transport)
-        # Hand the resolved logging snapshot to AppContext so shared tools
-        # (e.g. get_server_configuration_status) can surface it without
-        # coupling to our specific logging module.
-        resolved_logging = get_resolved_logging_config()
-        app_context = AppContext(
-            cluster_provider=StaticClusterProvider(settings=settings),
-            settings=settings,
-            read_only_mode=read_only_mode,
-            logging_config=resolved_logging.as_dict() if resolved_logging else None,
-        )
+    if workers > 1:
+        # Resolve OAuth purely to validate it: a bad OAuth configuration should
+        # surface as one usage error from the supervisor, not as N workers that
+        # spawn, raise, and get restarted.
         try:
-            yield app_context
-        except Exception as e:
-            logger.error(f"Error in app lifespan: {e}", exc_info=True)
-            raise
-        finally:
-            if app_context.cluster_provider:
-                app_context.cluster_provider.close()
-            logger.info("Closing MCP server")
+            resolve_oauth_from_params(ctx.params)
+        except OAuthConfigError as e:
+            raise click.UsageError(str(e)) from e
+
+        # One startup event for the deployment, sent by the supervisor; workers
+        # are told to stay quiet so N processes don't look like N installs.
+        send_install_ping(transport)
+        ctx.params["send_startup_ping"] = False
+        run_workers(ctx.params)
+        return
+
+    try:
+        mcp = build_mcp_server(ctx.params)
+    except OAuthConfigError as e:
+        raise click.UsageError(str(e)) from e
 
     # Map user-friendly transport names to SDK transport names
     sdk_transport = NETWORK_TRANSPORTS_SDK_MAPPING.get(transport, transport)
 
-    mcp = FastMCP(MCP_SERVER_NAME, lifespan=app_lifespan, auth=auth)
-
-    logger.info(
-        f"Registering {len(final_tools)} tool(s) with modes (read_only_mode={read_only_mode})"
-    )
-
-    # Register tools; FastMCP 3.x add_tool has no annotations kwarg, so wrap first.
-    for tool in final_tools:
-        annotations = TOOL_ANNOTATIONS.get(tool.__name__)
-        tool_obj = FunctionTool.from_function(tool, annotations=annotations)
-        mcp.add_tool(tool_obj)
-
-    logger.info(f"Registered {len(final_tools)} tool(s)")
-
-    run_kwargs = {"host": host, "port": port} if transport in NETWORK_TRANSPORTS else {}
+    run_kwargs: dict[str, Any] = {}
+    if transport in NETWORK_TRANSPORTS:
+        run_kwargs = {
+            "host": host,
+            "port": port,
+            "stateless_http": stateless_http,
+        }
     mcp.run(transport=sdk_transport, show_banner=False, **run_kwargs)  # type: ignore
 
 
