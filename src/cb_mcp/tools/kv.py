@@ -397,12 +397,12 @@ def mutate_subdocument(
         (
             "counter",
             counter_specs or [],
-            lambda s: subdoc.increment(
-                s["path"], s["delta"], create_parents=create_parents
-            )
-            if s["delta"] >= 0
-            else subdoc.decrement(
-                s["path"], abs(s["delta"]), create_parents=create_parents
+            lambda s: (
+                subdoc.increment(s["path"], s["delta"], create_parents=create_parents)
+                if s["delta"] >= 0
+                else subdoc.decrement(
+                    s["path"], abs(s["delta"]), create_parents=create_parents
+                )
             ),
         ),
     ]

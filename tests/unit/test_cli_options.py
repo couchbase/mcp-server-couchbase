@@ -178,6 +178,45 @@ class TestWorkerOptions:
         assert result.exit_code == 2
         assert "requires --transport=http" in result.output
 
+    def test_invalid_stateless_http_starts_anyway_on_the_default(self):
+        """A malformed boolean must not stop the server from booting: it falls
+        back to the worker-count default and the server still starts."""
+        result, fake_mcp, run_workers = self._invoke(
+            ["--transport", "http", "--stateless-http", "mabye"]
+        )
+
+        assert result.exit_code == 0, result.output
+        run_workers.assert_not_called()
+        assert fake_mcp.run.call_args.kwargs["stateless_http"] is False
+
+    def test_invalid_stateless_http_does_not_block_multi_worker(self):
+        """Same input under --workers: the default resolves to True, which is
+        what multi-worker needs, so the run proceeds."""
+        result, _, run_workers = self._invoke(
+            ["--transport", "http", "--workers", "2", "--stateless-http", "nope"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert run_workers.call_args.args[0]["stateless_http"] is True
+
+    def test_stateless_http_false_is_overridden_under_multi_worker(self):
+        """Previously a usage error; now the workable value wins so the server
+        starts, since sessions cannot be shared across processes anyway."""
+        result, _, run_workers = self._invoke(
+            ["--transport", "http", "--workers", "2", "--stateless-http", "false"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert run_workers.call_args.args[0]["stateless_http"] is True
+
+    def test_stateless_http_on_sse_is_overridden_not_rejected(self):
+        result, fake_mcp, _ = self._invoke(
+            ["--transport", "sse", "--stateless-http", "true"]
+        )
+
+        assert result.exit_code == 0, result.output
+        assert fake_mcp.run.call_args.kwargs["stateless_http"] is False
+
     def test_thread_pool_size_applied_during_startup(self):
         """``--thread-pool-size`` must reach the live limiter, and the settings
         must then report the limit that took effect rather than the input."""

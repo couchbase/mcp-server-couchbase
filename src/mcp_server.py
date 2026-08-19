@@ -52,6 +52,7 @@ from cb_mcp.utils import (
     validate_log_path,
     validate_log_sinks,
     validate_scope_label,
+    validate_stateless_http,
     worker_log_file,
 )
 
@@ -408,13 +409,15 @@ def run_workers(params: Mapping[str, Any]) -> None:
     "--stateless-http",
     "stateless_http",
     envvar="CB_MCP_STATELESS_HTTP",
-    type=bool,
     default=None,
+    callback=validate_stateless_http,
     help="Handle each HTTP request with a fresh MCP transport instead of "
     "keeping per-session state in the server. Defaults to True when "
     "--workers is above 1 (required, since sessions are not shared between "
     "worker processes) and False otherwise. Only honored with "
-    "--transport=http.",
+    "--transport=http. An unrecognised value falls back to that default with "
+    "an error log entry, and a value that cannot work with the rest of the "
+    "configuration is overridden with a warning rather than rejected.",
 )
 @click.option(
     "--disabled-tools",
@@ -674,16 +677,19 @@ def main(
     """
     configure_logging_from_params(ctx.params)
 
-    # Whether the operator named --stateless-http themselves. The distinction is
-    # lost below, where resolve_worker_settings turns the "None means decide for
-    # me" default into a concrete bool.
-    stateless_http_requested = stateless_http is not None
+    # stateless_http arrives as a ParsedStatelessHttp from its Click callback:
+    # the resolved value plus any input that could not be read. Both are handed
+    # to resolve_worker_settings, which reports the rejected text now that log
+    # handlers exist and turns the "None means decide for me" default into a
+    # concrete bool.
+    stateless_http_requested = stateless_http.value is not None
 
     try:
         workers, stateless_http = resolve_worker_settings(
             workers=workers,
-            stateless_http=stateless_http,
+            stateless_http=stateless_http.value,
             transport=transport,
+            invalid_stateless_http=stateless_http.invalid_token,
         )
     except WorkerConfigError as e:
         raise click.UsageError(str(e)) from e

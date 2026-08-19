@@ -23,6 +23,7 @@ from .logging import (
     parse_log_level,
     parse_log_sinks,
 )
+from .multiprocess import ParsedStatelessHttp, parse_stateless_http
 
 logger = getLogger(f"{MCP_SERVER_NAME}.utils.cli")
 
@@ -49,6 +50,21 @@ def validate_log_sinks(
     when nothing valid survives.
     """
     return parse_log_sinks(value)
+
+
+def validate_stateless_http(
+    ctx: click.Context, param: click.Parameter, value: object
+) -> ParsedStatelessHttp:
+    """Click callback for ``--stateless-http``.
+
+    Delegates to :func:`parse_stateless_http`, which falls back to "unset" on
+    input it cannot read and returns the rejected text so
+    ``resolve_worker_settings`` can log it once handlers exist. Declaring the
+    option without ``type=bool`` is deliberate: Click's BOOL type aborts on a
+    value it cannot coerce, and this option is meant to degrade to its default
+    instead.
+    """
+    return parse_stateless_http(value)  # type: ignore[arg-type]
 
 
 def validate_log_path(ctx: click.Context, param: click.Parameter, value: str) -> str:

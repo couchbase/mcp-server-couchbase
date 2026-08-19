@@ -10,6 +10,7 @@ from .cli import (
     validate_log_path,
     validate_log_sinks,
     validate_scope_label,
+    validate_stateless_http,
 )
 
 # Tool-execution concurrency
@@ -83,7 +84,9 @@ from .logging import (
 
 # Multi-worker (multi-process) support
 from .multiprocess import (
+    ALLOWED_STATELESS_HTTP_VALUES,
     WORKER_APP_IMPORT_STRING,
+    ParsedStatelessHttp,
     WorkerConfigError,
     export_worker_config,
     load_worker_config,
@@ -136,7 +139,9 @@ __all__ = [
     "NETWORK_TRANSPORTS",
     "NETWORK_TRANSPORTS_SDK_MAPPING",
     # Multi-worker support
+    "ALLOWED_STATELESS_HTTP_VALUES",
     "WORKER_APP_IMPORT_STRING",
+    "ParsedStatelessHttp",
     "WorkerConfigError",
     "export_worker_config",
     "load_worker_config",
@@ -154,6 +159,7 @@ __all__ = [
     "validate_log_path",
     "validate_log_sinks",
     "validate_scope_label",
+    "validate_stateless_http",
     # Elicitation
     "wrap_with_confirmation",
     # Environment diagnostics

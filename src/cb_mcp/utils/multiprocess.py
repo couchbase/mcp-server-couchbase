@@ -30,12 +30,15 @@ Two properties of that model shape the helpers below:
 """
 
 import json
+import logging
 import os
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, NamedTuple
 
-from .constants import STREAMABLE_HTTP_TRANSPORT
+from .constants import MCP_SERVER_NAME, STREAMABLE_HTTP_TRANSPORT
 from .logging import ParsedLogLevel, ParsedLogSinks
+
+logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.multiprocess")
 
 # Environment variable carrying the JSON-encoded resolved configuration from
 # the supervising parent to each spawned worker. Underscore-prefixed and
@@ -65,6 +68,13 @@ _UVICORN_LOG_LEVELS = {
 }
 
 
+# Boolean spellings accepted for --stateless-http, matching Click's own BOOL
+# vocabulary so operators who learned it from other flags are not surprised.
+_TRUTHY_TOKENS = frozenset({"1", "true", "t", "yes", "y", "on"})
+_FALSEY_TOKENS = frozenset({"0", "false", "f", "no", "n", "off"})
+ALLOWED_STATELESS_HTTP_VALUES = tuple(sorted(_TRUTHY_TOKENS | _FALSEY_TOKENS))
+
+
 class WorkerConfigError(ValueError):
     """Raised when the worker/stateless options cannot be honoured together.
 
@@ -74,33 +84,80 @@ class WorkerConfigError(ValueError):
     """
 
 
+class ParsedStatelessHttp(NamedTuple):
+    """Resolved ``--stateless-http`` value plus any rejected input.
+
+    ``value`` is ``None`` when the option was not set *or* when what was set
+    could not be understood — both mean "decide from the worker count", which is
+    the documented default. ``invalid_token`` carries the original text so
+    :func:`resolve_worker_settings` can report it once log handlers exist,
+    mirroring :class:`~cb_mcp.utils.logging.ParsedLogLevel`.
+    """
+
+    value: bool | None
+    invalid_token: str | None
+
+
+def parse_stateless_http(value: str | bool | None) -> ParsedStatelessHttp:
+    """Parse a ``--stateless-http`` / ``CB_MCP_STATELESS_HTTP`` value.
+
+    Unparseable input falls back to "unset" rather than aborting startup: a
+    malformed boolean in a compose file or a Kubernetes manifest should not stop
+    a database server from coming up when there is a well-defined default to use
+    instead. The rejected text is returned for logging so the operator still
+    finds out, which is the same contract ``--log-level`` and ``--log-sinks``
+    already use.
+
+    An empty value is treated as unset without complaint, since
+    ``CB_MCP_STATELESS_HTTP=`` in an env file reads as "not configured".
+    """
+    if value is None or isinstance(value, bool):
+        return ParsedStatelessHttp(value, None)
+
+    token = value.strip().lower()
+    if not token:
+        return ParsedStatelessHttp(None, None)
+    if token in _TRUTHY_TOKENS:
+        return ParsedStatelessHttp(True, None)
+    if token in _FALSEY_TOKENS:
+        return ParsedStatelessHttp(False, None)
+    return ParsedStatelessHttp(None, value)
+
+
 def resolve_worker_settings(
     workers: int,
     stateless_http: bool | None,
     transport: str,
+    invalid_stateless_http: str | None = None,
 ) -> tuple[int, bool]:
-    """Validate the worker options and resolve the effective stateless mode.
+    """Resolve the effective worker count and stateless mode.
 
     Returns ``(workers, stateless_http)``.
 
-    ``stateless_http`` defaults to ``None`` meaning "decide from the worker
-    count": multi-worker requires stateless mode, single-worker keeps the
-    stateful default so existing deployments are unaffected. An explicit value
-    always wins, except where it would produce a server that cannot work —
-    those combinations raise :class:`WorkerConfigError`:
+    ``stateless_http`` of ``None`` means "decide from the worker count":
+    multi-worker requires stateless mode, single-worker keeps the stateful
+    default so existing deployments are unaffected. An explicit value wins
+    unless it would produce a server that cannot work, in which case the
+    workable value is used and the override is logged rather than rejected:
 
-    * ``workers > 1`` on any transport other than streamable HTTP. Only that
-      transport has independent, load-balanceable requests; ``stdio`` speaks to
-      exactly one client over one pipe pair, and ``sse`` pins a client to the
-      process holding its event stream.
-    * ``workers > 1`` with ``stateless_http`` explicitly disabled. A session
-      created on one worker is unknown to the others, so the client's next
-      request would be rejected.
-    * ``stateless_http`` enabled on ``sse``, which has no stateless mode
-      (FastMCP rejects the combination).
+    * ``workers > 1`` with stateless mode disabled. A session created on one
+      worker is unknown to the others, so the client's follow-up request would
+      fail. Forced on.
+    * Stateless mode on ``sse``, which has no stateless implementation (FastMCP
+      raises on the combination). Forced off.
 
-    Enabling stateless mode on ``stdio`` is accepted but inert: the caller
-    only forwards it on network transports.
+    ``invalid_stateless_http`` is the rejected text from
+    :func:`parse_stateless_http`, reported here rather than at parse time
+    because Click callbacks run before log handlers are attached.
+
+    The one combination that still raises :class:`WorkerConfigError` is
+    ``workers > 1`` on a transport that cannot be served by multiple processes.
+    There is no safe fallback: quietly dropping to one worker would hand the
+    operator a fraction of the capacity they asked for and look like a
+    performance problem later, so it fails fast instead.
+
+    Enabling stateless mode on ``stdio`` is accepted but inert: the caller only
+    forwards it on network transports.
     """
     if workers > 1 and transport != STREAMABLE_HTTP_TRANSPORT:
         raise WorkerConfigError(
@@ -111,19 +168,34 @@ def resolve_worker_settings(
 
     resolved_stateless = workers > 1 if stateless_http is None else stateless_http
 
-    if workers > 1 and not resolved_stateless:
-        raise WorkerConfigError(
-            f"--workers={workers} requires stateless HTTP: a session created on "
-            "one worker process is not visible to the others, so a client's "
-            "follow-up request would fail. Remove --stateless-http=false to let "
-            "it default to true, or run with --workers=1."
+    if invalid_stateless_http is not None:
+        logger.error(
+            "Ignored invalid --stateless-http/CB_MCP_STATELESS_HTTP value %r; "
+            "allowed values are %s. Continuing with the default for this "
+            "configuration (stateless_http=%s).",
+            invalid_stateless_http,
+            list(ALLOWED_STATELESS_HTTP_VALUES),
+            resolved_stateless,
         )
 
-    if resolved_stateless and transport == "sse":
-        raise WorkerConfigError(
-            "--stateless-http is not supported on --transport=sse; SSE holds a "
-            "per-client event stream and therefore requires session state."
+    if workers > 1 and not resolved_stateless:
+        logger.warning(
+            "Overriding --stateless-http=false: --workers=%d needs stateless "
+            "HTTP because a session created on one worker process is not "
+            "visible to the others, so a client's follow-up request would "
+            "fail. Continuing with stateless_http=true. Use --workers=1 to keep "
+            "session state.",
+            workers,
         )
+        resolved_stateless = True
+
+    if resolved_stateless and transport == "sse":
+        logger.warning(
+            "Overriding stateless HTTP: --transport=sse holds a per-client "
+            "event stream and has no stateless mode. Continuing with "
+            "stateless_http=false."
+        )
+        resolved_stateless = False
 
     return workers, resolved_stateless
 
