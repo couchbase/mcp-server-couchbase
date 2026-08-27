@@ -10,7 +10,7 @@ GitHub Repo: <https://github.com/couchbase/mcp-server-couchbase>
 
 Dockerfile: <https://github.com/couchbase/mcp-server-couchbase/blob/main/Dockerfile>
 
-Documentation: <https://mcp-server.couchbase.com>
+Documentation: <https://docs.couchbase.com/mcp-server/get-started/overview.html>
 
 ## Features/Tools
 
@@ -21,6 +21,7 @@ Documentation: <https://mcp-server.couchbase.com>
 | `get_server_configuration_status` | Get the server status and configuration without connecting to the cluster — reports read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration |
 | `test_cluster_connection` | Check the cluster credentials by connecting to the cluster |
 | `get_cluster_health_and_services` | Get cluster health status and list of all running services, optionally filtered to specific services via `service_types` |
+| `get_cluster_diagnostics_report` | Get the SDK's cached connection diagnostics — whether connections were already broken and for how long, without any active network probing |
 
 ### Data model & schema discovery tools
 
@@ -320,7 +321,7 @@ The server logs to `stderr` by default. Logging is configured with the `CB_MCP_L
 - **Rotation & retention** — rotation size is configured **in MB** via `CB_MCP_LOG_ROTATION_MAX_SIZE_MB` (global) and per-level `CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE_MB` (inheriting the global); retention via `CB_MCP_LOG_RETENTION_BACKUP_COUNT` (global) and per-level `CB_MCP_LOG_<LEVEL>_RETENTION_BACKUP_COUNT`. A rotation size of `0` is invalid and falls back to the default with a startup warning. `CB_MCP_LOG_MAX_BYTES` (bytes) is deprecated but still honored for backward compatibility.
 - **Server-config snapshot** — with the `file` sink active, a one-shot record is written as JSON to a dedicated `mcp_server_config.log.json` file (derived from `CB_MCP_LOG_FILE`), overwritten each start, so support always has the current config even after other logs rotate.
 
-For more details, see the [documentation](https://mcp-server.couchbase.com/configuration/logging).
+For more details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/logging.html).
 
 ### OAuth 2.1 Authorization
 
@@ -332,4 +333,4 @@ OAuth is configured with the `CB_MCP_OAUTH_*` variables in the [Environment Vari
 - Setting `CB_MCP_OAUTH_MCP_BASE_URL` additionally publishes RFC 9728 Protected Resource Metadata so PRM-aware clients can discover the authorization server.
 - Access is gated by two scopes read from the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools, including SQL++) and `couchbase-mcp:write` (write tools: KV mutations and index management). Full access requires both. If your IdP can't emit those canonical labels, override them with `CB_MCP_OAUTH_SCOPE_READ_LABEL` / `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`.
 
-For full details, see the [documentation](https://mcp-server.couchbase.com/configuration/oauth).
+For full details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/oauth-overview.html).

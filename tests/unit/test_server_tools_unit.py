@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 from couchbase.diagnostics import ServiceType
 
 from cb_mcp.tools.server import (
+    get_cluster_diagnostics_report,
     get_cluster_health_and_services,
     get_scopes_and_collections_in_bucket,
     get_scopes_in_bucket,

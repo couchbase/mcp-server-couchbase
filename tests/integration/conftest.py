@@ -75,6 +75,7 @@ EXPECTED_TOOLS = {
     "build_index",
     "drop_index",
     "get_cluster_health_and_services",
+    "get_cluster_diagnostics_report",
     # Performance analysis tools
     "get_longest_running_queries",
     "get_most_frequent_queries",
@@ -95,6 +96,7 @@ TOOLS_BY_CATEGORY = {
         "get_scopes_and_collections_in_bucket",
         "get_collections_in_scope",
         "get_cluster_health_and_services",
+        "get_cluster_diagnostics_report",
     },
     "kv": {
         "get_document_by_id",

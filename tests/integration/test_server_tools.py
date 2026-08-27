@@ -8,6 +8,7 @@ Tests for:
 - get_scopes_and_collections_in_bucket
 - get_collections_in_scope
 - get_cluster_health_and_services (including service_types filtering)
+- get_cluster_diagnostics_report
 - test_cluster_connection
 """
 
