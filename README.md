@@ -32,7 +32,7 @@ For full documentation, visit [docs.couchbase.com/mcp-server](https://docs.couch
 - [Troubleshooting Tips](#troubleshooting-tips)
 - [Integration Testing](#integration-testing)
 - [FAQ](#faq)
-- [Contributing](#-contributing)
+- [Contributing](#contributing)
 - [Support Policy](#-support-policy)
 
 ## Why Couchbase MCP Server
@@ -792,7 +792,7 @@ uv run pytest tests/ -v
 
 **Is this officially supported by Couchbase?** This project is Couchbase community-maintained — see [Support Policy](#-support-policy). Enterprise support is available separately through [Couchbase AI Data Plane](https://www.couchbase.com/downloads/?family=agent-memory).
 
-## 👩‍💻 Contributing
+## Contributing
 
 We welcome contributions from the community! Whether you want to fix bugs, add features, or improve documentation, your help is appreciated.
 
