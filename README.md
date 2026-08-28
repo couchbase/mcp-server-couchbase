@@ -1,19 +1,58 @@
 # Couchbase MCP Server
 
-Couchbase MCP Server is a self-hosted MCP Server that allows AI agents to connect to and interact with data in Couchbase clusters, whether hosted on Capella or self-managed. It provides tools across categories including Cluster Health, Data Schema, Key-Value, Query, and Performance — with safety controls via read-only mode and fine-grained tool disabling. It supports both STDIO and Streamable HTTP transports.
+Couchbase MCP Server is a self-hosted [Model Context Protocol (MCP)](https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro) server that connects AI agents and LLM-powered assistants — Claude, Cursor, Windsurf, VS Code Copilot, and other [MCP clients](https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro) — to data in Couchbase clusters, whether hosted on [Capella](https://www.couchbase.com/products/capella/) or self-managed. MCP is an open standard for letting AI assistants call tools and query external data sources; this server implements that standard for Couchbase, so an AI agent can inspect your cluster, run SQL++ queries, read and write documents, and analyze query performance using natural language instead of hand-written code.
 
-Couchbase MCP server is distributed as a Python Package Index (PyPI) package and via Docker.
-Enterprise support for Couchbase MCP Server is available by licensing [Couchbase AI Data Plane](https://www.couchbase.com/downloads/?family=ai-data-plane), which also entitles use and enterprise support of Couchbase Agent Memory and Couchbase Agent Catalog.
+It provides tools across categories including Cluster Health, Data Schema, Key-Value, Query, and Performance — with safety controls via read-only mode (on by default) and fine-grained tool disabling, so you can let an AI agent explore and query your data without risking unintended writes. It supports both STDIO and Streamable HTTP transports.
 
-[![Docs](https://img.shields.io/badge/Docs-1B9E5A?logo=docusaurus&logoColor=white)](https://mcp-server.couchbase.com/) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/) [![PyPI version](https://badge.fury.io/py/couchbase-mcp-server.svg)](https://pypi.org/project/couchbase-mcp-server/) [![Install in Cursor](https://img.shields.io/badge/Cursor-Install_Server-1e1e1e?logo=data:image/svg%2bxml;base64,PHN2ZyBoZWlnaHQ9IjFlbSIgc3R5bGU9ImZsZXg6bm9uZTtsaW5lLWhlaWdodDoxIiB2aWV3Qm94PSIwIDAgMjQgMjQiIHdpZHRoPSIxZW0iCiAgICB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogICAgPHRpdGxlPkN1cnNvcjwvdGl0bGU+CiAgICA8cGF0aCBkPSJNMTEuOTI1IDI0bDEwLjQyNS02LTEwLjQyNS02TDEuNSAxOGwxMC40MjUgNnoiCiAgICAgICAgZmlsbD0idXJsKCNsb2JlLWljb25zLWN1cnNvcnVuZGVmaW5lZC1maWxsLTApIj48L3BhdGg+CiAgICA8cGF0aCBkPSJNMjIuMzUgMThWNkwxMS45MjUgMHYxMmwxMC40MjUgNnoiIGZpbGw9InVybCgjbG9iZS1pY29ucy1jdXJzb3J1bmRlZmluZWQtZmlsbC0xKSI+PC9wYXRoPgogICAgPHBhdGggZD0iTTExLjkyNSAwTDEuNSA2djEybDEwLjQyNS02VjB6IiBmaWxsPSJ1cmwoI2xvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMikiPjwvcGF0aD4KICAgIDxwYXRoIGQ9Ik0yMi4zNSA2TDExLjkyNSAyNFYxMkwyMi4zNSA2eiIgZmlsbD0iIzU1NSI+PC9wYXRoPgogICAgPHBhdGggZD0iTTIyLjM1IDZsLTEwLjQyNSA2TDEuNSA2aDIwLjg1eiIgZmlsbD0iI2ZmZiI+PC9wYXRoPgogICAgPGRlZnM+CiAgICAgICAgPGxpbmVhckdyYWRpZW50IGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiBpZD0ibG9iZS1pY29ucy1jdXJzb3J1bmRlZmluZWQtZmlsbC0wIgogICAgICAgICAgICB4MT0iMTEuOTI1IiB4Mj0iMTEuOTI1IiB5MT0iMTIiIHkyPSIyNCI+CiAgICAgICAgICAgIDxzdG9wIG9mZnNldD0iLjE2IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9Ii4zOSI+PC9zdG9wPgogICAgICAgICAgICA8c3RvcCBvZmZzZXQ9Ii42NTgiIHN0b3AtY29sb3I9IiNmZmYiIHN0b3Atb3BhY2l0eT0iLjgiPjwvc3RvcD4KICAgICAgICA8L2xpbmVhckdyYWRpZW50PgogICAgICAgIDxsaW5lYXJHcmFkaWVudCBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaWQ9ImxvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMSIKICAgICAgICAgICAgeDE9IjIyLjM1IiB4Mj0iMTEuOTI1IiB5MT0iNi4wMzciIHkyPSIxMi4xNSI+CiAgICAgICAgICAgIDxzdG9wIG9mZnNldD0iLjE4MiIgc3RvcC1jb2xvcj0iI2ZmZiIgc3RvcC1vcGFjaXR5PSIuMzEiPjwvc3RvcD4KICAgICAgICAgICAgPHN0b3Agb2Zmc2V0PSIuNzE1IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9IjAiPjwvc3RvcD4KICAgICAgICA8L2xpbmVhckdyYWRpZW50PgogICAgICAgIDxsaW5lYXJHcmFkaWVudCBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaWQ9ImxvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMiIKICAgICAgICAgICAgeDE9IjExLjkyNSIgeDI9IjEuNSIgeTE9IjAiIHkyPSIxOCI+CiAgICAgICAgICAgIDxzdG9wIHN0b3AtY29sb3I9IiNmZmYiIHN0b3Atb3BhY2l0eT0iLjYiPjwvc3RvcD4KICAgICAgICAgICAgPHN0b3Agb2Zmc2V0PSIuNjY3IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9Ii4yMiI+PC9zdG9wPgogICAgICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8L2RlZnM+Cjwvc3ZnPgo=)][cursor-install-basic] [![Verified on MseeP](https://img.shields.io/badge/MseeP-Verified-green)](https://mseep.ai/app/13fce476-0e74-4b1e-ab82-1df2a3204809) [![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/Couchbase-Ecosystem/mcp-server-couchbase)](https://archestra.ai/mcp-catalog/couchbase-ecosystem__mcp-server-couchbase)
+Couchbase MCP server is distributed as a Python Package Index (PyPI) package and via Docker. Enterprise support for Couchbase MCP Server is available by licensing [Couchbase AI Data Plane](https://www.couchbase.com/downloads/?family=agent-memory), which also entitles use and enterprise support of Couchbase Agent Memory and Couchbase Agent Catalog.
 
-For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couchbase.com/).
+For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couchbase.com).
 
-<a href="https://glama.ai/mcp/servers/@Couchbase-Ecosystem/mcp-server-couchbase">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/@Couchbase-Ecosystem/mcp-server-couchbase/badge" alt="Couchbase Server MCP server" />
+[![Docs](https://img.shields.io/badge/Docs-1B9E5A?logo=docusaurus&logoColor=white)](https://docs.couchbase.com/mcp-server/get-started/overview.html) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/) [![PyPI version](https://badge.fury.io/py/couchbase-mcp-server.svg)](https://pypi.org/project/couchbase-mcp-server/) [![Install in Cursor](https://img.shields.io/badge/Cursor-Install_Server-1e1e1e?logo=data:image/svg%2bxml;base64,PHN2ZyBoZWlnaHQ9IjFlbSIgc3R5bGU9ImZsZXg6bm9uZTtsaW5lLWhlaWdodDoxIiB2aWV3Qm94PSIwIDAgMjQgMjQiIHdpZHRoPSIxZW0iCiAgICB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogICAgPHRpdGxlPkN1cnNvcjwvdGl0bGU+CiAgICA8cGF0aCBkPSJNMTEuOTI1IDI0bDEwLjQyNS02LTEwLjQyNS02TDEuNSAxOGwxMC40MjUgNnoiCiAgICAgICAgZmlsbD0idXJsKCNsb2JlLWljb25zLWN1cnNvcnVuZGVmaW5lZC1maWxsLTApIj48L3BhdGg+CiAgICA8cGF0aCBkPSJNMjIuMzUgMThWNkwxMS45MjUgMHYxMmwxMC40MjUgNnoiIGZpbGw9InVybCgjbG9iZS1pY29ucy1jdXJzb3J1bmRlZmluZWQtZmlsbC0xKSI+PC9wYXRoPgogICAgPHBhdGggZD0iTTExLjkyNSAwTDEuNSA2djEybDEwLjQyNS02VjB6IiBmaWxsPSJ1cmwoI2xvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMikiPjwvcGF0aD4KICAgIDxwYXRoIGQ9Ik0yMi4zNSA2TDExLjkyNSAyNFYxMkwyMi4zNSA2eiIgZmlsbD0iIzU1NSI+PC9wYXRoPgogICAgPHBhdGggZD0iTTIyLjM1IDZsLTEwLjQyNSA2TDEuNSA2aDIwLjg1eiIgZmlsbD0iI2ZmZiI+PC9wYXRoPgogICAgPGRlZnM+CiAgICAgICAgPGxpbmVhckdyYWRpZW50IGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiBpZD0ibG9iZS1pY29ucy1jdXJzb3J1bmRlZmluZWQtZmlsbC0wIgogICAgICAgICAgICB4MT0iMTEuOTI1IiB4Mj0iMTEuOTI1IiB5MT0iMTIiIHkyPSIyNCI+CiAgICAgICAgICAgIDxzdG9wIG9mZnNldD0iLjE2IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9Ii4zOSI+PC9zdG9wPgogICAgICAgICAgICA8c3RvcCBvZmZzZXQ9Ii42NTgiIHN0b3AtY29sb3I9IiNmZmYiIHN0b3Atb3BhY2l0eT0iLjgiPjwvc3RvcD4KICAgICAgICA8L2xpbmVhckdyYWRpZW50PgogICAgICAgIDxsaW5lYXJHcmFkaWVudCBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaWQ9ImxvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMSIKICAgICAgICAgICAgeDE9IjIyLjM1IiB4Mj0iMTEuOTI1IiB5MT0iNi4wMzciIHkyPSIxMi4xNSI+CiAgICAgICAgICAgIDxzdG9wIG9mZnNldD0iLjE4MiIgc3RvcC1jb2xvcj0iI2ZmZiIgc3RvcC1vcGFjaXR5PSIuMzEiPjwvc3RvcD4KICAgICAgICAgICAgPHN0b3Agb2Zmc2V0PSIuNzE1IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9IjAiPjwvc3RvcD4KICAgICAgICA8L2xpbmVhckdyYWRpZW50PgogICAgICAgIDxsaW5lYXJHcmFkaWVudCBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaWQ9ImxvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMiIKICAgICAgICAgICAgeDE9IjExLjkyNSIgeDI9IjEuNSIgeTE9IjAiIHkyPSIxOCI+CiAgICAgICAgICAgIDxzdG9wIHN0b3AtY29sb3I9IiNmZmYiIHN0b3Atb3BhY2l0eT0iLjYiPjwvc3RvcD4KICAgICAgICAgICAgPHN0b3Agb2Zmc2V0PSIuNjY3IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9Ii4yMiI+PC9zdG9wPgogICAgICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8L2RlZnM+Cjwvc3ZnPgo=)][cursor-install-basic] [![Verified on MseeP](https://img.shields.io/badge/MseeP-Verified-green)](https://mseep.ai/app/13fce476-0e74-4b1e-ab82-1df2a3204809) [![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/Couchbase-Ecosystem/mcp-server-couchbase)](https://archestra.ai/mcp-catalog/couchbase-ecosystem__mcp-server-couchbase)
+
+For full documentation, visit [docs.couchbase.com/mcp-server](https://docs.couchbase.com/mcp-server/get-started/overview.html).
+
+<a href="https://glama.ai/mcp/servers/@couchbase/mcp-server-couchbase">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@couchbase/mcp-server-couchbase/badge" alt="Couchbase Server MCP server" />
 </a>
 
 <!-- mcp-name: io.github.couchbase/mcp-server-couchbase -->
+
+## Table of Contents
+- [Why Couchbase MCP Server](#why-couchbase-mcp-server)
+- [Example Prompts](#example-prompts)
+- [Features/Tools](#featurestools)
+- [Prerequisites](#prerequisites)
+- [Configuration](#configuration)
+- [Streamable HTTP Transport Mode](#streamable-http-transport-mode)
+- [SSE Transport Mode](#sse-transport-mode)
+- [OAuth 2.1 Authorization](#oauth-21-authorization)
+- [Docker Image](#docker-image)
+- [Usage Data Collection](#usage-data-collection)
+- [Troubleshooting Tips](#troubleshooting-tips)
+- [Integration Testing](#integration-testing)
+- [FAQ](#faq)
+- [Contributing](#contributing)
+- [Support Policy](#-support-policy)
+
+## Why Couchbase MCP Server
+
+- **Safe by default** — write operations (document upserts/inserts/deletes and data-modifying SQL++ queries) are blocked unless you explicitly set `CB_MCP_READ_ONLY_MODE=false`, and individual tools can be disabled or gated behind user confirmation.
+- **Works with Capella and self-managed clusters** — the same configuration connects to Couchbase Capella (fully managed) or a self-hosted Couchbase Server cluster.
+- **RBAC-aware** — tool disabling is a convenience layer for guiding LLM behavior; the underlying Couchbase user's role-based access control remains the authoritative security boundary.
+- **Production transports** — run over STDIO for local desktop clients, or Streamable HTTP with optional OAuth 2.1 (JWT/JWKS, provider-agnostic — Auth0, Okta, Keycloak, Entra, Cognito, etc.) for shared/remote deployments.
+- **Any MCP client** — tested with Claude Desktop, Cursor, Windsurf, VS Code, and JetBrains AI Assistant/Junie; works with any client implementing the [MCP specification](https://modelcontextprotocol.io/specification/2026-07-28).
+
+## Example Prompts
+
+Once the server is connected, you can talk to your Couchbase cluster in natural language through your AI assistant. For example:
+
+- "What buckets, scopes, and collections do I have in this cluster, and what's the schema of the `orders` collection?"
+- "Run a SQL++ query to find the 10 most recent documents in the `users` collection `where status = 'active'`."
+- "What are the 5 slowest queries on this cluster in the last hour, and are any of them missing a covering index?"
+- "Check whether this cluster is healthy and tell me which services are running."
+- "Insert a new document into the `products` collection with these fields: ..." (requires `CB_MCP_READ_ONLY_MODE=false`)
+
 
 ## Features/Tools
 
@@ -23,8 +62,8 @@ For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couc
 | --------- | ----------- |
 | `get_server_configuration_status` | Get the server status and configuration without connecting to the cluster — reports read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration |
 | `test_cluster_connection` | Check the cluster credentials by connecting to the cluster |
-| `get_cluster_health_and_services` | Get cluster health status and list of all running services |
-| `get_cluster_diagnostics_report` | Get the SDK's cached connection diagnostics — whether connections were already broken and for how long, without any active network probing |
+| `get_cluster_health_and_services` | Get cluster health status and list of all running services, optionally filtered to specific services via `service_types` |
+| `get_cluster_diagnostics_report` | Get the SDK's cached connection diagnostics — whether connections were already broken and for how long, without any active network probing | main
 
 ### Data model & schema discovery tools
 
@@ -363,7 +402,7 @@ uvx couchbase-mcp-server --log-level=debug --log-sinks=file \
   --log-error-retention-backup-count=30 --log-debug-retention-backup-count=0
 ```
 
-For more details, see the [documentation](https://mcp-server.couchbase.com/configuration/logging).
+For more details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/logging.html).
 
 ### Client Specific Configuration
 
@@ -593,7 +632,7 @@ uvx couchbase-mcp-server \
   --oauth-mcp-base-url='<public_base_url_of_this_server>'
 ```
 
-For full details, see the [documentation](https://mcp-server.couchbase.com/configuration/oauth).
+For full details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/oauth-overview.html).
 
 ## Docker Image
 
@@ -737,7 +776,23 @@ uv run pytest tests/ -v
 
 ---
 
-## 👩‍💻 Contributing
+## FAQ
+
+**What is the Couchbase MCP Server?** It's a self-hosted implementation of the [Model Context Protocol](https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro) that lets AI assistants and agents (Claude, Cursor, Windsurf, VS Code Copilot, JetBrains AI Assistant/Junie, and any other MCP client) query and, optionally, modify data in a Couchbase cluster using natural language.
+
+**How do I connect Claude Desktop to Couchbase?** Install the server with `uvx couchbase-mcp-server` (or run it from source or Docker), then add its configuration to Claude Desktop's `claude_desktop_config.json` as shown in [Configuration](#configuration). Restart Claude Desktop and it will pick up the new tools.
+
+**Can I use this with Couchbase Capella?** Yes. The same `CB_CONNECTION_STRING/CB_USERNAME/CB_PASSWORD` (or mTLS certificate) configuration works for both Couchbase Capella and self-managed Couchbase Server clusters.
+
+**Is it safe to let an AI agent write to my database?** By default, `CB_MCP_READ_ONLY_MODE` is true, so all write operations — document upserts/inserts/replaces/deletes and data-modifying SQL++ statements — are disabled and the write tools aren't even loaded. You can also disable individual tools (see [Disabling Tools](#disabling-tools)) or require explicit user confirmation before specific tools run (see [Elicitation/Confirmation](#elicitationconfirmation-for-tool-calls)). Tool-level controls guide LLM behavior; your Couchbase user's RBAC permissions remain the real security boundary.
+
+**Can I run natural-language queries against my data without writing SQL++ myself?** Yes — ask your AI assistant a question in plain English (e.g. "show me the 10 most recent orders over $100") and it can translate that into a [SQL++](https://www.couchbase.com/sqlplusplus/) query using the `run_sql_plus_plus_query` tool. You can also ask the assistant to `explain_sql_plus_plus_query` a query or ask the index advisor for recommendations.
+
+**What's the difference between STDIO, Streamable HTTP, and SSE transport?** STDIO is for a single local MCP client (e.g. Claude Desktop) launching the server as a subprocess. Streamable HTTP lets multiple clients share one running server instance over HTTP, and supports OAuth 2.1. SSE is the older HTTP transport, now deprecated by the MCP spec in favor of Streamable HTTP — see [Streamable HTTP Transport Mode](#streamable-http-transport-mode).
+
+**Is this officially supported by Couchbase?** This project is Couchbase community-maintained — see [Support Policy](#-support-policy). Enterprise support is available separately through [Couchbase AI Data Plane](https://www.couchbase.com/downloads/?family=agent-memory).
+
+## Contributing
 
 We welcome contributions from the community! Whether you want to fix bugs, add features, or improve documentation, your help is appreciated.
 

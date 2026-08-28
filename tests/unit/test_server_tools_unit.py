@@ -8,13 +8,16 @@ reached against a live cluster:
 - get_scopes_and_collections_in_bucket re-raises SDK errors.
 - get_scopes_in_bucket re-raises SDK errors.
 - get_cluster_health_and_services returns an error envelope on ping failure.
-- get_cluster_diagnostics_report returns an error envelope on diagnostics failure.
+- get_cluster_health_and_services translates service_types into PingOptions and
+  rejects unrecognized service type strings via the same error envelope.
 """
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+from couchbase.diagnostics import ServiceType
 
 from cb_mcp.tools.server import (
     get_cluster_diagnostics_report,
@@ -289,42 +292,65 @@ class TestGetClusterHealthAndServices:
         assert result["status"] == "success"
         assert result["data"] == {"services": {"kv": []}}
 
-
-class TestGetClusterDiagnosticsReport:
-    """get_cluster_diagnostics_report: error envelope and happy path."""
-
-    def test_returns_error_envelope_on_failure(self) -> None:
-        """A diagnostics failure must be reported as a structured error response."""
+    def test_service_types_filter_passed_to_cluster_ping(self) -> None:
+        """service_types must be translated into a PingOptions and passed through."""
         cluster = MagicMock()
-        cluster.diagnostics.side_effect = Exception("diagnostics failed")
+        ping_result = MagicMock()
+        ping_result.as_json.return_value = '{"services": {"query": []}}'
+        cluster.ping.return_value = ping_result
         ctx = _make_ctx(cluster=cluster)
 
         with patch(
             "cb_mcp.tools.server.get_cluster_connection",
             return_value=cluster,
         ):
-            result = get_cluster_diagnostics_report(ctx)
+            result = get_cluster_health_and_services(ctx, service_types=["query"])
 
-        assert result["status"] == "error"
-        assert "diagnostics failed" in result["error"]
-        assert "Failed to get cluster diagnostics" in result["message"]
-
-    def test_returns_success_envelope_with_diagnostics_data(self) -> None:
-        """Happy path returns the SDK's diagnostics report under 'data'."""
-        cluster = MagicMock()
-        diagnostics_result = MagicMock()
-        diagnostics_result.as_json.return_value = (
-            '{"state": "online", "services": {"kv": []}}'
-        )
-        cluster.diagnostics.return_value = diagnostics_result
-        ctx = _make_ctx(cluster=cluster)
-
-        with patch(
-            "cb_mcp.tools.server.get_cluster_connection",
-            return_value=cluster,
-        ):
-            result = get_cluster_diagnostics_report(ctx)
-
-        cluster.diagnostics.assert_called_once()
+        cluster.ping.assert_called_once()
+        (ping_opts,) = cluster.ping.call_args.args
+        assert list(ping_opts["service_types"]) == [ServiceType.Query]
         assert result["status"] == "success"
-        assert result["data"] == {"state": "online", "services": {"kv": []}}
+        assert result["data"] == {"services": {"query": []}}
+
+    def test_service_types_filter_passed_to_bucket_ping(self) -> None:
+        """service_types must also be passed through on the bucket-scoped path."""
+        cluster = MagicMock()
+        bucket = MagicMock()
+        ping_result = MagicMock()
+        ping_result.as_json.return_value = '{"services": {"kv": []}}'
+        bucket.ping.return_value = ping_result
+        ctx = _make_ctx(cluster=cluster)
+
+        with (
+            patch(
+                "cb_mcp.tools.server.get_cluster_connection",
+                return_value=cluster,
+            ),
+            patch(
+                "cb_mcp.tools.server.connect_to_bucket",
+                return_value=bucket,
+            ),
+        ):
+            result = get_cluster_health_and_services(
+                ctx, bucket_name="b", service_types=["key_value"]
+            )
+
+        bucket.ping.assert_called_once()
+        (ping_opts,) = bucket.ping.call_args.args
+        assert list(ping_opts["service_types"]) == [ServiceType.KeyValue]
+        assert result["status"] == "success"
+
+    def test_invalid_service_type_returns_error_envelope(self) -> None:
+        """An unrecognized service type string must not raise past the tool boundary."""
+        cluster = MagicMock()
+        ctx = _make_ctx(cluster=cluster)
+
+        with patch(
+            "cb_mcp.tools.server.get_cluster_connection",
+            return_value=cluster,
+        ):
+            result = get_cluster_health_and_services(ctx, service_types=["bogus"])
+
+        cluster.ping.assert_not_called()
+        assert result["status"] == "error"
+        assert "Failed to get cluster health" in result["message"]
