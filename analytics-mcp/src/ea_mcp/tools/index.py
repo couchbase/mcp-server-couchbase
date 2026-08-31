@@ -11,12 +11,9 @@ from fastmcp import Context
 
 from ..connection import get_cluster_connection
 from ..responses import tool_error, tool_success
+from .metadata import safe_ident
 
 logger = logging.getLogger("ea-mcp-server.tools.index")
-
-
-def safe_ident(name: str) -> str:
-    return "`" + name.replace("`", "``") + "`"
 
 
 def safe_field_path(path: str) -> str:
