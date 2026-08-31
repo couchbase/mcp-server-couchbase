@@ -38,31 +38,43 @@ and `Scope` only the two query methods. Unlike the parent `mcp-server-couchbase`
 [`CREATE INDEX`](https://docs.couchbase.com/enterprise-analytics/current/sqlpp/5_ddl_index.html)
 statement.
 
-`fields` is a list of `{"name": ..., "type": ...}` objects, where `type` is **optional**
-(supported types: `bigint`, `int`, `double`, `string`, `date`, `time`, `datetime`).
-Dotted paths address nested fields:
+Each entry in `fields` is one index element. A plain field is
+`{"name": ..., "type": ...}`, where `type` is optional (`bigint`, `int`, `double`,
+`string`, `date`, `time`, `datetime`); dotted paths address nested fields. To index
+inside an array, use `unnest` instead of `name`, with `select` for arrays of objects:
 
 ```jsonc
-// CREATE INDEX `song_title_idx` ON `music`.`myPlaylist`.`countrySongs` (`title`: string);
-{"database_name": "music", "scope_name": "myPlaylist", "collection_name": "countrySongs",
- "index_name": "song_title_idx", "fields": [{"name": "title", "type": "string"}]}
+// (`title`: string)
+"fields": [{"name": "title", "type": "string"}]
 
-// CREATE INDEX `name_idx` ON `travel-sample`.`inventory`.`airline` (`iata`);
-{"database_name": "travel-sample", "scope_name": "inventory", "collection_name": "airline",
- "index_name": "name_idx", "fields": [{"name": "iata"}]}
+// (`iata`)  -- type omitted
+"fields": [{"name": "iata"}]
+
+// (UNNEST `public_likes`: string)  -- array of primitives
+"fields": [{"unnest": "public_likes", "type": "string"}]
+
+// (`artist`, UNNEST `reviews` SELECT `ratings`.`Lyrics`: bigint)  -- mixed
+"fields": [{"name": "artist"},
+           {"unnest": "reviews", "select": [{"name": "ratings.Lyrics", "type": "bigint"}]}]
 ```
 
-> **On the optional type.** The published EBNF has
-> `IndexField ::= NestedField ":" IndexTypeRef` with no optional marker, implying a type is
-> always required. That appears to be a documentation bug: the same page's prose says
-> *"Specify a type when using array indexes or a CAST modifier"*, its composite example
-> indexes a bare `artist`, and a live cluster accepts
-> `CREATE INDEX name_idx3 ON \`travel-sample\`.inventory.airline (iata)`. Types **are**
-> mandatory for array indexes.
+Optional clauses: `if_not_exists`, `exclude_unknown_key`, and `cast_default_null` /
+`cast_formats` for `CAST (DEFAULT NULL ...)` — e.g.
+`cast_formats={"date": "MM/DD/YYYY"}` emits `CAST (DEFAULT NULL DATE "MM/DD/YYYY")`,
+used for TAV-backing indexes and non-ISO-8601 date formats.
 
-The tool covers standard scalar indexes (with optional `IF NOT EXISTS` and
-`EXCLUDE UNKNOWN KEY`). Array (`UNNEST`) indexes are out of scope — use `run_query_sync`
-for those.
+Identifiers are backtick-quoted (embedded backticks doubled); the field *type* cannot be
+quoted, so EA validates it. Invalid statements are forwarded to the server rather than
+pre-validated, matching `run_sql_plus_plus_query` in the parent repo.
+
+Behaviours verified against a live cluster that the published grammar does not state:
+
+- A type is **optional** on plain fields, despite `IndexField ::= NestedField ":" IndexTypeRef`
+  showing no optional marker. It is **mandatory** on array-indexed fields.
+- Array indexes **must** pass `exclude_unknown_key=True` (`INCLUDE UNKNOWN KEY` is rejected too).
+- `CAST` cannot be combined with an array index — *"CAST modifier is only allowed for B-Tree indexes"*.
+- The type is not checked against the data: indexing a string field as `double` succeeds but
+  silently indexes nothing. Use `get_schema_for_collection` when a field's type is unknown.
 
 ## Tests
 
