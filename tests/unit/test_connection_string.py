@@ -23,6 +23,26 @@ class TestExtractHostsFromConnectionString:
             "host1"
         ]
 
+    def test_ipv6_host(self) -> None:
+        assert extract_hosts_from_connection_string("couchbase://[::1]:8091") == ["::1"]
+
+    def test_multiple_ipv6_hosts(self) -> None:
+        assert extract_hosts_from_connection_string(
+            "couchbases://[2001:db8::1]:18091,[::1]:18091"
+        ) == ["2001:db8::1", "::1"]
+
+    def test_userinfo_ignored(self) -> None:
+        """A user:pass@ prefix must not be mistaken for the host."""
+        assert extract_hosts_from_connection_string(
+            "couchbase://user:pass@host1:8091"
+        ) == ["host1"]
+
+    def test_empty_connection_string_returns_no_hosts(self) -> None:
+        assert extract_hosts_from_connection_string("") == []
+
+    def test_malformed_connection_string_returns_no_hosts(self) -> None:
+        assert extract_hosts_from_connection_string("not-a-url") == []
+
 
 class TestIsCapellaConnection:
     def test_capella_host_detected(self) -> None:

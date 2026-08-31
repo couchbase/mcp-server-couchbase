@@ -428,6 +428,20 @@ class TestGetClusterMetrics:
         assert "Capella" in result["error"]
         assert "Failed to get cluster metrics" in result["message"]
 
+    def test_rejects_malformed_connection_string_without_rest_call(self) -> None:
+        """A connection string with no extractable host must fail fast, not
+        raise RuntimeError with no underlying error."""
+        settings = {**_VALID_SETTINGS, "connection_string": "not-a-url"}
+        ctx = _make_ctx_with_settings(settings)
+
+        with patch("cb_mcp.tools.server.httpx.Client") as mock_client_cls:
+            result = get_cluster_metrics(ctx, metrics=[{"metric": []}])
+
+        mock_client_cls.assert_not_called()
+        assert result["status"] == "error"
+        assert "No hosts found" in result["error"]
+        assert "Failed to get cluster metrics" in result["message"]
+
     def test_returns_success_envelope_with_rest_response(self) -> None:
         """Happy path wraps the raw stats-range response, per-spec errors and
         all, under {"status": "success", "data": ...}."""
@@ -523,6 +537,20 @@ class TestGetNodesInCluster:
         mock_client_cls.assert_not_called()
         assert result["status"] == "error"
         assert "Capella" in result["error"]
+        assert "Failed to get cluster nodes" in result["message"]
+
+    def test_rejects_malformed_connection_string_without_rest_call(self) -> None:
+        """A connection string with no extractable host must fail fast, not
+        raise RuntimeError with no underlying error."""
+        settings = {**_VALID_SETTINGS, "connection_string": "not-a-url"}
+        ctx = _make_ctx_with_settings(settings)
+
+        with patch("cb_mcp.tools.server.httpx.Client") as mock_client_cls:
+            result = get_nodes_in_cluster(ctx)
+
+        mock_client_cls.assert_not_called()
+        assert result["status"] == "error"
+        assert "No hosts found" in result["error"]
         assert "Failed to get cluster nodes" in result["message"]
 
     def test_returns_success_envelope_with_deduped_targets(self) -> None:

@@ -340,6 +340,10 @@ def get_cluster_metrics(
         # just the CA path for a self-signed self-managed cert, or the system CA bundle.
         verify_ssl = (settings.get("ca_cert_path") or True) if is_tls else False
         hosts = extract_hosts_from_connection_string(connection_string)
+        if not hosts:
+            raise ValueError(
+                f"No hosts found in connection_string: {connection_string!r}"
+            )
 
         last_error: Exception | None = None
         with httpx.Client(verify=verify_ssl, timeout=timeout) as client:
@@ -408,6 +412,10 @@ def get_nodes_in_cluster(
         # just the CA path for a self-signed self-managed cert, or the system CA bundle.
         verify_ssl = (settings.get("ca_cert_path") or True) if is_tls else False
         hosts = extract_hosts_from_connection_string(connection_string)
+        if not hosts:
+            raise ValueError(
+                f"No hosts found in connection_string: {connection_string!r}"
+            )
 
         last_error: Exception | None = None
         with httpx.Client(verify=verify_ssl, timeout=timeout) as client:
