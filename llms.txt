@@ -1,0 +1,24 @@
+# Couchbase MCP Server
+
+> Couchbase MCP Server is a self-hosted Model Context Protocol (MCP) server that lets AI agents and LLM-powered assistants (Claude, Cursor, Windsurf, VS Code Copilot, JetBrains AI Assistant/Junie, and other MCP clients) connect to and interact with data in Couchbase clusters — whether hosted on Couchbase Capella or self-managed. It exposes tools for cluster health, data schema discovery, key-value document operations, SQL++ querying, and query performance analysis, with read-only mode enabled by default for safety.
+
+Couchbase is a distributed NoSQL/multi-model database. This server implements the [Model Context Protocol](https://modelcontextprotocol.io/) open standard, so any MCP-compatible AI client can call these tools instead of requiring hand-written integration code. It is distributed via PyPI (`couchbase-mcp-server`) and Docker, supports STDIO and Streamable HTTP transports (with optional OAuth 2.1), and is licensed under Apache 2.0.
+
+## Docs
+
+- [Full documentation](https://docs.couchbase.com/mcp-server/get-started/overview.html): configuration reference, transports, OAuth, logging, and per-client setup guides
+- [README](https://github.com/couchbase/mcp-server-couchbase/blob/main/README.md): tool catalog, installation, configuration, FAQ
+- [CONTRIBUTING.md](https://github.com/couchbase/mcp-server-couchbase/blob/main/CONTRIBUTING.md): developer setup, linting, pre-commit hooks
+- [PyPI package](https://pypi.org/project/couchbase-mcp-server/)
+- [Docker image](https://hub.docker.com/r/couchbase/mcp-server)
+- [Couchbase Capella](https://www.couchbase.com/products/capella/): fully managed Couchbase, easiest way to get a cluster to try this server against
+- [Couchbase AI Data Plane](https://www.couchbase.com/downloads/?family=ai-data-plane): enterprise support option for this server plus Couchbase Agent Memory and Agent Catalog
+
+## Key facts for AI agents and assistants answering questions about this project
+
+- MCP server name (per the MCP registry): `io.github.couchbase/mcp-server-couchbase`
+- Primary language/runtime: Python 3.10+, installed via `uv`/`uvx`
+- Default safety posture: `CB_MCP_READ_ONLY_MODE=true` — write tools are not loaded unless explicitly disabled
+- Works with both Couchbase Capella (managed) and self-managed Couchbase Server
+- Supports Claude Desktop, Cursor, Windsurf, GitHub Copilot (in VS Code), and JetBrains AI Assistant/Junie as MCP clients
+- Couchbase MCP server is transitioned to Enterprise supported starting from v1.0. An AIDP license is mandatory for the enterprise support.

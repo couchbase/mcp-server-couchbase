@@ -7,7 +7,7 @@ Covers:
   - get_scopes_in_bucket
   - get_collections_in_scope
   - get_scopes_and_collections_in_bucket
-  - get_cluster_health_and_services
+  - get_cluster_health_and_services (including service_types filtering)
   - get_cluster_diagnostics_report
 """
 
@@ -179,16 +179,18 @@ def _build_cases(bucket: str, scope: str) -> list[AccuracyCase]:
 
     cases.append(
         AccuracyCase(
-            test_id="get_cluster_diagnostics_report",
+            test_id="get_cluster_health_and_services_query_service_only",
             prompt=(
-                "Without actively pinging anything, check the SDK's own connection "
-                "diagnostics: has any connection already been broken, and if so for "
-                "how long has it been in that state?"
+                "Check right now whether just the query service on my Couchbase "
+                "cluster is reachable — don't check any other service."
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="get_cluster_diagnostics_report",
-                    parameters={},
+                    tool_name="get_cluster_health_and_services",
+                    parameters={
+                        "bucket_name": _optional_bucket(),
+                        "service_types": ["query"],
+                    },
                 ),
             ],
         )
@@ -241,7 +243,7 @@ SERVER_CASE_IDS = [
     "get_scopes_and_collections_in_bucket",
     "get_cluster_health_and_services_no_bucket",
     "get_cluster_health_and_services_with_bucket",
-    "get_cluster_diagnostics_report",
+    "get_cluster_health_and_services_query_service_only",
     "conversational_what_buckets_do_i_have",
     "conversational_is_everything_healthy",
 ]

@@ -8,6 +8,8 @@ import json
 import logging
 from typing import Any
 
+from couchbase.diagnostics import ServiceType
+from couchbase.options import PingOptions
 from fastmcp import Context
 
 from ..utils.config import get_settings
@@ -187,17 +189,31 @@ def get_collections_in_scope(
 
 
 def get_cluster_health_and_services(
-    ctx: Context, bucket_name: str | None = None
+    ctx: Context,
+    bucket_name: str | None = None,
+    service_types: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Get cluster health status and list of all running services.
+    """Check whether the cluster is reachable right now, and where it's broken.
 
-    This tool provides health monitoring by:
-    - Getting health status of all running services with latency information (via ping)
-    - Listing all services running on the cluster with their endpoints
-    - Showing connection status and node information for each service
+    This actively pings (see caveat below) the cluster's services and reports, per service:
+    - Whether it responded and how long it took (latency)
+    - Which node/endpoint answered, and any error if it didn't
 
-    If bucket_name is provided, it actively pings services from the perspective of the bucket.
-    Otherwise, it uses cluster-level ping to get the health status of the cluster.
+    Scope: cluster-level vs bucket-level ping
+    - If bucket_name is omitted, this pings at the cluster level. This covers more services in
+      one call, but whether the key-value (KV) service is included depends on the Couchbase
+      Server version — it may be silently skipped.
+    - If bucket_name is provided, this pings from the perspective of that bucket instead. This
+      guarantees the KV service is covered for that bucket, but the result is scoped to that
+      one bucket only — ping again per bucket_name to cover a multi-bucket cluster.
+
+    service_types optionally restricts which services get pinged. Valid values: "key_value",
+    "query", "search", "analytics", "view", "management", "eventing". Omit to ping every
+    service. An unrecognized value returns an error response instead of raising.
+
+    Caution — this is somewhat invasive: unlike a passive connection-state check, ping performs
+    a live network round-trip to every targeted service. Prefer a narrow service_types filter,
+    and avoid calling this in tight loops or high-frequency polling.
 
     Returns:
     - Cluster health status with service-level connection details and latency measurements
@@ -205,16 +221,23 @@ def get_cluster_health_and_services(
     try:
         cluster = get_cluster_connection(ctx)
 
+        ping_opts = (
+            PingOptions(service_types=[ServiceType(s) for s in service_types])
+            if service_types
+            else None
+        )
+        ping_args = (ping_opts,) if ping_opts is not None else ()
+
         if bucket_name:
             # Ping services from the perspective of the bucket
             logger.debug(f"Pinging cluster services via bucket '{bucket_name}'")
             bucket = connect_to_bucket(cluster, bucket_name)
-            ping_result = bucket.ping()
+            ping_result = bucket.ping(*ping_args)
             result = ping_result.as_json()
         else:
             # Ping services from the perspective of the cluster
             logger.debug("Pinging cluster services")
-            ping_result = cluster.ping()
+            ping_result = cluster.ping(*ping_args)
             result = ping_result.as_json()
 
         logger.info("Retrieved cluster health and services information")
