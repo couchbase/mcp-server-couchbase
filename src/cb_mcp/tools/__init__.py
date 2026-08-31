@@ -5,10 +5,7 @@ This module contains all the MCP tools for Couchbase operations.
 
 Tool Categories:
 - READ_ONLY_TOOLS: Tools that only read data (always available)
-- KV_WRITE_TOOLS: KV tools that modify data (disabled when READ_ONLY_MODE=True)
-- COLLECTION_WRITE_TOOLS: Scope/collection management tools that modify data
-  (disabled when READ_ONLY_MODE=True)
-- INDEX_WRITE_TOOLS: Index management tools that modify data (disabled when READ_ONLY_MODE=True)
+- WRITE_TOOLS: Tools that modify data (disabled when READ_ONLY_MODE=True)
 """
 
 from collections.abc import Callable
@@ -100,34 +97,27 @@ READ_ONLY_TOOLS = [
     get_most_frequent_queries,
 ]
 
-# KV write tools - disabled when READ_ONLY_MODE is True
-KV_WRITE_TOOLS = [
+# Write tools - disabled when READ_ONLY_MODE is True
+WRITE_TOOLS = [
+    # KV write tools
     upsert_document_by_id,
     insert_document_by_id,
     replace_document_by_id,
     delete_document_by_id,
     mutate_subdocument,
-]
-
-# Scope/collection management write tools - disabled when READ_ONLY_MODE is True
-COLLECTION_WRITE_TOOLS = [
+    # Scope/collection management write tools
     create_scope,
     create_collection,
     delete_scope,
     delete_collection,
-]
-
-# Index write tools - disabled when READ_ONLY_MODE is True
-INDEX_WRITE_TOOLS = [
+    # Index write tools
     create_index,
     build_index,
     drop_index,
 ]
 
 # List of all tools for easy registration (kept for backward compatibility)
-ALL_TOOLS = (
-    READ_ONLY_TOOLS + KV_WRITE_TOOLS + COLLECTION_WRITE_TOOLS + INDEX_WRITE_TOOLS
-)
+ALL_TOOLS = READ_ONLY_TOOLS + WRITE_TOOLS
 
 # Tool annotations for MCP clients (readOnlyHint, destructiveHint, etc.)
 TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
@@ -186,9 +176,7 @@ def get_tools(read_only_mode: bool = True) -> list[Callable]:
 
     if not read_only_mode:
         # Write tools are only loaded when READ_ONLY_MODE is False
-        tools.extend(KV_WRITE_TOOLS)
-        tools.extend(COLLECTION_WRITE_TOOLS)
-        tools.extend(INDEX_WRITE_TOOLS)
+        tools.extend(WRITE_TOOLS)
 
     return tools
 
@@ -231,9 +219,7 @@ __all__ = [
     "get_most_frequent_queries",
     # Tool categories
     "READ_ONLY_TOOLS",
-    "KV_WRITE_TOOLS",
-    "COLLECTION_WRITE_TOOLS",
-    "INDEX_WRITE_TOOLS",
+    "WRITE_TOOLS",
     # Tool annotations
     "TOOL_ANNOTATIONS",
     # Convenience

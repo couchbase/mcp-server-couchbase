@@ -5,7 +5,7 @@ Tool registration orchestration shared across MCP implementations.
 import logging
 from collections.abc import Callable
 
-from .tools import COLLECTION_WRITE_TOOLS, INDEX_WRITE_TOOLS, KV_WRITE_TOOLS, get_tools
+from .tools import WRITE_TOOLS, get_tools
 from .utils import wrap_with_telemetry
 from .utils.config import parse_tool_names
 from .utils.constants import MCP_SERVER_NAME
@@ -80,10 +80,7 @@ def prepare_tools_for_registration(
             f"{sorted(skipped_confirmation_tool_names)}"
         )
 
-    write_tool_names = {
-        fn.__name__
-        for fn in KV_WRITE_TOOLS + COLLECTION_WRITE_TOOLS + INDEX_WRITE_TOOLS
-    }
+    write_tool_names = {fn.__name__ for fn in WRITE_TOOLS}
 
     final_tools: list[Callable] = []
     for tool in enabled_tools:
