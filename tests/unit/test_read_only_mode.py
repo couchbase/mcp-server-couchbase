@@ -43,9 +43,9 @@ INDEX_WRITE_TOOL_NAMES = {
     "drop_index",
 }
 
-# Read-only tool names that should always be available (22 tools)
+# Read-only tool names that should always be available (24 tools)
 READ_ONLY_TOOL_NAMES = {
-    # Server/Cluster management tools (8)
+    # Server/Cluster management tools (10)
     "get_buckets_in_cluster",
     "get_server_configuration_status",
     "test_cluster_connection",
@@ -54,6 +54,8 @@ READ_ONLY_TOOL_NAMES = {
     "get_scopes_in_bucket",
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
+    "get_cluster_metrics",
+    "get_nodes_in_cluster",
     # KV read tools (2)
     "get_document_by_id",
     "lookup_subdocument",
@@ -225,15 +227,15 @@ class TestToolCounts:
         """Verify correct number of tools in read-only mode."""
         tools = get_tools(read_only_mode=True)
         assert len(tools) == len(READ_ONLY_TOOLS)
-        assert len(tools) == 22  # Expected count of read-only tools
+        assert len(tools) == 24  # Expected count of read-only tools
 
     def test_all_tools_mode_tool_count(self):
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (22 read-only + 5 KV write + 4 collection write
+        # Expected total count (24 read-only + 5 KV write + 4 collection write
         # + 3 index write)
-        assert len(tools) == 34
+        assert len(tools) == 36
 
     def test_kv_write_tools_count(self):
         """Verify exactly 5 KV write tools exist."""

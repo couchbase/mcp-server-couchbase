@@ -117,6 +117,36 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[ResultCase]:
         )
     )
 
+    cases.append(
+        ResultCase(
+            test_id="cluster_metrics_faithful",
+            prompt=(
+                "Over the last hour, what has the CPU utilization looked like on "
+                "my Couchbase cluster?"
+            ),
+            expectation=(
+                "Faithfulness check. The answer must reflect the stats-range tool "
+                "output (whether the requested metric was found, its trend/values, "
+                "or any per-metric error the tool reported). FAIL if it invents "
+                "numeric values not present in the tool output, or if the tool "
+                "reported an error (e.g. connection or metric-not-found) but the "
+                "answer claims a successful trend anyway."
+            ),
+        )
+    )
+
+    cases.append(
+        ResultCase(
+            test_id="nodes_in_cluster_faithful",
+            prompt="What nodes are currently part of my Couchbase cluster?",
+            expectation=(
+                "Faithfulness check. The answer must reflect the node list the "
+                "tool returned. FAIL if it invents nodes not present in the tool "
+                "output or omits nodes that were returned."
+            ),
+        )
+    )
+
     return cases
 
 
@@ -133,6 +163,8 @@ SERVER_RESULT_CASE_IDS = [
     "health_faithful",
     "config_faithful",
     "connection_faithful",
+    "cluster_metrics_faithful",
+    "nodes_in_cluster_faithful",
 ]
 
 
