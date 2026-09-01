@@ -83,12 +83,14 @@ def get_collections_in_scope(
 ) -> list[dict[str, Any]]:
     """List all collections (datasets) in a scope.
 
-    Returns a list of rows, each with DatabaseName, ScopeName, and
-    CollectionName fields.
+    Returns a list of rows, each with DatabaseName, ScopeName,
+    CollectionName, and Type fields. Type is the collection's DatasetType
+    (INTERNAL, EXTERNAL, or VIEW) — callers that only want stored/linked
+    collections should filter out Type == "VIEW" themselves.
     """
     query = (
         "SELECT d.DatabaseName, d.DataverseName AS ScopeName, "
-        "d.DatasetName AS CollectionName "
+        "d.DatasetName AS CollectionName, d.DatasetType AS `Type` "
         "FROM System.Metadata.`Dataset` d "
         'WHERE d.DataverseName <> "Metadata" '
         "AND d.DatabaseName = $database_name AND d.DataverseName = $scope_name;"
@@ -125,13 +127,16 @@ def get_schema_for_collection(
     collection_name: str,
     sample_size: int = 1000,
 ) -> list[dict[str, Any]]:
-    """Infer the JSON schema of a collection by sampling documents.
+    """Infer the JSON schema of a collection using Analytics' built-in
+    ARRAY_INFER_SCHEMA function, sampling up to sample_size documents.
 
-    Samples up to sample_size documents from the collection and reports each
-    field's inferred type and how many sampled documents had it. sample_size
-    must be positive and is capped at MAX_SCHEMA_SAMPLE_SIZE.
+    ARRAY_INFER_SCHEMA detects distinct structural "flavors" across the
+    sample and returns one JSON-Schema-shaped object per flavor (with
+    per-property type/percentage/sample-value stats) — this is the same
+    function the Capella UI uses for schema inference. sample_size must be
+    positive and is capped at MAX_SCHEMA_SAMPLE_SIZE.
 
-    Returns a list of rows, each with field, data_type, and occurrences.
+    Returns a list of JSON-Schema-shaped objects, one per detected flavor.
     """
     if sample_size <= 0:
         raise ValueError(f"sample_size must be positive, got {sample_size}")
@@ -142,18 +147,9 @@ def get_schema_for_collection(
         f"{safe_ident(collection_name)}"
     )
     query = (
-        f"SELECT p.name AS field, t AS data_type, COUNT(*) AS occurrences "
-        f"FROM (SELECT VALUE d FROM {keyspace} AS d LIMIT $sample_size) AS d "
-        f"UNNEST OBJECT_PAIRS(d) AS p "
-        f"LET t = CASE "
-        f'WHEN is_number(p.`value`) THEN "number" '
-        f'WHEN is_string(p.`value`) THEN "string" '
-        f'WHEN is_boolean(p.`value`) THEN "boolean" '
-        f'WHEN is_array(p.`value`) THEN "array" '
-        f'WHEN is_object(p.`value`) THEN "object" '
-        f'ELSE "null/unknown" END '
-        f"GROUP BY p.name, t "
-        f"ORDER BY field, occurrences DESC;"
+        "SELECT VALUE ARRAY_INFER_SCHEMA("
+        f"(SELECT VALUE d FROM {keyspace} AS d LIMIT $sample_size)"
+        ");"
     )
     try:
         logger.debug(f"Inferring schema for {keyspace}")
@@ -161,11 +157,16 @@ def get_schema_for_collection(
         result = cluster.execute_query(
             query, QueryOptions(named_parameters={"sample_size": sample_size})
         )
+        # SELECT VALUE over a bare array_infer_schema() call returns exactly
+        # one row whose value is the array of flavor objects itself — unwrap
+        # it so this tool returns a flat list of flavor objects like its
+        # other list-returning siblings.
         rows = result.get_all_rows()
+        flavors = rows[0] if rows else []
         logger.info(
             f"Inferred schema for {keyspace} from {sample_size} sampled document(s)"
         )
-        return rows
+        return flavors
     except Exception as e:
         logger.error(f"Error inferring schema for {keyspace}: {e}", exc_info=True)
         raise
