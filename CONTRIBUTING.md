@@ -113,7 +113,7 @@ When implementing:
 
 1. **Create the tool function** in the appropriate module under `src/cb_mcp/tools/` (`server.py`, `kv.py`, `query.py`, or `index.py`), or propose a new module in your issue if none fits
 2. **Export the tool** in `src/cb_mcp/tools/__init__.py` and add it to `__all__`
-3. **Add it to the correct tool list** in `src/cb_mcp/tools/__init__.py`: `READ_ONLY_TOOLS` if it only reads data, or `KV_WRITE_TOOLS` if it modifies data (so it's excluded under read-only mode)
+3. **Add it to the correct tool list** in `src/cb_mcp/tools/__init__.py`: `READ_ONLY_TOOLS` if it only reads data, or `WRITE_TOOLS` if it modifies data (so it's excluded under read-only mode)
 4. **Add an entry to `TOOL_ANNOTATIONS`** with accurate hints (`readOnlyHint`, `idempotentHint`, `destructiveHint`) — clients rely on these for safety decisions
 5. **Respect read-only mode**: any tool that can modify data or cluster state must be excluded when `read_only_mode` is enabled
 6. **Support confirmation**: destructive tools should work with the confirmation/elicitation mechanism (`src/cb_mcp/utils/elicitation.py`)
