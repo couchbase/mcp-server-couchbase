@@ -90,7 +90,7 @@ def get_collections_in_scope(
     """
     query = (
         "SELECT d.DatabaseName, d.DataverseName AS ScopeName, "
-        "d.DatasetName AS CollectionName, d.DatasetType AS Type "
+        "d.DatasetName AS CollectionName, d.DatasetType AS `Type` "
         "FROM System.Metadata.`Dataset` d "
         'WHERE d.DataverseName <> "Metadata" '
         "AND d.DatabaseName = $database_name AND d.DataverseName = $scope_name;"
