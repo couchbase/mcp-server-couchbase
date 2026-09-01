@@ -4,6 +4,10 @@ run_query_sync can carry DDL/DML, so — unlike the metadata tools in this
 package — it follows the parent server's write-tool convention: catch
 Exception, log, and return a {"success": False, "error": ...} envelope
 instead of raising.
+
+explain_query never executes the statement it's given, so it follows the
+metadata tools' read-tool convention instead: raise on error, return the raw
+list of rows.
 """
 
 import logging
@@ -36,3 +40,26 @@ def run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"Error running query: {e}", exc_info=True)
         return tool_error(e, statement=statement)
+
+
+def explain_query(ctx: Context, statement: str) -> list[dict[str, Any]]:
+    """Generate the query plan for a SQL++ statement using EXPLAIN, without executing it.
+
+    Whether the plan is cost-based or rule-based depends on whether the
+    optimizer has collected samples for the target collection(s) — this tool
+    just returns whatever plan the optimizer produces.
+
+    Pass the statement without an EXPLAIN keyword; it is added automatically.
+
+    Returns the raw EXPLAIN result rows.
+    """
+    cluster = get_cluster_connection(ctx)
+    try:
+        logger.debug("Running EXPLAIN for SQL++ statement")
+        result = cluster.execute_query(f"EXPLAIN {statement}")
+        rows = result.get_all_rows()
+        logger.info(f"EXPLAIN returned {len(rows)} row(s)")
+        return rows
+    except Exception as e:
+        logger.error(f"Error running EXPLAIN: {e}", exc_info=True)
+        raise
