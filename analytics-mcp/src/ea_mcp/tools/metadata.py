@@ -83,12 +83,14 @@ def get_collections_in_scope(
 ) -> list[dict[str, Any]]:
     """List all collections (datasets) in a scope.
 
-    Returns a list of rows, each with DatabaseName, ScopeName, and
-    CollectionName fields.
+    Returns a list of rows, each with DatabaseName, ScopeName,
+    CollectionName, and Type fields. Type is the collection's DatasetType
+    (INTERNAL, EXTERNAL, or VIEW) — callers that only want stored/linked
+    collections should filter out Type == "VIEW" themselves.
     """
     query = (
         "SELECT d.DatabaseName, d.DataverseName AS ScopeName, "
-        "d.DatasetName AS CollectionName "
+        "d.DatasetName AS CollectionName, d.DatasetType AS Type "
         "FROM System.Metadata.`Dataset` d "
         'WHERE d.DataverseName <> "Metadata" '
         "AND d.DatabaseName = $database_name AND d.DataverseName = $scope_name;"
