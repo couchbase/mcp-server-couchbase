@@ -127,13 +127,16 @@ def get_schema_for_collection(
     collection_name: str,
     sample_size: int = 1000,
 ) -> list[dict[str, Any]]:
-    """Infer the JSON schema of a collection by sampling documents.
+    """Infer the JSON schema of a collection using Analytics' built-in
+    ARRAY_INFER_SCHEMA function, sampling up to sample_size documents.
 
-    Samples up to sample_size documents from the collection and reports each
-    field's inferred type and how many sampled documents had it. sample_size
-    must be positive and is capped at MAX_SCHEMA_SAMPLE_SIZE.
+    ARRAY_INFER_SCHEMA detects distinct structural "flavors" across the
+    sample and returns one JSON-Schema-shaped object per flavor (with
+    per-property type/percentage/sample-value stats) — this is the same
+    function the Capella UI uses for schema inference. sample_size must be
+    positive and is capped at MAX_SCHEMA_SAMPLE_SIZE.
 
-    Returns a list of rows, each with field, data_type, and occurrences.
+    Returns a list of JSON-Schema-shaped objects, one per detected flavor.
     """
     if sample_size <= 0:
         raise ValueError(f"sample_size must be positive, got {sample_size}")
@@ -144,18 +147,10 @@ def get_schema_for_collection(
         f"{safe_ident(collection_name)}"
     )
     query = (
-        f"SELECT p.name AS field, t AS data_type, COUNT(*) AS occurrences "
-        f"FROM (SELECT VALUE d FROM {keyspace} AS d LIMIT $sample_size) AS d "
-        f"UNNEST OBJECT_PAIRS(d) AS p "
-        f"LET t = CASE "
-        f'WHEN is_number(p.`value`) THEN "number" '
-        f'WHEN is_string(p.`value`) THEN "string" '
-        f'WHEN is_boolean(p.`value`) THEN "boolean" '
-        f'WHEN is_array(p.`value`) THEN "array" '
-        f'WHEN is_object(p.`value`) THEN "object" '
-        f'ELSE "null/unknown" END '
-        f"GROUP BY p.name, t "
-        f"ORDER BY field, occurrences DESC;"
+        "SELECT s.* "
+        "FROM ARRAY_INFER_SCHEMA("
+        f"(SELECT VALUE d FROM {keyspace} AS d LIMIT $sample_size)"
+        ") AS s;"
     )
     try:
         logger.debug(f"Inferring schema for {keyspace}")
