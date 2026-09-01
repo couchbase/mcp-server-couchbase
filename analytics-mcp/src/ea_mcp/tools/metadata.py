@@ -147,10 +147,9 @@ def get_schema_for_collection(
         f"{safe_ident(collection_name)}"
     )
     query = (
-        "SELECT s.* "
-        "FROM ARRAY_INFER_SCHEMA("
+        "SELECT VALUE ARRAY_INFER_SCHEMA("
         f"(SELECT VALUE d FROM {keyspace} AS d LIMIT $sample_size)"
-        ") AS s;"
+        ");"
     )
     try:
         logger.debug(f"Inferring schema for {keyspace}")
@@ -158,11 +157,16 @@ def get_schema_for_collection(
         result = cluster.execute_query(
             query, QueryOptions(named_parameters={"sample_size": sample_size})
         )
+        # SELECT VALUE over a bare array_infer_schema() call returns exactly
+        # one row whose value is the array of flavor objects itself — unwrap
+        # it so this tool returns a flat list of flavor objects like its
+        # other list-returning siblings.
         rows = result.get_all_rows()
+        flavors = rows[0] if rows else []
         logger.info(
             f"Inferred schema for {keyspace} from {sample_size} sampled document(s)"
         )
-        return rows
+        return flavors
     except Exception as e:
         logger.error(f"Error inferring schema for {keyspace}: {e}", exc_info=True)
         raise
