@@ -42,8 +42,8 @@ async def test_explain_query_returns_plan() -> None:
         )
         payload = extract_payload(response)
 
-        assert isinstance(payload, list)
-        assert len(payload) > 0
+        assert payload["success"] is True
+        assert len(payload["plan"]) > 0
 
 
 @pytest.mark.asyncio
@@ -58,15 +58,17 @@ async def test_explain_query_does_not_execute_statement() -> None:
 
         # A division-by-zero would fail if the statement were actually
         # executed; EXPLAIN only plans it, so this should succeed.
-        assert isinstance(payload, list)
+        assert payload["success"] is True
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_explain_query_invalid_statement_raises() -> None:
+async def test_explain_query_invalid_statement_returns_error_envelope() -> None:
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "explain_query", arguments={"statement": "SELECT bad("}
         )
+        payload = extract_payload(response)
 
-        assert response.isError is True
+        assert payload["success"] is False
+        assert "error" in payload

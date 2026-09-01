@@ -5,9 +5,8 @@ package — it follows the parent server's write-tool convention: catch
 Exception, log, and return a {"success": False, "error": ...} envelope
 instead of raising.
 
-explain_query never executes the statement it's given, so it follows the
-metadata tools' read-tool convention instead: raise on error, return the raw
-list of rows.
+explain_query follows the same convention: catch Exception, log, and return
+a {"success": False, "error": ...} envelope instead of raising.
 """
 
 import logging
@@ -42,7 +41,7 @@ def run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
         return tool_error(e, statement=statement)
 
 
-def explain_query(ctx: Context, statement: str) -> list[dict[str, Any]]:
+def explain_query(ctx: Context, statement: str) -> dict[str, Any]:
     """Generate the query plan for a SQL++ statement using EXPLAIN, without executing it.
 
     Whether the plan is cost-based or rule-based depends on whether the
@@ -51,7 +50,8 @@ def explain_query(ctx: Context, statement: str) -> list[dict[str, Any]]:
 
     Pass the statement without an EXPLAIN keyword; it is added automatically.
 
-    Returns the raw EXPLAIN result rows.
+    Returns {"success": True, "plan": [...]} on success, or
+    {"success": False, "error": "..."} on failure.
     """
     cluster = get_cluster_connection(ctx)
     try:
@@ -59,7 +59,7 @@ def explain_query(ctx: Context, statement: str) -> list[dict[str, Any]]:
         result = cluster.execute_query(f"EXPLAIN {statement}")
         rows = result.get_all_rows()
         logger.info(f"EXPLAIN returned {len(rows)} row(s)")
-        return rows
+        return tool_success(plan=rows)
     except Exception as e:
         logger.error(f"Error running EXPLAIN: {e}", exc_info=True)
-        raise
+        return tool_error(e, statement=statement)
