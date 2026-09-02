@@ -15,7 +15,7 @@ from .metadata import (
     get_schema_for_collection,
     get_scopes_in_database,
 )
-from .query import run_query_sync
+from .query import explain_query, run_query_sync
 
 TOOLS: list[Callable] = [
     get_databases_in_cluster,
@@ -24,6 +24,7 @@ TOOLS: list[Callable] = [
     get_schema_for_collection,
     create_index,
     run_query_sync,
+    explain_query,
 ]
 
 TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
@@ -38,11 +39,13 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     # run_query_sync can carry DDL/DML per the tool spec, so it gets no
     # readOnlyHint (matches run_sql_plus_plus_query in the parent server).
     "run_query_sync": ToolAnnotations(),
+    "explain_query": ToolAnnotations(readOnlyHint=True),
 }
 
 __all__ = [
     "TOOLS",
     "TOOL_ANNOTATIONS",
+    "explain_query",
     "create_index",
     "get_collections_in_scope",
     "get_databases_in_cluster",

@@ -134,7 +134,7 @@ def get_schema_for_collection(
     sample and returns one JSON-Schema-shaped object per flavor (with
     per-property type/percentage/sample-value stats) — this is the same
     function the Capella UI uses for schema inference. sample_size must be
-    positive and is capped at MAX_SCHEMA_SAMPLE_SIZE.
+    positive and is capped at 10_000.
 
     Returns a list of JSON-Schema-shaped objects, one per detected flavor.
     """
