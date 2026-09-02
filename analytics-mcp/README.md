@@ -25,7 +25,56 @@ EA_CONNECTION_STRING=http://localhost:8095 EA_USERNAME=Administrator EA_PASSWORD
 | `get_scopes_in_database` | List all scopes in a database |
 | `get_collections_in_scope` | List all collections (datasets) in a scope |
 | `get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents |
+| `create_index` | Create a secondary index on a collection via `CREATE INDEX` |
 | `run_query_sync` | Run a SQL++ statement and buffer all result rows in memory |
+
+### Note on `create_index`
+
+The `couchbase-analytics` SDK exposes **no index manager** — `Cluster` offers only
+`database()`, `execute_query()`, `start_query()`, `set_credential()` and `shutdown()`,
+and `Scope` only the two query methods. Unlike the parent `mcp-server-couchbase` server
+(which uses the operational SDK's `collection.query_indexes().create_index(...)`),
+`create_index` therefore has to build and execute a SQL++
+[`CREATE INDEX`](https://docs.couchbase.com/enterprise-analytics/current/sqlpp/5_ddl_index.html)
+statement.
+
+Each entry in `fields` is one index element. A plain field is
+`{"name": ..., "type": ...}`, where `type` is optional (`bigint`, `int`, `double`,
+`string`, `date`, `time`, `datetime`); dotted paths address nested fields. To index
+inside an array, use `unnest` instead of `name`, with `select` for arrays of objects:
+
+```jsonc
+// (`title`: string)
+"fields": [{"name": "title", "type": "string"}]
+
+// (`iata`)  -- type omitted
+"fields": [{"name": "iata"}]
+
+// (UNNEST `public_likes`: string)  -- array of primitives
+"fields": [{"unnest": "public_likes", "type": "string"}]
+
+// (`artist`, UNNEST `reviews` SELECT `ratings`.`Lyrics`: bigint)  -- mixed
+"fields": [{"name": "artist"},
+           {"unnest": "reviews", "select": [{"name": "ratings.Lyrics", "type": "bigint"}]}]
+```
+
+Optional clauses: `if_not_exists`, `exclude_unknown_key`, and `cast_default_null` /
+`cast_formats` for `CAST (DEFAULT NULL ...)` — e.g.
+`cast_formats={"date": "MM/DD/YYYY"}` emits `CAST (DEFAULT NULL DATE "MM/DD/YYYY")`,
+used for TAV-backing indexes and non-ISO-8601 date formats.
+
+Identifiers are backtick-quoted (embedded backticks doubled); the field *type* cannot be
+quoted, so EA validates it. Invalid statements are forwarded to the server rather than
+pre-validated, matching `run_sql_plus_plus_query` in the parent repo.
+
+Behaviours verified against a live cluster that the published grammar does not state:
+
+- A type is **optional** on plain fields, despite `IndexField ::= NestedField ":" IndexTypeRef`
+  showing no optional marker. It is **mandatory** on array-indexed fields.
+- Array indexes **must** pass `exclude_unknown_key=True` (`INCLUDE UNKNOWN KEY` is rejected too).
+- `CAST` cannot be combined with an array index — *"CAST modifier is only allowed for B-Tree indexes"*.
+- The type is not checked against the data: indexing a string field as `double` succeeds but
+  silently indexes nothing. Use `get_schema_for_collection` when a field's type is unknown.
 
 ## Tests
 
