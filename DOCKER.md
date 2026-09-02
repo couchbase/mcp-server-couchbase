@@ -22,6 +22,8 @@ Documentation: <https://docs.couchbase.com/mcp-server/get-started/overview.html>
 | `test_cluster_connection` | Check the cluster credentials by connecting to the cluster |
 | `get_cluster_health_and_services` | Get cluster health status and list of all running services, optionally filtered to specific services via `service_types` |
 | `get_cluster_diagnostics_report` | Get the SDK's cached connection diagnostics — whether connections were already broken and for how long, without any active network probing |
+| `get_cluster_metrics` | Get one or more cluster statistics over a historic time window via the Management REST API's stats-range endpoint. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
+| `get_nodes_in_cluster` | List cluster nodes as host:port targets via the Prometheus service-discovery REST endpoint. **Self-managed Couchbase Server only — not available on Capella.** |
 
 ### Data model & schema discovery tools
 
