@@ -16,11 +16,15 @@ from fastmcp.tools import FunctionTool
 
 # Reusable tools and utilities from the cb_mcp package
 from cb_mcp.auth import OAuthConfigError, resolve_oauth
-from cb_mcp.tool_registration import prepare_tools_for_registration
+from cb_mcp.tool_registration import (
+    TextOnlyFunctionTool,
+    prepare_tools_for_registration,
+)
 from cb_mcp.tools import TOOL_ANNOTATIONS
 from cb_mcp.utils import (
     ALLOWED_OAUTH_ALGORITHMS,
     ALLOWED_TRANSPORTS,
+    DEFAULT_DISABLE_STRUCTURED_OUTPUT,
     DEFAULT_HOST,
     DEFAULT_LOG_BACKUP_COUNT,
     DEFAULT_LOG_FILE,
@@ -153,6 +157,7 @@ def build_mcp_server(params: Mapping[str, Any]) -> FastMCP:
     """
     transport = params["transport"]
     read_only_mode = params["read_only_mode"]
+    disable_structured_output = params["disable_structured_output"]
 
     auth = resolve_oauth_from_params(params)
 
@@ -189,6 +194,10 @@ def build_mcp_server(params: Mapping[str, Any]) -> FastMCP:
         # effect, so this reports the real ceiling rather than the configured
         # one (which is None whenever the operator left it to the runtime).
         "thread_pool_size": params["thread_pool_size"],
+        # Whether tools were registered without an output schema, so results
+        # carry text content only. Reported because it changes the shape of
+        # every tool response a client sees.
+        "disable_structured_output": disable_structured_output,
         # OAuth resource-server config (non-secret IdP coordinates), captured
         # for the env-info diagnostic and get_server_configuration_status.
         # ``oauth_enabled`` is whether OAuth is active: resolve_oauth returns
@@ -255,10 +264,28 @@ def build_mcp_server(params: Mapping[str, Any]) -> FastMCP:
         f"Registering {len(final_tools)} tool(s) with modes (read_only_mode={read_only_mode})"
     )
 
+    # Disabling structured output takes both halves: ``output_schema=None``
+    # stops FastMCP deriving a schema from the tool's return annotation, and
+    # TextOnlyFunctionTool drops the structuredContent it would otherwise still
+    # attach to dict results. Left at FastMCP's ``NotSet`` default the schema is
+    # inferred as usual, so the kwarg is omitted rather than passed as a
+    # default.
+    tool_class = TextOnlyFunctionTool if disable_structured_output else FunctionTool
+    schema_kwargs: dict[str, Any] = (
+        {"output_schema": None} if disable_structured_output else {}
+    )
+    if disable_structured_output:
+        logger.info(
+            "Structured output disabled: registering tools without an output "
+            "schema, so results are returned as text content only."
+        )
+
     # Register tools; FastMCP 3.x add_tool has no annotations kwarg, so wrap first.
     for tool in final_tools:
         annotations = TOOL_ANNOTATIONS.get(tool.__name__)
-        tool_obj = FunctionTool.from_function(tool, annotations=annotations)
+        tool_obj = tool_class.from_function(
+            tool, annotations=annotations, **schema_kwargs
+        )
         mcp.add_tool(tool_obj)
 
     logger.info(f"Registered {len(final_tools)} tool(s)")
@@ -418,6 +445,18 @@ def run_workers(params: Mapping[str, Any]) -> None:
     "--transport=http. An unrecognised value falls back to that default with "
     "an error log entry, and a value that cannot work with the rest of the "
     "configuration is overridden with a warning rather than rejected.",
+)
+@click.option(
+    "--disable-structured-output",
+    "disable_structured_output",
+    envvar="CB_MCP_DISABLE_STRUCTURED_OUTPUT",
+    type=bool,
+    default=DEFAULT_DISABLE_STRUCTURED_OUTPUT,
+    help="Register every tool without an output schema, so results are "
+    "returned as text content only instead of also carrying structured "
+    "content. Use this with clients that mishandle or reject a tool's "
+    "structured output, or to avoid sending each result twice. Applies to all "
+    "tools; it cannot be set per tool.",
 )
 @click.option(
     "--disabled-tools",
@@ -644,6 +683,7 @@ def main(
     workers,
     thread_pool_size,
     stateless_http,
+    disable_structured_output,
     disabled_tools,
     confirmation_required_tools,
     oauth_jwks_uri,

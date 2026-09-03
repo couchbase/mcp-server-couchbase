@@ -4,6 +4,9 @@ Tool registration orchestration shared across MCP implementations.
 
 import logging
 from collections.abc import Callable
+from typing import Any
+
+from fastmcp.tools import FunctionTool, ToolResult
 
 from .tools import COLLECTION_WRITE_TOOLS, INDEX_WRITE_TOOLS, KV_WRITE_TOOLS, get_tools
 from .utils import wrap_with_telemetry
@@ -17,6 +20,30 @@ from .utils.scope_enforcement import (
 )
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tool_registration")
+
+
+class TextOnlyFunctionTool(FunctionTool):
+    """A tool whose results never carry ``structuredContent``.
+
+    Registering a tool with ``output_schema=None`` only drops the schema.
+    FastMCP still attaches structured content to any result that serialises to
+    a dict (see ``Tool.convert_result``), so a dict-returning tool would keep
+    sending every result twice — once as JSON text, once as a structured
+    object — with no schema for the client to validate it against. This strips
+    that second copy, leaving the text block FastMCP already produced from the
+    same value.
+
+    Used by entrypoints that expose a "disable structured output" option, for
+    clients that mishandle or reject structured tool results.
+    """
+
+    def convert_result(self, raw_value: Any) -> ToolResult:
+        result = super().convert_result(raw_value)
+        if result.structured_content is None:
+            return result
+        # model_copy rather than rebuilding the ToolResult: its constructor
+        # re-runs content conversion, and there is nothing to re-convert here.
+        return result.model_copy(update={"structured_content": None})
 
 
 def prepare_tools_for_registration(

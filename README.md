@@ -191,6 +191,7 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_WORKERS` | `--workers` | Number of server worker processes. A single process is limited to roughly one CPU core, so raise this to use more cores (see [Scaling with Multiple Worker Processes](#scaling-with-multiple-worker-processes)). Values above 1 require `--transport=http` | `1` |
 | `CB_MCP_THREAD_POOL_SIZE` | `--thread-pool-size` | Maximum tool calls executed concurrently per worker process (see [Tuning Tool-Call Concurrency](#tuning-tool-call-concurrency)). Raises the concurrency ceiling, not CPU-bound throughput | `40` |
 | `CB_MCP_STATELESS_HTTP` | `--stateless-http` | Handle each HTTP request with a fresh MCP transport instead of keeping per-session state in the server. Only honored with `--transport=http`. Unrecognised values fall back to the default with an error log entry; a value that cannot work with the rest of the configuration is overridden with a warning | `true` when `--workers` > 1, otherwise `false` |
+| `CB_MCP_DISABLE_STRUCTURED_OUTPUT` | `--disable-structured-output` | Register every tool without an output schema, so tool results are returned as text content only instead of also carrying structured content (see [Disabling Structured Output](#disabling-structured-output)). Applies to all tools | `false` |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Elicitation/Confirmation Required Tools](#elicitationconfirmation-for-tool-calls)) | None |
 | `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
@@ -316,6 +317,22 @@ Lines starting with `#` are treated as comments and ignored.
 > - The database user lacks the necessary RBAC permissions for data modification
 >
 > **Best Practice:** Always configure appropriate RBAC permissions on your Couchbase user credentials as the primary security measure. Use tool disabling as an additional layer to guide LLM behavior and reduce the attack surface, not as the sole security control.
+
+### Disabling Structured Output
+
+By default, the server derives an output schema from each tool's return type and returns results as structured content alongside the text block, which is what the MCP specification prefers. Some clients mishandle or reject structured content, and sending each result both ways costs extra tokens.
+
+`CB_MCP_DISABLE_STRUCTURED_OUTPUT` / `--disable-structured-output` registers every tool without an output schema, so results carry the text block only:
+
+```bash
+# Environment variable
+CB_MCP_DISABLE_STRUCTURED_OUTPUT=true
+
+# Command line
+uvx couchbase-mcp-server --disable-structured-output true
+```
+
+This is an all-or-nothing setting — it cannot be applied to individual tools. The tools themselves are unchanged; only the response shape the client receives differs. The effective value is reported by the `get_server_configuration_status` tool.
 
 ### Elicitation/Confirmation for Tool Calls
 

@@ -22,6 +22,7 @@ from click.testing import CliRunner
 import cb_mcp.utils.logging as logmod
 import mcp_server
 from cb_mcp.auth import OAuthConfigError, resolve_oauth
+from cb_mcp.tool_registration import TextOnlyFunctionTool
 from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
 
 
@@ -256,6 +257,45 @@ class TestWorkerOptions:
             result = runner.invoke(mcp_server.main, [], env=env, catch_exceptions=False)
         assert result.exit_code == 0, result.output
         assert run_workers.call_args.args[0]["workers"] == 2
+
+
+class TestStructuredOutputOption:
+    """``--disable-structured-output`` must reach every registered tool.
+
+    The flag's whole purpose is the wire shape of a tool result, so these
+    assert on the tool objects handed to ``add_tool``. Both halves matter: a
+    dropped ``output_schema`` stops the schema being advertised, and
+    ``TextOnlyFunctionTool`` stops FastMCP attaching ``structuredContent`` to
+    the dict results our tools return.
+    """
+
+    def _registered_tools(self, args: list[str], env: dict[str, str]):
+        _, fake_mcp = _capture_lifespan(args, env=env)
+        tools = [call.args[0] for call in fake_mcp.add_tool.call_args_list]
+        assert tools, "no tools were registered"
+        return tools
+
+    def test_default_keeps_inferred_output_schemas(self):
+        tools = self._registered_tools([], env=os.environ.copy())
+        assert any(tool.output_schema is not None for tool in tools)
+        assert not any(isinstance(tool, TextOnlyFunctionTool) for tool in tools)
+
+    def test_flag_disables_structured_output_for_every_tool(self):
+        tools = self._registered_tools(
+            ["--disable-structured-output", "true"], env=os.environ.copy()
+        )
+        assert all(tool.output_schema is None for tool in tools)
+        assert all(isinstance(tool, TextOnlyFunctionTool) for tool in tools)
+        # The dict a tool returns must survive as text and nothing else.
+        results = [tool.convert_result({"answer": 42}) for tool in tools]
+        assert all(result.structured_content is None for result in results)
+        assert all('"answer":42' in result.content[0].text for result in results)
+
+    def test_env_var_honored(self):
+        env = {**os.environ, "CB_MCP_DISABLE_STRUCTURED_OUTPUT": "true"}
+        tools = self._registered_tools([], env=env)
+        assert all(tool.output_schema is None for tool in tools)
+        assert all(isinstance(tool, TextOnlyFunctionTool) for tool in tools)
 
 
 def _resolve_oauth_kwargs(**overrides):

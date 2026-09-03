@@ -44,6 +44,10 @@ def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
         # startup; None only if the host never applied one.
         "thread_pool_size": settings.get("thread_pool_size"),
         "stateless_http": settings.get("stateless_http", False),
+        # True when tools were registered without an output schema, so results
+        # carry text content only. Defaults to False for hosts that don't
+        # populate the key, matching FastMCP's own inferred-schema behaviour.
+        "disable_structured_output": settings.get("disable_structured_output", False),
         "disabled_tools": sorted(settings.get("disabled_tools", set())),
         "confirmation_required_tools": sorted(
             settings.get("confirmation_required_tools", set())

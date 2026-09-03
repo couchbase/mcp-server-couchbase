@@ -57,6 +57,7 @@ def test_secret_paths_redacted_to_presence_booleans():
         "workers": None,
         "thread_pool_size": None,
         "stateless_http": None,
+        "disable_structured_output": None,
         "connection_string": None,
         "disabled_tools": None,
         "confirmation_required_tools": None,

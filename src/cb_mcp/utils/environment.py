@@ -50,6 +50,9 @@ _SAFE_SETTINGS_KEYS = (
     "workers",
     "thread_pool_size",
     "stateless_http",
+    # Whether tool results carry structured content, which changes the response
+    # shape a client sees for every tool call.
+    "disable_structured_output",
     "disabled_tools",
     "confirmation_required_tools",
     "connection_string",

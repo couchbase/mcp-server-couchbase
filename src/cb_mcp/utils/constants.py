@@ -10,6 +10,11 @@ DEFAULT_PORT = 8000
 # at about one CPU core by the GIL, so raising this is how the server uses more
 # than one core; see cb_mcp.utils.multiprocess.
 DEFAULT_WORKERS = 1
+# Whether tools are registered without an output schema, so results are
+# returned as unstructured text content only. Off by default: FastMCP derives a
+# schema from each tool's return annotation and sends the result as structured
+# content, which is the richer, spec-preferred behaviour.
+DEFAULT_DISABLE_STRUCTURED_OUTPUT = False
 
 # Allowed Transport Types
 ALLOWED_TRANSPORTS = ["stdio", "http", "sse"]
