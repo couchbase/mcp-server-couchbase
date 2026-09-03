@@ -18,7 +18,6 @@ from .query import (
     cancel_async_query,
     discard_async_query_results,
     get_async_query_results,
-    get_async_query_status,
     run_query_async,
     run_query_sync,
 )
@@ -31,7 +30,6 @@ TOOLS: list[Callable] = [
     run_query_sync,
     # Server Async Request API (EA 2.2+).
     run_query_async,
-    get_async_query_status,
     get_async_query_results,
     discard_async_query_results,
     cancel_async_query,
@@ -47,7 +45,6 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "run_query_sync": ToolAnnotations(),
     # run_query_async can likewise carry DDL/DML — no readOnlyHint.
     "run_query_async": ToolAnnotations(),
-    "get_async_query_status": ToolAnnotations(readOnlyHint=True),
     # Fetching does not free EA's buffers or evict the token, so it is
     # genuinely repeatable and side-effect free.
     "get_async_query_results": ToolAnnotations(readOnlyHint=True),
@@ -61,7 +58,6 @@ __all__ = [
     "cancel_async_query",
     "discard_async_query_results",
     "get_async_query_results",
-    "get_async_query_status",
     "get_collections_in_scope",
     "get_databases_in_cluster",
     "get_schema_for_collection",

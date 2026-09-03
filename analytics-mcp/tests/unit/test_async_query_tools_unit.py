@@ -17,7 +17,6 @@ from ea_mcp.tools.query import (
     cancel_async_query,
     discard_async_query_results,
     get_async_query_results,
-    get_async_query_status,
     run_query_async,
 )
 
@@ -101,41 +100,10 @@ class TestRunQueryAsync:
         assert registry.count() == 0
 
 
-class TestGetAsyncQueryStatus:
-    def test_reports_not_ready(self) -> None:
-        ctx, cluster, registry = _make_ctx()
-        token, handle = _start(ctx, cluster)
-        handle.fetch_status.return_value.results_ready.return_value = False
-
-        result = get_async_query_status(ctx, token)
-
-        assert result == {"success": True, "query_handle": token, "ready": False}
-        # Nothing to cache yet, and the query stays tracked.
-        assert registry.get(token).result_handle is None
-
-    def test_reports_ready_and_caches_result_handle(self) -> None:
-        ctx, cluster, registry = _make_ctx()
-        token, handle = _start(ctx, cluster)
-        status = handle.fetch_status.return_value
-        status.results_ready.return_value = True
-        result_handle = status.result_handle.return_value
-
-        result = get_async_query_status(ctx, token)
-
-        assert result == {"success": True, "query_handle": token, "ready": True}
-        assert registry.get(token).result_handle is result_handle
-
-    def test_unknown_token_returns_error_envelope(self) -> None:
-        ctx, _, _ = _make_ctx()
-
-        result = get_async_query_status(ctx, "nope")
-
-        assert result["success"] is False
-        assert "nope" in result["error"]
-        assert result["query_handle"] == "nope"
-
-
 class TestGetAsyncQueryResults:
+    """This tool does double duty: it reports readiness AND returns rows, so
+    there is no separate status tool to check first."""
+
     def test_fetches_rows_and_metadata_and_keeps_token(self) -> None:
         ctx, cluster, registry = _make_ctx()
         token, handle = _start(ctx, cluster)
@@ -144,7 +112,6 @@ class TestGetAsyncQueryResults:
         status.result_handle.return_value.fetch_results.return_value = _make_result(
             [{"one": 1}]
         )
-        get_async_query_status(ctx, token)
 
         result = get_async_query_results(ctx, token)
 
@@ -175,11 +142,33 @@ class TestGetAsyncQueryResults:
             [{"two": 2}]
         )
 
-        # Fetch without calling get_async_query_status first.
+        # No prior readiness check exists -- this tool derives it itself.
         result = get_async_query_results(ctx, token)
 
         assert result["success"] is True
         assert result["rows"] == [{"two": 2}]
+
+    def test_reports_not_ready_without_caching_a_result_handle(self) -> None:
+        ctx, cluster, registry = _make_ctx()
+        token, handle = _start(ctx, cluster)
+        handle.fetch_status.return_value.results_ready.return_value = False
+
+        result = get_async_query_results(ctx, token)
+
+        assert result["success"] is True
+        assert result["ready"] is False
+        assert "rows" not in result
+        # Nothing to cache yet, and the query stays tracked.
+        assert registry.get(token).result_handle is None
+
+    def test_unknown_token_returns_error_envelope(self) -> None:
+        ctx, _, _ = _make_ctx()
+
+        result = get_async_query_results(ctx, "nope")
+
+        assert result["success"] is False
+        assert "nope" in result["error"]
+        assert result["query_handle"] == "nope"
 
     def test_can_be_fetched_twice(self) -> None:
         ctx, cluster, registry = _make_ctx()
@@ -297,7 +286,6 @@ class TestDiscardAsyncQueryResults:
         status = handle.fetch_status.return_value
         status.results_ready.return_value = True
         result_handle = status.result_handle.return_value
-        get_async_query_status(ctx, token)
 
         result = discard_async_query_results(ctx, token)
 

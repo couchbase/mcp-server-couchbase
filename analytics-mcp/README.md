@@ -35,8 +35,7 @@ Handle-based flow for long-running queries. Requires **EA 2.2+** and
 | Tool Name | Description |
 | --------- | ----------- |
 | `run_query_async` | Submit a long-running query and return a `query_handle` token |
-| `get_async_query_status` | Report whether the query's results are ready |
-| `get_async_query_results` | Retrieve rows and metadata for a ready query (repeatable) |
+| `get_async_query_results` | Report whether the query has finished and, once it has, retrieve rows and metadata (repeatable) |
 | `discard_async_query_results` | Release server-side result buffers |
 | `cancel_async_query` | Cancel the query associated with the handle |
 
@@ -44,11 +43,14 @@ Typical flow:
 
 ```
 run_query_async -> query_handle
-  -> get_async_query_status (poll until ready: true)
-    -> get_async_query_results       (fetch rows; repeatable)
+  -> get_async_query_results         (ready: false while running; rows once ready)
   -> discard_async_query_results     (free buffers; ends the lifecycle)
   or cancel_async_query              (stop a still-running query)
 ```
+
+`get_async_query_results` doubles as the readiness check — it returns
+`ready: false` while the query is still running — so there is no separate
+status tool.
 
 **Fetching does not free results.** EA keeps the result buffers after a fetch —
 verified against EA 2.2, where the result URL still returns `200` post-fetch and

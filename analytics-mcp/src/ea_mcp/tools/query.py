@@ -2,7 +2,9 @@
 
 ``run_query_sync`` blocks and buffers the whole result set. The Server Async
 Request API tools (EA 2.2+, analytics SDK >= 1.1.0) expose EA's handle-based
-flow for long-running queries: start -> poll -> fetch/discard, or cancel.
+flow for long-running queries: start -> check/fetch -> discard, or cancel.
+``get_async_query_results`` does double duty as the readiness check, so there
+is no separate status tool.
 
 Design notes (kept out of the tool docstrings, which are sent to the model as
 tool descriptions and are deliberately short):
@@ -112,9 +114,9 @@ def run_query_async(ctx: Context, statement: str) -> dict[str, Any]:
     server until you finish with discard_async_query_results or
     cancel_async_query.
 
-    Usual sequence: get_async_query_status until ready, then
-    get_async_query_results, then discard_async_query_results. For quick
-    queries use run_query_sync instead, which returns rows directly.
+    Usual sequence: get_async_query_results until it reports ready, then
+    discard_async_query_results. For quick queries use run_query_sync
+    instead, which returns rows directly.
 
     Args:
         statement: The SQL++ statement to execute.
@@ -135,9 +137,9 @@ def run_query_async(ctx: Context, statement: str) -> dict[str, Any]:
             query_handle=token,
             request_id=request_id,
             message=(
-                "Query submitted. Poll get_async_query_status with this "
-                "query_handle; retrieve rows with get_async_query_results "
-                "once ready."
+                "Query submitted. Call get_async_query_results with this "
+                "query_handle to check whether it has finished and retrieve "
+                "the rows."
             ),
         )
     except Exception as e:
@@ -145,46 +147,21 @@ def run_query_async(ctx: Context, statement: str) -> dict[str, Any]:
         return tool_error(e, statement=statement)
 
 
-def get_async_query_status(ctx: Context, query_handle: str) -> dict[str, Any]:
-    """Check the status of an async query started by run_query_async.
-
-    Reports whether its results are ready yet. Once ready is true, call
-    get_async_query_results to obtain the results.
-
-    If ready is false the query is still running. Each check is a request to
-    the server, so space them out instead of calling in a tight loop — and
-    prefer telling the user the query is still running over waiting
-    indefinitely for it.
-
-    Args:
-        query_handle: The query_handle returned by run_query_async.
-
-    Returns:
-        {"success": True, "query_handle": "...", "ready": true/false}, or
-        {"success": False, "error": "..."} on failure.
-    """
-    registry = get_handle_registry(ctx)
-    try:
-        entry = registry.get(query_handle)
-        status = entry.handle.fetch_status()
-        ready = status.results_ready()
-        if ready:
-            # Cache the result handle so fetch/discard reuse it.
-            registry.set_result_handle(query_handle, status.result_handle())
-        logger.info(f"Async query status (token={query_handle}): ready={ready}")
-        return tool_success(query_handle=query_handle, ready=ready)
-    except Exception as e:
-        logger.error(f"Error fetching async query status: {e}", exc_info=True)
-        return tool_error(e, query_handle=query_handle)
-
-
 def get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
-    """Get the rows from a finished async query.
+    """Check the status of an async query and get its results once it has finished.
 
-    Check get_async_query_status first: if the results are not ready this
-    returns ready: false and no rows, rather than waiting. Safe to call more
-    than once — it does not consume the results. When you no longer need them,
-    call discard_async_query_results to free them on the server.
+    This both reports progress and returns results. If the query is still
+    running it returns ready: false and no rows, rather than waiting; call it
+    again later to check. If it has finished it returns ready: true with the
+    rows.
+
+    Each call is a request to the server, so space out repeat calls instead of
+    looping tightly — and prefer telling the user the query is still running
+    over waiting indefinitely for it.
+
+    Safe to call more than once after it is ready: it does not consume the
+    results. When you no longer need them, call discard_async_query_results
+    to free them on the server.
 
     Args:
         query_handle: The query_handle returned by run_query_async.
@@ -209,8 +186,8 @@ def get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
                     query_handle=query_handle,
                     ready=False,
                     message=(
-                        "Results are not ready yet. Poll get_async_query_status "
-                        "until ready before fetching."
+                        "Query is still running. Call this tool again later "
+                        "to check for results."
                     ),
                 )
             result_handle = status.result_handle()

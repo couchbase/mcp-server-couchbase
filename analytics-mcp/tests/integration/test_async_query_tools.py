@@ -22,18 +22,22 @@ POLL_ATTEMPTS = 30
 POLL_INTERVAL_SECONDS = 0.5
 
 
-async def _poll_until_ready(session, query_handle: str) -> bool:
-    """Poll get_async_query_status until results are ready or attempts run out."""
+async def _poll_until_ready(session, query_handle: str) -> dict | None:
+    """Call get_async_query_results until it reports ready, or attempts run out.
+
+    That tool doubles as the readiness check, so polling it IS the status
+    check. Returns the ready payload (rows included) or None on timeout.
+    """
     for _ in range(POLL_ATTEMPTS):
         response = await session.call_tool(
-            "get_async_query_status", arguments={"query_handle": query_handle}
+            "get_async_query_results", arguments={"query_handle": query_handle}
         )
         payload = extract_payload(response)
         assert payload["success"] is True, payload
         if payload["ready"]:
-            return True
+            return payload
         await asyncio.sleep(POLL_INTERVAL_SECONDS)
-    return False
+    return None
 
 
 async def _start_query(session, statement: str) -> str:
@@ -50,18 +54,15 @@ async def _start_query(session, statement: str) -> str:
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_async_query_full_lifecycle() -> None:
-    """Start -> poll to ready -> fetch rows and metadata."""
+    """Start -> call results until ready, which returns the rows in one step."""
     async with create_mcp_session() as session:
         handle = await _start_query(session, "SELECT 1 AS one")
 
-        assert await _poll_until_ready(session, handle), "query never became ready"
-
-        response = await session.call_tool(
-            "get_async_query_results", arguments={"query_handle": handle}
-        )
-        payload = extract_payload(response)
+        payload = await _poll_until_ready(session, handle)
+        assert payload is not None, "query never became ready"
 
         assert payload["success"] is True
+        assert payload["ready"] is True
         assert payload["rows"] == [{"one": 1}]
         assert payload["row_count"] == 1
         assert payload["metadata"]["request_id"]
@@ -216,7 +217,6 @@ async def test_cancel_running_query() -> None:
 async def test_unknown_handle_returns_error_envelope() -> None:
     async with create_mcp_session() as session:
         for tool in (
-            "get_async_query_status",
             "get_async_query_results",
             "discard_async_query_results",
             "cancel_async_query",
