@@ -90,7 +90,7 @@ def main(
 
     logger.info(f"Registered {len(TOOLS)} tool(s)")
     if transport == "http":
-        mcp.run(transport="http", host=host, port=port, show_banner=False)
+        mcp.run(transport="streamable-http", host=host, port=port, show_banner=False)
     else:
         mcp.run(transport="stdio", show_banner=False)
 
