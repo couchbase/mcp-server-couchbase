@@ -372,3 +372,167 @@ async def test_create_index_on_missing_collection_returns_error_envelope() -> No
 
         assert payload["success"] is False
         assert "error" in payload
+
+
+def _find_index(rows, index_name: str):
+    return next((row for row in rows if row.get("IndexName") == index_name), None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_indexes_round_trips_created_indexes() -> None:
+    """Indexes written by create_index read back through list_indexes.
+
+    Covers both encodings the catalog uses: a scalar index (SearchKey) and an
+    array index (SearchKeyElements), each returned as stored.
+    """
+    scope_name = f"eatest_scope_{uuid.uuid4().hex[:8]}"
+    collection_name = f"eatest_coll_{uuid.uuid4().hex[:8]}"
+
+    async with create_mcp_session() as session:
+        try:
+            await _create_collection(session, scope_name, collection_name)
+            base = {
+                "database_name": DATABASE,
+                "scope_name": scope_name,
+                "collection_name": collection_name,
+            }
+
+            scalar = await session.call_tool(
+                "create_index",
+                arguments={
+                    **base,
+                    "index_name": "eatest_scalar_idx",
+                    "fields": [{"name": "ratings.Lyrics", "type": "bigint"}],
+                },
+            )
+            assert extract_payload(scalar)["success"] is True
+
+            array = await session.call_tool(
+                "create_index",
+                arguments={
+                    **base,
+                    "index_name": "eatest_array_idx",
+                    "exclude_unknown_key": True,
+                    "fields": [
+                        {
+                            "unnest": "reviews",
+                            "select": [{"name": "ratings.Lyrics", "type": "bigint"}],
+                        }
+                    ],
+                },
+            )
+            assert extract_payload(array)["success"] is True
+
+            listed = await session.call_tool("list_indexes", arguments=base)
+            rows = extract_payload(listed)
+
+            # A scalar index stores its field path under SearchKey, as an
+            # array of path components.
+            scalar_row = _find_index(rows, "eatest_scalar_idx")
+            assert scalar_row is not None
+            assert scalar_row["SearchKey"] == [["ratings", "Lyrics"]]
+            assert scalar_row["CollectionName"] == collection_name
+
+            # An array index leaves SearchKey empty and describes its fields
+            # under SearchKeyElements instead.
+            array_row = _find_index(rows, "eatest_array_idx")
+            assert array_row is not None
+            assert array_row["SearchKey"] == []
+            assert array_row["SearchKeyElements"] == [
+                {"UnnestList": [["reviews"]], "ProjectList": [["ratings", "Lyrics"]]}
+            ]
+        finally:
+            await _drop_scope(session, scope_name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_indexes_excludes_primary_and_sample_indexes() -> None:
+    """A collection with no secondary indexes lists none.
+
+    The collection's own primary index and any optimizer SAMPLE index created
+    by ANALYZE COLLECTION must both be filtered out.
+    """
+    scope_name = f"eatest_scope_{uuid.uuid4().hex[:8]}"
+    collection_name = f"eatest_coll_{uuid.uuid4().hex[:8]}"
+
+    async with create_mcp_session() as session:
+        try:
+            await _create_collection(session, scope_name, collection_name)
+            await session.call_tool(
+                "run_query_sync",
+                arguments={
+                    "statement": (
+                        f"INSERT INTO `{DATABASE}`.`{scope_name}`.`{collection_name}` "
+                        "([{'id': '1', 'name': 'a'}]);"
+                    )
+                },
+            )
+            # Generates a SAMPLE index for the cost-based optimizer.
+            await session.call_tool(
+                "run_query_sync",
+                arguments={
+                    "statement": (
+                        f"ANALYZE COLLECTION "
+                        f"`{DATABASE}`.`{scope_name}`.`{collection_name}`;"
+                    )
+                },
+            )
+
+            listed = await session.call_tool(
+                "list_indexes",
+                arguments={
+                    "database_name": DATABASE,
+                    "scope_name": scope_name,
+                    "collection_name": collection_name,
+                },
+            )
+            # extract_payload() yields None rather than [] for an empty result.
+            assert not extract_payload(listed)
+        finally:
+            await _drop_scope(session, scope_name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_list_indexes_filters_are_scoped() -> None:
+    """An unfiltered listing spans the cluster; a scoped one is a subset of it."""
+    scope_name = f"eatest_scope_{uuid.uuid4().hex[:8]}"
+    collection_name = f"eatest_coll_{uuid.uuid4().hex[:8]}"
+
+    async with create_mcp_session() as session:
+        try:
+            await _create_collection(session, scope_name, collection_name)
+            created = await session.call_tool(
+                "create_index",
+                arguments={
+                    "database_name": DATABASE,
+                    "scope_name": scope_name,
+                    "collection_name": collection_name,
+                    "index_name": "eatest_scoped_idx",
+                    "fields": [{"name": "name", "type": "string"}],
+                },
+            )
+            assert extract_payload(created)["success"] is True
+
+            all_rows = extract_payload(
+                await session.call_tool("list_indexes", arguments={})
+            )
+            assert _index_exists(all_rows, "eatest_scoped_idx")
+            # No System-database catalog indexes leak into an unfiltered listing.
+            assert all(row["DatabaseName"] != "System" for row in all_rows)
+
+            scoped_rows = extract_payload(
+                await session.call_tool(
+                    "list_indexes",
+                    arguments={
+                        "database_name": DATABASE,
+                        "scope_name": scope_name,
+                        "collection_name": collection_name,
+                    },
+                )
+            )
+            assert [row["IndexName"] for row in scoped_rows] == ["eatest_scoped_idx"]
+        finally:
+            await _drop_scope(session, scope_name)

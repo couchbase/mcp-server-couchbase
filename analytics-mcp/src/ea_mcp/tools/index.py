@@ -1,12 +1,14 @@
-"""Index management tools for Enterprise Analytics.
+"""Index management and introspection tools for Enterprise Analytics.
 
 The ``couchbase-analytics`` SDK exposes no index manager at all. Index DDL
-therefore has to go through SQL++ ``CREATE INDEX``, per the EA tool spec.
+therefore has to go through SQL++ ``CREATE INDEX``, per the EA tool spec, and
+listing indexes has to read the ``System.Metadata.Index`` catalog directly.
 """
 
 import logging
 from typing import Any
 
+from couchbase_analytics.options import QueryOptions
 from fastmcp import Context
 
 from ..connection import get_cluster_connection
@@ -139,3 +141,81 @@ def create_index(
             f"Error creating index {index_name!r} on {keyspace}: {e}", exc_info=True
         )
         return tool_error(e, index_name=index_name, keyspace=keyspace)
+
+
+def list_indexes(
+    ctx: Context,
+    database_name: str | None = None,
+    scope_name: str | None = None,
+    collection_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """List user-created secondary indexes on Enterprise Analytics collections.
+
+    database_name, scope_name and collection_name are independent optional
+    filters; with none given, every secondary index in the cluster is listed.
+    Primary indexes, optimizer samples and internal System indexes are not
+    listed, as none can be acted on.
+
+    Returns a list of rows with DatabaseName, ScopeName, CollectionName,
+    IndexName, IndexStructure and ExcludeUnknownKey. The indexed fields are
+    under SearchKey for scalar indexes, or SearchKeyElements (UnnestList /
+    ProjectList) for array indexes, which leave SearchKey empty.
+    Each field path is an array of path components,
+    so ["ratings", "Lyrics"] means ratings.Lyrics.
+    """
+
+    named_parameters = {}
+    if database_name:
+        named_parameters["DatabaseName"] = database_name
+    if scope_name:
+        named_parameters["DataverseName"] = scope_name
+    if collection_name:
+        named_parameters["DatasetName"] = collection_name
+
+    # Three classes of Metadata.`Index` row are excluded, since none is a
+    # user-created secondary index: rows in the System database (internal
+    # catalog indexes); primary indexes, which in Analytics *are* the
+    # collection itself rather than a separate index; and IndexStructure
+    # "SAMPLE" rows, the samples the cost-based optimizer maintains via
+    # ANALYZE COLLECTION (these are not primary, so IsPrimary misses them).
+    query = (
+        "SELECT i.DatabaseName, "
+        "i.DataverseName AS ScopeName, "
+        "i.DatasetName AS CollectionName, "
+        "i.IndexName, "
+        "i.IndexStructure, "
+        "i.SearchKey, "
+        "i.SearchKeyElements, "
+        "i.ExcludeUnknownKey "
+        "FROM System.Metadata.`Index` i "
+        'WHERE i.DatabaseName <> "System" '
+        "AND i.IsPrimary = false "
+        'AND i.IndexStructure <> "SAMPLE" '
+        + "".join(f"AND i.{field} = ${field} " for field in named_parameters)
+        + "ORDER BY i.DatabaseName, ScopeName, CollectionName, i.IndexName;"
+    )
+
+    target = ", ".join(
+        f"{label}={value}"
+        for label, value in (
+            ("database", database_name),
+            ("scope", scope_name),
+            ("collection", collection_name),
+        )
+        if value
+    )
+    target = target or "the whole cluster"
+    try:
+        logger.debug(f"Listing secondary indexes for {target}")
+        cluster = get_cluster_connection(ctx)
+        result = cluster.execute_query(
+            query, QueryOptions(named_parameters=named_parameters)
+        )
+        rows = result.get_all_rows()
+        logger.info(f"Found {len(rows)} secondary index(es) for {target}")
+        return rows
+    except Exception as e:
+        logger.error(
+            f"Error listing secondary indexes for {target}: {e}", exc_info=True
+        )
+        raise

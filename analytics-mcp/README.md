@@ -26,6 +26,7 @@ EA_CONNECTION_STRING=http://localhost:8095 EA_USERNAME=Administrator EA_PASSWORD
 | `get_collections_in_scope` | List all collections (datasets) in a scope |
 | `get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents |
 | `create_index` | Create a secondary index on a collection via `CREATE INDEX` |
+| `list_indexes` | List secondary indexes on collections, optionally filtered by database/scope/collection |
 | `run_query_sync` | Run a SQL++ statement and buffer all result rows in memory |
 | `explain_query` | Generate the query plan for a SQL++ statement using EXPLAIN (without executing it); pass the statement without an EXPLAIN keyword |
 
@@ -76,6 +77,38 @@ Behaviours verified against a live cluster that the published grammar does not s
 - `CAST` cannot be combined with an array index — *"CAST modifier is only allowed for B-Tree indexes"*.
 - The type is not checked against the data: indexing a string field as `double` succeeds but
   silently indexes nothing. Use `get_schema_for_collection` when a field's type is unknown.
+
+### Note on `list_indexes`
+
+With no index manager in the SDK, `list_indexes` reads the
+``System.Metadata.`Index` `` catalog directly. `database_name`, `scope_name` and
+`collection_name` are all optional and bound as named parameters; passing none lists every
+secondary index in the cluster.
+
+Three classes of catalog row are excluded, because none is a user-created secondary index:
+
+- **`System` database rows** — internal catalog indexes (`Dataverse`, `Dataset`, …).
+- **Primary indexes** (`IsPrimary`) — in Analytics the primary index *is* the collection
+  itself rather than a separate index, so the rows carry no extra information and
+  `IsPrimary` is dropped from the result.
+- **`IndexStructure = "SAMPLE"`** — collected samples the cost-based optimizer maintains,
+  created by `ANALYZE COLLECTION`.
+
+The catalog stores indexed fields in two different shapes, and both are returned exactly
+as stored — read whichever is populated for a given index:
+
+| Index kind | Populated field | Value |
+| ---------- | --------------- | ----- |
+| Scalar | `SearchKey` | `[["ratings", "Lyrics"]]` |
+| Array of objects | `SearchKeyElements` | `[{"UnnestList": [["reviews"]], "ProjectList": [["ratings", "Lyrics"]]}]` |
+| Array of primitives | `SearchKeyElements` | `[{"UnnestList": [["public_likes"]], "ProjectList": []}]` |
+
+Each field path is an array of path components, so `["ratings", "Lyrics"]` is the nested
+field `ratings.Lyrics`. Array indexes leave `SearchKey` **empty** and populate
+`SearchKeyElements` instead — the read-back form of the `unnest`/`select` pair
+`create_index` writes, where `UnnestList` is the arrays being unnested and `ProjectList`
+the fields projected out of them (empty for an array of primitives). A listing that read
+only `SearchKey` would therefore report array indexes as having no fields.
 
 ## Tests
 
