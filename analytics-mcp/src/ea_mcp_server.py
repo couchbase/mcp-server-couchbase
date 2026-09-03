@@ -41,7 +41,34 @@ MCP_SERVER_NAME = "couchbase-enterprise-analytics-mcp"
     required=True,
     help="Enterprise Analytics password",
 )
-def main(connection_string: str, username: str, password: str) -> None:
+@click.option(
+    "--transport",
+    envvar="EA_MCP_TRANSPORT",
+    type=click.Choice(["stdio", "http"]),
+    default="stdio",
+    help="MCP transport to serve on",
+)
+@click.option(
+    "--host",
+    envvar="EA_MCP_HOST",
+    default="127.0.0.1",
+    help="Host to bind when --transport=http",
+)
+@click.option(
+    "--port",
+    envvar="EA_MCP_PORT",
+    default=8000,
+    type=int,
+    help="Port to bind when --transport=http",
+)
+def main(
+    connection_string: str,
+    username: str,
+    password: str,
+    transport: str,
+    host: str,
+    port: int,
+) -> None:
     """Couchbase Enterprise Analytics MCP server (prototype)."""
     logging.basicConfig(level=logging.INFO)
 
@@ -62,7 +89,10 @@ def main(connection_string: str, username: str, password: str) -> None:
         mcp.add_tool(tool_obj)
 
     logger.info(f"Registered {len(TOOLS)} tool(s)")
-    mcp.run(transport="stdio", show_banner=False)
+    if transport == "http":
+        mcp.run(transport="http", host=host, port=port, show_banner=False)
+    else:
+        mcp.run(transport="stdio", show_banner=False)
 
 
 if __name__ == "__main__":
