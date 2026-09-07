@@ -8,7 +8,8 @@ serialisation. This is the baseline every other perf test is relative to.
 from __future__ import annotations
 
 import pytest
-from _harness import (
+
+from ._harness import (
     StubClusterProvider,
     build_perf_server,
     check_ceiling,
