@@ -164,6 +164,7 @@ markers = [
     "integration: Integration tests against a live Couchbase cluster via the MCP server.",
     "accuracy: AI-in-the-loop accuracy tests. Require OPENAI_API_KEY and a Couchbase cluster.",
     "result_eval: LLM-as-judge answer-correctness evals. Require OPENAI_API_KEY and a Couchbase cluster.",
+    "perf: In-process performance tests. Opt-in via CB_MCP_PERF=1; not run in CI.",
 ]
 
 # Build system configuration
