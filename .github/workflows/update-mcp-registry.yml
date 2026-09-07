@@ -8,10 +8,11 @@ on:
 
 jobs:
   check-and-update-registry:
-    # Only run on tag pushes and if the docker workflow succeeded
+    # Only run on version tag releases (originating from a tag push) and if the docker workflow succeeded.
+    # Docker is now a downstream workflow_run job (not push-triggered), so event == 'push' is omitted;
+    # startsWith(head_branch, 'v') is sufficient to identify version tag runs through the chain.
     if: |
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
       startsWith(github.event.workflow_run.head_branch, 'v')
 
     runs-on: ubuntu-latest
@@ -30,7 +31,7 @@ jobs:
         id: wait-for-pypi
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          checkName: "Build and publish Python distributions to PyPI"
+          checkName: "Upload to PyPI via Jenkins"
           ref: ${{ github.event.workflow_run.head_sha }}
           timeoutSeconds: 600
           intervalSeconds: 10
