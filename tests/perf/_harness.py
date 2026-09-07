@@ -121,11 +121,16 @@ def build_perf_server(provider: Any, *, read_only_mode: bool = False) -> FastMCP
 
     @asynccontextmanager
     async def lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
-        yield AppContext(
-            cluster_provider=provider,
-            settings=settings,
-            read_only_mode=read_only_mode,
-        )
+        try:
+            yield AppContext(
+                cluster_provider=provider,
+                settings=settings,
+                read_only_mode=read_only_mode,
+            )
+        finally:
+            # Same as mcp_server's lifespan. Runs once per in-memory Client
+            # session; a live provider reconnects lazily on the next call.
+            provider.close()
 
     mcp = FastMCP(MCP_SERVER_NAME, lifespan=lifespan)
     for tool in final_tools:
