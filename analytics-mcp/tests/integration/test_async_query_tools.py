@@ -65,7 +65,7 @@ async def test_async_query_full_lifecycle() -> None:
         assert payload["ready"] is True
         assert payload["rows"] == [{"one": 1}]
         assert payload["row_count"] == 1
-        assert payload["metadata"]["request_id"]
+        assert payload["metadata"]["metrics"]["result_count"] == 1
 
 
 @pytest.mark.asyncio

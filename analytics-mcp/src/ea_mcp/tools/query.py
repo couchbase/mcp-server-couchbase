@@ -83,7 +83,6 @@ def _extract_metadata(result: Any, query_handle: str) -> dict[str, Any]:
     if meta is None:
         return metadata
 
-    metadata["request_id"] = _read(meta.request_id, "request_id")
     metadata["warnings"] = _read(meta.warnings, "warnings") or []
 
     metrics = _read(meta.metrics, "metrics")
@@ -122,7 +121,7 @@ def run_query_async(ctx: Context, statement: str) -> dict[str, Any]:
         statement: The SQL++ statement to execute.
 
     Returns:
-        {"success": True, "query_handle": "...", "request_id": "..."}, or
+        {"success": True, "query_handle": "..."}, or
         {"success": False, "error": "..."} on failure.
     """
     cluster = get_cluster_connection(ctx)
@@ -131,11 +130,9 @@ def run_query_async(ctx: Context, statement: str) -> dict[str, Any]:
         logger.debug("Starting async query")
         handle = cluster.start_query(statement)
         token = registry.register(handle, statement)
-        request_id = getattr(handle, "_request_id", None)
-        logger.info(f"Started async query (token={token}, request_id={request_id})")
+        logger.info(f"Started async query (token={token})")
         return tool_success(
             query_handle=token,
-            request_id=request_id,
             message=(
                 "Query submitted. Call get_async_query_results with this "
                 "query_handle to check whether it has finished and retrieve "
@@ -168,7 +165,7 @@ def get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
 
     Returns:
         {"success": True, "ready": true, "rows": [...], "row_count": N,
-        "metadata": {"request_id": ..., "warnings": [...], "metrics":
+        "metadata": {"warnings": [...], "metrics":
         {"elapsed_time_ms", "execution_time_ms", "result_count",
         "result_size", "processed_objects"}}}; or {"success": True,
         "ready": false} if not finished; or {"success": False,
@@ -177,24 +174,18 @@ def get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
     registry = get_handle_registry(ctx)
     try:
         entry = registry.get(query_handle)
-        result_handle = entry.result_handle
-        if result_handle is None:
-            # Status hasn't been polled to readiness yet; derive it now.
-            status = entry.handle.fetch_status()
-            if not status.results_ready():
-                return tool_success(
-                    query_handle=query_handle,
-                    ready=False,
-                    message=(
-                        "Query is still running. Call this tool again later "
-                        "to check for results."
-                    ),
-                )
-            result_handle = status.result_handle()
-            # Cache it so a re-fetch or a later discard skips the status call.
-            registry.set_result_handle(query_handle, result_handle)
+        status = entry.handle.fetch_status()
+        if not status.results_ready():
+            return tool_success(
+                query_handle=query_handle,
+                ready=False,
+                message=(
+                    "Query is still running. Call this tool again later "
+                    "to check for results."
+                ),
+            )
 
-        result = result_handle.fetch_results()
+        result = status.result_handle().fetch_results()
         rows = result.get_all_rows()
         metadata = _extract_metadata(result, query_handle)
 
@@ -238,22 +229,19 @@ def discard_async_query_results(ctx: Context, query_handle: str) -> dict[str, An
     registry = get_handle_registry(ctx)
     try:
         entry = registry.get(query_handle)
-        result_handle = entry.result_handle
-        if result_handle is None:
-            status = entry.handle.fetch_status()
-            if not status.results_ready():
-                return tool_success(
-                    query_handle=query_handle,
-                    discarded=False,
-                    ready=False,
-                    message=(
-                        "Results are not ready yet; nothing to discard. Cancel "
-                        "the query with cancel_async_query to stop it."
-                    ),
-                )
-            result_handle = status.result_handle()
+        status = entry.handle.fetch_status()
+        if not status.results_ready():
+            return tool_success(
+                query_handle=query_handle,
+                discarded=False,
+                ready=False,
+                message=(
+                    "Results are not ready yet; nothing to discard. Cancel "
+                    "the query with cancel_async_query to stop it."
+                ),
+            )
 
-        result_handle.discard_results()
+        status.result_handle().discard_results()
         registry.remove(query_handle)
         logger.info(f"Discarded results for async query (token={query_handle})")
         return tool_success(query_handle=query_handle, discarded=True)
@@ -289,9 +277,8 @@ def cancel_async_query(ctx: Context, query_handle: str) -> dict[str, Any]:
         # result buffers on the server with no handle left to discard them.
         status = entry.handle.fetch_status()
         if status.results_ready():
-            # Cache the result handle and deliberately KEEP the entry, so the
-            # discard this message recommends is still possible.
-            registry.set_result_handle(query_handle, status.result_handle())
+            # Deliberately KEEP the entry, so the discard this message
+            # recommends is still possible.
             logger.info(
                 f"Cancel skipped, query already complete (token={query_handle})"
             )

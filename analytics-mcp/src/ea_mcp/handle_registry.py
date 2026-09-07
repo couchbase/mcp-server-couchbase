@@ -49,14 +49,18 @@ class UnknownHandleError(KeyError):
 
 @dataclass
 class HandleEntry:
-    """One tracked async query."""
+    """One tracked async query.
+
+    Deliberately holds only what cannot be re-derived. The result handle is
+    NOT cached here: re-deriving it costs one cheap ``fetch_status()`` call
+    (~3ms against ~6ms for the fetch it precedes), whereas caching it meant a
+    read-modify-write spanning two separate lock acquisitions with a network
+    call in between — two concurrent callers could both see it empty and both
+    redo the work.
+    """
 
     handle: Any  # BlockingQueryHandle
     statement: str
-    # The result handle is only available once results are ready; we cache it
-    # the first time a status call reports readiness so fetch/discard can reuse
-    # it without re-deriving it.
-    result_handle: Any | None = None
 
 
 class HandleRegistry:
@@ -87,13 +91,6 @@ class HandleRegistry:
                 "discarded/cancelled, or created by a different server process."
             )
         return entry
-
-    def set_result_handle(self, token: str, result_handle: Any) -> None:
-        """Cache the result handle for a token once results are ready."""
-        with self._lock:
-            entry = self._entries.get(token)
-            if entry is not None:
-                entry.result_handle = result_handle
 
     def remove(self, token: str) -> None:
         """Evict a token (after fetch, discard, or cancel). Idempotent."""

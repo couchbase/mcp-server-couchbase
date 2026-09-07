@@ -46,7 +46,6 @@ def _make_result(rows: list, result_count: int = 1, result_size: int = 42) -> Ma
     result = MagicMock()
     result.get_all_rows.return_value = rows
     meta = result.metadata.return_value
-    meta.request_id.return_value = "req-1"
     meta.warnings.return_value = []
     metrics = meta.metrics.return_value
     metrics.elapsed_time.return_value = timedelta(milliseconds=12.5)
@@ -60,7 +59,6 @@ def _make_result(rows: list, result_count: int = 1, result_size: int = 42) -> Ma
 def _start(ctx, cluster, statement: str = "SELECT 1 AS one") -> tuple[str, MagicMock]:
     """Run run_query_async and return (token, the mock handle it registered)."""
     handle = MagicMock()
-    handle._request_id = "req-1"
     cluster.start_query.return_value = handle
     result = run_query_async(ctx, statement)
     assert result["success"] is True
@@ -75,16 +73,6 @@ class TestRunQueryAsync:
         cluster.start_query.assert_called_once_with("SELECT 1 AS one")
         assert registry.get(token).handle is handle
         assert registry.count() == 1
-
-    def test_includes_request_id(self) -> None:
-        ctx, cluster, _ = _make_ctx()
-        handle = MagicMock()
-        handle._request_id = "req-abc"
-        cluster.start_query.return_value = handle
-
-        result = run_query_async(ctx, "SELECT 1")
-
-        assert result["request_id"] == "req-abc"
 
     def test_returns_error_envelope_on_sdk_error(self) -> None:
         ctx, cluster, registry = _make_ctx()
@@ -119,7 +107,6 @@ class TestGetAsyncQueryResults:
         assert result["rows"] == [{"one": 1}]
         assert result["row_count"] == 1
         assert result["metadata"] == {
-            "request_id": "req-1",
             "warnings": [],
             "metrics": {
                 "elapsed_time_ms": 12.5,
@@ -133,7 +120,8 @@ class TestGetAsyncQueryResults:
         # re-fetch or an explicit discard.
         assert registry.count() == 1
 
-    def test_derives_result_handle_when_status_not_polled(self) -> None:
+    def test_checks_status_before_every_fetch(self) -> None:
+        """Readiness is re-derived on each call -- nothing is cached."""
         ctx, cluster, _ = _make_ctx()
         token, handle = _start(ctx, cluster)
         status = handle.fetch_status.return_value
@@ -142,13 +130,12 @@ class TestGetAsyncQueryResults:
             [{"two": 2}]
         )
 
-        # No prior readiness check exists -- this tool derives it itself.
-        result = get_async_query_results(ctx, token)
+        get_async_query_results(ctx, token)
+        get_async_query_results(ctx, token)
 
-        assert result["success"] is True
-        assert result["rows"] == [{"two": 2}]
+        assert handle.fetch_status.call_count == 2
 
-    def test_reports_not_ready_without_caching_a_result_handle(self) -> None:
+    def test_reports_not_ready_and_keeps_the_handle(self) -> None:
         ctx, cluster, registry = _make_ctx()
         token, handle = _start(ctx, cluster)
         handle.fetch_status.return_value.results_ready.return_value = False
@@ -158,8 +145,8 @@ class TestGetAsyncQueryResults:
         assert result["success"] is True
         assert result["ready"] is False
         assert "rows" not in result
-        # Nothing to cache yet, and the query stays tracked.
-        assert registry.get(token).result_handle is None
+        # The query stays tracked so it can be checked again later.
+        assert registry.count() == 1
 
     def test_unknown_token_returns_error_envelope(self) -> None:
         ctx, _, _ = _make_ctx()
@@ -185,19 +172,6 @@ class TestGetAsyncQueryResults:
         assert first["rows"] == [{"one": 1}]
         assert second["rows"] == [{"one": 1}]
         assert registry.count() == 1
-
-    def test_caches_derived_result_handle(self) -> None:
-        ctx, cluster, registry = _make_ctx()
-        token, handle = _start(ctx, cluster)
-        status = handle.fetch_status.return_value
-        status.results_ready.return_value = True
-        result_handle = status.result_handle.return_value
-        result_handle.fetch_results.return_value = _make_result([{"one": 1}])
-
-        # Fetch without a prior status poll -- the handle is derived here.
-        get_async_query_results(ctx, token)
-
-        assert registry.get(token).result_handle is result_handle
 
     def test_discard_after_fetch_releases_buffers(self) -> None:
         ctx, cluster, registry = _make_ctx()
@@ -261,7 +235,6 @@ class TestGetAsyncQueryResults:
         # Every other field survives the one failed read.
         assert metrics["result_count"] == 1
         assert metrics["elapsed_time_ms"] == 12.5
-        assert result["metadata"]["request_id"] == "req-1"
 
     def test_returns_error_envelope_on_fetch_error(self) -> None:
         ctx, cluster, _ = _make_ctx()
@@ -335,7 +308,6 @@ class TestCancelAsyncQuery:
         token, handle = _start(ctx, cluster)
         status = handle.fetch_status.return_value
         status.results_ready.return_value = True
-        result_handle = status.result_handle.return_value
 
         result = cancel_async_query(ctx, token)
 
@@ -344,10 +316,8 @@ class TestCancelAsyncQuery:
         assert "discard_async_query_results" in result["message"]
         # cancel() must NOT have been attempted.
         handle.cancel.assert_not_called()
-        # The entry survives, with the result handle cached, so the discard the
-        # message recommends actually works.
+        # The entry survives so the discard the message recommends works.
         assert registry.count() == 1
-        assert registry.get(token).result_handle is result_handle
 
     def test_discard_works_after_a_refused_cancel(self) -> None:
         ctx, cluster, registry = _make_ctx()
