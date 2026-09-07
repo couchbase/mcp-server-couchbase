@@ -15,7 +15,6 @@ from __future__ import annotations
 import os
 
 import pytest
-from _harness import build_perf_server, format_table, run_load
 from _test_env import (
     REQUIRED_ENV_VARS,
     get_test_collection,
@@ -24,6 +23,8 @@ from _test_env import (
 )
 
 from providers.static import StaticClusterProvider
+
+from ._harness import build_perf_server, format_table, run_load
 
 LEVELS = (1, 10)
 N_KEYS = 50

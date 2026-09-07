@@ -9,7 +9,8 @@ runtime stays bounded; total calls therefore grow at high concurrency.
 from __future__ import annotations
 
 import pytest
-from _harness import (
+
+from ._harness import (
     ITERATIONS,
     StubClusterProvider,
     build_perf_server,
