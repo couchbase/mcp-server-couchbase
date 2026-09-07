@@ -26,7 +26,7 @@ The stub tiers run anywhere in seconds. The live tier needs
 |---|---|
 | `CB_MCP_PERF=1` | required; otherwise everything is skipped |
 | `CB_MCP_PERF_ASSERT=1` | enforce thresholds (ratios, plus generous in-process caps) |
-| `CB_MCP_PERF_ITERATIONS` | calls per worker, default 200 |
+| `CB_MCP_PERF_ITERATIONS` | calls per worker, default 100 |
 
 `DO_NOT_TRACK=1` is set by `conftest.py`: the telemetry wrapper stays
 installed (realistic overhead) but sends nothing.
