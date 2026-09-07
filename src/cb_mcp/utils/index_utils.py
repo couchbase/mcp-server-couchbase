@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from .connection_string import is_capella_connection
 from .constants import MCP_SERVER_NAME
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.index_utils")
@@ -327,16 +328,9 @@ def _determine_ssl_verification(
         SSL verification setting (bool or path to cert file)
     """
     is_tls_enabled = connection_string.lower().startswith("couchbases://")
-    # Capella normally issues a single SRV hostname, but users may expand it to
-    # individual node hostnames when SRV lookup is unavailable — so accept any
-    # number of hosts as long as every one is under the Capella domain.
-    hosts = _extract_hosts_from_connection_string(connection_string)
-    is_capella_connection = bool(hosts) and all(
-        host.lower().endswith(".cloud.couchbase.com") for host in hosts
-    )
 
     # Priority 1: Capella connections always use Capella root CA
-    if is_capella_connection:
+    if is_capella_connection(connection_string):
         capella_ca = _get_capella_root_ca_path()
         if os.path.exists(capella_ca):
             logger.info(
