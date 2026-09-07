@@ -10,6 +10,7 @@ The stub cluster lets the full KV/SQL++ tool bodies run without Couchbase, isola
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import statistics
 import time
@@ -148,10 +149,11 @@ class LoadResult:
     errors: int = 0
 
     def _pct(self, p: float) -> float:
+        """Nearest-rank percentile: for n=100, p95 is the 95th value."""
         if not self.latencies_ms:
             return float("nan")
         ordered = sorted(self.latencies_ms)
-        return ordered[min(len(ordered) - 1, int(len(ordered) * p))]
+        return ordered[max(0, math.ceil(p * len(ordered)) - 1)]
 
     @property
     def p50(self) -> float:

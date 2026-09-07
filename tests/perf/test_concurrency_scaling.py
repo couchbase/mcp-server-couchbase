@@ -1,8 +1,9 @@
 """How per-call latency grows with in-process concurrency, Couchbase SDK stubbed.
 
 With the cluster free, every millisecond of growth from c1 to c100 is
-dispatch/scheduling contention in the single event loop. Total calls
-are held roughly constant across levels so runtime stays bounded.
+dispatch/scheduling contention in the single event loop. Per-worker call
+count shrinks with concurrency (``ITERATIONS // c``, floored at 20) so
+runtime stays bounded; total calls therefore grow at high concurrency.
 """
 
 from __future__ import annotations

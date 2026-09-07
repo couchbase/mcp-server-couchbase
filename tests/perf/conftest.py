@@ -6,7 +6,7 @@ Everything under tests/perf/ is auto-tagged ``perf`` and skipped unless
 Environment variables:
   - ``CB_MCP_PERF=1``: required to run anything here.
   - ``CB_MCP_PERF_ASSERT=1``: also enforce regression thresholds (default: report only, always pass).
-  - ``CB_MCP_PERF_ITERATIONS``: calls per worker (default 200).
+  - ``CB_MCP_PERF_ITERATIONS``: calls per worker (default 100).
   - ``CB_CONNECTION_STRING`` / ``CB_USERNAME`` / ``CB_PASSWORD`` /
     ``CB_MCP_TEST_BUCKET``: only for test_live_cluster.py.
 """
@@ -17,12 +17,14 @@ import os
 
 import pytest
 
-# Keep the telemetry wrapper installed (realistic overhead) but stop the
-# reo-census SDK from sending a network event per tool call.
-os.environ.setdefault("DO_NOT_TRACK", "1")
-os.environ.setdefault("PACKAGE_TRACKER_ANALYTICS", "false")
-
 PERF_ENABLED = os.getenv("CB_MCP_PERF") == "1"
+
+# Keep the telemetry wrapper installed (realistic overhead) but stop the
+# reo-census SDK from sending a network event per tool call. Gated so a
+# root `pytest tests/` run doesn't leak these into unrelated tests.
+if PERF_ENABLED:
+    os.environ.setdefault("DO_NOT_TRACK", "1")
+    os.environ.setdefault("PACKAGE_TRACKER_ANALYTICS", "false")
 
 
 def pytest_collection_modifyitems(config, items):
