@@ -48,7 +48,7 @@ jobs:
             "$JENKINS_BASE_URL/job/$JOB_NAME/buildWithParameters" \
             -d "PRODUCT=${PRODUCT}" \
             -d "VERSION=${VERSION}" \
-            -d "REPO=${REPO}" \
+            -d "PYPI_REPO=${PYPI_REPO}" \
             --user "$JENKINS_USER:$JENKINS_API_TOKEN" \
             --fail -s -D - -o /dev/null | grep -i "location:" | cut -d' ' -f2 | tr -d '\r')
 
@@ -119,5 +119,5 @@ jobs:
           JENKINS_API_TOKEN: ${{ secrets.SERVER_JENKINS_PAT }}
           PRODUCT: "mcp-server-couchbase"
           VERSION: ${{ github.event.inputs.version || steps.artifact-version.outputs.version || github.event.workflow_run.head_branch }}
-          REPO: "testpypi"
+          PYPI_REPO: "testpypi"
           JOB_NAME: "PyPI-publish"
