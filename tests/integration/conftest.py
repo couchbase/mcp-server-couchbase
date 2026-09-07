@@ -74,6 +74,11 @@ EXPECTED_TOOLS = {
     "create_index",
     "build_index",
     "drop_index",
+    # FTS/Search tools
+    "list_search_indexes",
+    "get_search_index_definition",
+    "run_fts_query",
+    "explain_fts_query",
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
     # Performance analysis tools
@@ -118,6 +123,12 @@ TOOLS_BY_CATEGORY = {
         "create_index",
         "build_index",
         "drop_index",
+    },
+    "search": {
+        "list_search_indexes",
+        "get_search_index_definition",
+        "run_fts_query",
+        "explain_fts_query",
     },
     "management": {
         "create_scope",
@@ -191,6 +202,9 @@ TOOL_REQUIRED_PARAMS = {
     ],
     "build_index": ["bucket_name", "scope_name", "collection_name"],
     "drop_index": ["bucket_name", "scope_name", "collection_name", "index_name"],
+    "get_search_index_definition": ["index_name"],
+    "run_fts_query": ["index_name", "query"],
+    "explain_fts_query": ["index_name", "query"],
 }
 
 # Default timeout (seconds) to guard against hangs when the Couchbase cluster

@@ -19,9 +19,11 @@ from .seeding import (
     delete_document,
     doc_id,
     drop_scope,
+    drop_search_index,
     seed_collection,
     seed_document,
     seed_scope,
+    seed_search_index,
     unique_name,
 )
 from .types import ExpectedToolCall, LLMToolCall, ModelResponse, PromptResult
@@ -45,11 +47,13 @@ __all__ = [
     "delete_document",
     "doc_id",
     "drop_scope",
+    "drop_search_index",
     "extract_tool_results",
     "run_accuracy_case",
     "run_result_case",
     "seed_collection",
     "seed_document",
     "seed_scope",
+    "seed_search_index",
     "unique_name",
 ]

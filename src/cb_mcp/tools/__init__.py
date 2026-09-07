@@ -54,6 +54,14 @@ from .query import (
     run_sql_plus_plus_query,
 )
 
+# FTS/Search tools
+from .search import (
+    explain_fts_query,
+    get_search_index_definition,
+    list_search_indexes,
+    run_fts_query,
+)
+
 # Server tools
 from .server import (
     get_buckets_in_cluster,
@@ -87,6 +95,11 @@ READ_ONLY_TOOLS = [
     # Index tools
     get_index_advisor_recommendations,
     list_indexes,
+    # FTS/Search tools
+    list_search_indexes,
+    get_search_index_definition,
+    run_fts_query,
+    explain_fts_query,
     # Query performance analysis tools
     get_queries_not_selective,
     get_queries_not_using_covering_index,
@@ -140,6 +153,11 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     # Index tools (read-only)
     "get_index_advisor_recommendations": ToolAnnotations(readOnlyHint=True),
     "list_indexes": ToolAnnotations(readOnlyHint=True),
+    # FTS/Search tools (read-only)
+    "list_search_indexes": ToolAnnotations(readOnlyHint=True),
+    "get_search_index_definition": ToolAnnotations(readOnlyHint=True),
+    "run_fts_query": ToolAnnotations(readOnlyHint=True),
+    "explain_fts_query": ToolAnnotations(readOnlyHint=True),
     # Query performance analysis tools (read-only)
     "get_longest_running_queries": ToolAnnotations(readOnlyHint=True),
     "get_most_frequent_queries": ToolAnnotations(readOnlyHint=True),
@@ -208,6 +226,10 @@ __all__ = [
     "create_index",
     "build_index",
     "drop_index",
+    "list_search_indexes",
+    "get_search_index_definition",
+    "run_fts_query",
+    "explain_fts_query",
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
     "get_queries_not_selective",
