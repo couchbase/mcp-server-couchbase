@@ -405,7 +405,11 @@ def get_cluster_metrics(
                         auth=(settings["username"], settings["password"]),
                     )
                     response.raise_for_status()
-                    return {"status": "success", "data": response.json()}
+                    data = response.json()
+                    logger.info(
+                        f"Retrieved cluster metrics for {len(metrics)} spec(s) from {host}"
+                    )
+                    return {"status": "success", "data": data}
                 except Exception as e:
                     last_error = e
         raise RuntimeError(f"Failed to reach any host in {hosts}: {last_error}")
@@ -495,7 +499,11 @@ def get_nodes_in_cluster(
                         for entry in response.json()
                         for target in entry.get("targets", [])
                     ]
-                    return {"status": "success", "data": list(dict.fromkeys(targets))}
+                    deduped_targets = list(dict.fromkeys(targets))
+                    logger.info(
+                        f"Found {len(deduped_targets)} node target(s) from {host}"
+                    )
+                    return {"status": "success", "data": deduped_targets}
                 except Exception as e:
                     last_error = e
         raise RuntimeError(f"Failed to reach any host in {hosts}: {last_error}")
