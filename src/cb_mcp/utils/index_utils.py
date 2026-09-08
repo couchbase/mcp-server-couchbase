@@ -5,16 +5,16 @@ This module contains helper functions for working with Couchbase indexes.
 """
 
 import logging
-import os
 from collections.abc import Mapping
-from importlib.resources import files
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 
-from .connection_string import is_capella_connection
-from .constants import MCP_SERVER_NAME
+from .connection_string import (
+    determine_ssl_verification,
+    extract_hosts_from_connection_string,
+)
+from .constants import INDEX_REST_PORT_PLAIN, INDEX_REST_PORT_TLS, MCP_SERVER_NAME
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.index_utils")
 
@@ -255,107 +255,6 @@ def resolve_cluster_major_version(cluster: Any) -> int:
     return min_major
 
 
-def _get_capella_root_ca_path() -> str:
-    """Get the path to the Capella root CA certificate.
-
-    Uses importlib.resources to locate the certificate file, which works when the package is installed with fallback for development.
-
-    Returns:
-        Path to the Capella root CA certificate file.
-    """
-    try:
-        # Use importlib.resources to get the certificate path (works for installed packages)
-        cert_file = files("cb_mcp.certs").joinpath("capella_root_ca.pem")
-        # Convert to string path - this works for both installed packages and dev mode
-        return str(cert_file)
-    except (ImportError, FileNotFoundError, TypeError):
-        # Fallback for development: use src/certs/ directory
-        utils_dir = os.path.dirname(os.path.abspath(__file__))
-        src_dir = os.path.dirname(utils_dir)
-        fallback_path = os.path.join(src_dir, "certs", "capella_root_ca.pem")
-
-        if os.path.exists(fallback_path):
-            logger.info(f"Using fallback certificate path: {fallback_path}")
-            return fallback_path
-
-        # If we still can't find it, log a warning and return the fallback path anyway
-        logger.warning(
-            f"Could not locate Capella root CA certificate at {fallback_path}. "
-            "SSL verification may fail for Capella connections."
-        )
-        return fallback_path
-
-
-def _extract_hosts_from_connection_string(connection_string: str) -> list[str]:
-    """Extract all hosts from a Couchbase connection string.
-
-    Args:
-        connection_string: Connection string like 'couchbase://host' or 'couchbases://host1,host2,host3'
-
-    Returns:
-        List of hosts extracted from the connection string
-    """
-    # Parse the connection string
-    parsed = urlparse(connection_string)
-
-    # If there's a netloc (host), extract all hosts
-    if parsed.netloc:
-        # Split by comma to handle multiple hosts
-        # Remove port if present from each host
-        hosts = [host.split(":")[0].strip() for host in parsed.netloc.split(",")]
-        return hosts
-
-    # Fallback: try to extract manually
-    # Handle cases like 'couchbase://host:8091' or just 'host'
-    host_part = connection_string.replace("couchbase://", "").replace(
-        "couchbases://", ""
-    )
-    host_part = host_part.split("/")[0]
-    hosts = [host.split(":")[0].strip() for host in host_part.split(",")]
-    return hosts
-
-
-def _determine_ssl_verification(
-    connection_string: str, ca_cert_path: str | None
-) -> bool | str:
-    """Determine SSL verification setting based on connection string and cert path.
-
-    Args:
-        connection_string: Couchbase connection string
-        ca_cert_path: Optional path to CA certificate
-
-    Returns:
-        SSL verification setting (bool or path to cert file)
-    """
-    is_tls_enabled = connection_string.lower().startswith("couchbases://")
-
-    # Priority 1: Capella connections always use Capella root CA
-    if is_capella_connection(connection_string):
-        capella_ca = _get_capella_root_ca_path()
-        if os.path.exists(capella_ca):
-            logger.info(
-                f"Capella connection detected, using Capella root CA: {capella_ca}"
-            )
-            return capella_ca
-        logger.warning(
-            f"Capella CA certificate not found at {capella_ca}, "
-            "falling back to system CA bundle"
-        )
-        return True
-
-    # Priority 2: Non-Capella TLS connections use provided cert or system CA bundle
-    if is_tls_enabled:
-        if ca_cert_path:
-            logger.info(f"Using provided CA certificate: {ca_cert_path}")
-            return ca_cert_path
-        logger.info("Using system CA bundle for SSL verification")
-        return True
-
-    # Priority 3: Non-TLS connections (HTTP), disable SSL verification
-    logger.info("Non-TLS connection, SSL verification disabled")
-    return False
-
-
 def _build_query_params(
     bucket_name: str | None,
     scope_name: str | None,
@@ -417,12 +316,12 @@ def fetch_indexes_from_rest_api(
         List of index status dictionaries containing name, definition, and other metadata
     """
     # Extract all hosts from connection string
-    hosts = _extract_hosts_from_connection_string(connection_string)
+    hosts = extract_hosts_from_connection_string(connection_string)
 
     # Determine protocol and port based on whether TLS is enabled
     is_tls_enabled = connection_string.lower().startswith("couchbases://")
     protocol = "https" if is_tls_enabled else "http"
-    port = 19102 if is_tls_enabled else 9102
+    port = INDEX_REST_PORT_TLS if is_tls_enabled else INDEX_REST_PORT_PLAIN
 
     logger.info(
         f"TLS {'enabled' if is_tls_enabled else 'disabled'}, "
@@ -431,7 +330,7 @@ def fetch_indexes_from_rest_api(
 
     # Build query parameters and determine SSL verification
     params = _build_query_params(bucket_name, scope_name, collection_name, index_name)
-    verify_ssl = _determine_ssl_verification(connection_string, ca_cert_path)
+    verify_ssl = determine_ssl_verification(connection_string, ca_cert_path)
 
     # Try each host one by one until we get a successful response
     last_error = None

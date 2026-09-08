@@ -20,6 +20,14 @@ NETWORK_TRANSPORTS_SDK_MAPPING = {
 # network transport but is explicitly out of scope for OAuth in this build.
 STREAMABLE_HTTP_TRANSPORT = "http"
 
+# Couchbase Server REST API ports. TLS/plaintext port pairs differ per service —
+# these are used to build request URLs once TLS-vs-plaintext is decided from the
+# connection string's scheme.
+MANAGEMENT_REST_PORT_TLS = 18091
+MANAGEMENT_REST_PORT_PLAIN = 8091
+INDEX_REST_PORT_TLS = 19102
+INDEX_REST_PORT_PLAIN = 9102
+
 # get_cluster_metrics Configuration
 # The stats-range REST endpoint itself enforces none of these — it will happily accept
 # dozens of specs, a multi-day window at a 1-second step, and fan out across every node a

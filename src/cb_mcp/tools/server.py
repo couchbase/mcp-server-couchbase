@@ -16,10 +16,13 @@ from fastmcp import Context
 from ..utils.config import get_settings
 from ..utils.connection import connect_to_bucket
 from ..utils.connection_string import (
+    determine_ssl_verification,
     extract_hosts_from_connection_string,
     is_capella_connection,
 )
 from ..utils.constants import (
+    MANAGEMENT_REST_PORT_PLAIN,
+    MANAGEMENT_REST_PORT_TLS,
     MAX_METRIC_SPECS,
     MAX_NODES_PER_SPEC,
     MAX_SAMPLES_PER_SERIES,
@@ -378,10 +381,14 @@ def get_cluster_metrics(
                 )
 
         is_tls = connection_string.lower().startswith("couchbases://")
-        protocol, port = ("https", 18091) if is_tls else ("http", 8091)
-        # Capella is already excluded above, so no Capella-CA handling is needed here —
-        # just the CA path for a self-signed self-managed cert, or the system CA bundle.
-        verify_ssl = (settings.get("ca_cert_path") or True) if is_tls else False
+        protocol, port = (
+            ("https", MANAGEMENT_REST_PORT_TLS)
+            if is_tls
+            else ("http", MANAGEMENT_REST_PORT_PLAIN)
+        )
+        verify_ssl = determine_ssl_verification(
+            connection_string, settings.get("ca_cert_path")
+        )
         hosts = extract_hosts_from_connection_string(connection_string)
         if not hosts:
             raise ValueError(
@@ -402,6 +409,15 @@ def get_cluster_metrics(
                 except Exception as e:
                     last_error = e
         raise RuntimeError(f"Failed to reach any host in {hosts}: {last_error}")
+    except ValueError as e:
+        # Up-front, documented rejections (bad input, Capella, no hosts) — not a
+        # system fault, so no traceback noise in the logs.
+        logger.warning(f"Rejected get_cluster_metrics request: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to get cluster metrics",
+        }
     except Exception as e:
         logger.error(f"Error getting cluster metrics: {e}", exc_info=True)
         return {
@@ -445,15 +461,19 @@ def get_nodes_in_cluster(
             )
 
         is_tls = connection_string.lower().startswith("couchbases://")
-        protocol, port = ("https", 18091) if is_tls else ("http", 8091)
+        protocol, port = (
+            ("https", MANAGEMENT_REST_PORT_TLS)
+            if is_tls
+            else ("http", MANAGEMENT_REST_PORT_PLAIN)
+        )
         params = {
             "type": "json",
             "port": "secure" if use_secure_ports else "insecure",
             "network": network,
         }
-        # Capella is already excluded above, so no Capella-CA handling is needed here —
-        # just the CA path for a self-signed self-managed cert, or the system CA bundle.
-        verify_ssl = (settings.get("ca_cert_path") or True) if is_tls else False
+        verify_ssl = determine_ssl_verification(
+            connection_string, settings.get("ca_cert_path")
+        )
         hosts = extract_hosts_from_connection_string(connection_string)
         if not hosts:
             raise ValueError(
@@ -479,6 +499,15 @@ def get_nodes_in_cluster(
                 except Exception as e:
                     last_error = e
         raise RuntimeError(f"Failed to reach any host in {hosts}: {last_error}")
+    except ValueError as e:
+        # Up-front, documented rejections (bad input, Capella, no hosts) — not a
+        # system fault, so no traceback noise in the logs.
+        logger.warning(f"Rejected get_nodes_in_cluster request: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to get cluster nodes",
+        }
     except Exception as e:
         logger.error(f"Error getting cluster nodes: {e}", exc_info=True)
         return {
