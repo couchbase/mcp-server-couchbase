@@ -15,6 +15,7 @@ from couchbase_analytics.credential import Credential
 from fastmcp import Context
 
 from .handle_registry import HandleRegistry
+from .result_store import ResultStore
 
 logger = logging.getLogger("ea-mcp-server.connection")
 
@@ -23,14 +24,16 @@ logger = logging.getLogger("ea-mcp-server.connection")
 class AppContext:
     """Lifespan-scoped context for the MCP server.
 
-    Holds the connected cluster plus the async-query handle registry. The
-    registry is created once per server process here (rather than as a module
-    global) so its lifetime is tied to the lifespan, and tests can build an
-    isolated one per case.
+    Holds the connected cluster, the async-query handle registry, and the
+    large-result store used by the truncating POC query tools. Both stores are
+    created once per server process here (rather than as module globals) so
+    their lifetime is tied to the lifespan, and tests can build an isolated one
+    per case.
     """
 
     cluster: Cluster
     handle_registry: HandleRegistry = field(default_factory=HandleRegistry)
+    result_store: ResultStore = field(default_factory=ResultStore)
 
 
 def connect_to_analytics_cluster(
@@ -61,3 +64,8 @@ def get_cluster_connection(ctx: Context) -> Cluster:
 def get_handle_registry(ctx: Context) -> HandleRegistry:
     """Return the async query handle registry for this server process."""
     return ctx.request_context.lifespan_context.handle_registry  # type: ignore
+
+
+def get_result_store(ctx: Context) -> ResultStore:
+    """Return the buffered-result store for this server process."""
+    return ctx.request_context.lifespan_context.result_store  # type: ignore

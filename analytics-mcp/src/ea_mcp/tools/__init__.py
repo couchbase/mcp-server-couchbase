@@ -21,6 +21,13 @@ from .query import (
     run_query_async,
     run_query_sync,
 )
+from .query_poc import (
+    get_async_query_results_poc_resource,
+    get_query_poc_async_results,
+    release_query_poc_result,
+    run_query_poc_async,
+    run_query_poc_resource,
+)
 
 TOOLS: list[Callable] = [
     get_databases_in_cluster,
@@ -33,6 +40,17 @@ TOOLS: list[Callable] = [
     get_async_query_results,
     discard_async_query_results,
     cancel_async_query,
+    # POC: large-result handling via MCP resources. A query returns a small
+    # preview plus a resource_uri; the rows are read back through the resource
+    # templates (whole result, or a page). See tools/query_poc.py.
+    run_query_poc_resource,
+    # Async: reuse run_query_async, truncate at fetch time.
+    get_async_query_results_poc_resource,
+    # Async: one result_id spanning running and ready.
+    run_query_poc_async,
+    get_query_poc_async_results,
+    # Cleanup for every POC above.
+    release_query_poc_result,
 ]
 
 TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
@@ -50,6 +68,17 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_async_query_results": ToolAnnotations(readOnlyHint=True),
     "discard_async_query_results": ToolAnnotations(destructiveHint=True),
     "cancel_async_query": ToolAnnotations(destructiveHint=True),
+    # The POC runners wrap the same execute_query as run_query_sync, so they
+    # can carry DDL/DML too — no readOnlyHint.
+    "run_query_poc_resource": ToolAnnotations(),
+    "run_query_poc_async": ToolAnnotations(),
+    # Fetching buffers rows server-side but does not consume EA's, so these
+    # stay repeatable and side-effect free (same reasoning as
+    # get_async_query_results).
+    "get_async_query_results_poc_resource": ToolAnnotations(readOnlyHint=True),
+    "get_query_poc_async_results": ToolAnnotations(readOnlyHint=True),
+    # Frees the buffer and cancels the query if it is still running.
+    "release_query_poc_result": ToolAnnotations(destructiveHint=True),
 }
 
 __all__ = [
@@ -58,10 +87,15 @@ __all__ = [
     "cancel_async_query",
     "discard_async_query_results",
     "get_async_query_results",
+    "get_async_query_results_poc_resource",
     "get_collections_in_scope",
     "get_databases_in_cluster",
+    "get_query_poc_async_results",
     "get_schema_for_collection",
     "get_scopes_in_database",
+    "release_query_poc_result",
     "run_query_async",
+    "run_query_poc_async",
+    "run_query_poc_resource",
     "run_query_sync",
 ]
