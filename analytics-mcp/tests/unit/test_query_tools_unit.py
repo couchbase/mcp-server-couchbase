@@ -7,7 +7,7 @@ Mocks the cluster so these tests can cover the error branches (returned as
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from ea_mcp.tools.query import run_query_sync
+from ea_mcp.tools.query import explain_query, run_query_sync
 
 
 def _make_ctx_with_cluster() -> tuple[SimpleNamespace, MagicMock]:
@@ -36,6 +36,31 @@ class TestRunQuerySync:
 
         with patch("ea_mcp.tools.query.get_cluster_connection", return_value=cluster):
             result = run_query_sync(ctx, "SELECT bad(")
+
+        assert result == {
+            "success": False,
+            "error": "syntax error",
+            "statement": "SELECT bad(",
+        }
+
+
+class TestExplainQuery:
+    def test_prepends_explain_to_statement(self) -> None:
+        ctx, cluster = _make_ctx_with_cluster()
+        cluster.execute_query.return_value.get_all_rows.return_value = [{"plan": {}}]
+
+        with patch("ea_mcp.tools.query.get_cluster_connection", return_value=cluster):
+            result = explain_query(ctx, "SELECT 1 AS one")
+
+        cluster.execute_query.assert_called_once_with("EXPLAIN SELECT 1 AS one")
+        assert result == {"success": True, "plan": [{"plan": {}}]}
+
+    def test_returns_error_envelope_on_sdk_error(self) -> None:
+        ctx, cluster = _make_ctx_with_cluster()
+        cluster.execute_query.side_effect = Exception("syntax error")
+
+        with patch("ea_mcp.tools.query.get_cluster_connection", return_value=cluster):
+            result = explain_query(ctx, "SELECT bad(")
 
         assert result == {
             "success": False,

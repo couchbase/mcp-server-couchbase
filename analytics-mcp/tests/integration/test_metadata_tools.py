@@ -16,6 +16,26 @@ from conftest import create_mcp_session, extract_payload
 DATABASE = "Default"
 
 
+def _collect_keys(obj: object) -> set[str]:
+    """Recursively collect every dict key appearing anywhere in obj.
+
+    array_infer_schema's exact envelope (top-level key names, nesting) isn't
+    pinned down by the docs, but it's documented to return "JSON Schema
+    format" — meaning inferred property names always end up as dict keys
+    somewhere in the structure. Walking for keys lets tests check that a
+    field was detected without assuming an unconfirmed envelope shape.
+    """
+    keys: set[str] = set()
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            keys.add(key)
+            keys |= _collect_keys(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            keys |= _collect_keys(item)
+    return keys
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_get_databases_in_cluster() -> None:
@@ -94,8 +114,8 @@ async def test_get_collections_in_scope_and_schema() -> None:
                 },
             )
             schema = extract_payload(schema_response)
-            fields = {row["field"] for row in schema}
-            assert {"id", "name", "count"} <= fields
+            assert isinstance(schema, list) and len(schema) > 0
+            assert {"id", "name", "count"} <= _collect_keys(schema)
         finally:
             await session.call_tool(
                 "run_query_sync",

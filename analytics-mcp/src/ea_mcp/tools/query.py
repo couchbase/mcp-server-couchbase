@@ -21,6 +21,13 @@ tool descriptions and are deliberately short):
 * Tools are plain ``def`` (not ``async def``): the SDK's handle calls are
   blocking, so they run on FastMCP's thread pool rather than blocking the event
   loop inside a coroutine.
+run_query_sync can carry DDL/DML, so — unlike the metadata tools in this
+package — it follows the parent server's write-tool convention: catch
+Exception, log, and return a {"success": False, "error": ...} envelope
+instead of raising.
+
+explain_query follows the same convention: catch Exception, log, and return
+a {"success": False, "error": ...} envelope instead of raising.
 """
 
 import logging
@@ -298,3 +305,25 @@ def cancel_async_query(ctx: Context, query_handle: str) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"Error cancelling async query: {e}", exc_info=True)
         return tool_error(e, query_handle=query_handle)
+def explain_query(ctx: Context, statement: str) -> dict[str, Any]:
+    """Generate the query plan for a SQL++ statement using EXPLAIN, without executing it.
+
+    Whether the plan is cost-based or rule-based depends on whether the
+    optimizer has collected samples for the target collection(s) — this tool
+    just returns whatever plan the optimizer produces.
+
+    Pass the statement without an EXPLAIN keyword; it is added automatically.
+
+    Returns {"success": True, "plan": [...]} on success, or
+    {"success": False, "error": "..."} on failure.
+    """
+    cluster = get_cluster_connection(ctx)
+    try:
+        logger.debug("Running EXPLAIN for SQL++ statement")
+        result = cluster.execute_query(f"EXPLAIN {statement}")
+        rows = result.get_all_rows()
+        logger.info(f"EXPLAIN returned {len(rows)} row(s)")
+        return tool_success(plan=rows)
+    except Exception as e:
+        logger.error(f"Error running EXPLAIN: {e}", exc_info=True)
+        return tool_error(e, statement=statement)

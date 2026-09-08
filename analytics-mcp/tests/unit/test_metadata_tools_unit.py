@@ -117,16 +117,18 @@ class TestGetCollectionsInScope:
 class TestGetSchemaForCollection:
     def test_returns_rows_on_success(self) -> None:
         ctx, cluster = _make_ctx_with_cluster()
-        cluster.execute_query.return_value.get_all_rows.return_value = [
-            {"field": "id", "data_type": "string", "occurrences": 2}
-        ]
+        # SELECT VALUE array_infer_schema(...) yields a single row whose
+        # value is the array of detected flavor objects. The exact envelope
+        # shape isn't asserted on here — this is a pass-through check.
+        flavors = [{"properties": {"id": {"type": ["string"]}}}]
+        cluster.execute_query.return_value.get_all_rows.return_value = [flavors]
 
         with patch(
             "ea_mcp.tools.metadata.get_cluster_connection", return_value=cluster
         ):
             result = get_schema_for_collection(ctx, "Default", "Default", "eatest_coll")
 
-        assert result == [{"field": "id", "data_type": "string", "occurrences": 2}]
+        assert result == flavors
 
     def test_raises_on_sdk_error(self) -> None:
         ctx, cluster = _make_ctx_with_cluster()
