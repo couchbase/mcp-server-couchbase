@@ -13,6 +13,9 @@ reached against a live cluster:
 - get_cluster_metrics / get_nodes_in_cluster return error envelopes on REST
   failures and success envelopes wrapping the raw REST response otherwise, and
   reject Capella connections up front without attempting the REST call.
+- get_cluster_metrics rejects out-of-bounds requests (too many specs, step too
+  small, window/samples too large, wrong node count) without attempting the
+  REST call.
 """
 
 from __future__ import annotations
@@ -33,6 +36,13 @@ from cb_mcp.tools.server import (
 from cb_mcp.tools.server import (
     # Aliased so pytest doesn't collect the tool function itself as a test.
     test_cluster_connection as cluster_connection_tool,
+)
+from cb_mcp.utils.constants import (
+    MAX_METRIC_SPECS,
+    MAX_NODES_PER_SPEC,
+    MAX_SAMPLES_PER_SERIES,
+    MAX_WINDOW_SECONDS,
+    MIN_STEP_SECONDS,
 )
 
 
@@ -433,9 +443,10 @@ class TestGetClusterMetrics:
         raise RuntimeError with no underlying error."""
         settings = {**_VALID_SETTINGS, "connection_string": "not-a-url"}
         ctx = _make_ctx_with_settings(settings)
+        metrics = [{"metric": [], "nodes": ["host1:11210"]}]
 
         with patch("cb_mcp.tools.server.httpx.Client") as mock_client_cls:
-            result = get_cluster_metrics(ctx, metrics=[{"metric": []}])
+            result = get_cluster_metrics(ctx, metrics=metrics)
 
         mock_client_cls.assert_not_called()
         assert result["status"] == "error"
@@ -450,7 +461,12 @@ class TestGetClusterMetrics:
             {"data": [{"metric": {"name": "kv_ops"}, "values": []}], "errors": []},
             {"data": [], "errors": ["unrecognized metric"]},
         ]
-        metrics = [{"metric": [{"label": "name", "value": "kv_ops"}]}]
+        metrics = [
+            {
+                "metric": [{"label": "name", "value": "kv_ops"}],
+                "nodes": ["host1:11210"],
+            }
+        ]
         client_patch, mock_client = self._patch_httpx_client(
             "post", [self._ok_response(rest_response)]
         )
@@ -492,6 +508,135 @@ class TestGetClusterMetrics:
         assert result["status"] == "error"
         assert "host1" in result["error"] and "host2" in result["error"]
         assert "Failed to get cluster metrics" in result["message"]
+
+    def test_rejects_too_many_specs_without_rest_call(self) -> None:
+        """More than MAX_METRIC_SPECS specs must be rejected before any REST call."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        metrics = [
+            {"metric": [], "nodes": ["host1:11210"]}
+            for _ in range(MAX_METRIC_SPECS + 1)
+        ]
+
+        with patch("cb_mcp.tools.server.httpx.Client") as mock_client_cls:
+            result = get_cluster_metrics(ctx, metrics=metrics)
+
+        mock_client_cls.assert_not_called()
+        assert result["status"] == "error"
+        assert "at most" in result["error"]
+        assert "Failed to get cluster metrics" in result["message"]
+
+    def test_rejects_step_below_minimum_without_rest_call(self) -> None:
+        """A step below MIN_STEP_SECONDS must be rejected before any REST call."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        metrics = [
+            {"metric": [], "step": MIN_STEP_SECONDS - 1, "nodes": ["host1:11210"]}
+        ]
+
+        with patch("cb_mcp.tools.server.httpx.Client") as mock_client_cls:
+            result = get_cluster_metrics(ctx, metrics=metrics)
+
+        mock_client_cls.assert_not_called()
+        assert result["status"] == "error"
+        assert "out of bounds" in result["error"]
+        assert "Failed to get cluster metrics" in result["message"]
+
+    def test_rejects_window_exceeding_max_without_rest_call(self) -> None:
+        """A start/end window wider than MAX_WINDOW_SECONDS must be rejected
+        before any REST call."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        metrics = [
+            {
+                "metric": [],
+                "start": -(MAX_WINDOW_SECONDS + 60),
+                "end": 0,
+                "nodes": ["host1:11210"],
+            }
+        ]
+
+        with patch("cb_mcp.tools.server.httpx.Client") as mock_client_cls:
+            result = get_cluster_metrics(ctx, metrics=metrics)
+
+        mock_client_cls.assert_not_called()
+        assert result["status"] == "error"
+        assert "out of bounds" in result["error"]
+        assert "Failed to get cluster metrics" in result["message"]
+
+    def test_rejects_samples_per_series_exceeding_max_without_rest_call(self) -> None:
+        """A window/step ratio above MAX_SAMPLES_PER_SERIES must be rejected
+        before any REST call, even with an in-bounds window, step, and node count."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        metrics = [
+            {
+                "metric": [],
+                "start": -(MAX_SAMPLES_PER_SERIES + 1) * MIN_STEP_SECONDS,
+                "end": 0,
+                "step": MIN_STEP_SECONDS,
+                "nodes": ["host1:11210"],
+            }
+        ]
+
+        with patch("cb_mcp.tools.server.httpx.Client") as mock_client_cls:
+            result = get_cluster_metrics(ctx, metrics=metrics)
+
+        mock_client_cls.assert_not_called()
+        assert result["status"] == "error"
+        assert "out of bounds" in result["error"]
+        assert "Failed to get cluster metrics" in result["message"]
+
+    def test_rejects_missing_nodes_without_rest_call(self) -> None:
+        """A spec with no 'nodes' at all must be rejected before any REST call."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        metrics = [{"metric": []}]
+
+        with patch("cb_mcp.tools.server.httpx.Client") as mock_client_cls:
+            result = get_cluster_metrics(ctx, metrics=metrics)
+
+        mock_client_cls.assert_not_called()
+        assert result["status"] == "error"
+        assert "out of bounds" in result["error"]
+        assert "Failed to get cluster metrics" in result["message"]
+
+    def test_rejects_empty_nodes_without_rest_call(self) -> None:
+        """A spec with an empty 'nodes' list must be rejected before any REST call."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        metrics = [{"metric": [], "nodes": []}]
+
+        with patch("cb_mcp.tools.server.httpx.Client") as mock_client_cls:
+            result = get_cluster_metrics(ctx, metrics=metrics)
+
+        mock_client_cls.assert_not_called()
+        assert result["status"] == "error"
+        assert "out of bounds" in result["error"]
+        assert "Failed to get cluster metrics" in result["message"]
+
+    def test_rejects_too_many_nodes_without_rest_call(self) -> None:
+        """More than MAX_NODES_PER_SPEC nodes must be rejected before any REST call."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        nodes = [f"host{i}:11210" for i in range(MAX_NODES_PER_SPEC + 1)]
+        metrics = [{"metric": [], "nodes": nodes}]
+
+        with patch("cb_mcp.tools.server.httpx.Client") as mock_client_cls:
+            result = get_cluster_metrics(ctx, metrics=metrics)
+
+        mock_client_cls.assert_not_called()
+        assert result["status"] == "error"
+        assert "out of bounds" in result["error"]
+        assert "Failed to get cluster metrics" in result["message"]
+
+    def test_accepts_max_nodes_per_spec(self) -> None:
+        """Exactly MAX_NODES_PER_SPEC nodes is in-bounds and reaches the REST call."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        nodes = [f"host{i}:11210" for i in range(MAX_NODES_PER_SPEC)]
+        metrics = [{"metric": [], "nodes": nodes}]
+        client_patch, mock_client = self._patch_httpx_client(
+            "post", [self._ok_response([{"data": []}])]
+        )
+
+        with client_patch:
+            result = get_cluster_metrics(ctx, metrics=metrics)
+
+        mock_client.post.assert_called_once()
+        assert result == {"status": "success", "data": [{"data": []}]}
 
 
 class TestGetNodesInCluster:

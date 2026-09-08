@@ -20,6 +20,19 @@ NETWORK_TRANSPORTS_SDK_MAPPING = {
 # network transport but is explicitly out of scope for OAuth in this build.
 STREAMABLE_HTTP_TRANSPORT = "http"
 
+# get_cluster_metrics Configuration
+# The stats-range REST endpoint itself enforces none of these — it will happily accept
+# dozens of specs, a multi-day window at a 1-second step, and fan out across every node a
+# metric touches. These are rejected up front with a clear error rather than attempting the
+# REST call. Fan-out across other label dimensions (bucket, collection, index, ...) isn't
+# bounded here — it can't be predicted from the request alone — so it's left to be measured
+# via telemetry rather than guessed at.
+MAX_METRIC_SPECS = 10
+MAX_WINDOW_SECONDS = 24 * 60 * 60  # 1 day
+MIN_STEP_SECONDS = 10
+MAX_SAMPLES_PER_SERIES = 500
+MAX_NODES_PER_SPEC = 2
+
 # Index Service Configuration
 # Cluster major version at which list_indexes prefers the query service over
 # the Index Service REST API. From this version, system:indexes exposes the

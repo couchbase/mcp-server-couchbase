@@ -26,6 +26,20 @@ from conftest import (
     require_test_bucket,
 )
 
+from cb_mcp.utils.constants import MAX_NODES_PER_SPEC
+
+
+async def _get_metrics_target_nodes(session) -> list[str]:
+    """Fetch up to MAX_NODES_PER_SPEC real node targets for a get_cluster_metrics spec.
+
+    Falls back to a placeholder when get_nodes_in_cluster itself errors (e.g. against
+    Capella) — get_cluster_metrics rejects Capella before validating "nodes" anyway.
+    """
+    response = await session.call_tool("get_nodes_in_cluster", arguments={})
+    payload = extract_payload(response)
+    nodes = payload.get("data") if isinstance(payload, dict) else None
+    return (nodes or ["127.0.0.1:8091"])[:MAX_NODES_PER_SPEC]
+
 
 @pytest.mark.asyncio
 async def test_get_server_configuration_status() -> None:
@@ -217,6 +231,7 @@ async def test_get_cluster_metrics() -> None:
     {"status": "error", ...} envelope rather than an unhandled exception.
     """
     async with create_mcp_session() as session:
+        nodes = await _get_metrics_target_nodes(session)
         response = await session.call_tool(
             "get_cluster_metrics",
             arguments={
@@ -228,6 +243,7 @@ async def test_get_cluster_metrics() -> None:
                         "applyFunctions": ["avg"],
                         "step": 10,
                         "start": -60,
+                        "nodes": nodes,
                     }
                 ]
             },
@@ -248,11 +264,15 @@ async def test_get_cluster_metrics() -> None:
 async def test_get_cluster_metrics_invalid_metric_reports_per_spec_error() -> None:
     """An unrecognized metric name should surface inline, not fail the whole call."""
     async with create_mcp_session() as session:
+        nodes = await _get_metrics_target_nodes(session)
         response = await session.call_tool(
             "get_cluster_metrics",
             arguments={
                 "metrics": [
-                    {"metric": [{"label": "name", "value": "not_a_real_metric_xyz"}]}
+                    {
+                        "metric": [{"label": "name", "value": "not_a_real_metric_xyz"}],
+                        "nodes": nodes,
+                    }
                 ]
             },
         )

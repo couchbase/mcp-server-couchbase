@@ -19,7 +19,14 @@ from ..utils.connection_string import (
     extract_hosts_from_connection_string,
     is_capella_connection,
 )
-from ..utils.constants import MCP_SERVER_NAME
+from ..utils.constants import (
+    MAX_METRIC_SPECS,
+    MAX_NODES_PER_SPEC,
+    MAX_SAMPLES_PER_SERIES,
+    MAX_WINDOW_SECONDS,
+    MCP_SERVER_NAME,
+    MIN_STEP_SECONDS,
+)
 from ..utils.context import (
     get_cluster_connection,
     get_cluster_provider,
@@ -318,11 +325,20 @@ def get_cluster_metrics(
 
     `metrics` is passed through as the request body: a list of specs, each with a required
     "metric" (list of {"label", "value"} pairs, e.g. [{"label": "name", "value":
-    "kv_disk_write_queue"}]) and optional "applyFunctions", "nodes", "nodesAggregation",
-    "start"/"end" (negative seconds relative to now; default -60/now), "step" (seconds, default
-    10), "alignTimestamps". To find metric names, see
+    "kv_disk_write_queue"}]), a required "nodes" (1-2 "host:port" targets — call
+    get_nodes_in_cluster first if you don't already know them), and optional "applyFunctions",
+    "nodesAggregation", "start"/"end" (negative seconds relative to now; default -60/now),
+    "step" (seconds, default 10), "alignTimestamps". To find metric names, see
     https://docs.couchbase.com/server/current/metrics-reference/metrics-reference.html (one page
     per service; long pages continue on "-2.html", "-3.html", ...).
+
+    Bounded for token-conscious output: at most 10 specs per call, each spanning at most 86400s
+    (1 day) with a step of at least 10s, no more than 500 samples per series (window / step),
+    and targeting at most 2 nodes. A spec outside these bounds is rejected up front with no
+    REST call made — narrow start/end, widen step, target fewer nodes, or split into multiple
+    calls. This doesn't bound fan-out across other dimensions a metric may vary by (bucket,
+    collection, index, ...) — narrow those via additional {"label", "value"} pairs in "metric"
+    if a spec's response is larger than expected.
 
     Returns {"status": "success", "data": [...]} (one entry per spec, each with "data" and any
     per-spec "errors") or {"status": "error", "error": "..."}.
@@ -333,6 +349,33 @@ def get_cluster_metrics(
         connection_string = settings["connection_string"]
         if is_capella_connection(connection_string):
             raise ValueError("get_cluster_metrics is not supported on Capella clusters")
+
+        if len(metrics) > MAX_METRIC_SPECS:
+            raise ValueError(
+                f"metrics has {len(metrics)} spec(s); at most {MAX_METRIC_SPECS} are allowed "
+                "per call to keep the response size bounded — split into multiple calls "
+                "instead."
+            )
+        for i, spec in enumerate(metrics):
+            step = spec.get("step", 10)
+            window = abs(spec.get("end", 0) - spec.get("start", -60))
+            samples = window // step if step > 0 else MAX_SAMPLES_PER_SERIES + 1
+            nodes = spec.get("nodes") or []
+            if (
+                step < MIN_STEP_SECONDS
+                or window > MAX_WINDOW_SECONDS
+                or samples > MAX_SAMPLES_PER_SERIES
+                or not (1 <= len(nodes) <= MAX_NODES_PER_SPEC)
+            ):
+                raise ValueError(
+                    f"metrics[{i}] is out of bounds (step={step}s, window={window}s, "
+                    f"~{samples} samples/series, {len(nodes)} node(s)); require step >= "
+                    f"{MIN_STEP_SECONDS}s, window <= {MAX_WINDOW_SECONDS}s, <= "
+                    f"{MAX_SAMPLES_PER_SERIES} samples/series, and 1-{MAX_NODES_PER_SPEC} "
+                    "node(s) in 'nodes' — narrow start/end, widen step, target fewer nodes, "
+                    "or split into multiple calls. Use get_nodes_in_cluster to find valid "
+                    "node targets."
+                )
 
         is_tls = connection_string.lower().startswith("couchbases://")
         protocol, port = ("https", 18091) if is_tls else ("http", 8091)
