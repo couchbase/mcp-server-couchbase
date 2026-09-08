@@ -6,7 +6,7 @@ This module contains tools for getting the server status, testing the connection
 
 import json
 import logging
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from couchbase.diagnostics import ServiceType
@@ -434,7 +434,7 @@ def get_cluster_metrics(
 def get_nodes_in_cluster(
     ctx: Context,
     use_secure_ports: bool = True,
-    network: str = "default",
+    network: Literal["default", "external"] = "default",
     timeout: int = 30,
 ) -> dict[str, Any]:
     """List cluster nodes as host:port targets, the way Prometheus would discover them.
