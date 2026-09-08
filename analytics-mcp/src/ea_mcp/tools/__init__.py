@@ -1,7 +1,7 @@
 """Enterprise Analytics (EA) prototype MCP tools.
 
 Flat tool set — no read/write split, no read-only-mode gating, unlike the
-parent ``cb_mcp.tools`` package. All 8 tools are registered unconditionally.
+parent ``cb_mcp.tools`` package. All 10 tools are registered unconditionally.
 """
 
 from collections.abc import Callable
@@ -15,6 +15,13 @@ from .metadata import (
     get_schema_for_collection,
     get_scopes_in_database,
 )
+from .query import (
+    cancel_async_query,
+    discard_async_query_results,
+    get_async_query_results,
+    run_query_async,
+    run_query_sync,
+)
 from .query import explain_query, run_query_sync
 
 TOOLS: list[Callable] = [
@@ -25,6 +32,11 @@ TOOLS: list[Callable] = [
     create_index,
     list_indexes,
     run_query_sync,
+    # Server Async Request API (EA 2.2+).
+    run_query_async,
+    get_async_query_results,
+    discard_async_query_results,
+    cancel_async_query,
     explain_query,
 ]
 
@@ -41,18 +53,29 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     # run_query_sync can carry DDL/DML per the tool spec, so it gets no
     # readOnlyHint (matches run_sql_plus_plus_query in the parent server).
     "run_query_sync": ToolAnnotations(),
+    # run_query_async can likewise carry DDL/DML — no readOnlyHint.
+    "run_query_async": ToolAnnotations(),
+    # Fetching does not free EA's buffers or evict the token, so it is
+    # genuinely repeatable and side-effect free.
+    "get_async_query_results": ToolAnnotations(readOnlyHint=True),
+    "discard_async_query_results": ToolAnnotations(destructiveHint=True),
+    "cancel_async_query": ToolAnnotations(destructiveHint=True),
     "explain_query": ToolAnnotations(readOnlyHint=True),
 }
 
 __all__ = [
     "TOOLS",
     "TOOL_ANNOTATIONS",
+    "cancel_async_query",
+    "discard_async_query_results",
+    "get_async_query_results",
     "create_index",
     "explain_query",
     "get_collections_in_scope",
     "get_databases_in_cluster",
     "get_schema_for_collection",
     "get_scopes_in_database",
+    "run_query_async",
     "list_indexes",
     "run_query_sync",
 ]

@@ -8,20 +8,29 @@ lazy-connect-on-first-call, no lock, and no ``is_connected()``/
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from couchbase_analytics.cluster import Cluster
 from couchbase_analytics.credential import Credential
 from fastmcp import Context
+
+from .handle_registry import HandleRegistry
 
 logger = logging.getLogger("ea-mcp-server.connection")
 
 
 @dataclass
 class AppContext:
-    """Lifespan-scoped context for the MCP server: just the connected cluster."""
+    """Lifespan-scoped context for the MCP server.
+
+    Holds the connected cluster plus the async-query handle registry. The
+    registry is created once per server process here (rather than as a module
+    global) so its lifetime is tied to the lifespan, and tests can build an
+    isolated one per case.
+    """
 
     cluster: Cluster
+    handle_registry: HandleRegistry = field(default_factory=HandleRegistry)
 
 
 def connect_to_analytics_cluster(
@@ -47,3 +56,8 @@ def connect_to_analytics_cluster(
 def get_cluster_connection(ctx: Context) -> Cluster:
     """Return the Enterprise Analytics cluster for this request."""
     return ctx.request_context.lifespan_context.cluster  # type: ignore
+
+
+def get_handle_registry(ctx: Context) -> HandleRegistry:
+    """Return the async query handle registry for this server process."""
+    return ctx.request_context.lifespan_context.handle_registry  # type: ignore
