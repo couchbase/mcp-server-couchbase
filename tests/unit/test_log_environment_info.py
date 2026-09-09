@@ -29,6 +29,7 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "mcp_server_version",
     "dependencies",
     "transport",
+    "server_id",
     "logging",
     "config",
 }

@@ -18,6 +18,7 @@ from ...utils.context import (
     get_cluster_connection,
     get_cluster_provider,
     get_logging_config,
+    get_server_id,
 )
 from ...utils.operational.connection import connect_to_bucket
 from .query import run_cluster_query
@@ -70,6 +71,7 @@ def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
 
     return {
         "server_name": FASTMCP_SERVER_NAME,
+        "server_id": get_server_id(ctx),
         "status": "running",
         "configuration": configuration,
         "logging": logging_status,

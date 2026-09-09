@@ -24,6 +24,10 @@ from .constants import LOGGER_ROOT
 
 logger = logging.getLogger(f"{LOGGER_ROOT}.utils.telemetry")
 
+# Attributed to the operational server when a caller does not say otherwise,
+# matching every event emitted before the field existed.
+DEFAULT_SERVER_ID = "operational"
+
 _PACKAGE_NAME = "couchbase-mcp-server"
 
 try:
@@ -43,18 +47,33 @@ except Exception:
     telemetry_logger = None
 
 
-def send_install_ping(transport: str) -> None:
-    """Fire a best-effort startup event recording the transport mode."""
+def send_install_ping(transport: str, *, server_id: str = DEFAULT_SERVER_ID) -> None:
+    """Fire a best-effort startup event recording the transport and server.
+
+    Every server ships in one distribution, so the package name and version
+    cannot tell them apart — ``server`` is the only field that does. Events
+    predating this field came from the operational server, so a query spanning
+    the boundary wants ``coalesce(server, 'operational')``.
+    """
     if telemetry_logger:
         try:
             telemetry_logger.log_event(
-                {"activity_type": "mcp_server_start", "transport": transport}
+                {
+                    "activity_type": "mcp_server_start",
+                    "transport": transport,
+                    "server": server_id,
+                }
             )
         except Exception:
             logger.debug("Failed to send startup telemetry ping", exc_info=True)
 
 
-def _send_tool_call_event(tool_name: str, success: bool, duration_ms: float) -> None:
+def _send_tool_call_event(
+    tool_name: str,
+    success: bool,
+    duration_ms: float,
+    server_id: str = DEFAULT_SERVER_ID,
+) -> None:
     if telemetry_logger:
         try:
             telemetry_logger.log_event(
@@ -63,13 +82,16 @@ def _send_tool_call_event(tool_name: str, success: bool, duration_ms: float) -> 
                     "tool_name": tool_name,
                     "success": "true" if success else "false",
                     "duration_ms": f"{duration_ms:.1f}",
+                    "server": server_id,
                 }
             )
         except Exception:
             logger.debug("Failed to send tool-call telemetry ping", exc_info=True)
 
 
-def wrap_with_telemetry(fn: Callable) -> Callable:
+def wrap_with_telemetry(
+    fn: Callable, *, server_id: str = DEFAULT_SERVER_ID
+) -> Callable:
     """Wrap a tool function to emit a Reo.dev event on every invocation.
 
     Fires once per call, after the tool has actually run, regardless of
@@ -97,7 +119,7 @@ def wrap_with_telemetry(fn: Callable) -> Callable:
                 raise
             finally:
                 duration_ms = (time.monotonic() - started) * 1000
-                _send_tool_call_event(fn.__name__, success, duration_ms)
+                _send_tool_call_event(fn.__name__, success, duration_ms, server_id)
 
         return async_wrapper
 
@@ -112,6 +134,6 @@ def wrap_with_telemetry(fn: Callable) -> Callable:
             raise
         finally:
             duration_ms = (time.monotonic() - started) * 1000
-            _send_tool_call_event(fn.__name__, success, duration_ms)
+            _send_tool_call_event(fn.__name__, success, duration_ms, server_id)
 
     return sync_wrapper

@@ -36,6 +36,11 @@ from .utils.constants import (
 
 logger = logging.getLogger(f"{LOGGER_ROOT}.auth")
 
+# Human-readable name advertised in RFC 9728 protected-resource metadata.
+# Per-server: a host passes its spec's display_name. Defaulted to the
+# operational server's so existing callers are unaffected.
+DEFAULT_RESOURCE_NAME = "Couchbase MCP Server"
+
 
 class OAuthConfigError(Exception):
     """Invalid or incomplete CLI/env OAuth settings.
@@ -113,6 +118,7 @@ def build_oauth(
     base_url: str | None = None,
     scope_read: str | None = None,
     scope_write: str | None = None,
+    resource_name: str = DEFAULT_RESOURCE_NAME,
 ) -> AuthProvider:
     """Build the FastMCP ``AuthProvider`` for the configured OAuth setup.
 
@@ -194,7 +200,7 @@ def build_oauth(
         authorization_servers=[AnyHttpUrl(issuer)],
         base_url=base_url,
         scopes_supported=supported_scopes,
-        resource_name="Couchbase MCP Server",
+        resource_name=resource_name,
     )
     logger.info(
         "OAuth enabled with PRM at %s/.well-known/oauth-protected-resource/mcp (scopes=%s)",
@@ -214,6 +220,7 @@ def resolve_oauth(
     base_url: str | None,
     scope_read: str | None = None,
     scope_write: str | None = None,
+    resource_name: str = DEFAULT_RESOURCE_NAME,
 ) -> AuthProvider | None:
     """Resolve CLI/env OAuth settings into a FastMCP ``AuthProvider`` or ``None``.
 
@@ -310,4 +317,5 @@ def resolve_oauth(
         base_url=base_url,
         scope_read=scope_read,
         scope_write=scope_write,
+        resource_name=resource_name,
     )

@@ -22,17 +22,22 @@ import platform
 import sys
 from collections.abc import Mapping
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .constants import LOGGER_ROOT
 from .logging import get_resolved_logging_config
 
+if TYPE_CHECKING:  # avoid a runtime import cycle: core.spec is unrelated to logging
+    from ..core.spec import ServerSpec
+
 logger = logging.getLogger(f"{LOGGER_ROOT}.utils.environment")
 
-# Key transitive dependencies whose versions are useful for support triage.
-# Keep this list small to avoid log spam; add entries only when knowing the
-# pinned version would meaningfully change how a ticket is investigated.
-_REPORTED_DEPENDENCIES = ("fastmcp", "mcp", "couchbase", "httpx", "click", "lark")
+# Dependencies every server shares. A server's own backing-SDK packages come
+# from its spec (``reported_dependencies``) and are appended to these, so this
+# module never has to know which SDKs exist. Keep both lists small to avoid log
+# spam; add entries only when knowing the pinned version would meaningfully
+# change how a ticket is investigated.
+_CORE_DEPENDENCIES = ("fastmcp", "mcp", "httpx", "click")
 
 # Settings keys whose full values are safe to include in the diagnostic
 # record. Anything not in this set or _PRESENCE_ONLY_KEYS is dropped —
@@ -46,6 +51,11 @@ _SAFE_SETTINGS_KEYS = (
     "disabled_tools",
     "confirmation_required_tools",
     "connection_string",
+    # An identifier, not a credential. Reported verbatim to match
+    # get_server_configuration_status, which already returns it to any
+    # connected MCP client via the provider — withholding it here only made
+    # the local support bundle less useful than the wire response.
+    "username",
     # OAuth resource-server config: non-secret IdP coordinates (JWKS URL,
     # issuer, audience, algorithm, PRM base URL, effective scope labels) plus
     # an oauth_enabled flag. There is no client secret to redact — the server
@@ -64,11 +74,11 @@ _SAFE_SETTINGS_KEYS = (
 # Settings whose presence is diagnostically useful but whose values are
 # secrets or filesystem paths. Logged as ``<key>_configured: true/false``,
 # matching the naming convention used by the provider's get_configuration.
+# Credential keys that differ per server come from
+# ``ServerSpec.secret_settings_keys``; these are the ones every server has.
 _PRESENCE_ONLY_KEYS = (
     "password",
     "ca_cert_path",
-    "client_cert_path",
-    "client_key_path",
 )
 
 
@@ -80,27 +90,45 @@ def _package_version(package_name: str) -> str:
         return "unknown"
 
 
-def _redacted_settings(server_settings: Mapping[str, Any]) -> dict[str, Any]:
+def safe_keys_for(spec: "ServerSpec | None" = None) -> tuple[str, ...]:
+    """Keys logged verbatim: the shared set plus the server's own."""
+    return _SAFE_SETTINGS_KEYS + (tuple(spec.safe_settings_keys) if spec else ())
+
+
+def presence_only_keys_for(spec: "ServerSpec | None" = None) -> tuple[str, ...]:
+    """Keys logged as ``<key>_configured`` booleans, never by value."""
+    return _PRESENCE_ONLY_KEYS + (tuple(spec.secret_settings_keys) if spec else ())
+
+
+def _redacted_settings(
+    server_settings: Mapping[str, Any], spec: "ServerSpec | None" = None
+) -> dict[str, Any]:
     """Project ``server_settings`` onto the safe-to-log subset.
 
-    Keys in ``_SAFE_SETTINGS_KEYS`` are emitted as-is; keys in
-    ``_PRESENCE_ONLY_KEYS`` are emitted as ``<key>_configured`` booleans.
-    Any other key is dropped.
+    Safe keys are emitted as-is; secret keys are emitted as ``<key>_configured``
+    booleans. Any other key is **dropped silently** — an allow-list is the right
+    default for a record that may end up in a customer-shared support bundle,
+    but it means an unclassified key vanishes without warning. See
+    ``test_every_settings_key_is_classified`` for the guard against that.
     """
     redacted: dict[str, Any] = {}
-    for key in _SAFE_SETTINGS_KEYS:
+    for key in safe_keys_for(spec):
         value = server_settings.get(key)
         # Normalise iterables of tool names so the log is stable across runs.
         if isinstance(value, set | frozenset | list | tuple):
             redacted[key] = sorted(value)
         else:
             redacted[key] = value
-    for key in _PRESENCE_ONLY_KEYS:
+    for key in presence_only_keys_for(spec):
         redacted[f"{key}_configured"] = bool(server_settings.get(key))
     return redacted
 
 
-def log_environment_info(transport: str, server_settings: Mapping[str, Any]) -> None:
+def log_environment_info(
+    transport: str,
+    server_settings: Mapping[str, Any],
+    spec: "ServerSpec | None" = None,
+) -> None:
     """Emit one DEBUG record describing the runtime environment.
 
     The payload is emitted as a JSON-encoded object after an ``Environment |``
@@ -128,11 +156,15 @@ def log_environment_info(transport: str, server_settings: Mapping[str, Any]) -> 
         "python": platform.python_version(),
         "mcp_server_version": _package_version("couchbase-mcp-server"),
         "dependencies": {
-            name: _package_version(name) for name in _REPORTED_DEPENDENCIES
+            name: _package_version(name)
+            for name in (
+                _CORE_DEPENDENCIES + (tuple(spec.reported_dependencies) if spec else ())
+            )
         },
         "transport": transport,
+        "server_id": spec.id if spec else None,
         "logging": resolved_logging.as_dict() if resolved_logging else None,
-        "config": _redacted_settings(server_settings),
+        "config": _redacted_settings(server_settings, spec),
     }
     payload = json.dumps(info, default=str)
 

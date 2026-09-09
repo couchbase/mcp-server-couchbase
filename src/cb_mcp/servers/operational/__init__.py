@@ -51,12 +51,9 @@ SPEC = ServerSpec(
     # only once per process, so no other server may make it.
     sdk_log_hook=_configure_couchbase_sdk_logging,
     reported_dependencies=("couchbase", "lark"),
-    safe_settings_keys=("connection_string",),
-    secret_settings_keys=(
-        "username",
-        "password",
-        "ca_cert_path",
-        "client_cert_path",
-        "client_key_path",
-    ),
+    # Only what is genuinely operational-specific: the shared env-info lists
+    # already cover connection_string, password and ca_cert_path, which every
+    # server has. mTLS client credentials have no analytics equivalent.
+    safe_settings_keys=(),
+    secret_settings_keys=("client_cert_path", "client_key_path"),
 )

@@ -146,6 +146,7 @@ def operational(
             base_url=oauth_mcp_base_url,
             scope_read=oauth_scope_read,
             scope_write=oauth_scope_write,
+            resource_name=OPERATIONAL_SPEC.display_name,
         )
     except OAuthConfigError as e:
         raise click.UsageError(str(e)) from e
@@ -155,6 +156,7 @@ def operational(
         configured_confirmation_tool_names,
         disabled_tool_names,
     ) = prepare_tools_for_registration(
+        OPERATIONAL_SPEC,
         read_only_mode=read_only_mode,
         disabled_tools=disabled_tools,
         confirmation_required_tools=confirmation_required_tools,

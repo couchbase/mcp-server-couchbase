@@ -77,13 +77,14 @@ def build_app(
         )
         # Diagnostic snapshot for customer support. Filtered at INFO; visible
         # whenever the user runs with --log-level DEBUG.
-        log_environment_info(transport, settings)
-        send_install_ping(transport)
+        log_environment_info(transport, settings, spec)
+        send_install_ping(transport, server_id=spec.id)
         app_context = AppContext(
             cluster_provider=provider_factory(),
             settings=settings,
             read_only_mode=read_only_mode,
             logging_config=logging_config,
+            server_id=spec.id,
         )
         try:
             yield app_context

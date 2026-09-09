@@ -8,8 +8,19 @@ from unittest.mock import patch
 
 import pytest
 
-from cb_mcp.tool_registration import prepare_tools_for_registration
+from cb_mcp.servers.operational import SPEC as OPERATIONAL_SPEC
+from cb_mcp.tool_registration import prepare_tools_for_registration as _prepare
 from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
+
+
+def prepare_tools_for_registration(**kwargs):
+    """Register the operational server, which is what these tests exercise.
+
+    The real function takes a ``ServerSpec`` first; these tests are about the
+    gating and wrapping pipeline rather than about which server is registered,
+    so the spec is supplied here instead of at every call site.
+    """
+    return _prepare(OPERATIONAL_SPEC, **kwargs)
 
 
 class TestPrepareToolsDisabling:
