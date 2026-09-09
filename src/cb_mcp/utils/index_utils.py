@@ -5,7 +5,6 @@ This module contains helper functions for working with Couchbase indexes.
 """
 
 import logging
-from collections.abc import Mapping
 from typing import Any
 
 import httpx
@@ -36,14 +35,6 @@ def validate_filter_params(
         raise ValueError(
             "bucket_name, scope_name, and collection_name are required when filtering by index_name"
         )
-
-
-def validate_connection_settings(settings: Mapping[str, Any]) -> None:
-    """Validate that required connection settings are present."""
-    required = ["connection_string", "username", "password"]
-    missing = [key for key in required if not settings.get(key)]
-    if missing:
-        raise ValueError(f"Missing required connection settings: {', '.join(missing)}")
 
 
 def clean_index_definition(definition: Any) -> str:

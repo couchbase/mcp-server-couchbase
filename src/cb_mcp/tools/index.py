@@ -12,6 +12,7 @@ from fastmcp import Context
 
 from ..utils.config import get_settings
 from ..utils.connection import connect_to_bucket, format_keyspace
+from ..utils.connection_string import validate_connection_settings
 from ..utils.constants import (
     MCP_SERVER_NAME,
     QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION,
@@ -22,7 +23,6 @@ from ..utils.index_utils import (
     process_index_data_from_query,
     process_index_data_from_rest_api,
     resolve_cluster_major_version,
-    validate_connection_settings,
     validate_filter_params,
 )
 from ..utils.responses import tool_error, tool_success

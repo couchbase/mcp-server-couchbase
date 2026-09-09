@@ -540,6 +540,34 @@ class TestGetClusterMetrics:
         assert "out of bounds" in result["error"]
         assert "Failed to get cluster metrics" in result["message"]
 
+    def test_rejects_non_dict_spec_without_rest_call(self) -> None:
+        """A spec that isn't an object must be rejected up front, not raise
+        AttributeError from spec.get(...)."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        metrics = ["not-a-spec"]
+
+        with patch("cb_mcp.tools.server.httpx.Client") as mock_client_cls:
+            result = get_cluster_metrics(ctx, metrics=metrics)
+
+        mock_client_cls.assert_not_called()
+        assert result["status"] == "error"
+        assert "must be an object" in result["error"]
+        assert "Failed to get cluster metrics" in result["message"]
+
+    def test_rejects_non_integer_step_without_rest_call(self) -> None:
+        """A string 'step' must be rejected up front, not raise TypeError from
+        comparing/dividing against it."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        metrics = [{"metric": [], "step": "10", "nodes": ["host1:11210"]}]
+
+        with patch("cb_mcp.tools.server.httpx.Client") as mock_client_cls:
+            result = get_cluster_metrics(ctx, metrics=metrics)
+
+        mock_client_cls.assert_not_called()
+        assert result["status"] == "error"
+        assert "non-integer" in result["error"]
+        assert "Failed to get cluster metrics" in result["message"]
+
     def test_rejects_window_exceeding_max_without_rest_call(self) -> None:
         """A start/end window wider than MAX_WINDOW_SECONDS must be rejected
         before any REST call."""

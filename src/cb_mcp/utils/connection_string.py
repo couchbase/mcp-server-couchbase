@@ -2,12 +2,22 @@
 
 import logging
 import os
+from collections.abc import Mapping
 from importlib.resources import files
+from typing import Any
 from urllib.parse import urlparse
 
 from .constants import MCP_SERVER_NAME
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.connection_string")
+
+
+def validate_connection_settings(settings: Mapping[str, Any]) -> None:
+    """Validate that required connection settings are present."""
+    required = ["connection_string", "username", "password"]
+    missing = [key for key in required if not settings.get(key)]
+    if missing:
+        raise ValueError(f"Missing required connection settings: {', '.join(missing)}")
 
 
 def extract_hosts_from_connection_string(connection_string: str) -> list[str]:

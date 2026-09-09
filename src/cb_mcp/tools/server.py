@@ -19,6 +19,7 @@ from ..utils.connection_string import (
     determine_ssl_verification,
     extract_hosts_from_connection_string,
     is_capella_connection,
+    validate_connection_settings,
 )
 from ..utils.constants import (
     MANAGEMENT_REST_PORT_PLAIN,
@@ -35,7 +36,6 @@ from ..utils.context import (
     get_cluster_provider,
     get_logging_config,
 )
-from ..utils.index_utils import validate_connection_settings
 from .query import run_cluster_query
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.server")
@@ -360,8 +360,20 @@ def get_cluster_metrics(
                 "instead."
             )
         for i, spec in enumerate(metrics):
+            if not isinstance(spec, dict):
+                raise ValueError(f"metrics[{i}] must be an object, got {spec!r}")
             step = spec.get("step", 10)
-            window = abs(spec.get("end", 0) - spec.get("start", -60))
+            end = spec.get("end", 0)
+            start = spec.get("start", -60)
+            if not all(
+                isinstance(v, int) and not isinstance(v, bool)
+                for v in (step, end, start)
+            ):
+                raise ValueError(
+                    f"metrics[{i}] has non-integer 'step'/'start'/'end' "
+                    f"(step={step!r}, start={start!r}, end={end!r}); all three must be integers."
+                )
+            window = abs(end - start)
             samples = window // step if step > 0 else MAX_SAMPLES_PER_SERIES + 1
             nodes = spec.get("nodes") or []
             if (
