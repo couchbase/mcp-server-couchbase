@@ -11,29 +11,30 @@ adding an in-process Click test.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from unittest.mock import MagicMock, patch
 
+import couchbase
 import pytest
 from click.testing import CliRunner
 
-import cb_mcp.utils.logging as logmod
 import mcp_server
 from cb_mcp.auth import OAuthConfigError, resolve_oauth
-from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
+from cb_mcp.utils.constants import LOGGER_ROOT, SCOPE_READ, SCOPE_WRITE
 
 
 @pytest.fixture(autouse=True)
 def mock_sdk_configure_logging():
     """Couchbase SDK ``configure_logging`` is one-shot per process.
 
-    ``mcp_server.main`` calls it for real via ``configure_logging``; without
+    ``mcp_server.main`` reaches it through the operational spec's hook; without
     this patch the second test in the process raises
     ``InvalidArgumentException`` ("Another logger has already been
-    initialized"). Patch the ``couchbase`` symbol as imported into our logging
-    module, matching the fixture in test_configure_logging.py.
+    initialized"). Patching at source works because the spec's hook looks the
+    attribute up per call rather than binding it at import.
     """
-    with patch.object(logmod.couchbase, "configure_logging"):
+    with patch.object(couchbase, "configure_logging"):
         yield
 
 
@@ -105,6 +106,33 @@ def test_env_var_used_when_flag_absent() -> None:
             assert app_context.settings["connection_string"] == "couchbase://from-env"
 
     asyncio.run(drive())
+
+
+def test_host_wires_the_couchbase_sdk_log_hook() -> None:
+    """The CLI must forward the operational spec's SDK hook to configure_logging.
+
+    ``cb_mcp.utils.logging`` deliberately imports no SDK and forwards nothing by
+    default, so this wiring is the only thing routing Couchbase SDK records into
+    our logger tree. If the host stops passing ``sdk_log_hook``, SDK logs vanish
+    silently — nothing else fails — which is exactly why this is pinned here.
+    """
+    calls: list[tuple[str, int]] = []
+
+    with (
+        patch.object(
+            couchbase, "configure_logging", lambda root, lvl: calls.append((root, lvl))
+        ),
+        patch("cb_mcp.core.app.FastMCP", return_value=MagicMock()),
+    ):
+        result = CliRunner().invoke(
+            mcp_server.main, ["--log-level", "DEBUG"], catch_exceptions=False
+        )
+
+    assert result.exit_code == 0, result.output
+    assert calls, "the Couchbase SDK log hook was never invoked"
+    root, level = calls[-1]
+    assert root == LOGGER_ROOT
+    assert level == logging.DEBUG
 
 
 def _resolve_oauth_kwargs(**overrides):

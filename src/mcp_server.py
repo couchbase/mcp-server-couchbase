@@ -113,6 +113,9 @@ def main(
         log_backup_count_overrides=backup_count_overrides,
         invalid_level=log_level.invalid_token,
         invalid_sinks=log_sinks.invalid_tokens,
+        # Which SDK's logs join our hierarchy is the server's business, not the
+        # logging module's — so the host supplies it from the spec.
+        sdk_log_hook=OPERATIONAL_SPEC.sdk_log_hook,
     )
 
     try:

@@ -23,6 +23,18 @@ from ..utils.scope_enforcement import TOOL_SCOPE_HINTS
 
 SERVER_ID = "operational"
 
+
+def _configure_couchbase_sdk_logging(logger_root: str, level: int) -> None:
+    """Route the Couchbase SDK's own records into ``logger_root``.
+
+    Wrapped rather than referencing ``couchbase.configure_logging`` directly in
+    the spec, so the attribute is looked up per call. Binding the function
+    object at import time would freeze it before tests could patch it — and
+    the SDK accepts this call only once per process, so tests must be able to.
+    """
+    couchbase.configure_logging(logger_root, level)
+
+
 SPEC = ServerSpec(
     id=SERVER_ID,
     # Wire-visible; must stay "couchbase" for already-connected clients.
@@ -37,7 +49,7 @@ SPEC = ServerSpec(
     scope_hints=TOOL_SCOPE_HINTS,
     # This server owns the Couchbase SDK's logging. The SDK accepts this call
     # only once per process, so no other server may make it.
-    sdk_log_hook=couchbase.configure_logging,
+    sdk_log_hook=_configure_couchbase_sdk_logging,
     reported_dependencies=("couchbase", "lark"),
     safe_settings_keys=("connection_string",),
     secret_settings_keys=(

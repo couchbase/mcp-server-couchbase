@@ -2,9 +2,12 @@
 
 Centralises handler/formatter wiring so the CLI entrypoint only needs a
 single call. All MCP modules log under the ``LOGGER_ROOT`` ("couchbase")
-logger hierarchy; the Couchbase Python SDK is routed into the same tree via
-``couchbase.configure_logging``, which means handlers attached here apply to
-SDK records as well.
+logger hierarchy.
+
+A backing SDK's own records can be routed into the same tree, so the handlers
+attached here apply to them too — but *which* SDK is not this module's
+business. The host injects that through ``configure_logging(sdk_log_hook=...)``,
+which is why nothing here imports an SDK.
 """
 
 import logging
@@ -14,8 +17,6 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from logging.handlers import RotatingFileHandler
 from typing import Any, NamedTuple
-
-import couchbase
 
 from .constants import (
     ALLOWED_LOG_LEVELS,
@@ -48,13 +49,15 @@ LEVEL_OFF = logging.CRITICAL + 1
 
 
 def _no_sdk_log_hook(logger_root: str, level: int) -> None:
-    """Forward no SDK logs.
+    """Forward no SDK logs. Also the default when no hook is supplied.
 
-    Pass this to ``configure_logging`` for a server that does not own the
-    Couchbase SDK's logging. It exists as a named sentinel because ``None``
-    already means "use the default hook", and because several SDKs accept
-    their ``configure_logging`` call only once per process — a server that
-    does not own the SDK must skip the call rather than repeat it.
+    Pass this explicitly for a server that does not own its backing SDK's
+    logging. Several SDKs — the Couchbase one included — accept their
+    ``configure_logging`` call only once per process, so a server sharing a
+    process with the SDK's owner must skip the call rather than repeat it.
+
+    Naming the no-op rather than special-casing ``None`` lets a caller state
+    "deliberately nothing" instead of leaving it to a default.
     """
 
 
@@ -437,16 +440,14 @@ def configure_logging(
 
     ``sdk_log_hook`` is the backing SDK's log-forwarding entry point, called as
     ``hook(logger_root, level)`` so the SDK's own records join this hierarchy.
-    It defaults to the Couchbase SDK's. Pass an explicit hook to forward a
-    different SDK's logs, or ``NO_SDK_LOG_HOOK`` to forward none — note that
+    It defaults to forwarding nothing, because this module does not know which
+    SDK the caller is using; the host passes its server's hook. Note that
     several SDKs accept this call only once per process, so a server that does
-    not own the SDK must not call it.
+    not own the SDK must pass ``NO_SDK_LOG_HOOK`` rather than repeat the call.
 
     Setting ``level="OFF"`` suppresses output regardless of sinks.
     """
-    # Resolved here rather than as a parameter default so the attribute lookup
-    # stays late-bound (tests patch ``couchbase.configure_logging``).
-    sdk_hook = sdk_log_hook if sdk_log_hook is not None else couchbase.configure_logging
+    sdk_hook = sdk_log_hook if sdk_log_hook is not None else NO_SDK_LOG_HOOK
     # Both code paths below rebind the module-level snapshot.
     global _resolved_config  # noqa: PLW0603
 

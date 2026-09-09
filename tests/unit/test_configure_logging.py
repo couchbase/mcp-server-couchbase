@@ -1,8 +1,9 @@
 """Tests for configure_logging end-to-end behaviour.
 
 The Couchbase SDK's ``configure_logging`` is one-shot per process (it raises
-``InvalidArgumentException`` on a second call), so we patch
-:func:`cb_mcp.utils.logging.couchbase.configure_logging` for every test. Each
+``InvalidArgumentException`` on a second call). ``configure_logging`` no longer
+imports it — the host injects a hook — so we patch the module's default hook,
+:data:`cb_mcp.utils.logging.NO_SDK_LOG_HOOK`, for every test. Each
 test also restores the ``couchbase`` logger and the module-level snapshot
 afterwards via an autouse fixture, so tests don't bleed state into one another.
 """
@@ -44,13 +45,16 @@ def reset_logging_state():
 
 @pytest.fixture(autouse=True)
 def mock_sdk_configure_logging():
-    """Couchbase SDK ``configure_logging`` is one-shot per process; mock it.
+    """Capture the SDK log hook ``configure_logging`` forwards to.
 
-    The patch target is the ``couchbase`` symbol *as imported into our logging
-    module* — patching ``couchbase.configure_logging`` directly wouldn't catch
-    references already resolved at module load time.
+    ``configure_logging`` no longer imports any SDK; the host injects one via
+    ``sdk_log_hook``, and when nothing is injected it falls back to the
+    module-level ``NO_SDK_LOG_HOOK``. That fallback is resolved as a global at
+    call time, so patching it here substitutes a mock for every call these
+    tests make — and keeps the real Couchbase ``configure_logging``, which is
+    one-shot per process, out of the test run entirely.
     """
-    with patch.object(logmod.couchbase, "configure_logging") as mock:
+    with patch.object(logmod, "NO_SDK_LOG_HOOK") as mock:
         yield mock
 
 
