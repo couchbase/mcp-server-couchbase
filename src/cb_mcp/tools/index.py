@@ -13,7 +13,7 @@ from fastmcp import Context
 from ..utils.config import get_settings
 from ..utils.connection import connect_to_bucket, format_keyspace
 from ..utils.constants import (
-    MCP_SERVER_NAME,
+    LOGGER_ROOT,
     QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION,
 )
 from ..utils.context import get_cluster_connection
@@ -28,7 +28,7 @@ from ..utils.index_utils import (
 from ..utils.responses import tool_error, tool_success
 from .query import run_cluster_query, run_sql_plus_plus_query
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.index")
+logger = logging.getLogger(f"{LOGGER_ROOT}.tools.index")
 
 
 def get_index_advisor_recommendations(

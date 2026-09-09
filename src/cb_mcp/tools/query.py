@@ -13,14 +13,14 @@ from fastmcp.server.dependencies import get_access_token
 from lark_sqlpp import modifies_data, modifies_structure, parse_sqlpp
 
 from ..utils.connection import connect_to_bucket, format_keyspace
-from ..utils.constants import MCP_SERVER_NAME, SCOPE_WRITE
+from ..utils.constants import LOGGER_ROOT, SCOPE_WRITE
 from ..utils.context import get_cluster_connection
 from ..utils.query_utils import (
     evaluate_query_plan,
     extract_plan_from_explain_results,
 )
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.query")
+logger = logging.getLogger(f"{LOGGER_ROOT}.tools.query")
 
 
 def safe_ident(name: str) -> str:

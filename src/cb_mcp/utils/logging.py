@@ -1,7 +1,7 @@
 """Logging configuration for the Couchbase MCP Server.
 
 Centralises handler/formatter wiring so the CLI entrypoint only needs a
-single call. All MCP modules log under the ``MCP_SERVER_NAME`` ("couchbase")
+single call. All MCP modules log under the ``LOGGER_ROOT`` ("couchbase")
 logger hierarchy; the Couchbase Python SDK is routed into the same tree via
 ``couchbase.configure_logging``, which means handlers attached here apply to
 SDK records as well.
@@ -10,7 +10,7 @@ SDK records as well.
 import logging
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from logging.handlers import RotatingFileHandler
 from typing import Any, NamedTuple
@@ -27,7 +27,7 @@ from .constants import (
     DEFAULT_LOG_LEVEL,
     DEFAULT_LOG_MAX_BYTES,
     DEFAULT_LOG_SINKS,
-    MCP_SERVER_NAME,
+    LOGGER_ROOT,
 )
 
 # TRACE sits below DEBUG and matches the Couchbase SDK's own TRACE=5. The SDK
@@ -45,6 +45,20 @@ _PER_LEVEL_FILE_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 # the threshold is unreachable, so this is the cheapest way to silence the
 # logger without touching other loggers in the process.
 LEVEL_OFF = logging.CRITICAL + 1
+
+
+def _no_sdk_log_hook(logger_root: str, level: int) -> None:
+    """Forward no SDK logs.
+
+    Pass this to ``configure_logging`` for a server that does not own the
+    Couchbase SDK's logging. It exists as a named sentinel because ``None``
+    already means "use the default hook", and because several SDKs accept
+    their ``configure_logging`` call only once per process — a server that
+    does not own the SDK must skip the call rather than repeat it.
+    """
+
+
+NO_SDK_LOG_HOOK: Callable[[str, int], None] = _no_sdk_log_hook
 
 
 @dataclass(frozen=True)
@@ -379,6 +393,7 @@ def configure_logging(
     log_backup_count_overrides: Mapping[str, int] | None = None,
     invalid_sinks: list[str] | None = None,
     invalid_level: str | None = None,
+    sdk_log_hook: Callable[[str, int], None] | None = None,
 ) -> None:
     """Configure the root MCP logger and the Couchbase SDK logs.
 
@@ -420,8 +435,18 @@ def configure_logging(
       * If the file sink is *not* requested, a warning is logged noting that
         support log files are not being generated.
 
+    ``sdk_log_hook`` is the backing SDK's log-forwarding entry point, called as
+    ``hook(logger_root, level)`` so the SDK's own records join this hierarchy.
+    It defaults to the Couchbase SDK's. Pass an explicit hook to forward a
+    different SDK's logs, or ``NO_SDK_LOG_HOOK`` to forward none — note that
+    several SDKs accept this call only once per process, so a server that does
+    not own the SDK must not call it.
+
     Setting ``level="OFF"`` suppresses output regardless of sinks.
     """
+    # Resolved here rather than as a parameter default so the attribute lookup
+    # stays late-bound (tests patch ``couchbase.configure_logging``).
+    sdk_hook = sdk_log_hook if sdk_log_hook is not None else couchbase.configure_logging
     # Both code paths below rebind the module-level snapshot.
     global _resolved_config  # noqa: PLW0603
 
@@ -434,7 +459,7 @@ def configure_logging(
         invalid_level = level
         level_name = DEFAULT_LOG_LEVEL.upper()
 
-    logger = logging.getLogger(MCP_SERVER_NAME)
+    logger = logging.getLogger(LOGGER_ROOT)
     for handler in list(logger.handlers):
         logger.removeHandler(handler)
         # Close so RotatingFileHandlers release their file descriptor — otherwise
@@ -445,7 +470,7 @@ def configure_logging(
 
     if level_name == "OFF":
         logger.setLevel(LEVEL_OFF)
-        couchbase.configure_logging(MCP_SERVER_NAME, LEVEL_OFF)
+        sdk_hook(LOGGER_ROOT, LEVEL_OFF)
         # No handlers attached, no sinks active; record that state so the
         # MCP tool and env-info reflect reality.
         _resolved_config = ResolvedLoggingConfig(
@@ -523,7 +548,7 @@ def configure_logging(
             "WARNING: File logging is disabled. Log files required for product support are not being generated."
         )
 
-    couchbase.configure_logging(MCP_SERVER_NAME, logger.level)
+    sdk_hook(LOGGER_ROOT, logger.level)
 
     if invalid_level:
         logger.error(

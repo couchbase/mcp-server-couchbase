@@ -43,6 +43,10 @@ def _capture_lifespan(args: list[str], env: dict[str, str]):
 
     The lifespan closes over the resolved settings dict, so driving it
     lets the test assert which value (flag vs env var) actually won.
+
+    The patch targets ``cb_mcp.core.app`` because that is where the server is
+    assembled; ``mcp_server`` only resolves configuration and hands it to
+    ``build_app``.
     """
     fake_instance = MagicMock()
     captured: dict = {}
@@ -52,7 +56,7 @@ def _capture_lifespan(args: list[str], env: dict[str, str]):
         return fake_instance
 
     runner = CliRunner()
-    with patch("mcp_server.FastMCP", side_effect=capture):
+    with patch("cb_mcp.core.app.FastMCP", side_effect=capture):
         result = runner.invoke(mcp_server.main, args, env=env, catch_exceptions=False)
 
     assert result.exit_code == 0, result.output

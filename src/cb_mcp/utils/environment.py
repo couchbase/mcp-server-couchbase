@@ -24,10 +24,10 @@ from collections.abc import Mapping
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
-from .constants import MCP_SERVER_NAME
+from .constants import LOGGER_ROOT
 from .logging import get_resolved_logging_config
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.environment")
+logger = logging.getLogger(f"{LOGGER_ROOT}.utils.environment")
 
 # Key transitive dependencies whose versions are useful for support triage.
 # Keep this list small to avoid log spam; add entries only when knowing the

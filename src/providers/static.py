@@ -7,9 +7,9 @@ from couchbase.cluster import Cluster
 from fastmcp import Context
 
 from cb_mcp.utils.connection import connect_to_couchbase_cluster
-from cb_mcp.utils.constants import MCP_SERVER_NAME
+from cb_mcp.utils.constants import LOGGER_ROOT
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.providers.static")
+logger = logging.getLogger(f"{LOGGER_ROOT}.providers.static")
 
 
 class StaticClusterProvider:

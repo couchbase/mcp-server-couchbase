@@ -20,9 +20,9 @@ import time
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError, version
 
-from .constants import MCP_SERVER_NAME
+from .constants import LOGGER_ROOT
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.telemetry")
+logger = logging.getLogger(f"{LOGGER_ROOT}.utils.telemetry")
 
 _PACKAGE_NAME = "couchbase-mcp-server"
 

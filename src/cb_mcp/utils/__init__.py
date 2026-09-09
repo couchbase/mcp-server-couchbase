@@ -41,6 +41,8 @@ from .constants import (
     DEFAULT_PORT,
     DEFAULT_READ_ONLY_MODE,
     DEFAULT_TRANSPORT,
+    FASTMCP_SERVER_NAME,
+    LOGGER_ROOT,
     MCP_SERVER_NAME,
     NETWORK_TRANSPORTS,
     NETWORK_TRANSPORTS_SDK_MAPPING,
@@ -70,6 +72,7 @@ from .index_utils import (
 
 # Logging
 from .logging import (
+    NO_SDK_LOG_HOOK,
     ResolvedLoggingConfig,
     configure_logging,
     get_resolved_logging_config,
@@ -84,7 +87,7 @@ from .scope_enforcement import required_scopes_for_tool, wrap_with_scope_check
 from .telemetry import send_install_ping, wrap_with_telemetry
 
 # Note: Individual modules create their own hierarchical loggers using:
-# logger = logging.getLogger(f"{MCP_SERVER_NAME}.module.name")
+# logger = logging.getLogger(f"{LOGGER_ROOT}.module.name")
 
 __all__ = [
     # Config
@@ -101,6 +104,8 @@ __all__ = [
     # Index utilities
     "fetch_indexes_from_rest_api",
     # Constants
+    "FASTMCP_SERVER_NAME",
+    "LOGGER_ROOT",
     "MCP_SERVER_NAME",
     "DEFAULT_READ_ONLY_MODE",
     "DEFAULT_TRANSPORT",
@@ -118,6 +123,7 @@ __all__ = [
     "NETWORK_TRANSPORTS",
     "NETWORK_TRANSPORTS_SDK_MAPPING",
     # Logging
+    "NO_SDK_LOG_HOOK",
     "ResolvedLoggingConfig",
     "configure_logging",
     "get_resolved_logging_config",

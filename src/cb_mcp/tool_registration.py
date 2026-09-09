@@ -3,12 +3,12 @@ Tool registration orchestration shared across MCP implementations.
 """
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
-from .tools import WRITE_TOOLS, get_tools
+from .core.spec import ScopeSpec, ToolSet
 from .utils import wrap_with_telemetry
 from .utils.config import parse_tool_names
-from .utils.constants import MCP_SERVER_NAME
+from .utils.constants import LOGGER_ROOT
 from .utils.elicitation import wrap_with_confirmation
 from .utils.scope_enforcement import (
     TOOL_SCOPE_HINTS,
@@ -16,7 +16,7 @@ from .utils.scope_enforcement import (
     wrap_with_scope_check,
 )
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.tool_registration")
+logger = logging.getLogger(f"{LOGGER_ROOT}.tool_registration")
 
 
 def prepare_tools_for_registration(
@@ -24,6 +24,10 @@ def prepare_tools_for_registration(
     disabled_tools: str | None,
     confirmation_required_tools: str | None,
     enforce_scopes: bool = False,
+    *,
+    tool_set: ToolSet | None = None,
+    scope_hints: Mapping[str, str] | None = None,
+    scopes: ScopeSpec | None = None,
 ) -> tuple[list[Callable], set[str], set[str]]:
     """Prepare final tool list and confirmation configuration for registration.
 
@@ -40,10 +44,23 @@ def prepare_tools_for_registration(
     own execution, excluding confirmation/scope-check overhead. A call
     rejected by the scope check or declined at confirmation never reaches
     the tool, so it never emits a tool-call event.
+
+    ``tool_set``, ``scope_hints`` and ``scopes`` describe *which* server is
+    being registered; they default to the operational server so existing
+    callers are unaffected. Pass a different server's values to register it
+    through the same gating and wrapping pipeline. The operational defaults are
+    imported lazily so this module stays free of any SDK import at module load.
     """
+    if tool_set is None:
+        from .tools import TOOL_SET  # noqa: PLC0415
+
+        tool_set = TOOL_SET
+    if scope_hints is None:
+        scope_hints = TOOL_SCOPE_HINTS
+
     # When read_only_mode is True, write tools (KV, collection management, and
     # index management) are not loaded.
-    tools = get_tools(read_only_mode=read_only_mode)
+    tools = tool_set.tools_for(read_only_mode=read_only_mode)
 
     loaded_tool_names = {tool.__name__ for tool in tools}
     disabled_tool_names = parse_tool_names(disabled_tools, loaded_tool_names)
@@ -80,7 +97,7 @@ def prepare_tools_for_registration(
             f"{sorted(skipped_confirmation_tool_names)}"
         )
 
-    write_tool_names = {fn.__name__ for fn in WRITE_TOOLS}
+    write_tool_names = tool_set.write_tool_names
 
     final_tools: list[Callable] = []
     for tool in enabled_tools:
@@ -89,12 +106,12 @@ def prepare_tools_for_registration(
             wrapped = wrap_with_confirmation(wrapped)
         if enforce_scopes:
             required_scopes = required_scopes_for_tool(
-                tool.__name__, write_tool_names=write_tool_names
+                tool.__name__, write_tool_names=write_tool_names, scopes=scopes
             )
             wrapped = wrap_with_scope_check(
                 wrapped,
                 required_scopes,
-                hint=TOOL_SCOPE_HINTS.get(tool.__name__),
+                hint=scope_hints.get(tool.__name__),
             )
         final_tools.append(wrapped)
 

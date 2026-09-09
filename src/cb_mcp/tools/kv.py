@@ -18,11 +18,11 @@ from couchbase.exceptions import CouchbaseException
 from fastmcp import Context
 
 from ..utils.connection import connect_to_bucket, format_keyspace
-from ..utils.constants import MCP_SERVER_NAME
+from ..utils.constants import LOGGER_ROOT
 from ..utils.context import get_cluster_connection
 from ..utils.responses import tool_error, tool_success
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.kv")
+logger = logging.getLogger(f"{LOGGER_ROOT}.tools.kv")
 
 
 def get_document_by_id(
@@ -397,12 +397,12 @@ def mutate_subdocument(
         (
             "counter",
             counter_specs or [],
-            lambda s: subdoc.increment(
-                s["path"], s["delta"], create_parents=create_parents
-            )
-            if s["delta"] >= 0
-            else subdoc.decrement(
-                s["path"], abs(s["delta"]), create_parents=create_parents
+            lambda s: (
+                subdoc.increment(s["path"], s["delta"], create_parents=create_parents)
+                if s["delta"] >= 0
+                else subdoc.decrement(
+                    s["path"], abs(s["delta"]), create_parents=create_parents
+                )
             ),
         ),
     ]

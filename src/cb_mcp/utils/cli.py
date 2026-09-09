@@ -16,7 +16,7 @@ from logging import getLogger
 
 import click
 
-from .constants import MCP_SERVER_NAME
+from .constants import LOGGER_ROOT
 from .logging import (
     ParsedLogLevel,
     ParsedLogSinks,
@@ -24,7 +24,7 @@ from .logging import (
     parse_log_sinks,
 )
 
-logger = getLogger(f"{MCP_SERVER_NAME}.utils.cli")
+logger = getLogger(f"{LOGGER_ROOT}.utils.cli")
 
 
 def validate_log_level(

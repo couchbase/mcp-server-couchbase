@@ -28,13 +28,13 @@ from pydantic import AnyHttpUrl, ValidationError
 
 from .utils.constants import (
     DEFAULT_OAUTH_ALGORITHM,
-    MCP_SERVER_NAME,
+    LOGGER_ROOT,
     SCOPE_READ,
     SCOPE_WRITE,
     STREAMABLE_HTTP_TRANSPORT,
 )
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.auth")
+logger = logging.getLogger(f"{LOGGER_ROOT}.auth")
 
 
 class OAuthConfigError(Exception):

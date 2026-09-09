@@ -1,5 +1,25 @@
 # MCP Server Constants
-MCP_SERVER_NAME = "couchbase"
+#
+# These two were historically one name doing three jobs. They are split because
+# the jobs have different compatibility contracts:
+#
+# LOGGER_ROOT is the single logger the per-level rotating handlers attach to
+# (see configure_logging). Every module's logger must be this or a descendant,
+# or it receives no handlers. It is operator-facing — it appears as %(name)s in
+# every log line and in support runbooks — and additional servers should nest
+# *under* it rather than start a second tree, so one --log-file scheme keeps
+# working.
+LOGGER_ROOT = "couchbase"
+
+# FASTMCP_SERVER_NAME is passed to FastMCP() and reported by
+# get_server_configuration_status. It is wire-visible to clients, so changing
+# it is a breaking change — independent of anything to do with logging.
+FASTMCP_SERVER_NAME = "couchbase"
+
+# DEPRECATED: ambiguous, retained for backward compatibility. New code should
+# pick LOGGER_ROOT or FASTMCP_SERVER_NAME deliberately based on which contract
+# it depends on.
+MCP_SERVER_NAME = LOGGER_ROOT
 
 # Default Configuration Values
 DEFAULT_READ_ONLY_MODE = True

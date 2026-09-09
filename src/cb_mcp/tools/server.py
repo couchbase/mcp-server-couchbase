@@ -14,7 +14,7 @@ from fastmcp import Context
 
 from ..utils.config import get_settings
 from ..utils.connection import connect_to_bucket
-from ..utils.constants import MCP_SERVER_NAME
+from ..utils.constants import FASTMCP_SERVER_NAME, LOGGER_ROOT
 from ..utils.context import (
     get_cluster_connection,
     get_cluster_provider,
@@ -22,7 +22,7 @@ from ..utils.context import (
 )
 from .query import run_cluster_query
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.server")
+logger = logging.getLogger(f"{LOGGER_ROOT}.tools.server")
 
 
 def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
@@ -69,7 +69,7 @@ def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
     logging_status = get_logging_config(ctx)
 
     return {
-        "server_name": MCP_SERVER_NAME,
+        "server_name": FASTMCP_SERVER_NAME,
         "status": "running",
         "configuration": configuration,
         "logging": logging_status,

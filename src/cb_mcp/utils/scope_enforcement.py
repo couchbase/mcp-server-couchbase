@@ -22,9 +22,15 @@ from collections.abc import Callable
 
 from fastmcp.server.dependencies import get_access_token
 
-from .constants import MCP_SERVER_NAME, SCOPE_READ, SCOPE_WRITE
+from ..core.spec import ScopeSpec
+from .constants import LOGGER_ROOT, SCOPE_READ, SCOPE_WRITE
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.scope_enforcement")
+logger = logging.getLogger(f"{LOGGER_ROOT}.utils.scope_enforcement")
+
+# The scope labels used when a caller does not supply a server's own. These are
+# the operational server's canonical labels, kept as the default so existing
+# callers keep their behaviour unchanged.
+DEFAULT_SCOPES = ScopeSpec(read=SCOPE_READ, write=SCOPE_WRITE)
 
 # Per-tool hints appended to the PermissionError message when a token is
 # missing required scopes. Use these to explain *why* a tool requires a
@@ -40,7 +46,8 @@ TOOL_SCOPE_HINTS: dict[str, str] = {
 def required_scopes_for_tool(
     tool_name: str,
     *,
-    write_tool_names: set[str],
+    write_tool_names: set[str] | frozenset[str],
+    scopes: ScopeSpec | None = None,
 ) -> set[str]:
     """Return the set of scopes a token must hold to invoke ``tool_name``.
 
@@ -53,10 +60,15 @@ def required_scopes_for_tool(
 
     A token holding only ``SCOPE_WRITE`` therefore cannot reach SQL++ or any
     read tool. Full access requires both scopes.
+
+    ``scopes`` supplies the server's canonical scope labels; it defaults to the
+    operational server's pair. These are the canonical values a token's scopes
+    are normalized to, not the operator-facing labels an IdP emits.
     """
+    scopes = scopes or DEFAULT_SCOPES
     if tool_name in write_tool_names:
-        return {SCOPE_WRITE}
-    return {SCOPE_READ}
+        return {scopes.write}
+    return {scopes.read}
 
 
 def wrap_with_scope_check(

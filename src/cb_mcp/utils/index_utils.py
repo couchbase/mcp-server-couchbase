@@ -13,9 +13,9 @@ from urllib.parse import urlparse
 
 import httpx
 
-from .constants import MCP_SERVER_NAME
+from .constants import LOGGER_ROOT
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.index_utils")
+logger = logging.getLogger(f"{LOGGER_ROOT}.utils.index_utils")
 
 
 def validate_filter_params(

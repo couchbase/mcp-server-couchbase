@@ -12,6 +12,8 @@ from collections.abc import Callable
 
 from mcp.types import ToolAnnotations
 
+from ..core.spec import ToolSet
+
 # Scope/collection management tools
 from .collection_management import (
     create_collection,
@@ -66,58 +68,64 @@ from .server import (
     test_cluster_connection,
 )
 
-# Read-only tools - always available regardless of mode settings
-READ_ONLY_TOOLS = [
-    # Server/Cluster management tools
-    get_buckets_in_cluster,
-    get_server_configuration_status,
-    test_cluster_connection,
-    get_scopes_and_collections_in_bucket,
-    get_collections_in_scope,
-    get_scopes_in_bucket,
-    get_cluster_health_and_services,
-    get_cluster_diagnostics_report,
-    # KV read tools
-    get_document_by_id,
-    lookup_subdocument,
-    # Query tools (read operations)
-    get_schema_for_collection,
-    run_sql_plus_plus_query,  # Write protection handled at runtime via read_only_mode
-    explain_sql_plus_plus_query,
-    # Index tools
-    get_index_advisor_recommendations,
-    list_indexes,
-    # Query performance analysis tools
-    get_queries_not_selective,
-    get_queries_not_using_covering_index,
-    get_queries_using_primary_index,
-    get_queries_with_large_result_count,
-    get_queries_with_largest_response_sizes,
-    get_longest_running_queries,
-    get_most_frequent_queries,
-]
+# The operational server's tool inventory, and the single source of truth for
+# it. The module-level lists below are derived from this; prefer TOOL_SET in
+# new code, and see cb_mcp.core.spec for why the inventory is declared as data.
+TOOL_SET = ToolSet(
+    # Read-only tools - always available regardless of mode settings
+    read_only=(
+        # Server/Cluster management tools
+        get_buckets_in_cluster,
+        get_server_configuration_status,
+        test_cluster_connection,
+        get_scopes_and_collections_in_bucket,
+        get_collections_in_scope,
+        get_scopes_in_bucket,
+        get_cluster_health_and_services,
+        get_cluster_diagnostics_report,
+        # KV read tools
+        get_document_by_id,
+        lookup_subdocument,
+        # Query tools (read operations)
+        get_schema_for_collection,
+        run_sql_plus_plus_query,  # Write protection handled at runtime via read_only_mode
+        explain_sql_plus_plus_query,
+        # Index tools
+        get_index_advisor_recommendations,
+        list_indexes,
+        # Query performance analysis tools
+        get_queries_not_selective,
+        get_queries_not_using_covering_index,
+        get_queries_using_primary_index,
+        get_queries_with_large_result_count,
+        get_queries_with_largest_response_sizes,
+        get_longest_running_queries,
+        get_most_frequent_queries,
+    ),
+    # Write tools - disabled when READ_ONLY_MODE is True
+    write=(
+        # KV write tools
+        upsert_document_by_id,
+        insert_document_by_id,
+        replace_document_by_id,
+        delete_document_by_id,
+        mutate_subdocument,
+        # Scope/collection management write tools
+        create_scope,
+        create_collection,
+        delete_scope,
+        delete_collection,
+        # Index write tools
+        create_index,
+        build_index,
+        drop_index,
+    ),
+)
 
-# Write tools - disabled when READ_ONLY_MODE is True
-WRITE_TOOLS = [
-    # KV write tools
-    upsert_document_by_id,
-    insert_document_by_id,
-    replace_document_by_id,
-    delete_document_by_id,
-    mutate_subdocument,
-    # Scope/collection management write tools
-    create_scope,
-    create_collection,
-    delete_scope,
-    delete_collection,
-    # Index write tools
-    create_index,
-    build_index,
-    drop_index,
-]
-
-# List of all tools for easy registration (kept for backward compatibility)
-ALL_TOOLS = READ_ONLY_TOOLS + WRITE_TOOLS
+# Derived views, kept for backward compatibility with existing importers.
+READ_ONLY_TOOLS = list(TOOL_SET.read_only)
+WRITE_TOOLS = list(TOOL_SET.write)
+ALL_TOOLS = TOOL_SET.all_tools
 
 # Tool annotations for MCP clients (readOnlyHint, destructiveHint, etc.)
 TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
@@ -172,13 +180,7 @@ def get_tools(read_only_mode: bool = True) -> list[Callable]:
     This function determines which tools should be loaded based on the
     READ_ONLY_MODE setting. When read_only_mode is True, write tools are excluded.
     """
-    tools = list(READ_ONLY_TOOLS)
-
-    if not read_only_mode:
-        # Write tools are only loaded when READ_ONLY_MODE is False
-        tools.extend(WRITE_TOOLS)
-
-    return tools
+    return TOOL_SET.tools_for(read_only_mode=read_only_mode)
 
 
 __all__ = [
@@ -217,6 +219,8 @@ __all__ = [
     "get_queries_with_largest_response_sizes",
     "get_longest_running_queries",
     "get_most_frequent_queries",
+    # Tool inventory
+    "TOOL_SET",
     # Tool categories
     "READ_ONLY_TOOLS",
     "WRITE_TOOLS",
