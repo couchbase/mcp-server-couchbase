@@ -59,31 +59,37 @@ def compose(*decorators: Callable) -> Callable:
 credential_options = compose(
     click.option(
         "--connection-string",
+        "connection_string",
         envvar="CB_CONNECTION_STRING",
         help="Couchbase connection string (required for operations)",
     ),
     click.option(
         "--username",
+        "username",
         envvar="CB_USERNAME",
         help="Couchbase database user (required for operations)",
     ),
     click.option(
         "--password",
+        "password",
         envvar="CB_PASSWORD",
         help="Couchbase database password (required for operations)",
     ),
     click.option(
         "--ca-cert-path",
+        "ca_cert_path",
         envvar="CB_CA_CERT_PATH",
         help="Path to the server trust store (CA certificate) file. The certificate at this path is used to verify the server certificate during the authentication process.",
     ),
     click.option(
         "--client-cert-path",
+        "client_cert_path",
         envvar="CB_CLIENT_CERT_PATH",
         help="Path to the client certificate file used for mTLS authentication.",
     ),
     click.option(
         "--client-key-path",
+        "client_key_path",
         envvar="CB_CLIENT_KEY_PATH",
         help="Path to the client certificate key file used for mTLS authentication.",
     ),
@@ -93,6 +99,7 @@ credential_options = compose(
 read_only_option = compose(
     click.option(
         "--read-only-mode",
+        "read_only_mode",
         envvar="CB_MCP_READ_ONLY_MODE",
         type=bool,
         default=DEFAULT_READ_ONLY_MODE,
@@ -104,6 +111,7 @@ read_only_option = compose(
 transport_options = compose(
     click.option(
         "--transport",
+        "transport",
         envvar=["CB_MCP_TRANSPORT"],
         type=click.Choice(ALLOWED_TRANSPORTS),
         default=DEFAULT_TRANSPORT,
@@ -111,12 +119,14 @@ transport_options = compose(
     ),
     click.option(
         "--host",
+        "host",
         envvar="CB_MCP_HOST",
         default=DEFAULT_HOST,
         help="Host to run the server on.",
     ),
     click.option(
         "--port",
+        "port",
         envvar="CB_MCP_PORT",
         default=DEFAULT_PORT,
         help="Port to run the server on.",
@@ -146,6 +156,7 @@ tool_gating_options = compose(
 logging_options = compose(
     click.option(
         "--log-level",
+        "log_level",
         envvar="CB_MCP_LOG_LEVEL",
         default=DEFAULT_LOG_LEVEL,
         callback=validate_log_level,
@@ -155,6 +166,7 @@ logging_options = compose(
     ),
     click.option(
         "--log-sinks",
+        "log_sinks",
         envvar="CB_MCP_LOG_SINKS",
         default=DEFAULT_LOG_SINKS,
         callback=validate_log_sinks,
@@ -164,6 +176,7 @@ logging_options = compose(
     ),
     click.option(
         "--log-file",
+        "log_file",
         envvar="CB_MCP_LOG_FILE",
         default=DEFAULT_LOG_FILE,
         callback=validate_log_path,
@@ -175,6 +188,7 @@ logging_options = compose(
     ),
     click.option(
         "--log-rotation-max-size-mb",
+        "log_rotation_max_size_mb",
         envvar="CB_MCP_LOG_ROTATION_MAX_SIZE_MB",
         # Default None so the 1 MB default is applied only when neither this nor the
         # deprecated --log-max-bytes is set.
@@ -186,6 +200,7 @@ logging_options = compose(
     ),
     click.option(
         "--log-max-bytes",
+        "log_max_bytes",
         envvar="CB_MCP_LOG_MAX_BYTES",
         # DEPRECATED: superseded by --log-rotation-max-size-mb (MB). Still honored in
         # bytes for backward compatibility. Default None so it's only applied when
@@ -199,6 +214,7 @@ logging_options = compose(
     ),
     click.option(
         "--log-error-rotation-max-size-mb",
+        "log_error_rotation_max_size_mb",
         envvar="CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE_MB",
         type=click.FloatRange(min=0),
         default=None,
@@ -208,6 +224,7 @@ logging_options = compose(
     ),
     click.option(
         "--log-warning-rotation-max-size-mb",
+        "log_warning_rotation_max_size_mb",
         envvar="CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE_MB",
         type=click.FloatRange(min=0),
         default=None,
@@ -217,6 +234,7 @@ logging_options = compose(
     ),
     click.option(
         "--log-info-rotation-max-size-mb",
+        "log_info_rotation_max_size_mb",
         envvar="CB_MCP_LOG_INFO_ROTATION_MAX_SIZE_MB",
         type=click.FloatRange(min=0),
         default=None,
@@ -226,6 +244,7 @@ logging_options = compose(
     ),
     click.option(
         "--log-debug-rotation-max-size-mb",
+        "log_debug_rotation_max_size_mb",
         envvar="CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE_MB",
         type=click.FloatRange(min=0),
         default=None,
@@ -235,6 +254,7 @@ logging_options = compose(
     ),
     click.option(
         "--log-retention-backup-count",
+        "log_retention_backup_count",
         envvar="CB_MCP_LOG_RETENTION_BACKUP_COUNT",
         # 0 keeps no rotated backups (only the live file); negative is rejected.
         type=click.IntRange(min=0),
@@ -245,6 +265,7 @@ logging_options = compose(
     ),
     click.option(
         "--log-error-retention-backup-count",
+        "log_error_retention_backup_count",
         envvar="CB_MCP_LOG_ERROR_RETENTION_BACKUP_COUNT",
         type=click.IntRange(min=0),
         default=None,
@@ -253,6 +274,7 @@ logging_options = compose(
     ),
     click.option(
         "--log-warning-retention-backup-count",
+        "log_warning_retention_backup_count",
         envvar="CB_MCP_LOG_WARNING_RETENTION_BACKUP_COUNT",
         type=click.IntRange(min=0),
         default=None,
@@ -261,6 +283,7 @@ logging_options = compose(
     ),
     click.option(
         "--log-info-retention-backup-count",
+        "log_info_retention_backup_count",
         envvar="CB_MCP_LOG_INFO_RETENTION_BACKUP_COUNT",
         type=click.IntRange(min=0),
         default=None,
@@ -269,6 +292,7 @@ logging_options = compose(
     ),
     click.option(
         "--log-debug-retention-backup-count",
+        "log_debug_retention_backup_count",
         envvar="CB_MCP_LOG_DEBUG_RETENTION_BACKUP_COUNT",
         type=click.IntRange(min=0),
         default=None,
@@ -281,6 +305,7 @@ logging_options = compose(
 oauth_options = compose(
     click.option(
         "--oauth-jwks-uri",
+        "oauth_jwks_uri",
         envvar="CB_MCP_OAUTH_JWT_JWKS_URI",
         default=None,
         help="JWKS endpoint of the upstream identity provider, used to verify "
@@ -290,6 +315,7 @@ oauth_options = compose(
     ),
     click.option(
         "--oauth-issuer",
+        "oauth_issuer",
         envvar="CB_MCP_OAUTH_JWT_ISSUER",
         default=None,
         help="Expected JWT 'iss' claim value. Also advertised as the authorization "
@@ -298,12 +324,14 @@ oauth_options = compose(
     ),
     click.option(
         "--oauth-audience",
+        "oauth_audience",
         envvar="CB_MCP_OAUTH_JWT_AUDIENCE",
         default=None,
         help="Expected JWT 'aud' claim value. Required to enable OAuth.",
     ),
     click.option(
         "--oauth-algorithm",
+        "oauth_algorithm",
         envvar="CB_MCP_OAUTH_JWT_ALGORITHM",
         type=click.Choice(ALLOWED_OAUTH_ALGORITHMS),
         default=DEFAULT_OAUTH_ALGORITHM,
@@ -312,6 +340,7 @@ oauth_options = compose(
     ),
     click.option(
         "--oauth-mcp-base-url",
+        "oauth_mcp_base_url",
         envvar="CB_MCP_OAUTH_MCP_BASE_URL",
         default=None,
         help="Public base URL of this MCP server (e.g. https://api.yourcompany.com). "
