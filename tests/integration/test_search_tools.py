@@ -19,6 +19,7 @@ import os
 import time
 import uuid
 from collections.abc import Iterator
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -29,6 +30,7 @@ from conftest import (
     get_test_scope,
     require_test_bucket,
 )
+from couchbase.mutation_state import MutationState
 from couchbase.options import SearchOptions
 from couchbase.search import RawQuery, SearchRequest
 
@@ -46,6 +48,10 @@ except ImportError:  # pragma: no cover - SDK always provides this in practice
 # spirit as conftest's CB_MCP_TEST_TIMEOUT.
 FTS_READY_TIMEOUT = int(os.getenv("CB_MCP_FTS_READY_TIMEOUT", "300"))
 FTS_READY_POLL_INTERVAL = 5
+# Per-attempt server-side budget. Each attempt asks the Search service to wait
+# (via consistent_with) until it has indexed our mutation, so an attempt that
+# hits this is "still catching up", not a hard failure — the outer loop retries.
+FTS_READY_ATTEMPT_TIMEOUT = 30
 
 
 def _direct_cluster():
@@ -57,30 +63,51 @@ def _direct_cluster():
     return connect_to_couchbase_cluster(connection_string, username, password)
 
 
-def _wait_for_seeded_document(scope, index_name: str, marker: str) -> bool:
+def _wait_for_seeded_document(
+    scope, index_name: str, marker: str, mutation_state: MutationState
+) -> tuple[bool, str | None]:
     """Block until the seeded document is findable through the Search index.
+
+    Returns ``(indexed, last_error)`` — the error is carried out rather than
+    swallowed so a failure says *why* (e.g. "pindex not available") instead of
+    just reporting that the wait elapsed.
+
+    Uses ``consistent_with`` (AT_PLUS) so the Search service itself waits until
+    it has indexed our specific mutation, rather than us guessing with blind
+    polling. The outer loop only exists to ride out the window where the index
+    is too young to answer at all.
 
     Polls with the direct SDK rather than through an MCP session on purpose:
     conftest's ``create_mcp_session`` wraps the *entire* session in
-    ``asyncio.timeout(DEFAULT_TIMEOUT)``, so a long poll inside one always
+    ``asyncio.timeout(DEFAULT_TIMEOUT)``, so a long wait inside one always
     trips that deadline. This is a plain synchronous fixture, so blocking here
     touches neither the event loop nor any MCP session.
 
     Queries the unique per-run ``marker`` token, not ``match_all`` — the index
-    covers the whole test collection, which in CI holds ~1500 travel-sample
-    documents, so ``match_all`` would return hits from pre-existing data and
-    tell us nothing about whether *our* document has been indexed yet.
+    covers the whole test collection, which in CI holds pre-existing
+    travel-sample documents, so ``match_all`` would return hits from that data
+    and tell us nothing about whether *our* document has been indexed yet.
     """
     request = SearchRequest.create(RawQuery({"match": marker, "field": "marker"}))
     deadline = time.monotonic() + FTS_READY_TIMEOUT
+    last_error: str | None = None
     while time.monotonic() < deadline:
-        # The index legitimately errors ("pindex not available") for the first
-        # stretch after creation, so a failed attempt is a retry, not a fault.
-        with contextlib.suppress(Exception):
-            if list(scope.search(index_name, request, SearchOptions(limit=5)).rows()):
-                return True
+        # A young index legitimately errors ("pindex not available") for a
+        # while after creation, so a failed attempt is a retry, not a fault.
+        try:
+            options = SearchOptions(
+                limit=5,
+                consistent_with=mutation_state,
+                timeout=timedelta(seconds=FTS_READY_ATTEMPT_TIMEOUT),
+            )
+            if list(scope.search(index_name, request, options).rows()):
+                return True, None
+            last_error = "query succeeded but returned no rows for the seeded marker"
+        except Exception as e:
+            # Reported back to the caller, not swallowed.
+            last_error = f"{type(e).__name__}: {e}"
         time.sleep(FTS_READY_POLL_INTERVAL)
-    return False
+    return False, last_error
 
 
 @pytest.fixture(scope="module")
@@ -137,13 +164,16 @@ def seeded_search_index() -> Iterator[dict[str, Any]]:
             pytest.skip(f"Could not create Search index for tests: {e}")
 
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.upsert(
+        mutation_result = collection.upsert(
             doc_id,
             {"name": "fts-seed-document", "kind": "test", "marker": marker},
         )
 
-        indexed = _wait_for_seeded_document(
-            bucket.scope(scope_name), index_name, marker
+        indexed, index_error = _wait_for_seeded_document(
+            bucket.scope(scope_name),
+            index_name,
+            marker,
+            MutationState(mutation_result),
         )
 
         try:
@@ -155,6 +185,7 @@ def seeded_search_index() -> Iterator[dict[str, Any]]:
                 "doc_id": doc_id,
                 "marker": marker,
                 "indexed": indexed,
+                "index_error": index_error,
             }
         finally:
             with contextlib.suppress(Exception):
@@ -170,7 +201,17 @@ def seeded_search_index() -> Iterator[dict[str, Any]]:
 def seeded_cluster_level_search_index() -> Iterator[dict[str, str]]:
     """Create a cluster-level (legacy) Search index for the duration of the
     module, and drop it afterward. Ensures test_list_search_indexes_no_filters
-    always has a cluster-level index to find instead of skipping."""
+    always has a cluster-level index to find instead of skipping.
+
+    The index deliberately matches **zero documents**: it is only ever listed,
+    never queried, and an index left on its default dynamic mapping would
+    index the entire bucket. On a CI node with the minimum ftsMemoryQuota
+    that competes with the scope-level index this module actually queries,
+    which is enough to keep the latter stuck on "pindex not available".
+    Mapping a type_field value no document carries keeps it free. (The server
+    rejects an index with no enabled mapping at all, and a mapping naming a
+    nonexistent scope/collection, so this is the cheapest legal option.)
+    """
     if SearchIndex is None:
         pytest.skip("couchbase.management.search.SearchIndex is unavailable")
 
@@ -186,6 +227,20 @@ def seeded_cluster_level_search_index() -> Iterator[dict[str, str]]:
             source_type="couchbase",
             idx_type="fulltext-index",
             source_name=bucket_name,
+            params={
+                "doc_config": {"mode": "type_field", "type_field": "type"},
+                "mapping": {
+                    "default_mapping": {"enabled": False},
+                    "types": {
+                        "__cb_mcp_no_such_type__": {
+                            "enabled": True,
+                            "dynamic": False,
+                            "properties": {},
+                        }
+                    },
+                    "default_analyzer": "standard",
+                },
+            },
         )
 
         try:
@@ -363,8 +418,9 @@ async def test_run_fts_query_match_all(seeded_search_index: dict[str, Any]) -> N
     test_run_fts_query_matches_seeded_document covers document identity.
     """
     assert seeded_search_index["indexed"], (
-        "Search index never picked up the seeded document within "
-        f"{FTS_READY_TIMEOUT}s — the Search service is too slow or not indexing."
+        f"Search index never picked up the seeded document within "
+        f"{FTS_READY_TIMEOUT}s. Last error from the Search service: "
+        f"{seeded_search_index['index_error']}"
     )
 
     async with create_mcp_session() as session:
@@ -396,8 +452,9 @@ async def test_run_fts_query_matches_seeded_document(
     document — the real proof that search returns the right result, and
     deterministic whether or not the collection holds other data."""
     assert seeded_search_index["indexed"], (
-        "Search index never picked up the seeded document within "
-        f"{FTS_READY_TIMEOUT}s — the Search service is too slow or not indexing."
+        f"Search index never picked up the seeded document within "
+        f"{FTS_READY_TIMEOUT}s. Last error from the Search service: "
+        f"{seeded_search_index['index_error']}"
     )
 
     async with create_mcp_session() as session:
@@ -424,8 +481,9 @@ async def test_run_fts_query_explain_default_limit(
     """run_fts_query with explain=True and no limit must default to 1 and
     return an explanation for the single returned hit."""
     assert seeded_search_index["indexed"], (
-        "Search index never picked up the seeded document within "
-        f"{FTS_READY_TIMEOUT}s — the Search service is too slow or not indexing."
+        f"Search index never picked up the seeded document within "
+        f"{FTS_READY_TIMEOUT}s. Last error from the Search service: "
+        f"{seeded_search_index['index_error']}"
     )
 
     async with create_mcp_session() as session:
