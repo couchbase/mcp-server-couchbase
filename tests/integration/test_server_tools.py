@@ -26,19 +26,19 @@ from conftest import (
     require_test_bucket,
 )
 
-from cb_mcp.utils.constants import MAX_NODES_PER_SPEC
+_METRICS_TEST_NODE_LIMIT = 2
 
 
 async def _get_metrics_target_nodes(session) -> list[str]:
-    """Fetch up to MAX_NODES_PER_SPEC real node targets for a get_cluster_metrics spec.
+    """Fetch a couple of real node targets for a get_cluster_metrics spec.
 
     Falls back to a placeholder when get_nodes_in_cluster itself errors (e.g. against
-    Capella) — get_cluster_metrics rejects Capella before validating "nodes" anyway.
+    Capella) — get_cluster_metrics rejects Capella before making any REST call anyway.
     """
     response = await session.call_tool("get_nodes_in_cluster", arguments={})
     payload = extract_payload(response)
     nodes = payload.get("data") if isinstance(payload, dict) else None
-    return (nodes or ["127.0.0.1:8091"])[:MAX_NODES_PER_SPEC]
+    return (nodes or ["127.0.0.1:8091"])[:_METRICS_TEST_NODE_LIMIT]
 
 
 @pytest.mark.asyncio
