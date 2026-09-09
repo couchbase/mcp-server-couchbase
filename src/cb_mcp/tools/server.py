@@ -451,8 +451,10 @@ def get_nodes_in_cluster(
 ) -> dict[str, Any]:
     """List cluster nodes as host:port targets, the way Prometheus would discover them.
 
-    Useful before calling get_cluster_metrics with a "nodes" filter, or to confirm a node is
-    actually part of the cluster.
+    Useful before calling get_cluster_metrics with a "nodes" filter — returns the authoritative,
+    complete cluster membership as exact host:port targets, unlike get_cluster_diagnostics_report
+    (only endpoints already touched by this connection) or get_cluster_health_and_services (only
+    services that answer a live ping right now).
 
     Self-managed Couchbase Server only — rejects Capella connections without a REST call.
     Calls GET /prometheus_sd_config
