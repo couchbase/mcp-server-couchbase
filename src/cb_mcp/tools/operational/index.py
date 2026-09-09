@@ -10,14 +10,14 @@ from typing import Any
 from couchbase.management.options import CreateQueryIndexOptions, DropQueryIndexOptions
 from fastmcp import Context
 
-from ..utils.config import get_settings
-from ..utils.connection import connect_to_bucket, format_keyspace
-from ..utils.constants import (
+from ...utils.config import get_settings
+from ...utils.constants import (
     LOGGER_ROOT,
     QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION,
 )
-from ..utils.context import get_cluster_connection
-from ..utils.index_utils import (
+from ...utils.context import get_cluster_connection
+from ...utils.operational.connection import connect_to_bucket, format_keyspace
+from ...utils.operational.index_utils import (
     fetch_indexes_from_rest_api,
     process_index_data_from_query,
     process_index_data_from_rest_api,
@@ -25,7 +25,7 @@ from ..utils.index_utils import (
     validate_connection_settings,
     validate_filter_params,
 )
-from ..utils.responses import tool_error, tool_success
+from ...utils.responses import tool_error, tool_success
 from .query import run_cluster_query, run_sql_plus_plus_query
 
 logger = logging.getLogger(f"{LOGGER_ROOT}.tools.index")

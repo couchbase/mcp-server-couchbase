@@ -7,7 +7,7 @@ Tests for:
 - Non-detection of non-EXPLAIN statements
 """
 
-from cb_mcp.tools.query import _is_explain_statement
+from cb_mcp.tools.operational.query import _is_explain_statement
 
 
 class TestIsExplainStatement:

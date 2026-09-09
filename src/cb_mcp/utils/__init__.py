@@ -1,7 +1,9 @@
 """
 Couchbase MCP Utilities
 
-This module contains utility functions for configuration, connection, and context management.
+Shared utilities: configuration, context, logging, telemetry and tool wrappers.
+Helpers tied to a specific backing SDK live under that server's namespace
+(e.g. :mod:`cb_mcp.utils.operational`), not here.
 """
 
 # CLI adapters
@@ -16,12 +18,6 @@ from .cli import (
 from .config import (
     get_settings,
     parse_tool_names,
-)
-
-# Connection utilities
-from .connection import (
-    connect_to_bucket,
-    connect_to_couchbase_cluster,
 )
 
 # Constants
@@ -65,11 +61,6 @@ from .elicitation import wrap_with_confirmation
 # Environment diagnostics
 from .environment import log_environment_info
 
-# Index utilities
-from .index_utils import (
-    fetch_indexes_from_rest_api,
-)
-
 # Logging
 from .logging import (
     NO_SDK_LOG_HOOK,
@@ -94,15 +85,11 @@ __all__ = [
     "get_settings",
     "parse_tool_names",
     # Connection
-    "connect_to_couchbase_cluster",
-    "connect_to_bucket",
     # Context
     "AppContext",
     "get_cluster_connection",
     "get_cluster_provider",
     "get_logging_config",
-    # Index utilities
-    "fetch_indexes_from_rest_api",
     # Constants
     "FASTMCP_SERVER_NAME",
     "LOGGER_ROOT",

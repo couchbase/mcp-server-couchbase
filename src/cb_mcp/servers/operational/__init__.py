@@ -11,15 +11,15 @@ behaviour, it does not change it.
 
 import couchbase
 
-from ..core.spec import ScopeSpec, ServerSpec
-from ..tools import TOOL_ANNOTATIONS, TOOL_SET
-from ..utils.constants import (
+from ...core.spec import ScopeSpec, ServerSpec
+from ...tools.operational import TOOL_ANNOTATIONS, TOOL_SET
+from ...utils.constants import (
     FASTMCP_SERVER_NAME,
     LOGGER_ROOT,
     SCOPE_READ,
     SCOPE_WRITE,
 )
-from ..utils.scope_enforcement import TOOL_SCOPE_HINTS
+from ...utils.scope_enforcement import TOOL_SCOPE_HINTS
 
 SERVER_ID = "operational"
 

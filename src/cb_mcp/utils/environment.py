@@ -9,7 +9,7 @@ them to enable DEBUG logging will produce this record with most of the
 context needed to triage — no further back-and-forth required.
 
 The config redaction mirrors the policy of the ``get_server_configuration_status``
-MCP tool (see :mod:`cb_mcp.tools.server`) and the provider's
+MCP tool (see :mod:`cb_mcp.tools.operational.server`) and the provider's
 ``get_configuration`` so that the log file and the MCP tool output agree on
 what's safe to expose. Secrets (passwords, certificate file paths) are
 replaced with ``*_configured`` booleans; identifiers the user typed into

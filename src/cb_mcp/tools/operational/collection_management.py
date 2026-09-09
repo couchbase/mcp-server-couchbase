@@ -13,10 +13,10 @@ from typing import Any
 
 from fastmcp import Context
 
-from ..utils.connection import connect_to_bucket
-from ..utils.constants import LOGGER_ROOT
-from ..utils.context import get_cluster_connection
-from ..utils.responses import tool_error, tool_success
+from ...utils.constants import LOGGER_ROOT
+from ...utils.context import get_cluster_connection
+from ...utils.operational.connection import connect_to_bucket
+from ...utils.responses import tool_error, tool_success
 
 logger = logging.getLogger(f"{LOGGER_ROOT}.tools.collection_management")
 

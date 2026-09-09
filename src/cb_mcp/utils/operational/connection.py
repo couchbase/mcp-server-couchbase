@@ -7,7 +7,7 @@ from couchbase.bucket import Bucket
 from couchbase.cluster import Cluster
 from couchbase.options import ClusterOptions
 
-from .constants import LOGGER_ROOT
+from ..constants import LOGGER_ROOT
 
 logger = logging.getLogger(f"{LOGGER_ROOT}.utils.connection")
 

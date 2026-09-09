@@ -19,7 +19,7 @@ from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 from cb_mcp.auth import CouchbaseJWTVerifier, build_oauth
-from cb_mcp.tools.query import run_sql_plus_plus_query
+from cb_mcp.tools.operational.query import run_sql_plus_plus_query
 from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
 from cb_mcp.utils.scope_enforcement import (
     required_scopes_for_tool,
@@ -337,9 +337,12 @@ class TestSqlPlusPlusScopeGate:
         token = SimpleNamespace(scopes=[SCOPE_READ])
 
         with (
-            patch("cb_mcp.tools.query.get_access_token", return_value=token),
-            patch("cb_mcp.tools.query.get_cluster_connection"),
-            patch("cb_mcp.tools.query.connect_to_bucket"),
+            patch(
+                "cb_mcp.tools.operational.query.get_access_token",
+                return_value=token,
+            ),
+            patch("cb_mcp.tools.operational.query.get_cluster_connection"),
+            patch("cb_mcp.tools.operational.query.connect_to_bucket"),
             pytest.raises(PermissionError) as excinfo,
         ):
             run_sql_plus_plus_query(
@@ -356,9 +359,12 @@ class TestSqlPlusPlusScopeGate:
         token = SimpleNamespace(scopes=[SCOPE_READ])
 
         with (
-            patch("cb_mcp.tools.query.get_access_token", return_value=token),
-            patch("cb_mcp.tools.query.get_cluster_connection"),
-            patch("cb_mcp.tools.query.connect_to_bucket"),
+            patch(
+                "cb_mcp.tools.operational.query.get_access_token",
+                return_value=token,
+            ),
+            patch("cb_mcp.tools.operational.query.get_cluster_connection"),
+            patch("cb_mcp.tools.operational.query.connect_to_bucket"),
             pytest.raises(PermissionError),
         ):
             run_sql_plus_plus_query(
@@ -379,9 +385,12 @@ class TestSqlPlusPlusScopeGate:
         token = SimpleNamespace(scopes=[SCOPE_READ])
 
         with (
-            patch("cb_mcp.tools.query.get_access_token", return_value=token),
-            patch("cb_mcp.tools.query.get_cluster_connection"),
-            patch("cb_mcp.tools.query.connect_to_bucket"),
+            patch(
+                "cb_mcp.tools.operational.query.get_access_token",
+                return_value=token,
+            ),
+            patch("cb_mcp.tools.operational.query.get_cluster_connection"),
+            patch("cb_mcp.tools.operational.query.connect_to_bucket"),
             pytest.raises(PermissionError) as excinfo,
         ):
             run_sql_plus_plus_query(
@@ -403,9 +412,15 @@ class TestSqlPlusPlusScopeGate:
         bucket.scope.return_value.query.side_effect = RuntimeError("reached cluster")
 
         with (
-            patch("cb_mcp.tools.query.get_access_token", return_value=token),
-            patch("cb_mcp.tools.query.get_cluster_connection"),
-            patch("cb_mcp.tools.query.connect_to_bucket", return_value=bucket),
+            patch(
+                "cb_mcp.tools.operational.query.get_access_token",
+                return_value=token,
+            ),
+            patch("cb_mcp.tools.operational.query.get_cluster_connection"),
+            patch(
+                "cb_mcp.tools.operational.query.connect_to_bucket",
+                return_value=bucket,
+            ),
             pytest.raises(RuntimeError, match="reached cluster"),
         ):
             run_sql_plus_plus_query(
@@ -421,9 +436,12 @@ class TestSqlPlusPlusScopeGate:
         ctx = _ctx_with_modes(read_only_mode=True)
 
         with (
-            patch("cb_mcp.tools.query.get_access_token", return_value=None),
-            patch("cb_mcp.tools.query.get_cluster_connection"),
-            patch("cb_mcp.tools.query.connect_to_bucket"),
+            patch(
+                "cb_mcp.tools.operational.query.get_access_token",
+                return_value=None,
+            ),
+            patch("cb_mcp.tools.operational.query.get_cluster_connection"),
+            patch("cb_mcp.tools.operational.query.connect_to_bucket"),
             pytest.raises(ValueError, match="not allowed in read-only mode"),
         ):
             run_sql_plus_plus_query(

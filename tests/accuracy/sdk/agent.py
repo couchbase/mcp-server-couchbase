@@ -70,9 +70,7 @@ class OpenAIAgent:
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._max_steps = max_steps
         # Reasoning models (gpt-5*, o-series) reject a custom temperature.
-        self._temperature = (
-            temperature if supports_custom_temperature(model) else None
-        )
+        self._temperature = temperature if supports_custom_temperature(model) else None
 
         system_parts: list[str] = []
         if system_prompt is None:

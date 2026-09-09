@@ -19,13 +19,12 @@ from unittest.mock import MagicMock, patch
 
 from couchbase.diagnostics import ServiceType
 
-from cb_mcp.tools.server import (
-    get_cluster_diagnostics_report,
+from cb_mcp.tools.operational.server import (
     get_cluster_health_and_services,
     get_scopes_and_collections_in_bucket,
     get_scopes_in_bucket,
 )
-from cb_mcp.tools.server import (
+from cb_mcp.tools.operational.server import (
     # Aliased so pytest doesn't collect the tool function itself as a test.
     test_cluster_connection as cluster_connection_tool,
 )
@@ -54,7 +53,7 @@ class TestTestClusterConnection:
         # Force get_cluster_connection to raise by patching it at the module
         # path the tool imports from.
         with patch(
-            "cb_mcp.tools.server.get_cluster_connection",
+            "cb_mcp.tools.operational.server.get_cluster_connection",
             side_effect=Exception("auth failed"),
         ):
             result = cluster_connection_tool(ctx)
@@ -75,7 +74,7 @@ class TestTestClusterConnection:
         ctx = _make_ctx(cluster=cluster)
 
         with patch(
-            "cb_mcp.tools.server.get_cluster_connection",
+            "cb_mcp.tools.operational.server.get_cluster_connection",
             return_value=cluster,
         ):
             result = cluster_connection_tool(ctx)
@@ -93,11 +92,11 @@ class TestTestClusterConnection:
 
         with (
             patch(
-                "cb_mcp.tools.server.get_cluster_connection",
+                "cb_mcp.tools.operational.server.get_cluster_connection",
                 return_value=cluster,
             ),
             patch(
-                "cb_mcp.tools.server.connect_to_bucket",
+                "cb_mcp.tools.operational.server.connect_to_bucket",
                 return_value=MagicMock(),
             ) as mock_connect_bucket,
         ):
@@ -122,11 +121,11 @@ class TestGetScopesAndCollectionsInBucket:
 
         with (
             patch(
-                "cb_mcp.tools.server.get_cluster_connection",
+                "cb_mcp.tools.operational.server.get_cluster_connection",
                 return_value=cluster,
             ),
             patch(
-                "cb_mcp.tools.server.connect_to_bucket",
+                "cb_mcp.tools.operational.server.connect_to_bucket",
                 return_value=bucket,
             ),
         ):
@@ -161,11 +160,11 @@ class TestGetScopesAndCollectionsInBucket:
 
         with (
             patch(
-                "cb_mcp.tools.server.get_cluster_connection",
+                "cb_mcp.tools.operational.server.get_cluster_connection",
                 return_value=cluster,
             ),
             patch(
-                "cb_mcp.tools.server.connect_to_bucket",
+                "cb_mcp.tools.operational.server.connect_to_bucket",
                 return_value=bucket,
             ),
         ):
@@ -189,11 +188,11 @@ class TestGetScopesInBucket:
 
         with (
             patch(
-                "cb_mcp.tools.server.get_cluster_connection",
+                "cb_mcp.tools.operational.server.get_cluster_connection",
                 return_value=cluster,
             ),
             patch(
-                "cb_mcp.tools.server.connect_to_bucket",
+                "cb_mcp.tools.operational.server.connect_to_bucket",
                 return_value=bucket,
             ),
         ):
@@ -216,11 +215,11 @@ class TestGetScopesInBucket:
 
         with (
             patch(
-                "cb_mcp.tools.server.get_cluster_connection",
+                "cb_mcp.tools.operational.server.get_cluster_connection",
                 return_value=cluster,
             ),
             patch(
-                "cb_mcp.tools.server.connect_to_bucket",
+                "cb_mcp.tools.operational.server.connect_to_bucket",
                 return_value=bucket,
             ),
         ):
@@ -239,7 +238,7 @@ class TestGetClusterHealthAndServices:
         ctx = _make_ctx(cluster=cluster)
 
         with patch(
-            "cb_mcp.tools.server.get_cluster_connection",
+            "cb_mcp.tools.operational.server.get_cluster_connection",
             return_value=cluster,
         ):
             result = get_cluster_health_and_services(ctx)
@@ -257,7 +256,7 @@ class TestGetClusterHealthAndServices:
         ctx = _make_ctx(cluster=cluster)
 
         with patch(
-            "cb_mcp.tools.server.get_cluster_connection",
+            "cb_mcp.tools.operational.server.get_cluster_connection",
             return_value=cluster,
         ):
             result = get_cluster_health_and_services(ctx)
@@ -277,11 +276,11 @@ class TestGetClusterHealthAndServices:
 
         with (
             patch(
-                "cb_mcp.tools.server.get_cluster_connection",
+                "cb_mcp.tools.operational.server.get_cluster_connection",
                 return_value=cluster,
             ),
             patch(
-                "cb_mcp.tools.server.connect_to_bucket",
+                "cb_mcp.tools.operational.server.connect_to_bucket",
                 return_value=bucket,
             ),
         ):
@@ -301,7 +300,7 @@ class TestGetClusterHealthAndServices:
         ctx = _make_ctx(cluster=cluster)
 
         with patch(
-            "cb_mcp.tools.server.get_cluster_connection",
+            "cb_mcp.tools.operational.server.get_cluster_connection",
             return_value=cluster,
         ):
             result = get_cluster_health_and_services(ctx, service_types=["query"])
@@ -323,11 +322,11 @@ class TestGetClusterHealthAndServices:
 
         with (
             patch(
-                "cb_mcp.tools.server.get_cluster_connection",
+                "cb_mcp.tools.operational.server.get_cluster_connection",
                 return_value=cluster,
             ),
             patch(
-                "cb_mcp.tools.server.connect_to_bucket",
+                "cb_mcp.tools.operational.server.connect_to_bucket",
                 return_value=bucket,
             ),
         ):
@@ -346,7 +345,7 @@ class TestGetClusterHealthAndServices:
         ctx = _make_ctx(cluster=cluster)
 
         with patch(
-            "cb_mcp.tools.server.get_cluster_connection",
+            "cb_mcp.tools.operational.server.get_cluster_connection",
             return_value=cluster,
         ):
             result = get_cluster_health_and_services(ctx, service_types=["bogus"])

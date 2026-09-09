@@ -52,7 +52,7 @@ def prepare_tools_for_registration(
     imported lazily so this module stays free of any SDK import at module load.
     """
     if tool_set is None:
-        from .tools import TOOL_SET  # noqa: PLC0415
+        from .tools.operational import TOOL_SET  # noqa: PLC0415
 
         tool_set = TOOL_SET
     if scope_hints is None:

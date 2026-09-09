@@ -18,12 +18,11 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from cb_mcp.tools.index import (
+from cb_mcp.tools.operational.index import (
     fetch_indexes_via_query_service,
     list_indexes,
 )
 from cb_mcp.utils.config import get_settings
-from cb_mcp.utils.connection import connect_to_bucket, connect_to_couchbase_cluster
 from cb_mcp.utils.constants import (
     ALLOWED_TRANSPORTS,
     DEFAULT_READ_ONLY_MODE,
@@ -35,7 +34,11 @@ from cb_mcp.utils.context import (
     AppContext,
     get_cluster_connection,
 )
-from cb_mcp.utils.index_utils import (
+from cb_mcp.utils.operational.connection import (
+    connect_to_bucket,
+    connect_to_couchbase_cluster,
+)
+from cb_mcp.utils.operational.index_utils import (
     _build_query_params,
     _determine_ssl_verification,
     _extract_hosts_from_connection_string,
@@ -768,10 +771,12 @@ class TestConnectionModule:
         mock_cluster = MagicMock()
 
         with (
-            patch("cb_mcp.utils.connection.PasswordAuthenticator") as mock_auth,
-            patch("cb_mcp.utils.connection.ClusterOptions") as mock_options,
             patch(
-                "cb_mcp.utils.connection.Cluster", return_value=mock_cluster
+                "cb_mcp.utils.operational.connection.PasswordAuthenticator"
+            ) as mock_auth,
+            patch("cb_mcp.utils.operational.connection.ClusterOptions") as mock_options,
+            patch(
+                "cb_mcp.utils.operational.connection.Cluster", return_value=mock_cluster
             ) as mock_cluster_class,
         ):
             mock_options_instance = MagicMock()
@@ -793,10 +798,16 @@ class TestConnectionModule:
         mock_cluster = MagicMock()
 
         with (
-            patch("cb_mcp.utils.connection.CertificateAuthenticator") as mock_cert_auth,
-            patch("cb_mcp.utils.connection.ClusterOptions") as mock_options,
-            patch("cb_mcp.utils.connection.Cluster", return_value=mock_cluster),
-            patch("cb_mcp.utils.connection.os.path.exists", return_value=True),
+            patch(
+                "cb_mcp.utils.operational.connection.CertificateAuthenticator"
+            ) as mock_cert_auth,
+            patch("cb_mcp.utils.operational.connection.ClusterOptions") as mock_options,
+            patch(
+                "cb_mcp.utils.operational.connection.Cluster", return_value=mock_cluster
+            ),
+            patch(
+                "cb_mcp.utils.operational.connection.os.path.exists", return_value=True
+            ),
         ):
             mock_options_instance = MagicMock()
             mock_options.return_value = mock_options_instance
@@ -820,7 +831,9 @@ class TestConnectionModule:
     def test_connect_to_couchbase_cluster_missing_cert_file(self) -> None:
         """Verify FileNotFoundError raised when cert files don't exist."""
         with (
-            patch("cb_mcp.utils.connection.os.path.exists", return_value=False),
+            patch(
+                "cb_mcp.utils.operational.connection.os.path.exists", return_value=False
+            ),
             pytest.raises(
                 FileNotFoundError, match="Client certificate files not found"
             ),
@@ -856,10 +869,10 @@ class TestConnectionModule:
     def test_connect_to_couchbase_cluster_connection_failure(self) -> None:
         """Verify exceptions are re-raised on connection failure."""
         with (
-            patch("cb_mcp.utils.connection.PasswordAuthenticator"),
-            patch("cb_mcp.utils.connection.ClusterOptions"),
+            patch("cb_mcp.utils.operational.connection.PasswordAuthenticator"),
+            patch("cb_mcp.utils.operational.connection.ClusterOptions"),
             patch(
-                "cb_mcp.utils.connection.Cluster",
+                "cb_mcp.utils.operational.connection.Cluster",
                 side_effect=Exception("Connection refused"),
             ),
             pytest.raises(Exception, match="Connection refused"),
@@ -1089,7 +1102,7 @@ class TestFetchIndexesViaQueryService:
         )
 
         with patch(
-            "cb_mcp.tools.index.run_cluster_query",
+            "cb_mcp.tools.operational.index.run_cluster_query",
             new_callable=MagicMock,
             return_value=[{"name": "idx1"}, {"name": "idx2"}],
         ) as mock_query:
@@ -1110,7 +1123,7 @@ class TestFetchIndexesViaQueryService:
         )
 
         with patch(
-            "cb_mcp.tools.index.run_cluster_query",
+            "cb_mcp.tools.operational.index.run_cluster_query",
             new_callable=MagicMock,
             return_value=[{"name": "idx1"}],
         ) as mock_query:
@@ -1128,7 +1141,7 @@ class TestFetchIndexesViaQueryService:
         mock_ctx = MagicMock()
 
         with patch(
-            "cb_mcp.tools.index.run_cluster_query",
+            "cb_mcp.tools.operational.index.run_cluster_query",
             new_callable=MagicMock,
             return_value=[{"name": "idx1"}],
         ) as mock_query:
@@ -1157,7 +1170,7 @@ class TestFetchIndexesViaQueryService:
         mock_ctx = MagicMock()
 
         with patch(
-            "cb_mcp.tools.index.run_cluster_query",
+            "cb_mcp.tools.operational.index.run_cluster_query",
             new_callable=MagicMock,
             return_value=[{"name": "idx1"}, "stray_string", 42, None],
         ):
@@ -1242,7 +1255,7 @@ class TestListIndexesVersionRouting:
 
         with (
             patch(
-                "cb_mcp.tools.index.get_settings",
+                "cb_mcp.tools.operational.index.get_settings",
                 return_value={
                     "connection_string": "couchbase://localhost",
                     "username": "u",
@@ -1250,12 +1263,12 @@ class TestListIndexesVersionRouting:
                 },
             ),
             patch(
-                "cb_mcp.tools.index.get_cluster_connection",
+                "cb_mcp.tools.operational.index.get_cluster_connection",
                 new_callable=MagicMock,
                 return_value=mock_cluster,
             ),
             patch(
-                "cb_mcp.tools.index.run_cluster_query",
+                "cb_mcp.tools.operational.index.run_cluster_query",
                 new_callable=MagicMock,
                 return_value=[
                     {
@@ -1278,7 +1291,8 @@ class TestListIndexesVersionRouting:
                 ],
             ) as mock_query,
             patch(
-                "cb_mcp.tools.index.fetch_indexes_from_rest_api", new_callable=MagicMock
+                "cb_mcp.tools.operational.index.fetch_indexes_from_rest_api",
+                new_callable=MagicMock,
             ) as mock_rest,
         ):
             result = list_indexes(mock_ctx)
@@ -1298,7 +1312,7 @@ class TestListIndexesVersionRouting:
 
         with (
             patch(
-                "cb_mcp.tools.index.get_settings",
+                "cb_mcp.tools.operational.index.get_settings",
                 return_value={
                     "connection_string": "couchbase://localhost",
                     "username": "u",
@@ -1306,15 +1320,16 @@ class TestListIndexesVersionRouting:
                 },
             ),
             patch(
-                "cb_mcp.tools.index.get_cluster_connection",
+                "cb_mcp.tools.operational.index.get_cluster_connection",
                 new_callable=MagicMock,
                 return_value=mock_cluster,
             ),
             patch(
-                "cb_mcp.tools.index.run_cluster_query", new_callable=MagicMock
+                "cb_mcp.tools.operational.index.run_cluster_query",
+                new_callable=MagicMock,
             ) as mock_query,
             patch(
-                "cb_mcp.tools.index.fetch_indexes_from_rest_api",
+                "cb_mcp.tools.operational.index.fetch_indexes_from_rest_api",
                 new_callable=MagicMock,
                 return_value=[
                     {
@@ -1370,11 +1385,11 @@ class TestDetermineSSLCapella:
 
         with (
             patch(
-                "cb_mcp.utils.index_utils._get_capella_root_ca_path",
+                "cb_mcp.utils.operational.index_utils._get_capella_root_ca_path",
                 return_value="/fake/capella_root_ca.pem",
             ),
             patch(
-                "cb_mcp.utils.index_utils.os.path.exists",
+                "cb_mcp.utils.operational.index_utils.os.path.exists",
                 return_value=True,
             ),
         ):
@@ -1388,11 +1403,11 @@ class TestDetermineSSLCapella:
 
         with (
             patch(
-                "cb_mcp.utils.index_utils._get_capella_root_ca_path",
+                "cb_mcp.utils.operational.index_utils._get_capella_root_ca_path",
                 return_value="/fake/capella_root_ca.pem",
             ),
             patch(
-                "cb_mcp.utils.index_utils.os.path.exists",
+                "cb_mcp.utils.operational.index_utils.os.path.exists",
                 return_value=True,
             ),
         ):
@@ -1406,11 +1421,11 @@ class TestDetermineSSLCapella:
 
         with (
             patch(
-                "cb_mcp.utils.index_utils._get_capella_root_ca_path",
+                "cb_mcp.utils.operational.index_utils._get_capella_root_ca_path",
                 return_value="/fake/capella_root_ca.pem",
             ),
             patch(
-                "cb_mcp.utils.index_utils.os.path.exists",
+                "cb_mcp.utils.operational.index_utils.os.path.exists",
                 return_value=True,
             ),
         ):
@@ -1425,11 +1440,11 @@ class TestDetermineSSLCapella:
 
         with (
             patch(
-                "cb_mcp.utils.index_utils._get_capella_root_ca_path",
+                "cb_mcp.utils.operational.index_utils._get_capella_root_ca_path",
                 return_value="/missing/capella_root_ca.pem",
             ),
             patch(
-                "cb_mcp.utils.index_utils.os.path.exists",
+                "cb_mcp.utils.operational.index_utils.os.path.exists",
                 return_value=False,
             ),
         ):
@@ -1444,11 +1459,11 @@ class TestDetermineSSLCapella:
 
         with (
             patch(
-                "cb_mcp.utils.index_utils._get_capella_root_ca_path",
+                "cb_mcp.utils.operational.index_utils._get_capella_root_ca_path",
                 return_value="/fake/capella_root_ca.pem",
             ),
             patch(
-                "cb_mcp.utils.index_utils.os.path.exists",
+                "cb_mcp.utils.operational.index_utils.os.path.exists",
                 return_value=True,
             ),
         ):
@@ -1467,12 +1482,12 @@ class TestGetCapellaRootCAPath:
             "/site-packages/cb_mcp/certs/capella_root_ca.pem"
         )
 
-        with patch("cb_mcp.utils.index_utils.files") as mock_files:
+        with patch("cb_mcp.utils.operational.index_utils.files") as mock_files:
             mock_files.return_value.joinpath.return_value = fake_path
             result = _get_capella_root_ca_path()
 
         assert result == "/site-packages/cb_mcp/certs/capella_root_ca.pem"
-        mock_files.assert_called_once_with("cb_mcp.certs")
+        mock_files.assert_called_once_with("cb_mcp.utils.operational.certs")
 
     def test_falls_back_to_dev_path_when_importlib_fails(self) -> None:
         """When importlib.resources raises, the fallback returns a path
@@ -1480,11 +1495,11 @@ class TestGetCapellaRootCAPath:
         when the file exists."""
         with (
             patch(
-                "cb_mcp.utils.index_utils.files",
+                "cb_mcp.utils.operational.index_utils.files",
                 side_effect=FileNotFoundError("no resource"),
             ),
             patch(
-                "cb_mcp.utils.index_utils.os.path.exists",
+                "cb_mcp.utils.operational.index_utils.os.path.exists",
                 return_value=True,
             ),
         ):
@@ -1498,11 +1513,11 @@ class TestGetCapellaRootCAPath:
         the fallback path is still returned (with a warning logged)."""
         with (
             patch(
-                "cb_mcp.utils.index_utils.files",
+                "cb_mcp.utils.operational.index_utils.files",
                 side_effect=ImportError("no module"),
             ),
             patch(
-                "cb_mcp.utils.index_utils.os.path.exists",
+                "cb_mcp.utils.operational.index_utils.os.path.exists",
                 return_value=False,
             ),
         ):
@@ -1530,7 +1545,8 @@ class TestFetchIndexesFromRestApi:
         mock_client_cm.__enter__.return_value = mock_client
         mock_client_cm.__exit__.return_value = False
         return patch(
-            "cb_mcp.utils.index_utils.httpx.Client", return_value=mock_client_cm
+            "cb_mcp.utils.operational.index_utils.httpx.Client",
+            return_value=mock_client_cm,
         ), mock_client
 
     def test_single_host_success(self) -> None:

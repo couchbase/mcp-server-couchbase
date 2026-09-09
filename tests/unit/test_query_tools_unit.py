@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 import pytest
 from lark_sqlpp import modifies_data, modifies_structure, parse_sqlpp
 
-from cb_mcp.tools.query import (
+from cb_mcp.tools.operational.query import (
     _blocked_write_kind,
     _run_query_tool_with_empty_message,
     explain_sql_plus_plus_query,

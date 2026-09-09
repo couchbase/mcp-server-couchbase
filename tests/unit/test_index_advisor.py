@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cb_mcp.tools.index import get_index_advisor_recommendations
+from cb_mcp.tools.operational.index import get_index_advisor_recommendations
 
 # Queries with single quotes, doubled quotes, and an injection-style payload —
 # exactly the inputs that broke the old string-concatenation implementation.
@@ -31,7 +31,7 @@ def test_advisor_binds_user_query_as_named_parameter(user_query: str) -> None:
     ]
 
     with patch(
-        "cb_mcp.tools.index.run_sql_plus_plus_query",
+        "cb_mcp.tools.operational.index.run_sql_plus_plus_query",
         return_value=fake_results,
     ) as mock_run:
         result = get_index_advisor_recommendations(

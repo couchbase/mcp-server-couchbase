@@ -12,14 +12,14 @@ from couchbase.diagnostics import ServiceType
 from couchbase.options import PingOptions
 from fastmcp import Context
 
-from ..utils.config import get_settings
-from ..utils.connection import connect_to_bucket
-from ..utils.constants import FASTMCP_SERVER_NAME, LOGGER_ROOT
-from ..utils.context import (
+from ...utils.config import get_settings
+from ...utils.constants import FASTMCP_SERVER_NAME, LOGGER_ROOT
+from ...utils.context import (
     get_cluster_connection,
     get_cluster_provider,
     get_logging_config,
 )
+from ...utils.operational.connection import connect_to_bucket
 from .query import run_cluster_query
 
 logger = logging.getLogger(f"{LOGGER_ROOT}.tools.server")
