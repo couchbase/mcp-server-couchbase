@@ -14,11 +14,12 @@ going through ``call_tool_silent`` (there's no MCP tool to call).
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import os
+import time
 import uuid
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from conftest import (
@@ -28,6 +29,8 @@ from conftest import (
     get_test_scope,
     require_test_bucket,
 )
+from couchbase.options import SearchOptions
+from couchbase.search import RawQuery, SearchRequest
 
 from cb_mcp.utils.connection import connect_to_couchbase_cluster
 
@@ -35,6 +38,14 @@ try:
     from couchbase.management.search import SearchIndex
 except ImportError:  # pragma: no cover - SDK always provides this in practice
     SearchIndex = None
+
+# How long the fixture waits for the freshly-created Search index to actually
+# index the seeded document. FTS indexing is asynchronous and, on a constrained
+# CI node, a just-upserted index answers queries with HTTP 400 "pindex not
+# available" for a while before becoming queryable. Env-overridable in the same
+# spirit as conftest's CB_MCP_TEST_TIMEOUT.
+FTS_READY_TIMEOUT = int(os.getenv("CB_MCP_FTS_READY_TIMEOUT", "300"))
+FTS_READY_POLL_INTERVAL = 5
 
 
 def _direct_cluster():
@@ -46,11 +57,42 @@ def _direct_cluster():
     return connect_to_couchbase_cluster(connection_string, username, password)
 
 
+def _wait_for_seeded_document(scope, index_name: str, marker: str) -> bool:
+    """Block until the seeded document is findable through the Search index.
+
+    Polls with the direct SDK rather than through an MCP session on purpose:
+    conftest's ``create_mcp_session`` wraps the *entire* session in
+    ``asyncio.timeout(DEFAULT_TIMEOUT)``, so a long poll inside one always
+    trips that deadline. This is a plain synchronous fixture, so blocking here
+    touches neither the event loop nor any MCP session.
+
+    Queries the unique per-run ``marker`` token, not ``match_all`` — the index
+    covers the whole test collection, which in CI holds ~1500 travel-sample
+    documents, so ``match_all`` would return hits from pre-existing data and
+    tell us nothing about whether *our* document has been indexed yet.
+    """
+    request = SearchRequest.create(RawQuery({"match": marker, "field": "marker"}))
+    deadline = time.monotonic() + FTS_READY_TIMEOUT
+    while time.monotonic() < deadline:
+        # The index legitimately errors ("pindex not available") for the first
+        # stretch after creation, so a failed attempt is a retry, not a fault.
+        with contextlib.suppress(Exception):
+            if list(scope.search(index_name, request, SearchOptions(limit=5)).rows()):
+                return True
+        time.sleep(FTS_READY_POLL_INTERVAL)
+    return False
+
+
 @pytest.fixture(scope="module")
-def seeded_search_index() -> Iterator[dict[str, str]]:
+def seeded_search_index() -> Iterator[dict[str, Any]]:
     """Create a scope-level Search index on the test bucket/scope/collection,
-    seed one document into that collection so match_all queries have
-    something to find, and drop the index (and doc) afterward."""
+    seed one uniquely-markered document into that collection, wait for the
+    index to actually pick that document up, and drop the index (and doc)
+    afterward.
+
+    Waiting here rather than in each test means the (potentially slow) FTS
+    catch-up is paid once per module and stays out of every MCP session.
+    """
     if SearchIndex is None:
         pytest.skip("couchbase.management.search.SearchIndex is unavailable")
 
@@ -59,6 +101,10 @@ def seeded_search_index() -> Iterator[dict[str, str]]:
     collection_name = get_test_collection()
     index_name = f"test_fts_idx_{uuid.uuid4().hex[:8]}"
     doc_id = f"test_fts_doc_{uuid.uuid4().hex[:8]}"
+    # A single lowercase-alphanumeric token: the standard analyzer splits on
+    # non-alphanumerics, so this stays one term and cannot collide with any
+    # pre-existing document in the collection.
+    marker = uuid.uuid4().hex[:8]
 
     cluster = _direct_cluster()
     try:
@@ -91,7 +137,14 @@ def seeded_search_index() -> Iterator[dict[str, str]]:
             pytest.skip(f"Could not create Search index for tests: {e}")
 
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.upsert(doc_id, {"name": "fts-seed-document", "kind": "test"})
+        collection.upsert(
+            doc_id,
+            {"name": "fts-seed-document", "kind": "test", "marker": marker},
+        )
+
+        indexed = _wait_for_seeded_document(
+            bucket.scope(scope_name), index_name, marker
+        )
 
         try:
             yield {
@@ -100,6 +153,8 @@ def seeded_search_index() -> Iterator[dict[str, str]]:
                 "scope_name": scope_name,
                 "collection_name": collection_name,
                 "doc_id": doc_id,
+                "marker": marker,
+                "indexed": indexed,
             }
         finally:
             with contextlib.suppress(Exception):
@@ -168,7 +223,7 @@ async def test_list_search_indexes_no_filters(
 
 @pytest.mark.asyncio
 async def test_list_search_indexes_by_bucket_and_scope(
-    seeded_search_index: dict[str, str],
+    seeded_search_index: dict[str, Any],
 ) -> None:
     """Filtering by bucket_name + scope_name must return the seeded index."""
     async with create_mcp_session() as session:
@@ -191,7 +246,7 @@ async def test_list_search_indexes_by_bucket_and_scope(
 
 @pytest.mark.asyncio
 async def test_list_search_indexes_by_bucket_only(
-    seeded_search_index: dict[str, str],
+    seeded_search_index: dict[str, Any],
 ) -> None:
     """Filtering by bucket_name only must enumerate across all scopes and
     still surface the seeded index."""
@@ -223,7 +278,7 @@ async def test_list_search_indexes_scope_without_bucket_returns_error() -> None:
 
 @pytest.mark.asyncio
 async def test_list_search_indexes_by_index_name_scope_level(
-    seeded_search_index: dict[str, str],
+    seeded_search_index: dict[str, Any],
 ) -> None:
     """Fetching the seeded scope-level index via index_name must return a
     single-entry list with native nested dicts for params (not JSON-encoded
@@ -264,7 +319,7 @@ async def test_list_search_indexes_by_index_name_partial_pair_returns_error() ->
 
 @pytest.mark.asyncio
 async def test_list_search_indexes_by_index_name_not_found_returns_error(
-    seeded_search_index: dict[str, str],
+    seeded_search_index: dict[str, Any],
 ) -> None:
     """Looking up a nonexistent index name must return an error entry
     rather than raising or returning None."""
@@ -283,56 +338,96 @@ async def test_list_search_indexes_by_index_name_not_found_returns_error(
     assert "error" in payload[0]
 
 
-@pytest.mark.asyncio
-async def test_run_fts_query_match_all(seeded_search_index: dict[str, str]) -> None:
-    """A match_all query against the seeded index must eventually find the
-    seeded document. FTS indexing is asynchronous, so immediately after
-    upsert_index/document upsert the index may not have caught up yet — poll
-    with a bounded timeout instead of accepting 0 hits as a pass (GSI's
-    build_index has a synchronous build-trigger response that's sufficient to
-    assert on its own; FTS has no equivalent synchronous completion signal,
-    so unlike test_index_tools.py's deferred-index test, polling here is
-    necessary rather than a convention we're deviating from casually). The
-    budget is generous (5 minutes) because CI runners have observably higher
-    FTS indexing lag than a local dev cluster."""
-    deadline = asyncio.get_event_loop().time() + 300
-    payload = None
-    async with create_mcp_session() as session:
-        while asyncio.get_event_loop().time() < deadline:
-            response = await session.call_tool(
-                "run_fts_query",
-                arguments={
-                    "index_name": seeded_search_index["index_name"],
-                    "bucket_name": seeded_search_index["bucket_name"],
-                    "scope_name": seeded_search_index["scope_name"],
-                    "query": {"match_all": {}},
-                    "limit": 5,
-                },
-            )
-            payload = extract_payload(response)
-            if payload.get("total_hits", 0) > 0:
-                break
-            await asyncio.sleep(5)
+def _assert_query_succeeded(payload: object) -> dict[str, Any]:
+    """Fail with the tool's own error message rather than a bare KeyError.
 
-    assert payload is not None
-    assert payload["index_name"] == seeded_search_index["index_name"]
-    assert payload["total_hits"] > 0, (
-        "Expected at least one hit for the seeded document within 5 minutes of "
-        f"polling; last payload: {payload}"
+    run_fts_query reports Search-service failures as {"error": ...}, so
+    indexing into a success key first turns a real, readable server error
+    (e.g. "pindex not available") into an opaque KeyError.
+    """
+    assert isinstance(payload, dict), f"Expected a dict payload, got: {payload!r}"
+    assert "error" not in payload, f"run_fts_query failed: {payload['error']}"
+    return payload
+
+
+@pytest.mark.asyncio
+async def test_run_fts_query_match_all(seeded_search_index: dict[str, Any]) -> None:
+    """A match_all query against the seeded index must return real hits with
+    a well-formed shape.
+
+    The fixture has already waited for the index to pick up the seeded
+    document, so 0 hits here is a genuine failure rather than indexing lag.
+    Note this deliberately does not assert *which* document comes back first:
+    the index covers the whole test collection, which in CI holds ~1500
+    travel-sample documents, so match_all returns arbitrary ones.
+    test_run_fts_query_matches_seeded_document covers document identity.
+    """
+    assert seeded_search_index["indexed"], (
+        "Search index never picked up the seeded document within "
+        f"{FTS_READY_TIMEOUT}s — the Search service is too slow or not indexing."
     )
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "run_fts_query",
+            arguments={
+                "index_name": seeded_search_index["index_name"],
+                "bucket_name": seeded_search_index["bucket_name"],
+                "scope_name": seeded_search_index["scope_name"],
+                "query": {"match_all": {}},
+                "limit": 5,
+            },
+        )
+        payload = _assert_query_succeeded(extract_payload(response))
+
+    assert payload["index_name"] == seeded_search_index["index_name"]
+    assert payload["total_hits"] > 0
     assert isinstance(payload["hits"], list) and payload["hits"]
     hit = payload["hits"][0]
-    assert hit["id"] == seeded_search_index["doc_id"]
-    assert "score" in hit and "fields" in hit
+    assert "id" in hit and "score" in hit and "fields" in hit
     assert "metadata" in payload
 
 
 @pytest.mark.asyncio
+async def test_run_fts_query_matches_seeded_document(
+    seeded_search_index: dict[str, Any],
+) -> None:
+    """Querying the seeded document's unique marker must return exactly that
+    document — the real proof that search returns the right result, and
+    deterministic whether or not the collection holds other data."""
+    assert seeded_search_index["indexed"], (
+        "Search index never picked up the seeded document within "
+        f"{FTS_READY_TIMEOUT}s — the Search service is too slow or not indexing."
+    )
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "run_fts_query",
+            arguments={
+                "index_name": seeded_search_index["index_name"],
+                "bucket_name": seeded_search_index["bucket_name"],
+                "scope_name": seeded_search_index["scope_name"],
+                "query": {"match": seeded_search_index["marker"], "field": "marker"},
+                "limit": 5,
+            },
+        )
+        payload = _assert_query_succeeded(extract_payload(response))
+
+    assert payload["total_hits"] == 1
+    assert payload["hits"][0]["id"] == seeded_search_index["doc_id"]
+
+
+@pytest.mark.asyncio
 async def test_run_fts_query_explain_default_limit(
-    seeded_search_index: dict[str, str],
+    seeded_search_index: dict[str, Any],
 ) -> None:
     """run_fts_query with explain=True and no limit must default to 1 and
-    return an explanation per (at most one) hit."""
+    return an explanation for the single returned hit."""
+    assert seeded_search_index["indexed"], (
+        "Search index never picked up the seeded document within "
+        f"{FTS_READY_TIMEOUT}s — the Search service is too slow or not indexing."
+    )
+
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "run_fts_query",
@@ -344,12 +439,11 @@ async def test_run_fts_query_explain_default_limit(
                 "explain": True,
             },
         )
-        payload = extract_payload(response)
+        payload = _assert_query_succeeded(extract_payload(response))
 
     assert payload["explain"] is True
-    assert len(payload["hits"]) <= 1
-    for hit in payload["hits"]:
-        assert "explanation" in hit
+    assert len(payload["hits"]) == 1
+    assert "explanation" in payload["hits"][0]
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +453,7 @@ async def test_run_fts_query_explain_default_limit(
 
 @pytest.mark.asyncio
 async def test_list_search_indexes_entries_have_expected_keys(
-    seeded_search_index: dict[str, str],
+    seeded_search_index: dict[str, Any],
 ) -> None:
     """Schema contract: every list_search_indexes entry must carry the keys
     our summary formatter promises, so an SDK-shape change is caught early."""
