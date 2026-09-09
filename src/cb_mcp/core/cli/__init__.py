@@ -1,5 +1,6 @@
 """CLI building blocks shared by hosts that expose a command line."""
 
+from .group import DefaultGroup
 from .options import (
     compose,
     credential_options,
@@ -11,6 +12,7 @@ from .options import (
 )
 
 __all__ = [
+    "DefaultGroup",
     "compose",
     "credential_options",
     "logging_options",

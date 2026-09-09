@@ -10,6 +10,7 @@ import click
 from cb_mcp.auth import OAuthConfigError, resolve_oauth
 from cb_mcp.core.app import build_app, run_app
 from cb_mcp.core.cli import (
+    DefaultGroup,
     credential_options,
     logging_options,
     oauth_options,
@@ -31,15 +32,32 @@ from providers.static import StaticClusterProvider
 logger = logging.getLogger(LOGGER_ROOT)
 
 
-@click.command(context_settings={"show_default": True})
+@click.group(
+    cls=DefaultGroup,
+    default_cmd="operational",
+    # Inherited by every subcommand context, so per-server --help keeps
+    # showing "[default: ...]" without repeating this on each command.
+    context_settings={"show_default": True},
+)
+@click.version_option(package_name="couchbase-mcp-server")
+def main() -> None:
+    """Couchbase MCP servers.
+
+    Invoked without a subcommand, runs the operational server — the
+    long-standing behaviour that existing configs and containers rely on.
+    """
+
+
+@main.command("operational", short_help="Operational cluster server (default).")
 @credential_options
 @read_only_option
 @transport_options
 @tool_gating_options
 @logging_options
 @oauth_options
+# Also on the subcommand so `couchbase-mcp-server operational --version` works.
 @click.version_option(package_name="couchbase-mcp-server")
-def main(
+def operational(
     connection_string,
     username,
     password,
@@ -74,7 +92,7 @@ def main(
     log_info_retention_backup_count,
     log_debug_retention_backup_count,
 ):
-    """Couchbase MCP Server"""
+    """Run the operational Couchbase cluster MCP server."""
 
     # log_level / log_sinks are the parse results from their Click callbacks:
     # each carries the resolved value plus any rejected input, which is passed
