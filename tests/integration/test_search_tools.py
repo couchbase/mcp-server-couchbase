@@ -292,8 +292,10 @@ async def test_run_fts_query_match_all(seeded_search_index: dict[str, str]) -> N
     build_index has a synchronous build-trigger response that's sufficient to
     assert on its own; FTS has no equivalent synchronous completion signal,
     so unlike test_index_tools.py's deferred-index test, polling here is
-    necessary rather than a convention we're deviating from casually)."""
-    deadline = asyncio.get_event_loop().time() + 30
+    necessary rather than a convention we're deviating from casually). The
+    budget is generous (5 minutes) because CI runners have observably higher
+    FTS indexing lag than a local dev cluster."""
+    deadline = asyncio.get_event_loop().time() + 300
     payload = None
     async with create_mcp_session() as session:
         while asyncio.get_event_loop().time() < deadline:
@@ -310,12 +312,12 @@ async def test_run_fts_query_match_all(seeded_search_index: dict[str, str]) -> N
             payload = extract_payload(response)
             if payload.get("total_hits", 0) > 0:
                 break
-            await asyncio.sleep(2)
+            await asyncio.sleep(5)
 
     assert payload is not None
     assert payload["index_name"] == seeded_search_index["index_name"]
     assert payload["total_hits"] > 0, (
-        "Expected at least one hit for the seeded document within 30s of "
+        "Expected at least one hit for the seeded document within 5 minutes of "
         f"polling; last payload: {payload}"
     )
     assert isinstance(payload["hits"], list) and payload["hits"]
