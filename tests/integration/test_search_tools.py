@@ -2,20 +2,19 @@
 Integration tests for search.py (FTS/Search) tools.
 
 Tests for:
-- list_search_indexes
-- get_search_index_definition
-- run_fts_query
-- explain_fts_query
+- list_search_indexes (list mode and full-definition mode via index_name)
+- run_fts_query (query mode and explain mode via explain=True)
 
 There is no MCP write tool for Search index management (out of scope for this
-tool family), so the fixture below seeds/drops a scope-level Search index
-directly via the Couchbase Python SDK, mirroring how ``test_index.py``'s
-local ``_create_index``/``_drop_index`` helpers work but SDK-direct instead
-of going through ``call_tool_silent`` (there's no MCP tool to call).
+tool family), so the fixtures below seed/drop Search indexes directly via the
+Couchbase Python SDK, mirroring how ``test_index.py``'s local
+``_create_index``/``_drop_index`` helpers work but SDK-direct instead of
+going through ``call_tool_silent`` (there's no MCP tool to call).
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import uuid
@@ -49,66 +48,119 @@ def _direct_cluster():
 
 @pytest.fixture(scope="module")
 def seeded_search_index() -> Iterator[dict[str, str]]:
-    """Create a scope-level Search index on the test bucket/scope/collection
-    for the duration of the module, and drop it afterward."""
+    """Create a scope-level Search index on the test bucket/scope/collection,
+    seed one document into that collection so match_all queries have
+    something to find, and drop the index (and doc) afterward."""
+    if SearchIndex is None:
+        pytest.skip("couchbase.management.search.SearchIndex is unavailable")
+
     bucket_name = require_test_bucket()
     scope_name = get_test_scope()
     collection_name = get_test_collection()
     index_name = f"test_fts_idx_{uuid.uuid4().hex[:8]}"
+    doc_id = f"test_fts_doc_{uuid.uuid4().hex[:8]}"
 
     cluster = _direct_cluster()
-    bucket = cluster.bucket(bucket_name)
-    scope_index_manager = bucket.scope(scope_name).search_indexes()
+    try:
+        bucket = cluster.bucket(bucket_name)
+        scope_index_manager = bucket.scope(scope_name).search_indexes()
 
-    definition = SearchIndex(
-        name=index_name,
-        source_type="couchbase",
-        idx_type="fulltext-index",
-        source_name=bucket_name,
-        params={
-            "doc_config": {"mode": "scope.collection.type_field"},
-            "mapping": {
-                "types": {
-                    f"{scope_name}.{collection_name}": {
-                        "enabled": True,
-                        "dynamic": True,
-                    }
+        definition = SearchIndex(
+            name=index_name,
+            source_type="couchbase",
+            idx_type="fulltext-index",
+            source_name=bucket_name,
+            params={
+                "doc_config": {"mode": "scope.collection.type_field"},
+                "mapping": {
+                    "types": {
+                        f"{scope_name}.{collection_name}": {
+                            "enabled": True,
+                            "dynamic": True,
+                        }
+                    },
+                    "default_mapping": {"enabled": False},
+                    "default_analyzer": "standard",
                 },
-                "default_mapping": {"enabled": False},
-                "default_analyzer": "standard",
             },
-        },
-    )
+        )
 
-    try:
-        scope_index_manager.upsert_index(definition)
-    except Exception as e:
-        pytest.skip(f"Could not create Search index for tests: {e}")
+        try:
+            scope_index_manager.upsert_index(definition)
+        except Exception as e:
+            pytest.skip(f"Could not create Search index for tests: {e}")
 
-    try:
-        yield {
-            "index_name": index_name,
-            "bucket_name": bucket_name,
-            "scope_name": scope_name,
-            "collection_name": collection_name,
-        }
+        collection = bucket.scope(scope_name).collection(collection_name)
+        collection.upsert(doc_id, {"name": "fts-seed-document", "kind": "test"})
+
+        try:
+            yield {
+                "index_name": index_name,
+                "bucket_name": bucket_name,
+                "scope_name": scope_name,
+                "collection_name": collection_name,
+                "doc_id": doc_id,
+            }
+        finally:
+            with contextlib.suppress(Exception):
+                scope_index_manager.drop_index(index_name)
+            with contextlib.suppress(Exception):
+                collection.remove(doc_id)
     finally:
         with contextlib.suppress(Exception):
-            scope_index_manager.drop_index(index_name)
+            cluster.close()
+
+
+@pytest.fixture(scope="module")
+def seeded_cluster_level_search_index() -> Iterator[dict[str, str]]:
+    """Create a cluster-level (legacy) Search index for the duration of the
+    module, and drop it afterward. Ensures test_list_search_indexes_no_filters
+    always has a cluster-level index to find instead of skipping."""
+    if SearchIndex is None:
+        pytest.skip("couchbase.management.search.SearchIndex is unavailable")
+
+    bucket_name = require_test_bucket()
+    index_name = f"test_fts_cluster_idx_{uuid.uuid4().hex[:8]}"
+
+    cluster = _direct_cluster()
+    try:
+        index_manager = cluster.search_indexes()
+
+        definition = SearchIndex(
+            name=index_name,
+            source_type="couchbase",
+            idx_type="fulltext-index",
+            source_name=bucket_name,
+        )
+
+        try:
+            index_manager.upsert_index(definition)
+        except Exception as e:
+            pytest.skip(f"Could not create cluster-level Search index for tests: {e}")
+
+        try:
+            yield {"index_name": index_name, "bucket_name": bucket_name}
+        finally:
+            with contextlib.suppress(Exception):
+                index_manager.drop_index(index_name)
+    finally:
+        with contextlib.suppress(Exception):
+            cluster.close()
 
 
 @pytest.mark.asyncio
-async def test_list_search_indexes_no_filters() -> None:
+async def test_list_search_indexes_no_filters(
+    seeded_cluster_level_search_index: dict[str, str],
+) -> None:
     """No-filter call must return cluster-level (legacy) indexes only, and
-    must not error even if none exist."""
+    must surface the seeded cluster-level index."""
     async with create_mcp_session() as session:
         response = await session.call_tool("list_search_indexes", arguments={})
         payload = extract_payload(response)
 
-    if payload is None or (isinstance(payload, list) and len(payload) == 0):
-        pytest.skip("No cluster-level Search indexes found")
-
     assert isinstance(payload, list)
+    names = {entry["name"] for entry in payload}
+    assert seeded_cluster_level_search_index["index_name"] in names
     for entry in payload:
         assert entry["bucket"] is None
         assert entry["scope"] is None
@@ -170,14 +222,15 @@ async def test_list_search_indexes_scope_without_bucket_returns_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_search_index_definition_scope_level(
+async def test_list_search_indexes_by_index_name_scope_level(
     seeded_search_index: dict[str, str],
 ) -> None:
-    """Fetching the seeded scope-level index must return native nested
-    dicts for params (not JSON-encoded strings)."""
+    """Fetching the seeded scope-level index via index_name must return a
+    single-entry list with native nested dicts for params (not JSON-encoded
+    strings)."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "get_search_index_definition",
+            "list_search_indexes",
             arguments={
                 "index_name": seeded_search_index["index_name"],
                 "bucket_name": seeded_search_index["bucket_name"],
@@ -186,35 +239,38 @@ async def test_get_search_index_definition_scope_level(
         )
         payload = extract_payload(response)
 
-    assert payload["name"] == seeded_search_index["index_name"]
-    assert isinstance(payload["params"], dict)
-    assert payload["bucket"] == seeded_search_index["bucket_name"]
-    assert payload["scope"] == seeded_search_index["scope_name"]
+    assert isinstance(payload, list) and len(payload) == 1
+    entry = payload[0]
+    assert entry["name"] == seeded_search_index["index_name"]
+    assert isinstance(entry["params"], dict)
+    assert entry["bucket"] == seeded_search_index["bucket_name"]
+    assert entry["scope"] == seeded_search_index["scope_name"]
 
 
 @pytest.mark.asyncio
-async def test_get_search_index_definition_partial_pair_returns_error() -> None:
-    """Passing only bucket_name (no scope_name) must return a descriptive
-    error entry, not a raised MCP error."""
+async def test_list_search_indexes_by_index_name_partial_pair_returns_error() -> None:
+    """Passing index_name with only bucket_name (no scope_name) must return
+    a descriptive error entry, not a raised MCP error."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "get_search_index_definition",
+            "list_search_indexes",
             arguments={"index_name": "whatever", "bucket_name": "b"},
         )
         payload = extract_payload(response)
 
-    assert "must be provided together" in payload["error"]
+    assert isinstance(payload, list) and len(payload) == 1
+    assert "must be provided together" in payload[0]["error"]
 
 
 @pytest.mark.asyncio
-async def test_get_search_index_definition_not_found_returns_error(
+async def test_list_search_indexes_by_index_name_not_found_returns_error(
     seeded_search_index: dict[str, str],
 ) -> None:
     """Looking up a nonexistent index name must return an error entry
     rather than raising or returning None."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "get_search_index_definition",
+            "list_search_indexes",
             arguments={
                 "index_name": f"does_not_exist_{uuid.uuid4().hex[:8]}",
                 "bucket_name": seeded_search_index["bucket_name"],
@@ -223,13 +279,58 @@ async def test_get_search_index_definition_not_found_returns_error(
         )
         payload = extract_payload(response)
 
-    assert "error" in payload
+    assert isinstance(payload, list) and len(payload) == 1
+    assert "error" in payload[0]
 
 
 @pytest.mark.asyncio
 async def test_run_fts_query_match_all(seeded_search_index: dict[str, str]) -> None:
-    """A match_all query against the seeded index must return a well-formed
-    envelope (hits may legitimately be empty if the collection has no data)."""
+    """A match_all query against the seeded index must eventually find the
+    seeded document. FTS indexing is asynchronous, so immediately after
+    upsert_index/document upsert the index may not have caught up yet — poll
+    with a bounded timeout instead of accepting 0 hits as a pass (GSI's
+    build_index has a synchronous build-trigger response that's sufficient to
+    assert on its own; FTS has no equivalent synchronous completion signal,
+    so unlike test_index_tools.py's deferred-index test, polling here is
+    necessary rather than a convention we're deviating from casually)."""
+    deadline = asyncio.get_event_loop().time() + 30
+    payload = None
+    async with create_mcp_session() as session:
+        while asyncio.get_event_loop().time() < deadline:
+            response = await session.call_tool(
+                "run_fts_query",
+                arguments={
+                    "index_name": seeded_search_index["index_name"],
+                    "bucket_name": seeded_search_index["bucket_name"],
+                    "scope_name": seeded_search_index["scope_name"],
+                    "query": {"match_all": {}},
+                    "limit": 5,
+                },
+            )
+            payload = extract_payload(response)
+            if payload.get("total_hits", 0) > 0:
+                break
+            await asyncio.sleep(2)
+
+    assert payload is not None
+    assert payload["index_name"] == seeded_search_index["index_name"]
+    assert payload["total_hits"] > 0, (
+        "Expected at least one hit for the seeded document within 30s of "
+        f"polling; last payload: {payload}"
+    )
+    assert isinstance(payload["hits"], list) and payload["hits"]
+    hit = payload["hits"][0]
+    assert hit["id"] == seeded_search_index["doc_id"]
+    assert "score" in hit and "fields" in hit
+    assert "metadata" in payload
+
+
+@pytest.mark.asyncio
+async def test_run_fts_query_explain_default_limit(
+    seeded_search_index: dict[str, str],
+) -> None:
+    """run_fts_query with explain=True and no limit must default to 1 and
+    return an explanation per (at most one) hit."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "run_fts_query",
@@ -238,40 +339,15 @@ async def test_run_fts_query_match_all(seeded_search_index: dict[str, str]) -> N
                 "bucket_name": seeded_search_index["bucket_name"],
                 "scope_name": seeded_search_index["scope_name"],
                 "query": {"match_all": {}},
-                "limit": 5,
+                "explain": True,
             },
         )
         payload = extract_payload(response)
 
-    assert payload["index_name"] == seeded_search_index["index_name"]
-    assert isinstance(payload["total_hits"], int)
-    assert isinstance(payload["hits"], list)
-    assert "metadata" in payload
-
-
-@pytest.mark.asyncio
-async def test_explain_fts_query_default_limit(
-    seeded_search_index: dict[str, str],
-) -> None:
-    """explain_fts_query without limit must default to 1 and return an
-    explanation per (at most one) hit."""
-    async with create_mcp_session() as session:
-        response = await session.call_tool(
-            "explain_fts_query",
-            arguments={
-                "index_name": seeded_search_index["index_name"],
-                "bucket_name": seeded_search_index["bucket_name"],
-                "scope_name": seeded_search_index["scope_name"],
-                "query": {"match_all": {}},
-            },
-        )
-        payload = extract_payload(response)
-
-    assert payload["query_explained"] is True
-    assert payload["limit"] == 1
-    assert len(payload["explanations"]) <= 1
-    for explanation in payload["explanations"]:
-        assert "explanation" in explanation
+    assert payload["explain"] is True
+    assert len(payload["hits"]) <= 1
+    for hit in payload["hits"]:
+        assert "explanation" in hit
 
 
 # ---------------------------------------------------------------------------

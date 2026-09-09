@@ -56,11 +56,9 @@ READ_ONLY_TOOL_NAMES = {
     # Index tools (2)
     "get_index_advisor_recommendations",
     "list_indexes",
-    # FTS/Search tools (4)
+    # FTS/Search tools (2)
     "list_search_indexes",
-    "get_search_index_definition",
     "run_fts_query",
-    "explain_fts_query",
     # Query performance analysis tools (7)
     "get_queries_not_selective",
     "get_queries_not_using_covering_index",
@@ -174,14 +172,14 @@ class TestToolCounts:
         """Verify correct number of tools in read-only mode."""
         tools = get_tools(read_only_mode=True)
         assert len(tools) == len(READ_ONLY_TOOLS)
-        assert len(tools) == 26  # Expected count of read-only tools
+        assert len(tools) == 24  # Expected count of read-only tools
 
     def test_all_tools_mode_tool_count(self):
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (26 read-only + 12 write)
-        assert len(tools) == 38
+        # Expected total count (24 read-only + 12 write)
+        assert len(tools) == 36
 
     def test_write_tools_count(self):
         """Verify exactly 12 write tools exist."""

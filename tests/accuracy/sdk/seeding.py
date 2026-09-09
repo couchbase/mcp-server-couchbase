@@ -10,6 +10,7 @@ result-validation tests (tests/accuracy/result_validation/).
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import uuid
@@ -135,31 +136,40 @@ def seed_search_index(
     can't go through ``call_tool_silent`` — it connects to the cluster
     directly via the Couchbase SDK, using the same ``CB_CONNECTION_STRING``/
     ``CB_USERNAME``/``CB_PASSWORD`` env vars the MCP server subprocess uses.
+    The blocking SDK calls run in a thread so they don't block the event loop.
     """
 
-    async def _hook(client: AccuracyTestingClient) -> None:
+    def _create_index() -> None:
         cluster = connect_to_couchbase_cluster(
             os.environ["CB_CONNECTION_STRING"],
             os.environ["CB_USERNAME"],
             os.environ["CB_PASSWORD"],
         )
-        definition = SearchIndex(
-            name=index_name,
-            source_type="couchbase",
-            idx_type="fulltext-index",
-            source_name=bucket,
-            params={
-                "doc_config": {"mode": "scope.collection.type_field"},
-                "mapping": {
-                    "types": {
-                        f"{scope}.{collection}": {"enabled": True, "dynamic": True}
+        try:
+            definition = SearchIndex(
+                name=index_name,
+                source_type="couchbase",
+                idx_type="fulltext-index",
+                source_name=bucket,
+                params={
+                    "doc_config": {"mode": "scope.collection.type_field"},
+                    "mapping": {
+                        "types": {
+                            f"{scope}.{collection}": {"enabled": True, "dynamic": True}
+                        },
+                        "default_mapping": {"enabled": False},
+                        "default_analyzer": "standard",
                     },
-                    "default_mapping": {"enabled": False},
-                    "default_analyzer": "standard",
                 },
-            },
-        )
-        cluster.bucket(bucket).scope(scope).search_indexes().upsert_index(definition)
+            )
+            cluster.bucket(bucket).scope(scope).search_indexes().upsert_index(
+                definition
+            )
+        finally:
+            cluster.close()
+
+    async def _hook(client: AccuracyTestingClient) -> None:
+        await asyncio.to_thread(_create_index)
 
     return _hook
 
@@ -167,16 +177,25 @@ def seed_search_index(
 def drop_search_index(bucket: str, scope: str, index_name: str) -> SetupHook:
     """Return a hook that drops a scope-level Search index (best-effort).
 
-    SDK-direct for the same reason as :func:`seed_search_index`.
+    SDK-direct for the same reason as :func:`seed_search_index`; also runs in
+    a thread and closes the cluster for the same reason.
     """
 
-    async def _hook(client: AccuracyTestingClient) -> None:
+    def _drop_index() -> None:
         cluster = connect_to_couchbase_cluster(
             os.environ["CB_CONNECTION_STRING"],
             os.environ["CB_USERNAME"],
             os.environ["CB_PASSWORD"],
         )
-        with contextlib.suppress(Exception):
-            cluster.bucket(bucket).scope(scope).search_indexes().drop_index(index_name)
+        try:
+            with contextlib.suppress(Exception):
+                cluster.bucket(bucket).scope(scope).search_indexes().drop_index(
+                    index_name
+                )
+        finally:
+            cluster.close()
+
+    async def _hook(client: AccuracyTestingClient) -> None:
+        await asyncio.to_thread(_drop_index)
 
     return _hook

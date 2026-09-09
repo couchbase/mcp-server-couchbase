@@ -1,10 +1,10 @@
 """Accuracy tests for the FTS/Search tools.
 
 Covers:
-  - list_search_indexes (no filter, bucket+scope filter)
-  - get_search_index_definition
-  - run_fts_query
-  - explain_fts_query
+  - list_search_indexes (no filter, bucket+scope filter, index_name lookup)
+  - run_fts_query (normal query, explain=True)
+  - Disambiguation: a full-text relevance-search prompt should select
+    run_fts_query rather than run_sql_plus_plus_query's SEARCH() function.
 """
 
 from __future__ import annotations
@@ -77,14 +77,14 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
 
     cases.append(
         AccuracyCase(
-            test_id="get_search_index_definition",
+            test_id="list_search_indexes_by_index_name",
             prompt=(
                 f"Show me the full definition of the Search index named "
                 f"'{index_name}' in scope '{scope}' of bucket '{bucket}'."
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="get_search_index_definition",
+                    tool_name="list_search_indexes",
                     parameters={
                         "index_name": index_name,
                         "bucket_name": bucket,
@@ -123,7 +123,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
 
     cases.append(
         AccuracyCase(
-            test_id="explain_fts_query",
+            test_id="run_fts_query_explain",
             prompt=(
                 f"Explain the execution plan for a match_all query against the "
                 f"Search index '{index_name}' in scope '{scope}' of bucket "
@@ -131,7 +131,32 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="explain_fts_query",
+                    tool_name="run_fts_query",
+                    parameters={
+                        "index_name": index_name,
+                        "bucket_name": bucket,
+                        "scope_name": scope,
+                        "query": Matcher.any_value(),
+                        "explain": True,
+                    },
+                ),
+            ],
+            seed=seed,
+            cleanup=cleanup,
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="run_fts_query_over_sql_plus_plus",
+            prompt=(
+                f"Search the '{index_name}' Search index in scope '{scope}' of "
+                f"bucket '{bucket}' for documents whose text fuzzily matches "
+                f"'ale', ranked by relevance score."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="run_fts_query",
                     parameters={
                         "index_name": index_name,
                         "bucket_name": bucket,
@@ -156,9 +181,10 @@ def search_cases(test_bucket: str, test_scope: str, test_collection: str):
 SEARCH_CASE_IDS = [
     "list_search_indexes_no_filter",
     "list_search_indexes_scoped",
-    "get_search_index_definition",
+    "list_search_indexes_by_index_name",
     "run_fts_query",
-    "explain_fts_query",
+    "run_fts_query_explain",
+    "run_fts_query_over_sql_plus_plus",
 ]
 
 

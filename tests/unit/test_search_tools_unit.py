@@ -1,14 +1,13 @@
-"""Unit tests for FTS/Search tools (list/get/run/explain).
+"""Unit tests for FTS/Search tools (list/get and run/explain, both merged).
 
 Covers:
-- list_search_indexes: cluster-level (legacy), bucket-only (enumerate scopes),
-  bucket+scope, invalid filter combo, error propagation.
-- get_search_index_definition: cluster-level and scope-level happy paths,
-  invalid bucket/scope pairing, error propagation.
+- list_search_indexes: summary mode (cluster-level (legacy), bucket-only
+  (enumerate scopes), bucket+scope, invalid filter combo, error propagation)
+  and full-definition mode via index_name (cluster-level and scope-level
+  happy paths, invalid bucket/scope pairing, error propagation).
 - run_fts_query: RawQuery/SearchOptions construction, cluster-level vs
-  scope-level branching, result formatting from a mocked SearchResult.
-- explain_fts_query: forced explain=True and default limit=1, explanation
-  extraction.
+  scope-level branching, result formatting from a mocked SearchResult, and
+  explain=True forcing explain/default limit=1 with explanation extraction.
 """
 
 from __future__ import annotations
@@ -18,12 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cb_mcp.tools.search import (
-    explain_fts_query,
-    get_search_index_definition,
-    list_search_indexes,
-    run_fts_query,
-)
+from cb_mcp.tools.search import list_search_indexes, run_fts_query
 
 
 def _make_ctx_with_search_managers() -> tuple[
@@ -71,7 +65,7 @@ def _make_index(
 
 
 class TestListSearchIndexes:
-    """Filter branches of list_search_indexes."""
+    """Summary-mode (no index_name) filter branches."""
 
     def test_no_filters_lists_cluster_level_indexes(self) -> None:
         ctx, cluster, cluster_index_manager, bucket = _make_ctx_with_search_managers()
@@ -192,8 +186,9 @@ class TestListSearchIndexes:
             list_search_indexes(ctx)
 
 
-class TestGetSearchIndexDefinition:
-    """Cluster-level vs scope-level lookup and pairing validation."""
+class TestListSearchIndexesByIndexName:
+    """Full-definition mode (index_name given): cluster-level vs scope-level
+    lookup and pairing validation. Always returns a list."""
 
     def test_cluster_level_lookup(self) -> None:
         ctx, cluster, cluster_index_manager, _bucket = _make_ctx_with_search_managers()
@@ -202,13 +197,15 @@ class TestGetSearchIndexDefinition:
         )
 
         with patch("cb_mcp.tools.search.get_cluster_connection", return_value=cluster):
-            result = get_search_index_definition(ctx, "idx1")
+            result = list_search_indexes(ctx, index_name="idx1")
 
         cluster_index_manager.get_index.assert_called_once_with("idx1")
-        assert result["name"] == "idx1"
-        assert result["params"] == {"mapping": {}}
-        assert result["bucket"] is None
-        assert result["scope"] is None
+        assert len(result) == 1
+        entry = result[0]
+        assert entry["name"] == "idx1"
+        assert entry["params"] == {"mapping": {}}
+        assert entry["bucket"] is None
+        assert entry["scope"] is None
 
     def test_scope_level_lookup(self) -> None:
         ctx, cluster, _cluster_index_manager, bucket = _make_ctx_with_search_managers()
@@ -222,34 +219,37 @@ class TestGetSearchIndexDefinition:
             patch("cb_mcp.tools.search.get_cluster_connection", return_value=cluster),
             patch("cb_mcp.tools.search.connect_to_bucket", return_value=bucket),
         ):
-            result = get_search_index_definition(
-                ctx, "idx1", bucket_name="b", scope_name="s"
+            result = list_search_indexes(
+                ctx, index_name="idx1", bucket_name="b", scope_name="s"
             )
 
         bucket.scope.assert_called_once_with("s")
         scope_mgr.search_indexes.return_value.get_index.assert_called_once_with("idx1")
-        assert result["bucket"] == "b"
-        assert result["scope"] == "s"
+        assert len(result) == 1
+        assert result[0]["bucket"] == "b"
+        assert result[0]["scope"] == "s"
 
     def test_partial_pair_returns_error(self) -> None:
         ctx, _cluster, _cluster_index_manager, _bucket = (
             _make_ctx_with_search_managers()
         )
 
-        result_bucket_only = get_search_index_definition(ctx, "idx1", bucket_name="b")
-        result_scope_only = get_search_index_definition(ctx, "idx1", scope_name="s")
+        result_bucket_only = list_search_indexes(
+            ctx, index_name="idx1", bucket_name="b"
+        )
+        result_scope_only = list_search_indexes(ctx, index_name="idx1", scope_name="s")
 
-        assert "must be provided together" in result_bucket_only["error"]
-        assert "must be provided together" in result_scope_only["error"]
+        assert "must be provided together" in result_bucket_only[0]["error"]
+        assert "must be provided together" in result_scope_only[0]["error"]
 
-    def test_sdk_error_returns_error_dict_not_raised(self) -> None:
+    def test_sdk_error_returns_error_entry_not_raised(self) -> None:
         ctx, cluster, cluster_index_manager, _bucket = _make_ctx_with_search_managers()
         cluster_index_manager.get_index.side_effect = Exception("index not found")
 
         with patch("cb_mcp.tools.search.get_cluster_connection", return_value=cluster):
-            result = get_search_index_definition(ctx, "idx1")
+            result = list_search_indexes(ctx, index_name="idx1")
 
-        assert result == {"error": "index not found", "index_name": "idx1"}
+        assert result == [{"error": "index not found", "index_name": "idx1"}]
 
     def test_connection_failure_propagates(self) -> None:
         """The one case that must still raise: the cluster is unreachable."""
@@ -264,7 +264,7 @@ class TestGetSearchIndexDefinition:
             ),
             pytest.raises(Exception, match="cluster down"),
         ):
-            get_search_index_definition(ctx, "idx1")
+            list_search_indexes(ctx, index_name="idx1")
 
 
 def _make_search_result(rows=None, errors=None, metrics=None, facets=None):
@@ -292,7 +292,7 @@ def _make_row(
 
 
 class TestRunFtsQuery:
-    """RawQuery/SearchOptions construction and result formatting."""
+    """RawQuery/SearchOptions construction and result formatting (explain=False)."""
 
     def test_cluster_level_query_builds_options_and_formats_hits(self) -> None:
         ctx, cluster, _cluster_index_manager, _bucket = _make_ctx_with_search_managers()
@@ -338,6 +338,7 @@ class TestRunFtsQuery:
             "idx1", mock_search_request.create.return_value, mock_options.return_value
         )
         assert result["index_name"] == "idx1"
+        assert result["explain"] is False
         assert result["total_hits"] == 1
         assert result["hits"][0]["id"] == "doc1"
         assert result["hits"][0]["score"] == 1.5
@@ -402,8 +403,8 @@ class TestRunFtsQuery:
             run_fts_query(ctx, "idx1", {"match": "ale"})
 
 
-class TestExplainFtsQuery:
-    """explain=True and default limit=1 are always forced."""
+class TestRunFtsQueryExplain:
+    """explain=True forces SearchOptions(explain=True) and default limit=1."""
 
     def test_forces_explain_and_default_limit(self) -> None:
         ctx, cluster, _cluster_index_manager, _bucket = _make_ctx_with_search_managers()
@@ -417,14 +418,14 @@ class TestExplainFtsQuery:
             patch("cb_mcp.tools.search.RawQuery"),
             patch("cb_mcp.tools.search.SearchRequest"),
         ):
-            result = explain_fts_query(ctx, "idx1", {"match": "ale"})
+            result = run_fts_query(ctx, "idx1", {"match": "ale"}, explain=True)
 
         mock_options.assert_called_once_with(explain=True, limit=1)
-        assert result["query_explained"] is True
-        assert result["limit"] == 1
-        assert result["explanations"] == [
+        assert result["explain"] is True
+        assert result["hits"] == [
             {"id": "doc1", "score": 2.0, "explanation": {"plan": "x"}}
         ]
+        assert result["facets"] == {}
 
     def test_custom_limit_forwarded(self) -> None:
         ctx, cluster, _cluster_index_manager, _bucket = _make_ctx_with_search_managers()
@@ -436,7 +437,7 @@ class TestExplainFtsQuery:
             patch("cb_mcp.tools.search.RawQuery"),
             patch("cb_mcp.tools.search.SearchRequest"),
         ):
-            explain_fts_query(ctx, "idx1", {"match": "ale"}, limit=5)
+            run_fts_query(ctx, "idx1", {"match": "ale"}, explain=True, limit=5)
 
         mock_options.assert_called_once_with(explain=True, limit=5)
 
@@ -450,7 +451,7 @@ class TestExplainFtsQuery:
             patch("cb_mcp.tools.search.RawQuery"),
             patch("cb_mcp.tools.search.SearchRequest"),
         ):
-            result = explain_fts_query(ctx, "idx1", {"match": "ale"})
+            result = run_fts_query(ctx, "idx1", {"match": "ale"}, explain=True)
 
         assert result == {"error": "explain failed", "index_name": "idx1"}
 
@@ -467,4 +468,4 @@ class TestExplainFtsQuery:
             ),
             pytest.raises(Exception, match="cluster down"),
         ):
-            explain_fts_query(ctx, "idx1", {"match": "ale"})
+            run_fts_query(ctx, "idx1", {"match": "ale"}, explain=True)

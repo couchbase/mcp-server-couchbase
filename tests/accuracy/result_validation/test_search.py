@@ -24,7 +24,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[ResultCase]:
 
     cases.append(
         ResultCase(
-            test_id="get_search_index_definition_faithful",
+            test_id="list_search_indexes_by_index_name_faithful",
             prompt=(
                 f"What is the idx_type (index type) of the Search index "
                 f"'{index_name}' in scope '{scope}' of bucket '{bucket}'?"
@@ -64,7 +64,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[ResultCase]:
 
     cases.append(
         ResultCase(
-            test_id="explain_fts_query_faithful",
+            test_id="run_fts_query_explain_faithful",
             prompt=(
                 f"Explain the execution plan for a match_all query against "
                 f"the Search index '{index_name}' in scope '{scope}' of "
@@ -73,8 +73,8 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[ResultCase]:
             expectation=(
                 "Faithfulness check: the answer should describe that an "
                 "execution plan/explanation was retrieved for the query "
-                "(e.g. mention the explain output), consistent with the "
-                "explain_fts_query tool's output. FAIL if the answer "
+                "(e.g. mention the explain output), consistent with "
+                "run_fts_query's explain=True output. FAIL if the answer "
                 "fabricates plan details not present in the tool output, or "
                 "claims no explanation is available when the tool actually "
                 "returned one."
@@ -93,9 +93,9 @@ def search_cases(test_bucket: str, test_scope: str, test_collection: str):
 
 
 SEARCH_RESULT_CASE_IDS = [
-    "get_search_index_definition_faithful",
+    "list_search_indexes_by_index_name_faithful",
     "run_fts_query_faithful",
-    "explain_fts_query_faithful",
+    "run_fts_query_explain_faithful",
 ]
 
 
