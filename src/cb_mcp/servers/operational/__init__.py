@@ -14,6 +14,8 @@ import couchbase
 from ...core.spec import ScopeSpec, ServerSpec
 from ...tools.operational import TOOL_ANNOTATIONS, TOOL_SET
 from ...utils.constants import (
+    DEFAULT_LOG_FILE,
+    DEFAULT_PORT,
     FASTMCP_SERVER_NAME,
     LOGGER_ROOT,
     SCOPE_READ,
@@ -44,6 +46,11 @@ SPEC = ServerSpec(
     logger_namespace=LOGGER_ROOT,
     display_name="Couchbase MCP Server",
     tools=TOOL_SET,
+    # The long-standing values: this server keeps them so existing
+    # deployments, compose files and log tooling are unaffected. A second
+    # server must pick different ones.
+    default_port=DEFAULT_PORT,
+    default_log_file=DEFAULT_LOG_FILE,
     scopes=ScopeSpec(read=SCOPE_READ, write=SCOPE_WRITE),
     annotations=TOOL_ANNOTATIONS,
     scope_hints=TOOL_SCOPE_HINTS,

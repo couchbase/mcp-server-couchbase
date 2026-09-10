@@ -107,6 +107,18 @@ class ServerSpec:
     tools: ToolSet
     scopes: ScopeSpec
 
+    #: Port this server binds by default under a network transport.
+    #: Required, and must differ per server: two servers left on one port
+    #: cannot both bind. A shared default would make that collision the
+    #: silent path, which is exactly what this field exists to prevent —
+    #: hence no default here, even though it means one more line per server.
+    default_port: int
+
+    #: Base path for this server's log files. Required, and must differ per
+    #: server: ``RotatingFileHandler`` is not multi-process safe, so two
+    #: servers sharing a base path corrupt each other's rotation.
+    default_log_file: str
+
     #: Per-tool MCP annotations (readOnlyHint / destructiveHint / ...).
     annotations: Mapping[str, ToolAnnotations] = field(default_factory=dict)
 

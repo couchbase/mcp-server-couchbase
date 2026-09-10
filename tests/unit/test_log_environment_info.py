@@ -30,6 +30,7 @@ EXPECTED_TOP_LEVEL_KEYS = {
     "dependencies",
     "transport",
     "server_id",
+    "server_name",
     "logging",
     "config",
 }

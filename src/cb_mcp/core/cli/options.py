@@ -108,31 +108,39 @@ read_only_option = compose(
 )
 """Whether write tools are loaded at all. Kept separate from the other gating flags to preserve the historical --help ordering."""
 
-transport_options = compose(
-    click.option(
-        "--transport",
-        "transport",
-        envvar=["CB_MCP_TRANSPORT"],
-        type=click.Choice(ALLOWED_TRANSPORTS),
-        default=DEFAULT_TRANSPORT,
-        help="Transport mode for the server (stdio, http or sse). Default is stdio. OAuth is only honored with http (streamable-http).",
-    ),
-    click.option(
-        "--host",
-        "host",
-        envvar="CB_MCP_HOST",
-        default=DEFAULT_HOST,
-        help="Host to run the server on.",
-    ),
-    click.option(
-        "--port",
-        "port",
-        envvar="CB_MCP_PORT",
-        default=DEFAULT_PORT,
-        help="Port to run the server on.",
-    ),
-)
-"""Transport selection and the network bind address. Shared by every server."""
+
+def transport_options(*, default_port: int = DEFAULT_PORT) -> Callable:
+    """Transport selection and the network bind address. Shared by every server.
+
+    A factory because the default port is per-server: two servers left on one
+    port cannot both bind. Parameterising here rather than resolving later
+    keeps the correct value visible in each subcommand's ``--help``.
+    """
+    return compose(
+        click.option(
+            "--transport",
+            "transport",
+            envvar=["CB_MCP_TRANSPORT"],
+            type=click.Choice(ALLOWED_TRANSPORTS),
+            default=DEFAULT_TRANSPORT,
+            help="Transport mode for the server (stdio, http or sse). Default is stdio. OAuth is only honored with http (streamable-http).",
+        ),
+        click.option(
+            "--host",
+            "host",
+            envvar="CB_MCP_HOST",
+            default=DEFAULT_HOST,
+            help="Host to run the server on.",
+        ),
+        click.option(
+            "--port",
+            "port",
+            envvar="CB_MCP_PORT",
+            default=default_port,
+            help="Port to run the server on.",
+        ),
+    )
+
 
 tool_gating_options = compose(
     click.option(
@@ -153,154 +161,162 @@ tool_gating_options = compose(
 )
 """Per-tool opt-outs and confirmation requirements. Shared by every server."""
 
-logging_options = compose(
-    click.option(
-        "--log-level",
-        "log_level",
-        envvar="CB_MCP_LOG_LEVEL",
-        default=DEFAULT_LOG_LEVEL,
-        callback=validate_log_level,
-        help="Logging level for MCP server and Couchbase SDK. Allowed values: "
-        "off, debug, info, warning, error. Use 'off' to disable logging entirely. Invalid values fall "
-        "back to the default with an error log entry.",
-    ),
-    click.option(
-        "--log-sinks",
-        "log_sinks",
-        envvar="CB_MCP_LOG_SINKS",
-        default=DEFAULT_LOG_SINKS,
-        callback=validate_log_sinks,
-        help="Comma-separated list of log sinks. Allowed values: stderr, file. "
-        "Include 'file' (optionally with --log-file) to write per-level files; "
-        "include 'stderr' to write to the console.",
-    ),
-    click.option(
-        "--log-file",
-        "log_file",
-        envvar="CB_MCP_LOG_FILE",
-        default=DEFAULT_LOG_FILE,
-        callback=validate_log_path,
-        help="Base file path for the per-level log files. One rotating file is written "
-        "per level, derived by inserting the level name: e.g. mcp_server.log -> "
-        "mcp_server.debug.log, mcp_server.info.log, mcp_server.warning.log, "
-        "mcp_server.error.log (the error file also captures CRITICAL). Only active "
-        "when 'file' is in --log-sinks.",
-    ),
-    click.option(
-        "--log-rotation-max-size-mb",
-        "log_rotation_max_size_mb",
-        envvar="CB_MCP_LOG_ROTATION_MAX_SIZE_MB",
-        # Default None so the 1 MB default is applied only when neither this nor the
-        # deprecated --log-max-bytes is set.
-        type=click.FloatRange(min=0),
-        default=None,
-        help="Global maximum size in MB per-level log file before it rotates, "
-        "inherited by every level unless overridden. Default is 1 MB. 0 is invalid "
-        "and falls back to the default with a startup warning.",
-    ),
-    click.option(
-        "--log-max-bytes",
-        "log_max_bytes",
-        envvar="CB_MCP_LOG_MAX_BYTES",
-        # DEPRECATED: superseded by --log-rotation-max-size-mb (MB). Still honored in
-        # bytes for backward compatibility. Default None so it's only applied when
-        # explicitly set; if set alongside --log-rotation-max-size-mb it is ignored.
-        type=click.IntRange(min=0),
-        default=None,
-        help="[DEPRECATED] Global rotation size in bytes; use --log-rotation-max-size-mb "
-        "(MB) instead. Still honored for backward compatibility. Ignored when "
-        "--log-rotation-max-size-mb is also set. 0 is invalid and falls back to the "
-        "default with a startup warning.",
-    ),
-    click.option(
-        "--log-error-rotation-max-size-mb",
-        "log_error_rotation_max_size_mb",
-        envvar="CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE_MB",
-        type=click.FloatRange(min=0),
-        default=None,
-        help="Rotation size in MB for the ERROR log file. Overrides "
-        "--log-rotation-max-size-mb for ERROR; inherits it when unset. 0 is invalid and "
-        "falls back to the inherited global with a startup warning.",
-    ),
-    click.option(
-        "--log-warning-rotation-max-size-mb",
-        "log_warning_rotation_max_size_mb",
-        envvar="CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE_MB",
-        type=click.FloatRange(min=0),
-        default=None,
-        help="Rotation size in MB for the WARNING log file. Overrides "
-        "--log-rotation-max-size-mb for WARNING; inherits it when unset. 0 is invalid "
-        "and falls back to the inherited global with a startup warning.",
-    ),
-    click.option(
-        "--log-info-rotation-max-size-mb",
-        "log_info_rotation_max_size_mb",
-        envvar="CB_MCP_LOG_INFO_ROTATION_MAX_SIZE_MB",
-        type=click.FloatRange(min=0),
-        default=None,
-        help="Rotation size in MB for the INFO log file. Overrides "
-        "--log-rotation-max-size-mb for INFO; inherits it when unset. 0 is invalid and "
-        "falls back to the inherited global with a startup warning.",
-    ),
-    click.option(
-        "--log-debug-rotation-max-size-mb",
-        "log_debug_rotation_max_size_mb",
-        envvar="CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE_MB",
-        type=click.FloatRange(min=0),
-        default=None,
-        help="Rotation size in MB for the DEBUG log file. Overrides "
-        "--log-rotation-max-size-mb for DEBUG; inherits it when unset. 0 is invalid and "
-        "falls back to the inherited global with a startup warning.",
-    ),
-    click.option(
-        "--log-retention-backup-count",
-        "log_retention_backup_count",
-        envvar="CB_MCP_LOG_RETENTION_BACKUP_COUNT",
-        # 0 keeps no rotated backups (only the live file); negative is rejected.
-        type=click.IntRange(min=0),
-        default=DEFAULT_LOG_BACKUP_COUNT,
-        help="Number of rotated backup files kept per-level log file, excluding "
-        "the live file. Applies to every level unless overridden per level. Set to 0 "
-        "to keep only the live file.",
-    ),
-    click.option(
-        "--log-error-retention-backup-count",
-        "log_error_retention_backup_count",
-        envvar="CB_MCP_LOG_ERROR_RETENTION_BACKUP_COUNT",
-        type=click.IntRange(min=0),
-        default=None,
-        help="Rotated backups kept for the ERROR log file. Overrides "
-        "--log-retention-backup-count for ERROR; inherits it when unset.",
-    ),
-    click.option(
-        "--log-warning-retention-backup-count",
-        "log_warning_retention_backup_count",
-        envvar="CB_MCP_LOG_WARNING_RETENTION_BACKUP_COUNT",
-        type=click.IntRange(min=0),
-        default=None,
-        help="Rotated backups kept for the WARNING log file. Overrides "
-        "--log-retention-backup-count for WARNING; inherits it when unset.",
-    ),
-    click.option(
-        "--log-info-retention-backup-count",
-        "log_info_retention_backup_count",
-        envvar="CB_MCP_LOG_INFO_RETENTION_BACKUP_COUNT",
-        type=click.IntRange(min=0),
-        default=None,
-        help="Rotated backups kept for the INFO log file. Overrides "
-        "--log-retention-backup-count for INFO; inherits it when unset.",
-    ),
-    click.option(
-        "--log-debug-retention-backup-count",
-        "log_debug_retention_backup_count",
-        envvar="CB_MCP_LOG_DEBUG_RETENTION_BACKUP_COUNT",
-        type=click.IntRange(min=0),
-        default=None,
-        help="Rotated backups kept for the DEBUG log file. Overrides "
-        "--log-retention-backup-count for DEBUG; inherits it when unset.",
-    ),
-)
-"""Log level, sinks, and per-level rotation/retention. Shared by every server."""
+
+def logging_options(*, default_log_file: str = DEFAULT_LOG_FILE) -> Callable:
+    """Log level, sinks, and per-level rotation/retention. Shared by every server.
+
+    A factory because the default log file is per-server: two servers sharing
+    one base path put two RotatingFileHandlers on the same files, and
+    rotation is not multi-process safe.
+    """
+    return compose(
+        click.option(
+            "--log-level",
+            "log_level",
+            envvar="CB_MCP_LOG_LEVEL",
+            default=DEFAULT_LOG_LEVEL,
+            callback=validate_log_level,
+            help="Logging level for MCP server and Couchbase SDK. Allowed values: "
+            "off, debug, info, warning, error. Use 'off' to disable logging entirely. Invalid values fall "
+            "back to the default with an error log entry.",
+        ),
+        click.option(
+            "--log-sinks",
+            "log_sinks",
+            envvar="CB_MCP_LOG_SINKS",
+            default=DEFAULT_LOG_SINKS,
+            callback=validate_log_sinks,
+            help="Comma-separated list of log sinks. Allowed values: stderr, file. "
+            "Include 'file' (optionally with --log-file) to write per-level files; "
+            "include 'stderr' to write to the console.",
+        ),
+        click.option(
+            "--log-file",
+            "log_file",
+            envvar="CB_MCP_LOG_FILE",
+            default=default_log_file,
+            callback=validate_log_path,
+            help="Base file path for the per-level log files. One rotating file is written "
+            "per level, derived by inserting the level name: e.g. mcp_server.log -> "
+            "mcp_server.debug.log, mcp_server.info.log, mcp_server.warning.log, "
+            "mcp_server.error.log (the error file also captures CRITICAL). Only active "
+            "when 'file' is in --log-sinks.",
+        ),
+        click.option(
+            "--log-rotation-max-size-mb",
+            "log_rotation_max_size_mb",
+            envvar="CB_MCP_LOG_ROTATION_MAX_SIZE_MB",
+            # Default None so the 1 MB default is applied only when neither this nor the
+            # deprecated --log-max-bytes is set.
+            type=click.FloatRange(min=0),
+            default=None,
+            help="Global maximum size in MB per-level log file before it rotates, "
+            "inherited by every level unless overridden. Default is 1 MB. 0 is invalid "
+            "and falls back to the default with a startup warning.",
+        ),
+        click.option(
+            "--log-max-bytes",
+            "log_max_bytes",
+            envvar="CB_MCP_LOG_MAX_BYTES",
+            # DEPRECATED: superseded by --log-rotation-max-size-mb (MB). Still honored in
+            # bytes for backward compatibility. Default None so it's only applied when
+            # explicitly set; if set alongside --log-rotation-max-size-mb it is ignored.
+            type=click.IntRange(min=0),
+            default=None,
+            help="[DEPRECATED] Global rotation size in bytes; use --log-rotation-max-size-mb "
+            "(MB) instead. Still honored for backward compatibility. Ignored when "
+            "--log-rotation-max-size-mb is also set. 0 is invalid and falls back to the "
+            "default with a startup warning.",
+        ),
+        click.option(
+            "--log-error-rotation-max-size-mb",
+            "log_error_rotation_max_size_mb",
+            envvar="CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE_MB",
+            type=click.FloatRange(min=0),
+            default=None,
+            help="Rotation size in MB for the ERROR log file. Overrides "
+            "--log-rotation-max-size-mb for ERROR; inherits it when unset. 0 is invalid and "
+            "falls back to the inherited global with a startup warning.",
+        ),
+        click.option(
+            "--log-warning-rotation-max-size-mb",
+            "log_warning_rotation_max_size_mb",
+            envvar="CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE_MB",
+            type=click.FloatRange(min=0),
+            default=None,
+            help="Rotation size in MB for the WARNING log file. Overrides "
+            "--log-rotation-max-size-mb for WARNING; inherits it when unset. 0 is invalid "
+            "and falls back to the inherited global with a startup warning.",
+        ),
+        click.option(
+            "--log-info-rotation-max-size-mb",
+            "log_info_rotation_max_size_mb",
+            envvar="CB_MCP_LOG_INFO_ROTATION_MAX_SIZE_MB",
+            type=click.FloatRange(min=0),
+            default=None,
+            help="Rotation size in MB for the INFO log file. Overrides "
+            "--log-rotation-max-size-mb for INFO; inherits it when unset. 0 is invalid and "
+            "falls back to the inherited global with a startup warning.",
+        ),
+        click.option(
+            "--log-debug-rotation-max-size-mb",
+            "log_debug_rotation_max_size_mb",
+            envvar="CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE_MB",
+            type=click.FloatRange(min=0),
+            default=None,
+            help="Rotation size in MB for the DEBUG log file. Overrides "
+            "--log-rotation-max-size-mb for DEBUG; inherits it when unset. 0 is invalid and "
+            "falls back to the inherited global with a startup warning.",
+        ),
+        click.option(
+            "--log-retention-backup-count",
+            "log_retention_backup_count",
+            envvar="CB_MCP_LOG_RETENTION_BACKUP_COUNT",
+            # 0 keeps no rotated backups (only the live file); negative is rejected.
+            type=click.IntRange(min=0),
+            default=DEFAULT_LOG_BACKUP_COUNT,
+            help="Number of rotated backup files kept per-level log file, excluding "
+            "the live file. Applies to every level unless overridden per level. Set to 0 "
+            "to keep only the live file.",
+        ),
+        click.option(
+            "--log-error-retention-backup-count",
+            "log_error_retention_backup_count",
+            envvar="CB_MCP_LOG_ERROR_RETENTION_BACKUP_COUNT",
+            type=click.IntRange(min=0),
+            default=None,
+            help="Rotated backups kept for the ERROR log file. Overrides "
+            "--log-retention-backup-count for ERROR; inherits it when unset.",
+        ),
+        click.option(
+            "--log-warning-retention-backup-count",
+            "log_warning_retention_backup_count",
+            envvar="CB_MCP_LOG_WARNING_RETENTION_BACKUP_COUNT",
+            type=click.IntRange(min=0),
+            default=None,
+            help="Rotated backups kept for the WARNING log file. Overrides "
+            "--log-retention-backup-count for WARNING; inherits it when unset.",
+        ),
+        click.option(
+            "--log-info-retention-backup-count",
+            "log_info_retention_backup_count",
+            envvar="CB_MCP_LOG_INFO_RETENTION_BACKUP_COUNT",
+            type=click.IntRange(min=0),
+            default=None,
+            help="Rotated backups kept for the INFO log file. Overrides "
+            "--log-retention-backup-count for INFO; inherits it when unset.",
+        ),
+        click.option(
+            "--log-debug-retention-backup-count",
+            "log_debug_retention_backup_count",
+            envvar="CB_MCP_LOG_DEBUG_RETENTION_BACKUP_COUNT",
+            type=click.IntRange(min=0),
+            default=None,
+            help="Rotated backups kept for the DEBUG log file. Overrides "
+            "--log-retention-backup-count for DEBUG; inherits it when unset.",
+        ),
+    )
+
 
 oauth_options = compose(
     click.option(

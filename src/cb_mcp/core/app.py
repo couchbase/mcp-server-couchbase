@@ -71,9 +71,13 @@ def build_app(
     async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
         """Build the lifespan AppContext from host-resolved configuration."""
         transport = settings.get("transport")
+        # Name the server: both servers log into the same hierarchy, so in an
+        # aggregated stream these lines are otherwise indistinguishable. The
+        # wire-visible name is a static fact and lives in the env-info record,
+        # not repeated on every startup line.
         logger.info(
-            f"MCP server initialized in lazy mode for tool discovery. "
-            f"Modes: (read_only_mode={read_only_mode})"
+            f"MCP server '{spec.id}' initialized in lazy mode for tool "
+            f"discovery. Modes: (read_only_mode={read_only_mode})"
         )
         # Diagnostic snapshot for customer support. Filtered at INFO; visible
         # whenever the user runs with --log-level DEBUG.
@@ -99,7 +103,8 @@ def build_app(
     mcp = FastMCP(spec.fastmcp_name, lifespan=app_lifespan, auth=auth)
 
     logger.info(
-        f"Registering {len(tools)} tool(s) with modes (read_only_mode={read_only_mode})"
+        f"Registering {len(tools)} tool(s) for server '{spec.id}' "
+        f"with modes (read_only_mode={read_only_mode})"
     )
 
     # Register tools; FastMCP 3.x add_tool has no annotations kwarg, so wrap first.
@@ -108,7 +113,7 @@ def build_app(
         tool_obj = FunctionTool.from_function(tool, annotations=annotations)
         mcp.add_tool(tool_obj)
 
-    logger.info(f"Registered {len(tools)} tool(s)")
+    logger.info(f"Registered {len(tools)} tool(s) for server '{spec.id}'")
 
     return mcp
 

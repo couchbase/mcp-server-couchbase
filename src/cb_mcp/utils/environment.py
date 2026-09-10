@@ -163,6 +163,9 @@ def log_environment_info(
         },
         "transport": transport,
         "server_id": spec.id if spec else None,
+        # The name clients see. Recorded here because FastMCP logs it only
+        # to stderr, so a file-only log bundle would otherwise never state it.
+        "server_name": spec.fastmcp_name if spec else None,
         "logging": resolved_logging.as_dict() if resolved_logging else None,
         "config": _redacted_settings(server_settings, spec),
     }

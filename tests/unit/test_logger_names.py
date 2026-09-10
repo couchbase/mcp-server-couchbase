@@ -18,6 +18,8 @@ attach handlers that never see its records.
 import importlib
 import logging
 import pathlib
+import subprocess
+import sys
 
 import pytest
 
@@ -139,3 +141,29 @@ def test_snapshot_covers_every_module_logger():
         f"{sorted(found - set(EXPECTED_LOGGER_NAMES))}, "
         f"removed: {sorted(set(EXPECTED_LOGGER_NAMES) - found)}"
     )
+
+
+def test_packages_import_in_any_order():
+    """Guard against an import cycle between core and utils.
+
+    ``cb_mcp.core.spec`` importing from ``cb_mcp.utils`` creates a loop:
+    ``utils/__init__`` pulls in ``scope_enforcement``, which imports
+    ``core.spec``. The test suite hides this — pytest happens to import the
+    packages in an order that resolves — so it only surfaces for a caller who
+    reaches for ``cb_mcp.core`` first. Each import runs in a clean interpreter.
+    """
+    for module in (
+        "cb_mcp.core",
+        "cb_mcp.core.spec",
+        "cb_mcp.utils",
+        "cb_mcp.tools.operational",
+    ):
+        result = subprocess.run(
+            [sys.executable, "-c", f"import {module}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"importing {module} first fails:\n{result.stderr}"
+        )

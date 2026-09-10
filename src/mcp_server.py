@@ -54,9 +54,9 @@ def main() -> None:
 @main.command("operational", short_help="Operational cluster server (default).")
 @credential_options
 @read_only_option
-@transport_options
+@transport_options(default_port=OPERATIONAL_SPEC.default_port)
 @tool_gating_options
-@logging_options
+@logging_options(default_log_file=OPERATIONAL_SPEC.default_log_file)
 @oauth_options
 # Also on the subcommand so `couchbase-mcp-server operational --version` works.
 @click.version_option(
