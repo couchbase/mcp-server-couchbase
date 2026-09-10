@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from cb_mcp.tools.index import (
+from cb_mcp.tools.operational.index import (
     build_index,
     create_index,
     drop_index,
@@ -51,7 +51,7 @@ class TestGetIndexAdvisorRecommendations:
         mock_ctx = MagicMock()
 
         with patch(
-            "cb_mcp.tools.index.run_sql_plus_plus_query",
+            "cb_mcp.tools.operational.index.run_sql_plus_plus_query",
             return_value=[],
         ):
             result = get_index_advisor_recommendations(
@@ -82,7 +82,7 @@ class TestGetIndexAdvisorRecommendations:
         ]
 
         with patch(
-            "cb_mcp.tools.index.run_sql_plus_plus_query",
+            "cb_mcp.tools.operational.index.run_sql_plus_plus_query",
             return_value=advisor_payload,
         ):
             result = get_index_advisor_recommendations(
@@ -108,7 +108,7 @@ class TestGetIndexAdvisorRecommendations:
         ]
 
         with patch(
-            "cb_mcp.tools.index.run_sql_plus_plus_query",
+            "cb_mcp.tools.operational.index.run_sql_plus_plus_query",
             return_value=advisor_payload,
         ):
             result = get_index_advisor_recommendations(
@@ -124,7 +124,7 @@ class TestGetIndexAdvisorRecommendations:
 
         with (
             patch(
-                "cb_mcp.tools.index.run_sql_plus_plus_query",
+                "cb_mcp.tools.operational.index.run_sql_plus_plus_query",
                 side_effect=Exception("syntax error in ADVISOR"),
             ),
             pytest.raises(Exception, match="syntax error in ADVISOR"),
@@ -147,7 +147,7 @@ class TestGetIndexAdvisorRecommendations:
         user_query = "SELECT * FROM airline WHERE country = 'United States'"
 
         with patch(
-            "cb_mcp.tools.index.run_sql_plus_plus_query",
+            "cb_mcp.tools.operational.index.run_sql_plus_plus_query",
             return_value=[],
         ) as mock_run:
             get_index_advisor_recommendations(mock_ctx, "b", "s", user_query)
@@ -199,7 +199,7 @@ class TestListIndexesRestRawPath:
 
         with (
             patch(
-                "cb_mcp.tools.index.get_settings",
+                "cb_mcp.tools.operational.index.get_settings",
                 return_value={
                     "connection_string": "couchbase://localhost",
                     "username": "u",
@@ -207,15 +207,15 @@ class TestListIndexesRestRawPath:
                 },
             ),
             patch(
-                "cb_mcp.tools.index.get_cluster_connection",
+                "cb_mcp.tools.operational.index.get_cluster_connection",
                 return_value=mock_cluster,
             ),
             patch(
-                "cb_mcp.tools.index.fetch_indexes_from_rest_api",
+                "cb_mcp.tools.operational.index.fetch_indexes_from_rest_api",
                 return_value=raw_rows,
             ),
             patch(
-                "cb_mcp.tools.index.process_index_data_from_rest_api"
+                "cb_mcp.tools.operational.index.process_index_data_from_rest_api"
             ) as mock_process,
         ):
             result = list_indexes(mock_ctx, return_raw_index_stats=True)
@@ -237,7 +237,7 @@ class TestListIndexesErrorPropagation:
 
         with (
             patch(
-                "cb_mcp.tools.index.get_settings",
+                "cb_mcp.tools.operational.index.get_settings",
                 return_value={
                     "connection_string": "couchbase://localhost",
                     "username": "u",
@@ -245,7 +245,7 @@ class TestListIndexesErrorPropagation:
                 },
             ),
             patch(
-                "cb_mcp.tools.index.get_cluster_connection",
+                "cb_mcp.tools.operational.index.get_cluster_connection",
                 side_effect=Exception("cluster down"),
             ),
             pytest.raises(Exception, match="cluster down"),
@@ -261,8 +261,13 @@ class TestCreateIndex:
         ctx, cluster, index_manager = _make_ctx_with_index_manager()
 
         with (
-            patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster),
-            patch("cb_mcp.tools.index.CreateQueryIndexOptions") as mock_options,
+            patch(
+                "cb_mcp.tools.operational.index.get_cluster_connection",
+                return_value=cluster,
+            ),
+            patch(
+                "cb_mcp.tools.operational.index.CreateQueryIndexOptions"
+            ) as mock_options,
         ):
             result = create_index(ctx, "b", "s", "c", "idx1", ["email"])
 
@@ -287,8 +292,13 @@ class TestCreateIndex:
         ctx, cluster, _index_manager = _make_ctx_with_index_manager()
 
         with (
-            patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster),
-            patch("cb_mcp.tools.index.CreateQueryIndexOptions") as mock_options,
+            patch(
+                "cb_mcp.tools.operational.index.get_cluster_connection",
+                return_value=cluster,
+            ),
+            patch(
+                "cb_mcp.tools.operational.index.CreateQueryIndexOptions"
+            ) as mock_options,
         ):
             create_index(
                 ctx,
@@ -315,7 +325,10 @@ class TestCreateIndex:
         ctx, cluster, index_manager = _make_ctx_with_index_manager()
         index_manager.create_index.side_effect = Exception("index already exists")
 
-        with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.index.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = create_index(ctx, "b", "s", "c", "idx1", ["email"])
 
         assert result == {
@@ -338,7 +351,10 @@ class TestBuildIndex:
         """Happy path calls build_deferred_indexes exactly once."""
         ctx, cluster, index_manager = _make_ctx_with_index_manager()
 
-        with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.index.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = build_index(ctx, "b", "s", "c")
 
         assert result == {"success": True, "keyspace": "b.s.c"}
@@ -350,7 +366,10 @@ class TestBuildIndex:
         ctx, cluster, index_manager = _make_ctx_with_index_manager()
         index_manager.build_deferred_indexes.side_effect = Exception("connection reset")
 
-        with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.index.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = build_index(ctx, "b", "s", "c")
 
         assert result == {
@@ -368,8 +387,13 @@ class TestDropIndex:
         ctx, cluster, index_manager = _make_ctx_with_index_manager()
 
         with (
-            patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster),
-            patch("cb_mcp.tools.index.DropQueryIndexOptions") as mock_options,
+            patch(
+                "cb_mcp.tools.operational.index.get_cluster_connection",
+                return_value=cluster,
+            ),
+            patch(
+                "cb_mcp.tools.operational.index.DropQueryIndexOptions"
+            ) as mock_options,
         ):
             result = drop_index(ctx, "b", "s", "c", "idx1", ignore_if_not_exists=True)
 
@@ -383,7 +407,10 @@ class TestDropIndex:
         ctx, cluster, index_manager = _make_ctx_with_index_manager()
         index_manager.drop_index.side_effect = Exception("index not found")
 
-        with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.index.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = drop_index(ctx, "b", "s", "c", "idx1")
 
         assert result == {

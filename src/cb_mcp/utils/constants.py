@@ -1,5 +1,21 @@
 # MCP Server Constants
-MCP_SERVER_NAME = "couchbase"
+#
+# These two were historically one name doing three jobs. They are split because
+# the jobs have different compatibility contracts:
+#
+# LOGGER_ROOT is the single logger the per-level rotating handlers attach to
+# (see configure_logging). Every module's logger must be this or a descendant,
+# or it receives no handlers. It is operator-facing — it appears as %(name)s in
+# every log line and in support runbooks — and additional servers should nest
+# *under* it rather than start a second tree, so one --log-file scheme keeps
+# working.
+LOGGER_ROOT = "couchbase"
+
+# Namespace for this package's own loggers, a child of LOGGER_ROOT so the
+# handlers attached at the root still see them. Shared modules log directly
+# under it; a server's own modules nest one level further (see
+# ServerSpec.logger_namespace).
+LOGGER_NAMESPACE = f"{LOGGER_ROOT}.mcp"
 
 # Default Configuration Values
 DEFAULT_READ_ONLY_MODE = True
@@ -19,13 +35,6 @@ NETWORK_TRANSPORTS_SDK_MAPPING = {
 # so we gate the OAuth wiring strictly on this transport name. SSE is a
 # network transport but is explicitly out of scope for OAuth in this build.
 STREAMABLE_HTTP_TRANSPORT = "http"
-
-# Index Service Configuration
-# Cluster major version at which list_indexes prefers the query service over
-# the Index Service REST API. From this version, system:indexes exposes the
-# original CREATE INDEX statement in metadata.definition, so we query it
-# instead of the /getIndexStatus REST endpoint.
-QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION = 8
 
 # Logging Configuration
 # Change this to DEBUG, WARNING, ERROR as needed

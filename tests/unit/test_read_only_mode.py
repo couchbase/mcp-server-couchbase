@@ -7,7 +7,7 @@ This module tests:
 - Verification that KV write tools are not loaded when READ_ONLY_MODE=True
 """
 
-from cb_mcp.tools import (
+from cb_mcp.tools.operational import (
     ALL_TOOLS,
     READ_ONLY_TOOLS,
     WRITE_TOOLS,

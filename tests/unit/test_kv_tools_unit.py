@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 import couchbase.subdocument as subdoc
 from couchbase.exceptions import PathMismatchException, PathNotFoundException
 
-from cb_mcp.tools.kv import (
+from cb_mcp.tools.operational.kv import (
     delete_document_by_id,
     insert_document_by_id,
     lookup_subdocument,
@@ -60,7 +60,10 @@ class TestUpsertDocument:
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.upsert.side_effect = Exception("transient error")
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = upsert_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
 
         assert result == {"success": False, "error": "transient error"}
@@ -70,7 +73,10 @@ class TestUpsertDocument:
         """Happy path returns {"success": True} after invoking collection.upsert."""
         ctx, cluster, _collection = _make_ctx_with_collection()
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = upsert_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
 
         assert result == {"success": True}
@@ -85,7 +91,10 @@ class TestInsertDocument:
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.insert.side_effect = Exception("DocumentExistsException")
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = insert_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
 
         assert result == {"success": False, "error": "DocumentExistsException"}
@@ -100,7 +109,10 @@ class TestReplaceDocument:
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.replace.side_effect = Exception("DocumentNotFoundException")
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = replace_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
 
         assert result == {"success": False, "error": "DocumentNotFoundException"}
@@ -115,7 +127,10 @@ class TestDeleteDocument:
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.remove.side_effect = Exception("DocumentNotFoundException")
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = delete_document_by_id(ctx, "b", "s", "c", "doc1")
 
         assert result == {"success": False, "error": "DocumentNotFoundException"}
@@ -171,7 +186,10 @@ class TestSubDocumentLookupIn:
             ]
         )
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = lookup_subdocument(
                 ctx,
                 "b",
@@ -202,7 +220,10 @@ class TestSubDocumentLookupIn:
             [{"error": PathNotFoundException("Path could not be found.")}]
         )
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = lookup_subdocument(
                 ctx, "b", "s", "c", "doc1", get_paths=["missing.path"]
             )
@@ -217,7 +238,10 @@ class TestSubDocumentLookupIn:
             [{"error": PathMismatchException("Path mismatch.")}]
         )
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = lookup_subdocument(
                 ctx, "b", "s", "c", "doc1", exists_paths=["bad.path"]
             )
@@ -230,7 +254,10 @@ class TestSubDocumentLookupIn:
         """Calling with no paths at all is a usage error, not an SDK call."""
         ctx, cluster, collection = _make_ctx_with_collection()
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = lookup_subdocument(ctx, "b", "s", "c", "doc1")
 
         assert "error" in result
@@ -241,7 +268,10 @@ class TestSubDocumentLookupIn:
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.lookup_in.side_effect = Exception("connection reset")
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = lookup_subdocument(ctx, "b", "s", "c", "doc1", get_paths=["name"])
 
         assert result == {"error": "connection reset"}
@@ -259,7 +289,10 @@ class TestSubDocumentLookupIn:
             ]
         )
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = lookup_subdocument(
                 ctx, "b", "s", "c", "doc1", count_paths=["name", "tags"]
             )
@@ -320,7 +353,10 @@ class TestSubDocumentMutateIn:
             [None, None, 5], content_as_works=True
         )
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = mutate_subdocument(
                 ctx,
                 "b",
@@ -353,7 +389,10 @@ class TestSubDocumentMutateIn:
             [7], content_as_works=False
         )
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = mutate_subdocument(
                 ctx,
                 "b",
@@ -370,7 +409,10 @@ class TestSubDocumentMutateIn:
         underscore in the SDK function name)."""
         ctx, cluster, collection = _make_ctx_with_collection()
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             mutate_subdocument(
                 ctx,
                 "b",
@@ -392,7 +434,10 @@ class TestSubDocumentMutateIn:
             [3], content_as_works=True
         )
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = mutate_subdocument(
                 ctx,
                 "b",
@@ -410,7 +455,10 @@ class TestSubDocumentMutateIn:
         """create_parents=True must be passed through to every spec that supports it."""
         ctx, cluster, collection = _make_ctx_with_collection()
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             mutate_subdocument(
                 ctx,
                 "b",
@@ -436,7 +484,10 @@ class TestSubDocumentMutateIn:
         sdk_error._context = error_context
         collection.mutate_in.side_effect = sdk_error
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = mutate_subdocument(
                 ctx,
                 "b",
@@ -455,7 +506,10 @@ class TestSubDocumentMutateIn:
         """Calling with no mutation specs at all is a usage error, not an SDK call."""
         ctx, cluster, collection = _make_ctx_with_collection()
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = mutate_subdocument(ctx, "b", "s", "c", "doc1")
 
         assert "error" in result
@@ -466,7 +520,10 @@ class TestSubDocumentMutateIn:
         an error, not raise an uncaught KeyError."""
         ctx, cluster, collection = _make_ctx_with_collection()
 
-        with patch("cb_mcp.tools.kv.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
             result = mutate_subdocument(
                 ctx, "b", "s", "c", "doc1", upsert_specs=[{"path": "a"}]
             )

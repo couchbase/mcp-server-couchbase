@@ -17,6 +17,8 @@ from conftest import (
     require_test_bucket,
 )
 
+from cb_mcp.servers.operational.constants import FASTMCP_SERVER_NAME
+
 
 @pytest.mark.asyncio
 async def test_tools_are_registered() -> None:
@@ -271,7 +273,7 @@ async def test_server_status_without_connection() -> None:
         assert payload is not None, "No payload returned"
         assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
         assert payload.get("status") == "running"
-        assert payload.get("server_name") == "couchbase"
+        assert payload.get("server_name") == FASTMCP_SERVER_NAME
 
 
 @pytest.mark.asyncio

@@ -24,17 +24,38 @@ class AppContext:
             management) are disabled and KV and index write tools are not loaded.
         logging_config: Optional snapshot of the active logging configuration,
             populated by the server entrypoint after configuring its loggers.
+        server_id: Which server this process is running (e.g. "operational").
+            An identity, not configuration — nobody sets it, so it is kept off
+            ``settings``, which holds operator-resolved values only. Populated
+            from the spec by ``cb_mcp.core.app.build_app``; a host building this
+            context itself may leave it unset.
     """
 
     cluster_provider: ClusterProvider | None = None
     settings: Mapping[str, Any] = field(default_factory=dict)
     read_only_mode: bool = True
     logging_config: Mapping[str, Any] | None = None
+    server_id: str | None = None
+    server_name: str | None = None
 
 
 def get_cluster_provider(ctx: Context):
     """Return the ClusterProvider for this request."""
     return ctx.request_context.lifespan_context.cluster_provider  # type: ignore
+
+
+def get_server_id(ctx: Context) -> str | None:
+    """Return which server is running, or None if the host did not set it.
+
+    ``getattr`` with a default, like :func:`get_logging_config`: an embedding
+    host may supply a lifespan-context type that predates this field.
+    """
+    return getattr(ctx.request_context.lifespan_context, "server_id", None)
+
+
+def get_server_name(ctx: Context) -> str | None:
+    """Return the wire-visible server name, or None if the host did not set it."""
+    return getattr(ctx.request_context.lifespan_context, "server_name", None)
 
 
 def get_logging_config(ctx: Context) -> Mapping[str, Any] | None:

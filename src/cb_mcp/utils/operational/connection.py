@@ -7,9 +7,9 @@ from couchbase.bucket import Bucket
 from couchbase.cluster import Cluster
 from couchbase.options import ClusterOptions
 
-from .constants import MCP_SERVER_NAME
+from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.connection")
+logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.utils.connection")
 
 
 def connect_to_couchbase_cluster(

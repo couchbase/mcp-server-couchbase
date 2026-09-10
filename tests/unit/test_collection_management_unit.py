@@ -10,14 +10,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from cb_mcp.tools.collection_management import (
+from cb_mcp.tools.operational.collection_management import (
     create_collection,
     create_scope,
     delete_collection,
     delete_scope,
 )
 
-_GET_CLUSTER = "cb_mcp.tools.collection_management.get_cluster_connection"
+_GET_CLUSTER = "cb_mcp.tools.operational.collection_management.get_cluster_connection"
 
 
 def _make_ctx() -> tuple[SimpleNamespace, MagicMock, MagicMock]:

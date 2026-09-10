@@ -7,7 +7,7 @@ from typing import cast
 
 from fastmcp import Context
 
-from cb_mcp.tools.server import get_server_configuration_status
+from cb_mcp.tools.operational.server import get_server_configuration_status
 
 
 def _make_ctx(settings=None, cluster_provider=None, logging_config=None) -> Context:

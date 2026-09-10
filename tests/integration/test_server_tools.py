@@ -24,6 +24,8 @@ from conftest import (
     require_test_bucket,
 )
 
+from cb_mcp.servers.operational.constants import FASTMCP_SERVER_NAME
+
 
 @pytest.mark.asyncio
 async def test_get_server_configuration_status() -> None:
@@ -36,7 +38,7 @@ async def test_get_server_configuration_status() -> None:
 
         assert isinstance(payload, dict), "Expected dict response"
         assert payload.get("status") == "running"
-        assert payload.get("server_name") == "couchbase"
+        assert payload.get("server_name") == FASTMCP_SERVER_NAME
 
         # Configuration should be present but not expose the password
         config = payload.get("configuration", {})

@@ -75,7 +75,14 @@ We use **[Ruff](https://docs.astral.sh/ruff/)** for fast linting and code format
 - **Type hints**: Use modern Python type hints
 - **Docstrings**: Add docstrings for public functions and classes — tool docstrings are shown to LLMs, so make them precise and unambiguous
 - **Error handling**: Catch specific exceptions, log them, and return actionable error messages (tool errors are read by an LLM, which will try to recover based on your message)
-- **Logging**: Use the hierarchical logging pattern `logger = logging.getLogger(f"{MCP_SERVER_NAME}.module.name")`. Never log credentials, connection strings with passwords, or document contents.
+- **Logging**: Use the hierarchical logging pattern. Shared modules log under
+  the package namespace — `logger = logging.getLogger(f"{LOGGER_NAMESPACE}.module.name")`
+  — while a server's own modules nest under that server, e.g.
+  `logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.query")`. Do not log
+  on the bare `LOGGER_ROOT` (`couchbase`): that namespace belongs to the
+  Couchbase SDK, which registers its own loggers there. `LOGGER_ROOT` is the
+  single point handlers attach to, which is why SDK records are captured too.
+  Never log credentials, connection strings with passwords, or document contents.
 
 ## 🏛️ Design Guidelines
 
@@ -88,7 +95,7 @@ The server is a thin adapter between MCP and the Couchbase Python SDK (`couchbas
 
 ### Capella and self-managed support
 
-- Connections must work over both `couchbase://` and `couchbases://` (TLS), including Capella's certificate requirements (handled in `src/cb_mcp/utils/connection.py`).
+- Connections must work over both `couchbase://` and `couchbases://` (TLS), including Capella's certificate requirements (handled in `src/cb_mcp/utils/operational/connection.py`).
 - Avoid features that only exist in one deployment model, or gate them gracefully with a clear error message when unavailable.
 - Test against **both** Capella and self-managed Couchbase Server, and state the environments you used in your PR (see [Evidence of testing](#evidence-of-testing)). The [Capella free tier](https://docs.couchbase.com/cloud/get-started/create-account.html) and [Couchbase Server via Docker](https://docs.couchbase.com/server/current/install/getting-started-docker.html) make this easy to do locally.
 
@@ -111,9 +118,9 @@ New tools are the most common contribution. Before implementing any, open a sing
 
 When implementing:
 
-1. **Create the tool function** in the appropriate module under `src/cb_mcp/tools/` (`server.py`, `kv.py`, `query.py`, or `index.py`), or propose a new module in your issue if none fits
-2. **Export the tool** in `src/cb_mcp/tools/__init__.py` and add it to `__all__`
-3. **Add it to the correct tool list** in `src/cb_mcp/tools/__init__.py`: `READ_ONLY_TOOLS` if it only reads data, or `WRITE_TOOLS` if it modifies data (so it's excluded under read-only mode)
+1. **Create the tool function** in the appropriate module under the server's tool package — for the operational server, `src/cb_mcp/tools/operational/` (`server.py`, `kv.py`, `query.py`, or `index.py`) — or propose a new module in your issue if none fits
+2. **Export the tool** in that package's `__init__.py` and add it to `__all__`
+3. **Add it to the correct half of `TOOL_SET`**: `read_only` if it only reads data, or `write` if it modifies data (so it is not loaded at all under read-only mode)
 4. **Add an entry to `TOOL_ANNOTATIONS`** with accurate hints (`readOnlyHint`, `idempotentHint`, `destructiveHint`) — clients rely on these for safety decisions
 5. **Respect read-only mode**: any tool that can modify data or cluster state must be excluded when `read_only_mode` is enabled
 6. **Support confirmation**: destructive tools should work with the confirmation/elicitation mechanism (`src/cb_mcp/utils/elicitation.py`)
@@ -124,7 +131,7 @@ When implementing:
 
 - Never log or return credentials, connection strings containing passwords, or certificate contents.
 - Validate and constrain inputs at the tool boundary; remember tool parameters are LLM-generated and may be malformed or adversarial.
-- Query tools must preserve the SQL++ read/write classification (`src/cb_mcp/utils/query_utils.py`) so read-only mode cannot be bypassed.
+- Query tools must preserve the SQL++ read/write classification (`src/cb_mcp/utils/operational/query_utils.py`) so read-only mode cannot be bypassed.
 - The server makes no network calls other than MCP transport and the configured Couchbase cluster. Don't add telemetry, update checks, or third-party callbacks.
 
 ### Dependencies
@@ -216,6 +223,7 @@ PRs without testing evidence will be sent back for it before review.
 
    ```bash
    # Run the server for testing
+   # Bare invocation runs the operational server; `operational` is equivalent.
    uv run src/mcp_server.py --connection-string "..." --username "..." --password "..."
 
    # With write operations enabled
@@ -264,21 +272,22 @@ We welcome contributions developed with AI assistance — this is an MCP server,
 ```
 mcp-server-couchbase/
 ├── src/
-│   ├── mcp_server.py            # Standalone CLI entry point (uv run src/mcp_server.py)
-│   ├── providers/               # Standalone-host ClusterProvider implementations
+│   ├── mcp_server.py            # CLI entry point: a click group, one subcommand per server
+│   ├── providers/               # Standalone-host provider implementations
 │   │   └── static.py            # StaticClusterProvider (CLI/env config)
 │   └── cb_mcp/                  # Reusable package shared with managed MCP implementations
-│       ├── tool_registration.py # Tool preparation: parse, filter, wrap with confirmation
-│       ├── core/
-│       │   └── contracts.py     # Host-agnostic contracts (ClusterProvider, ...)
-│       ├── certs/               # Bundled Capella root CA certificates
-│       ├── tools/               # MCP tool implementations
-│       │   ├── __init__.py      # Tool exports, tool lists, TOOL_ANNOTATIONS
-│       │   ├── server.py        # Server status and connection tools
-│       │   ├── kv.py            # Key-value operations (CRUD)
-│       │   ├── query.py         # SQL++ query tools
-│       │   └── index.py         # Index operations and recommendations
-│       └── utils/               # Config, connection, context, elicitation, helpers
+│       ├── core/                # Server-agnostic machinery
+│       │   ├── contracts.py     # Host-agnostic contracts (ClusterProvider, ...)
+│       │   ├── spec.py          # ServerSpec / ToolSet / ScopeSpec — a server, as data
+│       │   ├── app.py           # build_app(spec, ...) -> FastMCP, and run_app
+│       │   └── cli/             # DefaultGroup + reusable Click option stacks
+│       ├── servers/             # One package per server
+│       │   └── operational/     # Identity constants and the SPEC itself
+│       ├── tools/               # Tool implementations, one subpackage per server
+│       │   └── operational/     # server.py, kv.py, query.py, index.py, ...
+│       ├── utils/               # Shared helpers (config, context, logging, telemetry)
+│       │   └── operational/     # Couchbase-SDK-specific helpers + bundled CA certs
+│       └── tool_registration.py # Gating and wrapping: disabled, confirmation, scopes
 ├── scripts/                     # Lint, test-data setup, version bump scripts
 ├── tests/
 │   ├── unit/                    # Pure Python tests (no cluster)
@@ -289,6 +298,121 @@ mcp-server-couchbase/
 ├── RELEASE.md                   # Release process
 └── README.md                    # Usage documentation
 ```
+
+### How a server is assembled
+
+Everything server-specific is declared as data in a `ServerSpec` (`core/spec.py`):
+its tools, OAuth scope labels, logger namespace, wire-visible name, default port
+and log file. `core/app.py`'s `build_app(spec, ...)` turns that into a running
+`FastMCP` application, so adding a server means adding a spec, a provider and a
+subcommand — not touching the shared machinery.
+
+Three names are deliberately distinct, because they have different
+compatibility contracts:
+
+| name | example | contract |
+|---|---|---|
+| `spec.id` | `operational` | the CLI subcommand and telemetry dimension |
+| `spec.fastmcp_name` | `couchbase-operational` | wire-visible; clients see it as `serverInfo.name` |
+| `spec.logger_namespace` | `couchbase.mcp.operational` | operator-facing; appears in every log line |
+
+### Adding a new MCP server
+
+A server is a spec plus a provider plus a subcommand. The shared machinery in
+`core/` should not need changing — if it does, that is worth raising in the
+issue first.
+
+**1. Pick the three names.** They are permanent once shipped, and they are not
+interchangeable (see the table above). Check the logger namespace against the
+backing SDK's own modules before committing to it:
+
+```python
+import couchbase, pkgutil
+{m.name for m in pkgutil.walk_packages(couchbase.__path__, "couchbase.")}
+```
+
+`couchbase.analytics`, for instance, is a real module in the operational SDK, so
+it cannot be used as a logger namespace. Nesting under `couchbase.mcp.<id>`
+avoids the problem entirely.
+
+**2. Declare the tools** in `src/cb_mcp/tools/<id>/`, exporting a `ToolSet` and a
+`TOOL_ANNOTATIONS` mapping from the package `__init__`. Tool *names* must be
+globally unique across all servers — a client connected to two servers sees one
+flat namespace.
+
+**3. Declare the spec** in `src/cb_mcp/servers/<id>/spec.py`:
+
+```python
+SPEC = ServerSpec(
+    id=SERVER_ID,                       # CLI subcommand, telemetry dimension
+    fastmcp_name=FASTMCP_SERVER_NAME,   # wire-visible; must differ per server
+    logger_namespace=...,               # under LOGGER_NAMESPACE; must differ
+    display_name=...,                   # shown in OAuth protected-resource metadata
+    tools=TOOL_SET,
+    scopes=ScopeSpec(read=SCOPE_READ, write=SCOPE_WRITE),
+    default_port=8001,                  # required, and must differ per server
+    default_log_file="mcp_server_<id>.log",   # required, and must differ
+    annotations=TOOL_ANNOTATIONS,
+    scope_hints=...,                    # optional per-tool scope explanations
+    sdk_log_hook=...,                   # see below
+    reported_dependencies=("your-sdk",),
+    safe_settings_keys=(), secret_settings_keys=(),   # anything beyond the shared set
+)
+```
+
+Keep `src/cb_mcp/servers/<id>/__init__.py` **inert** — a docstring and nothing
+else. Importing any submodule runs the package `__init__` first, so if it
+imported the spec (which imports the tools, which import the server's
+constants) you get a circular import. `tests/unit/test_logger_names.py`
+imports each package first in a clean subprocess to catch this.
+
+**4. Write the provider** in `src/providers/<id>.py`. It must satisfy the
+`ClusterProvider` shape in `core/contracts.py`, and `close()` should encapsulate
+whatever teardown its client needs — the shared lifespan just calls `close()`
+and should never type-switch on the client.
+
+**5. Add the subcommand** in `src/mcp_server.py`. Reuse the shared option stacks
+and supply only what differs:
+
+```python
+@main.command("<id>")
+@your_credential_options          # per-server: different SDK, different auth
+@read_only_option
+@transport_options(default_port=SPEC.default_port)
+@tool_gating_options
+@logging_options(default_log_file=SPEC.default_log_file)
+@oauth_options
+def your_server(...):
+    ...
+```
+
+Import the spec lazily inside the subcommand so a process only loads the SDK of
+the server it is actually running.
+
+**6. Add tests.** Beyond the tool tests, extend the cross-server checks: tool
+names unique across specs, annotations covering every tool, and the logger
+snapshot in `tests/unit/test_logger_names.py`.
+
+#### Constraints that are easy to miss
+
+- **Only one server may own an SDK's logging.** `couchbase.configure_logging`
+  is one-shot per process. A server that does not own its SDK's logging must
+  pass `NO_SDK_LOG_HOOK`, not leave `sdk_log_hook` unset and hope.
+- **Handlers attach at `LOGGER_ROOT` (`couchbase`), never per server.** That
+  root is also the Couchbase SDK's own namespace, which is the *only* reason
+  its `threshold` / `metrics` / `transactions` records get captured. Moving the
+  attach point silently drops them.
+- **`default_port` and `default_log_file` are required for a reason.** Two
+  servers on one port cannot both bind; two servers sharing a log base path
+  corrupt each other's rotation, since `RotatingFileHandler` is not
+  multi-process safe.
+- **Every settings key must be classified.** Redaction is allow-list based, so
+  an unclassified key is silently dropped from the diagnostic record. Declare
+  it in `safe_settings_keys` or `secret_settings_keys`;
+  `tests/unit/test_settings_classification.py` fails the build otherwise.
+- **One distribution, one version.** All servers ship together, so a fix in one
+  bumps the version for every user of the others. Release notes need
+  per-server sections.
 
 ## 💡 Tips for Contributors
 
@@ -305,7 +429,8 @@ uv sync --upgrade
 
 ### Debugging
 
-- **Use logging**: hierarchical loggers under the `MCP_SERVER_NAME` namespace
+- **Use logging**: hierarchical loggers under `LOGGER_NAMESPACE` (`couchbase.mcp`),
+  or under a server's own namespace for server-specific modules
 - **Check connection**: ensure your Couchbase cluster is reachable and credentials have the needed RBAC roles
 - **Validate configuration**: make sure required environment variables / CLI flags are set
 - **MCP Inspector**: [`npx @modelcontextprotocol/inspector`](https://modelcontextprotocol.io/docs/tools/inspector) is handy for exercising tools without a full client

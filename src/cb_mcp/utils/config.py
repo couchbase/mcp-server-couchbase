@@ -5,9 +5,9 @@ from typing import Any
 
 from fastmcp import Context
 
-from .constants import MCP_SERVER_NAME
+from .constants import LOGGER_NAMESPACE
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.config")
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.utils.config")
 
 
 def get_settings(ctx: Context) -> Mapping[str, Any]:
