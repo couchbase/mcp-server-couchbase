@@ -113,14 +113,27 @@ class TestExplicitSubcommand:
         assert _settings_from(lifespan)["transport"] == "http"
 
     def test_version_on_group_and_subcommand(self):
-        """--version must work at both levels, and report the console-script
-        name at both — click derives it from the root context's info_name."""
-        for args in (["--version"], ["operational", "--version"]):
-            result = CliRunner().invoke(
-                mcp_server.main, args, prog_name="couchbase-mcp-server"
-            )
+        """--version works at both levels, and names the distribution.
+
+        Deliberately does *not* pass ``prog_name`` to the runner: click would
+        otherwise default it to argv[0], so running from source reported
+        "mcp_server.py, version X" — a filename beside a package version. The
+        name is pinned on each option, and this asserts it holds however the
+        CLI was invoked.
+
+        The subcommand qualifies the name with its own ("... operational").
+        Note the version itself is the distribution's and is identical for
+        every subcommand — there is one package and one version number.
+        """
+        cases = (
+            (["--version"], "couchbase-mcp-server"),
+            (["operational", "--version"], "couchbase-mcp-server operational"),
+        )
+        for args, expected_prog in cases:
+            result = CliRunner().invoke(mcp_server.main, args)
             assert result.exit_code == 0, result.output
-            assert "couchbase-mcp-server, version" in result.output
+            assert result.output.startswith(f"{expected_prog}, version")
+            assert "mcp_server.py" not in result.output
 
 
 class TestFailsLoudlyRatherThanSilently:
@@ -136,6 +149,28 @@ class TestFailsLoudlyRatherThanSilently:
         result = CliRunner().invoke(mcp_server.main, ["--transport", "http", "bogus"])
         assert result.exit_code == 2
         assert "unexpected extra argument" in result.output.lower()
+
+    def test_unknown_subcommand_is_rejected_by_name(self):
+        """A mistyped or not-yet-shipped server must say so.
+
+        Injecting the default here would rewrite ``analytics`` into
+        ``operational analytics`` and report an extra-argument error naming a
+        server the user never typed.
+        """
+        result = CliRunner().invoke(mcp_server.main, ["analytics"])
+        assert result.exit_code == 2
+        assert "no such command 'analytics'" in result.output.lower()
+
+    def test_unknown_subcommand_is_not_masked_by_a_trailing_eager_option(self):
+        """The silent-success case: ``analytics --version`` used to exit 0.
+
+        ``--version`` is eager, so once the stray word had been demoted to an
+        argument of the default subcommand it printed and exited before the
+        argument was ever validated — the run looked like it worked.
+        """
+        result = CliRunner().invoke(mcp_server.main, ["analytics", "--version"])
+        assert result.exit_code == 2, result.output
+        assert "no such command 'analytics'" in result.output.lower()
 
     def test_unknown_option_still_errors(self):
         result = CliRunner().invoke(mcp_server.main, ["--definitely-not-an-option"])

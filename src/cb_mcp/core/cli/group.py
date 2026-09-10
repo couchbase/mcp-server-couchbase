@@ -48,10 +48,23 @@ class DefaultGroup(click.Group):
         # there would hide every sibling subcommand from completion.
         if ctx.resilient_parsing:
             return False
-        if args and args[0] in self.commands:
+        if not args:
+            return True
+        first = args[0]
+        if first in self.commands:
             return False
         # Let the group answer for itself rather than delegating these.
-        return not (args and args[0] in (*ctx.help_option_names, "--version"))
+        if first in (*ctx.help_option_names, "--version"):
+            return False
+        # A leading bare word reads as an attempt at a subcommand, so let the
+        # group reject it by name. Injecting here would rewrite a mistyped or
+        # not-yet-implemented server into "<default> <word>", and the user
+        # would get an extra-argument error naming a server they never typed —
+        # or, worse, silence: an eager option later in the line (``--version``,
+        # ``--help``) fires before the stray argument is ever validated, so the
+        # command appears to succeed. No subcommand here takes a positional
+        # argument, so a leading bare word is never legitimate.
+        return first.startswith("-")
 
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
         if self._should_inject(ctx, args):

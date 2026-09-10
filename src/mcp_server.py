@@ -39,7 +39,10 @@ logger = logging.getLogger(LOGGER_ROOT)
     # showing "[default: ...]" without repeating this on each command.
     context_settings={"show_default": True},
 )
-@click.version_option(package_name="couchbase-mcp-server")
+@click.version_option(
+    package_name="couchbase-mcp-server",
+    prog_name="couchbase-mcp-server",
+)
 def main() -> None:
     """Couchbase MCP servers.
 
@@ -56,7 +59,10 @@ def main() -> None:
 @logging_options
 @oauth_options
 # Also on the subcommand so `couchbase-mcp-server operational --version` works.
-@click.version_option(package_name="couchbase-mcp-server")
+@click.version_option(
+    package_name="couchbase-mcp-server",
+    prog_name="couchbase-mcp-server operational",
+)
 def operational(
     connection_string,
     username,
