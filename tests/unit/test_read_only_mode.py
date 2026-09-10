@@ -35,7 +35,7 @@ WRITE_TOOL_NAMES = {
     "drop_index",
 }
 
-# Read-only tool names that should always be available (24 tools)
+# Read-only tool names that should always be available (25 tools)
 READ_ONLY_TOOL_NAMES = {
     # Server/Cluster management tools (10)
     "get_buckets_in_cluster",
@@ -66,6 +66,8 @@ READ_ONLY_TOOL_NAMES = {
     "get_queries_with_largest_response_sizes",
     "get_longest_running_queries",
     "get_most_frequent_queries",
+    # Reference data tools (1)
+    "discover_tool_input_values",
 }
 
 
@@ -171,15 +173,15 @@ class TestToolCounts:
         """Verify correct number of tools in read-only mode."""
         tools = get_tools(read_only_mode=True)
         assert len(tools) == len(READ_ONLY_TOOLS)
-        assert len(tools) == 24  # Expected count of read-only tools
+        assert len(tools) == 25  # Expected count of read-only tools
 
     def test_all_tools_mode_tool_count(self):
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (24 read-only + 5 KV write + 4 collection write
+        # Expected total count (25 read-only + 5 KV write + 4 collection write
         # + 3 index write)
-        assert len(tools) == 36
+        assert len(tools) == 37
 
     def test_write_tools_count(self):
         """Verify exactly 12 write tools exist."""

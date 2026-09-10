@@ -326,9 +326,13 @@ def get_cluster_metrics(
     "kv_disk_write_queue"}]), an optional "nodes" ("host:port" targets — call
     get_nodes_in_cluster first if you don't already know them), and optional "applyFunctions",
     "nodesAggregation", "start"/"end" (negative seconds relative to now; default -60/now),
-    "step" (seconds, default 10), "alignTimestamps". To find metric names, see
-    https://docs.couchbase.com/server/current/metrics-reference/metrics-reference.html (one page
-    per service; long pages continue on "-2.html", "-3.html", ...).
+    "step" (seconds, default 10), "alignTimestamps".
+
+    To find metric names, call discover_tool_input_values(tool_name="get_cluster_metrics",
+    search_keywords=[...]) — it searches the full Couchbase metrics reference bundled with this
+    server, offline. Don't guess a metric name: an unknown name
+    comes back as a per-spec error with no data. (The same reference is published at
+    https://docs.couchbase.com/server/current/metrics-reference/metrics-reference.html.)
 
     Not bounded: any number of specs, window, step, or node count is passed straight through to
     the REST call, so a broad request (long window, fine step, many nodes/specs) can return a

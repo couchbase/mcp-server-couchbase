@@ -24,6 +24,7 @@ Documentation: <https://docs.couchbase.com/mcp-server/get-started/overview.html>
 | `get_cluster_diagnostics_report` | Get the SDK's cached connection diagnostics — whether connections were already broken and for how long, without any active network probing |
 | `get_cluster_metrics` | Get one or more cluster statistics over a historic time window via the Management REST API's stats-range endpoint. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
 | `get_nodes_in_cluster` | List cluster nodes as host:port targets via the Prometheus service-discovery REST endpoint. **Self-managed Couchbase Server only — not available on Capella.** |
+| `discover_tool_input_values` | Look up the exact input values another tool needs, from reference data bundled with the server — currently every Couchbase Server metric name (type, unit, version added, description) for `get_cluster_metrics`. Browse by category or fuzzy-search by keyword. Works offline, without a cluster connection. |
 
 ### Data model & schema discovery tools
 

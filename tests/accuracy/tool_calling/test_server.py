@@ -11,6 +11,7 @@ Covers:
   - get_cluster_diagnostics_report
   - get_cluster_metrics
   - get_nodes_in_cluster
+  - discover_tool_input_values
 """
 
 from __future__ import annotations
@@ -256,6 +257,40 @@ def _build_cases(bucket: str, scope: str) -> list[AccuracyCase]:
         )
     )
 
+    # discover_tool_input_values: the prompt describes a metric by concept and never names it,
+    # so the model has to look the identifier up instead of calling get_cluster_metrics with a
+    # guess. Each case targets a real record in the bundled dataset (asserted in the
+    # result-validation suite), spread across different services.
+    for test_id, prompt in (
+        (
+            "discover_metric_name_disk_queue",
+            "What is the exact Couchbase metric name for the number of items enqueued "
+            "on the disk write queue? Just tell me the metric name.",
+        ),
+        (
+            "discover_metric_name_index_resident_ratio",
+            "I need the exact metric name that reports the Index service's resident "
+            "ratio. Don't fetch any data, I just want the name.",
+        ),
+        (
+            "discover_metric_name_dropped_audit_events",
+            "Which Couchbase metric counts audit events that were dropped? "
+            "Name the metric.",
+        ),
+    ):
+        cases.append(
+            AccuracyCase(
+                test_id=test_id,
+                prompt=prompt,
+                expected_tools=[
+                    ExpectedToolCall(
+                        tool_name="discover_tool_input_values",
+                        parameters=Matcher.any_value(),
+                    ),
+                ],
+            )
+        )
+
     return cases
 
 
@@ -279,6 +314,9 @@ SERVER_CASE_IDS = [
     "get_nodes_in_cluster",
     "conversational_what_buckets_do_i_have",
     "conversational_is_everything_healthy",
+    "discover_metric_name_disk_queue",
+    "discover_metric_name_index_resident_ratio",
+    "discover_metric_name_dropped_audit_events",
 ]
 
 
