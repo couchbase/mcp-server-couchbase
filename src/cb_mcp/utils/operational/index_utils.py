@@ -13,9 +13,9 @@ from urllib.parse import urlparse
 
 import httpx
 
-from ..constants import LOGGER_ROOT
+from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 
-logger = logging.getLogger(f"{LOGGER_ROOT}.utils.index_utils")
+logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.utils.index_utils")
 
 
 def validate_filter_params(

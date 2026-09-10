@@ -28,6 +28,7 @@ from .constants import (
     DEFAULT_LOG_LEVEL,
     DEFAULT_LOG_MAX_BYTES,
     DEFAULT_LOG_SINKS,
+    LOGGER_NAMESPACE,
     LOGGER_ROOT,
 )
 
@@ -46,6 +47,9 @@ _PER_LEVEL_FILE_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 # the threshold is unreachable, so this is the cheapest way to silence the
 # logger without touching other loggers in the process.
 LEVEL_OFF = logging.CRITICAL + 1
+
+# This module's own logger.
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.utils.logging")
 
 
 def _no_sdk_log_hook(logger_root: str, level: int) -> None:
@@ -258,14 +262,14 @@ class BoundedRotatingFileHandler(RotatingFileHandler):
 
 
 def _attach_per_level_file_handlers(
-    logger: logging.Logger,
+    root_logger: logging.Logger,
     formatter: logging.Formatter,
     log_file: str,
     max_bytes: Mapping[str, int],
     global_backup_count: int,
     backup_count_overrides: Mapping[str, int],
 ) -> tuple[dict[str, str], dict[str, int], list[str]]:
-    """Attach one rotating file handler per active level to ``logger``.
+    """Attach one rotating file handler per active level to ``root_logger``.
 
     All per-level files derive from the single ``log_file`` base path by
     inserting the level name (``mcp_server.log`` -> ``mcp_server.info.log``,
@@ -300,7 +304,7 @@ def _attach_per_level_file_handlers(
     backup_counts: dict[str, int] = {}
     for lvl_name in _PER_LEVEL_FILE_LEVELS:
         lvl_no = logging.getLevelName(lvl_name)
-        if lvl_no < logger.level:
+        if lvl_no < root_logger.level:
             continue
         path = _per_level_path(log_file, lvl_name)
         backup_count = backup_count_overrides.get(lvl_name, global_backup_count)
@@ -326,7 +330,7 @@ def _attach_per_level_file_handlers(
             handler.addFilter(_level_filter(LEVEL_TRACE, logging.DEBUG))
         else:
             handler.addFilter(_level_filter(lvl_no))
-        logger.addHandler(handler)
+        root_logger.addHandler(handler)
         attached[lvl_name] = path
         backup_counts[lvl_name] = backup_count
     return attached, backup_counts, errors
@@ -456,21 +460,21 @@ def configure_logging(
         # Defer logging about the invalid level until after handlers are configured,
         # so the message is visible even when the user sets an unrecognised level.
         # ``DEFAULT_LOG_LEVEL`` is stored lowercase for help-text consistency;
-        # uppercase here so ``logger.setLevel`` accepts it.
+        # uppercase here so ``root_logger.setLevel`` accepts it.
         invalid_level = level
         level_name = DEFAULT_LOG_LEVEL.upper()
 
-    logger = logging.getLogger(LOGGER_ROOT)
-    for handler in list(logger.handlers):
-        logger.removeHandler(handler)
+    root_logger = logging.getLogger(LOGGER_ROOT)
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
         # Close so RotatingFileHandlers release their file descriptor — otherwise
         # repeated configure_logging() calls (tests, reloads) leak FDs and keep
         # rotated files open against the filesystem.
         handler.close()
-    logger.propagate = False
+    root_logger.propagate = False
 
     if level_name == "OFF":
-        logger.setLevel(LEVEL_OFF)
+        root_logger.setLevel(LEVEL_OFF)
         sdk_hook(LOGGER_ROOT, LEVEL_OFF)
         # No handlers attached, no sinks active; record that state so the
         # MCP tool and env-info reflect reality.
@@ -484,7 +488,7 @@ def configure_logging(
         )
         return
 
-    logger.setLevel(level_name)
+    root_logger.setLevel(level_name)
 
     formatter = logging.Formatter(DEFAULT_LOG_FORMAT, datefmt=DEFAULT_LOG_DATEFMT)
 
@@ -511,7 +515,7 @@ def configure_logging(
     if "stderr" in effective_sinks:
         stderr_handler = logging.StreamHandler(sys.stderr)
         stderr_handler.setFormatter(formatter)
-        logger.addHandler(stderr_handler)
+        root_logger.addHandler(stderr_handler)
 
     # Deferred so these surface after handlers (incl. stderr) are wired and are
     # therefore actually visible.
@@ -523,7 +527,7 @@ def configure_logging(
     if file_sink_active:
         attached_files, active_backup_counts, file_errors = (
             _attach_per_level_file_handlers(
-                logger,
+                root_logger,
                 formatter,
                 log_file,
                 resolved_max_bytes,
@@ -541,7 +545,7 @@ def configure_logging(
         if file_errors and no_error_handler and "stderr" not in effective_sinks:
             fallback_handler = logging.StreamHandler(sys.stderr)
             fallback_handler.setFormatter(formatter)
-            logger.addHandler(fallback_handler)
+            root_logger.addHandler(fallback_handler)
     else:
         # Requirement: warn when file logging isn't explicitly enabled so the
         # operator knows support logs aren't being persisted.
@@ -549,7 +553,7 @@ def configure_logging(
             "WARNING: File logging is disabled. Log files required for product support are not being generated."
         )
 
-    sdk_hook(LOGGER_ROOT, logger.level)
+    sdk_hook(LOGGER_ROOT, root_logger.level)
 
     if invalid_level:
         logger.error(

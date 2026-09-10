@@ -22,7 +22,7 @@ from fastmcp.server.auth import AuthProvider
 from fastmcp.tools import FunctionTool
 
 from ..utils.constants import (
-    LOGGER_ROOT,
+    LOGGER_NAMESPACE,
     NETWORK_TRANSPORTS,
     NETWORK_TRANSPORTS_SDK_MAPPING,
 )
@@ -32,7 +32,7 @@ from ..utils.telemetry import send_install_ping
 from .contracts import ClusterProvider
 from .spec import ServerSpec
 
-logger = logging.getLogger(f"{LOGGER_ROOT}.core.app")
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.core.app")
 
 
 def build_app(
@@ -89,6 +89,7 @@ def build_app(
             read_only_mode=read_only_mode,
             logging_config=logging_config,
             server_id=spec.id,
+            server_name=spec.fastmcp_name,
         )
         try:
             yield app_context

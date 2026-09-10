@@ -28,13 +28,13 @@ from pydantic import AnyHttpUrl, ValidationError
 
 from .utils.constants import (
     DEFAULT_OAUTH_ALGORITHM,
-    LOGGER_ROOT,
+    LOGGER_NAMESPACE,
     SCOPE_READ,
     SCOPE_WRITE,
     STREAMABLE_HTTP_TRANSPORT,
 )
 
-logger = logging.getLogger(f"{LOGGER_ROOT}.auth")
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.auth")
 
 # Human-readable name advertised in RFC 9728 protected-resource metadata.
 # Per-server: a host passes its spec's display_name. Defaulted to the

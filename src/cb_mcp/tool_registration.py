@@ -8,14 +8,14 @@ from collections.abc import Callable
 from .core.spec import ServerSpec
 from .utils import wrap_with_telemetry
 from .utils.config import parse_tool_names
-from .utils.constants import LOGGER_ROOT
+from .utils.constants import LOGGER_NAMESPACE
 from .utils.elicitation import wrap_with_confirmation
 from .utils.scope_enforcement import (
     required_scopes_for_tool,
     wrap_with_scope_check,
 )
 
-logger = logging.getLogger(f"{LOGGER_ROOT}.tool_registration")
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.tool_registration")
 
 
 def prepare_tools_for_registration(

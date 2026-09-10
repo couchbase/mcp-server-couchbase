@@ -13,9 +13,9 @@ from collections.abc import Callable
 from mcp import types
 from pydantic import BaseModel, Field
 
-from .constants import LOGGER_ROOT
+from .constants import LOGGER_NAMESPACE
 
-logger = logging.getLogger(f"{LOGGER_ROOT}.utils.elicitation")
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.utils.elicitation")
 
 
 class ConfirmationResult(BaseModel):

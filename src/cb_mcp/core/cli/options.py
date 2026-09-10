@@ -27,11 +27,9 @@ from ...utils.constants import (
     ALLOWED_TRANSPORTS,
     DEFAULT_HOST,
     DEFAULT_LOG_BACKUP_COUNT,
-    DEFAULT_LOG_FILE,
     DEFAULT_LOG_LEVEL,
     DEFAULT_LOG_SINKS,
     DEFAULT_OAUTH_ALGORITHM,
-    DEFAULT_PORT,
     DEFAULT_READ_ONLY_MODE,
     DEFAULT_TRANSPORT,
     SCOPE_READ,
@@ -109,12 +107,15 @@ read_only_option = compose(
 """Whether write tools are loaded at all. Kept separate from the other gating flags to preserve the historical --help ordering."""
 
 
-def transport_options(*, default_port: int = DEFAULT_PORT) -> Callable:
+def transport_options(*, default_port: int) -> Callable:
     """Transport selection and the network bind address. Shared by every server.
 
     A factory because the default port is per-server: two servers left on one
     port cannot both bind. Parameterising here rather than resolving later
     keeps the correct value visible in each subcommand's ``--help``.
+
+    Required, matching ``ServerSpec.default_port``: a default here would
+    re-open the silent collision the required spec field exists to close.
     """
     return compose(
         click.option(
@@ -162,12 +163,14 @@ tool_gating_options = compose(
 """Per-tool opt-outs and confirmation requirements. Shared by every server."""
 
 
-def logging_options(*, default_log_file: str = DEFAULT_LOG_FILE) -> Callable:
+def logging_options(*, default_log_file: str) -> Callable:
     """Log level, sinks, and per-level rotation/retention. Shared by every server.
 
     A factory because the default log file is per-server: two servers sharing
     one base path put two RotatingFileHandlers on the same files, and
     rotation is not multi-process safe.
+
+    Required, matching ``ServerSpec.default_log_file``, for the same reason.
     """
     return compose(
         click.option(

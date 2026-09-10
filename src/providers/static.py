@@ -6,10 +6,10 @@ from typing import Any
 from couchbase.cluster import Cluster
 from fastmcp import Context
 
-from cb_mcp.utils.constants import LOGGER_ROOT
+from cb_mcp.servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from cb_mcp.utils.operational.connection import connect_to_couchbase_cluster
 
-logger = logging.getLogger(f"{LOGGER_ROOT}.providers.static")
+logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.providers.static")
 
 
 class StaticClusterProvider:

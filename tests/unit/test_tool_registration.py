@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from cb_mcp.servers.operational import SPEC as OPERATIONAL_SPEC
+from cb_mcp.servers.operational.spec import SPEC as OPERATIONAL_SPEC
 from cb_mcp.tool_registration import prepare_tools_for_registration as _prepare
 from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
 

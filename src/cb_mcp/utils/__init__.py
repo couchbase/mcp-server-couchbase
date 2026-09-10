@@ -37,9 +37,8 @@ from .constants import (
     DEFAULT_PORT,
     DEFAULT_READ_ONLY_MODE,
     DEFAULT_TRANSPORT,
-    FASTMCP_SERVER_NAME,
+    LOGGER_NAMESPACE,
     LOGGER_ROOT,
-    MCP_SERVER_NAME,
     NETWORK_TRANSPORTS,
     NETWORK_TRANSPORTS_SDK_MAPPING,
     SCOPE_READ,
@@ -78,7 +77,7 @@ from .scope_enforcement import required_scopes_for_tool, wrap_with_scope_check
 from .telemetry import send_install_ping, wrap_with_telemetry
 
 # Note: Individual modules create their own hierarchical loggers using:
-# logger = logging.getLogger(f"{LOGGER_ROOT}.module.name")
+# logger = logging.getLogger(f"{LOGGER_NAMESPACE}.module.name")
 
 __all__ = [
     # Config
@@ -91,9 +90,8 @@ __all__ = [
     "get_cluster_provider",
     "get_logging_config",
     # Constants
-    "FASTMCP_SERVER_NAME",
+    "LOGGER_NAMESPACE",
     "LOGGER_ROOT",
-    "MCP_SERVER_NAME",
     "DEFAULT_READ_ONLY_MODE",
     "DEFAULT_TRANSPORT",
     "DEFAULT_LOG_LEVEL",

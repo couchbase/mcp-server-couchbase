@@ -24,32 +24,42 @@ import sys
 import pytest
 
 import cb_mcp
-from cb_mcp.utils.constants import (
+import cb_mcp.utils.constants as consts
+from cb_mcp.servers.operational.constants import (
     FASTMCP_SERVER_NAME,
+    OPERATIONAL_LOGGER_NAMESPACE,
+)
+from cb_mcp.utils.constants import (
+    LOGGER_NAMESPACE,
     LOGGER_ROOT,
-    MCP_SERVER_NAME,
 )
 from cb_mcp.utils.logging import configure_logging
 
 # module import path -> the logger name it registers at import time.
+# Shared modules sit directly under the package namespace; a server's own
+# modules nest one level further under its id. Neither uses the bare
+# "couchbase" root, which belongs to the SDK.
 EXPECTED_LOGGER_NAMES = {
-    "cb_mcp.auth": "couchbase.auth",
-    "cb_mcp.core.app": "couchbase.core.app",
-    "cb_mcp.tool_registration": "couchbase.tool_registration",
-    "cb_mcp.tools.operational.collection_management": "couchbase.tools.collection_management",
-    "cb_mcp.tools.operational.index": "couchbase.tools.index",
-    "cb_mcp.tools.operational.kv": "couchbase.tools.kv",
-    "cb_mcp.tools.operational.query": "couchbase.tools.query",
-    "cb_mcp.tools.operational.server": "couchbase.tools.server",
-    "cb_mcp.utils.cli": "couchbase.utils.cli",
-    "cb_mcp.utils.config": "couchbase.utils.config",
-    "cb_mcp.utils.operational.connection": "couchbase.utils.connection",
-    "cb_mcp.utils.elicitation": "couchbase.utils.elicitation",
-    "cb_mcp.utils.environment": "couchbase.utils.environment",
-    "cb_mcp.utils.operational.index_utils": "couchbase.utils.index_utils",
-    "cb_mcp.utils.scope_enforcement": "couchbase.utils.scope_enforcement",
-    "cb_mcp.utils.telemetry": "couchbase.utils.telemetry",
-    "providers.static": "couchbase.providers.static",
+    # shared
+    "cb_mcp.auth": "couchbase.mcp.auth",
+    "cb_mcp.core.app": "couchbase.mcp.core.app",
+    "cb_mcp.tool_registration": "couchbase.mcp.tool_registration",
+    "cb_mcp.utils.cli": "couchbase.mcp.utils.cli",
+    "cb_mcp.utils.config": "couchbase.mcp.utils.config",
+    "cb_mcp.utils.elicitation": "couchbase.mcp.utils.elicitation",
+    "cb_mcp.utils.environment": "couchbase.mcp.utils.environment",
+    "cb_mcp.utils.logging": "couchbase.mcp.utils.logging",
+    "cb_mcp.utils.scope_enforcement": "couchbase.mcp.utils.scope_enforcement",
+    "cb_mcp.utils.telemetry": "couchbase.mcp.utils.telemetry",
+    # operational server
+    "cb_mcp.tools.operational.collection_management": "couchbase.mcp.operational.tools.collection_management",
+    "cb_mcp.tools.operational.index": "couchbase.mcp.operational.tools.index",
+    "cb_mcp.tools.operational.kv": "couchbase.mcp.operational.tools.kv",
+    "cb_mcp.tools.operational.query": "couchbase.mcp.operational.tools.query",
+    "cb_mcp.tools.operational.server": "couchbase.mcp.operational.tools.server",
+    "cb_mcp.utils.operational.connection": "couchbase.mcp.operational.utils.connection",
+    "cb_mcp.utils.operational.index_utils": "couchbase.mcp.operational.utils.index_utils",
+    "providers.static": "couchbase.mcp.operational.providers.static",
 }
 
 # The root the handlers attach to. Everything above must be a descendant.
@@ -80,19 +90,44 @@ def test_logger_root_matches_constant():
     assert LOGGER_ROOT == EXPECTED_LOGGER_ROOT
 
 
-def test_deprecated_alias_still_resolves_to_the_logging_root():
-    """``MCP_SERVER_NAME`` is retained for external importers.
+def test_ambiguous_alias_is_gone():
+    """``MCP_SERVER_NAME`` was one name for three jobs and has been removed.
 
-    It aliases the *logging* root specifically, not the wire-visible FastMCP
-    name — the two happen to share a value today, and this pins which of the
-    two the alias follows if they ever diverge.
+    It is now ``LOGGER_ROOT`` (where handlers attach), ``LOGGER_NAMESPACE``
+    (this package's loggers) or a server's ``fastmcp_name`` (wire-visible).
+    Reintroducing the alias would re-blur three distinct contracts.
     """
-    assert MCP_SERVER_NAME == LOGGER_ROOT
+    assert not hasattr(consts, "MCP_SERVER_NAME")
 
 
-def test_fastmcp_name_is_wire_visible_and_unchanged():
-    """Changing this breaks every connected client, independent of logging."""
-    assert FASTMCP_SERVER_NAME == "couchbase"
+def test_namespaces_nest_correctly():
+    """Package namespace under the root; the server's under the package.
+
+    The nesting is what lets handlers attach once at the root while keeping
+    each server's records distinguishable in a merged stream.
+    """
+    assert LOGGER_NAMESPACE.startswith(f"{LOGGER_ROOT}.")
+    assert OPERATIONAL_LOGGER_NAMESPACE.startswith(f"{LOGGER_NAMESPACE}.")
+
+
+def test_nothing_logs_on_the_bare_sdk_root():
+    """The bare "couchbase" logger belongs to the Couchbase SDK.
+
+    It creates ``couchbase``, ``couchbase.threshold``, ``couchbase.metrics``
+    and ``couchbase.<module>`` loggers of its own — we previously shadowed
+    ``couchbase.auth``. Ours must all sit under our own namespace so an SDK
+    release can never collide.
+    """
+    for name in EXPECTED_LOGGER_NAMES.values():
+        assert name.startswith(f"{LOGGER_NAMESPACE}."), (
+            f"{name!r} is outside {LOGGER_NAMESPACE!r} and risks colliding "
+            "with an SDK logger"
+        )
+
+
+def test_fastmcp_name_is_wire_visible():
+    """serverInfo.name. Changing it is breaking for every connected client."""
+    assert FASTMCP_SERVER_NAME == "couchbase-operational"
 
 
 def test_configure_logging_attaches_to_the_root():

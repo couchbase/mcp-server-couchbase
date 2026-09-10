@@ -24,13 +24,13 @@ from collections.abc import Mapping
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any
 
-from .constants import LOGGER_ROOT
+from .constants import LOGGER_NAMESPACE
 from .logging import get_resolved_logging_config
 
 if TYPE_CHECKING:  # avoid a runtime import cycle: core.spec is unrelated to logging
     from ..core.spec import ServerSpec
 
-logger = logging.getLogger(f"{LOGGER_ROOT}.utils.environment")
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.utils.environment")
 
 # Dependencies every server shares. A server's own backing-SDK packages come
 # from its spec (``reported_dependencies``) and are appended to these, so this

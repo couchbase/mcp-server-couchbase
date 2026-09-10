@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 
-from cb_mcp.servers.operational import SPEC
+from cb_mcp.servers.operational.spec import SPEC
 from cb_mcp.utils.environment import _redacted_settings
 
 

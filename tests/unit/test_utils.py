@@ -27,7 +27,7 @@ from cb_mcp.utils.constants import (
     ALLOWED_TRANSPORTS,
     DEFAULT_READ_ONLY_MODE,
     DEFAULT_TRANSPORT,
-    MCP_SERVER_NAME,
+    LOGGER_ROOT,
     NETWORK_TRANSPORTS,
 )
 from cb_mcp.utils.context import (
@@ -719,7 +719,7 @@ class TestConstants:
 
     def test_mcp_server_name(self) -> None:
         """Verify MCP server name constant."""
-        assert MCP_SERVER_NAME == "couchbase"
+        assert LOGGER_ROOT == "couchbase"
 
     def test_default_transport(self) -> None:
         """Verify default transport constant."""

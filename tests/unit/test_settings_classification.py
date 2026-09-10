@@ -21,7 +21,7 @@ import pytest
 from click.testing import CliRunner
 
 import mcp_server
-from cb_mcp.servers.operational import SPEC
+from cb_mcp.servers.operational.spec import SPEC
 from cb_mcp.utils.environment import (
     _redacted_settings,
     presence_only_keys_for,

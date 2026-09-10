@@ -36,6 +36,7 @@ class AppContext:
     read_only_mode: bool = True
     logging_config: Mapping[str, Any] | None = None
     server_id: str | None = None
+    server_name: str | None = None
 
 
 def get_cluster_provider(ctx: Context):
@@ -50,6 +51,11 @@ def get_server_id(ctx: Context) -> str | None:
     host may supply a lifespan-context type that predates this field.
     """
     return getattr(ctx.request_context.lifespan_context, "server_id", None)
+
+
+def get_server_name(ctx: Context) -> str | None:
+    """Return the wire-visible server name, or None if the host did not set it."""
+    return getattr(ctx.request_context.lifespan_context, "server_name", None)
 
 
 def get_logging_config(ctx: Context) -> Mapping[str, Any] | None:

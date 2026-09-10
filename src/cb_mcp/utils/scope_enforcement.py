@@ -23,9 +23,9 @@ from collections.abc import Callable
 from fastmcp.server.dependencies import get_access_token
 
 from ..core.spec import ScopeSpec
-from .constants import LOGGER_ROOT, SCOPE_READ, SCOPE_WRITE
+from .constants import LOGGER_NAMESPACE, SCOPE_READ, SCOPE_WRITE
 
-logger = logging.getLogger(f"{LOGGER_ROOT}.utils.scope_enforcement")
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.utils.scope_enforcement")
 
 # The scope labels used when a caller does not supply a server's own. These are
 # the operational server's canonical labels, kept as the default so existing

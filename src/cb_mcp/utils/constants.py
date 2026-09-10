@@ -11,15 +11,11 @@
 # working.
 LOGGER_ROOT = "couchbase"
 
-# FASTMCP_SERVER_NAME is passed to FastMCP() and reported by
-# get_server_configuration_status. It is wire-visible to clients, so changing
-# it is a breaking change — independent of anything to do with logging.
-FASTMCP_SERVER_NAME = "couchbase"
-
-# DEPRECATED: ambiguous, retained for backward compatibility. New code should
-# pick LOGGER_ROOT or FASTMCP_SERVER_NAME deliberately based on which contract
-# it depends on.
-MCP_SERVER_NAME = LOGGER_ROOT
+# Namespace for this package's own loggers, a child of LOGGER_ROOT so the
+# handlers attached at the root still see them. Shared modules log directly
+# under it; a server's own modules nest one level further (see
+# ServerSpec.logger_namespace).
+LOGGER_NAMESPACE = f"{LOGGER_ROOT}.mcp"
 
 # Default Configuration Values
 DEFAULT_READ_ONLY_MODE = True
@@ -39,13 +35,6 @@ NETWORK_TRANSPORTS_SDK_MAPPING = {
 # so we gate the OAuth wiring strictly on this transport name. SSE is a
 # network transport but is explicitly out of scope for OAuth in this build.
 STREAMABLE_HTTP_TRANSPORT = "http"
-
-# Index Service Configuration
-# Cluster major version at which list_indexes prefers the query service over
-# the Index Service REST API. From this version, system:indexes exposes the
-# original CREATE INDEX statement in metadata.definition, so we query it
-# instead of the /getIndexStatus REST endpoint.
-QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION = 8
 
 # Logging Configuration
 # Change this to DEBUG, WARNING, ERROR as needed

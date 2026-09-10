@@ -17,12 +17,12 @@ import couchbase.subdocument as subdoc
 from couchbase.exceptions import CouchbaseException
 from fastmcp import Context
 
-from ...utils.constants import LOGGER_ROOT
+from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.context import get_cluster_connection
 from ...utils.operational.connection import connect_to_bucket, format_keyspace
 from ...utils.responses import tool_error, tool_success
 
-logger = logging.getLogger(f"{LOGGER_ROOT}.tools.kv")
+logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.kv")
 
 
 def get_document_by_id(

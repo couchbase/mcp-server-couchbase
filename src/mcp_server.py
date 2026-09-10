@@ -2,8 +2,6 @@
 Couchbase MCP Server
 """
 
-import logging
-
 import click
 
 # Reusable tools and utilities from the cb_mcp package
@@ -18,18 +16,15 @@ from cb_mcp.core.cli import (
     tool_gating_options,
     transport_options,
 )
-from cb_mcp.servers.operational import SPEC as OPERATIONAL_SPEC
+from cb_mcp.servers.operational.spec import SPEC as OPERATIONAL_SPEC
 from cb_mcp.tool_registration import prepare_tools_for_registration
 from cb_mcp.utils import (
-    LOGGER_ROOT,
     configure_logging,
     get_resolved_logging_config,
 )
 
 # Standalone-host provider implementation
 from providers.static import StaticClusterProvider
-
-logger = logging.getLogger(LOGGER_ROOT)
 
 
 @click.group(

@@ -13,10 +13,10 @@ import json
 import logging
 
 import cb_mcp.utils.logging as logmod
-from cb_mcp.utils.constants import MCP_SERVER_NAME
+from cb_mcp.utils.constants import LOGGER_NAMESPACE
 from cb_mcp.utils.environment import log_environment_info
 
-ENV_LOGGER_NAME = f"{MCP_SERVER_NAME}.utils.environment"
+ENV_LOGGER_NAME = f"{LOGGER_NAMESPACE}.utils.environment"
 
 # Top-level keys ``log_environment_info`` documents and consumers rely on.
 # A future refactor that renames or drops one of these will break this test

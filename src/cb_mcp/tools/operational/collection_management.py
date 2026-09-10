@@ -13,12 +13,14 @@ from typing import Any
 
 from fastmcp import Context
 
-from ...utils.constants import LOGGER_ROOT
+from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.context import get_cluster_connection
 from ...utils.operational.connection import connect_to_bucket
 from ...utils.responses import tool_error, tool_success
 
-logger = logging.getLogger(f"{LOGGER_ROOT}.tools.collection_management")
+logger = logging.getLogger(
+    f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.collection_management"
+)
 
 
 def create_scope(ctx: Context, bucket_name: str, scope_name: str) -> dict[str, Any]:

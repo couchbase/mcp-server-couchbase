@@ -10,11 +10,11 @@ from typing import Any
 from couchbase.management.options import CreateQueryIndexOptions, DropQueryIndexOptions
 from fastmcp import Context
 
-from ...utils.config import get_settings
-from ...utils.constants import (
-    LOGGER_ROOT,
+from ...servers.operational.constants import (
+    OPERATIONAL_LOGGER_NAMESPACE,
     QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION,
 )
+from ...utils.config import get_settings
 from ...utils.context import get_cluster_connection
 from ...utils.operational.connection import connect_to_bucket, format_keyspace
 from ...utils.operational.index_utils import (
@@ -28,7 +28,7 @@ from ...utils.operational.index_utils import (
 from ...utils.responses import tool_error, tool_success
 from .query import run_cluster_query, run_sql_plus_plus_query
 
-logger = logging.getLogger(f"{LOGGER_ROOT}.tools.index")
+logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.index")
 
 
 def get_index_advisor_recommendations(
