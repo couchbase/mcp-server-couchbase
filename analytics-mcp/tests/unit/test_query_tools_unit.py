@@ -28,7 +28,13 @@ class TestRunQuerySync:
         with patch("ea_mcp.tools.query.get_cluster_connection", return_value=cluster):
             result = run_query_sync(ctx, "SELECT 1 AS one")
 
-        assert result == {"success": True, "rows": [{"one": 1}], "row_count": 1}
+        assert result == {
+            "success": True,
+            "rows": [{"one": 1}],
+            "row_count": 1,
+            # Small results are returned whole; truncated says so explicitly.
+            "truncated": False,
+        }
 
     def test_returns_error_envelope_on_sdk_error(self) -> None:
         ctx, cluster = _make_ctx_with_cluster()

@@ -15,6 +15,7 @@ from fastmcp import FastMCP
 from fastmcp.tools import FunctionTool
 
 from ea_mcp.connection import AppContext, connect_to_analytics_cluster
+from ea_mcp.result_store import start_reaper
 from ea_mcp.tools import TOOL_ANNOTATIONS, TOOLS
 
 logger = logging.getLogger("ea-mcp-server")
@@ -75,8 +76,13 @@ def main(
     @asynccontextmanager
     async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
         cluster = connect_to_analytics_cluster(connection_string, username, password)
+        context = AppContext(cluster=cluster)
         try:
-            yield AppContext(cluster=cluster)
+            # The reaper expires stale buffered results on a timer. Without it
+            # the store's TTL is only applied when a tool happens to touch the
+            # store, so an idle server never reclaims anything.
+            async with start_reaper(context.result_store):
+                yield context
         finally:
             logger.info("Closing Enterprise Analytics MCP server")
             cluster.shutdown()

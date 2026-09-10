@@ -262,7 +262,14 @@ class TestDiscardAsyncQueryResults:
 
         result = discard_async_query_results(ctx, token)
 
-        assert result == {"success": True, "query_handle": token, "discarded": True}
+        assert result == {
+            "success": True,
+            "query_handle": token,
+            "discarded": True,
+            # Discarding the query also drops any rows buffered under the
+            # same id; none here, so nothing was released.
+            "buffered_rows_released": False,
+        }
         result_handle.discard_results.assert_called_once()
         assert registry.count() == 0
 
@@ -297,7 +304,12 @@ class TestCancelAsyncQuery:
 
         result = cancel_async_query(ctx, token)
 
-        assert result == {"success": True, "query_handle": token, "cancelled": True}
+        assert result == {
+            "success": True,
+            "query_handle": token,
+            "cancelled": True,
+            "buffered_rows_released": False,
+        }
         handle.cancel.assert_called_once()
         assert registry.count() == 0
 

@@ -37,6 +37,7 @@ from fastmcp import Context
 
 from ..connection import get_cluster_connection, get_handle_registry
 from ..responses import tool_error, tool_success
+from .large_result import deliver_rows, release_buffered_rows
 
 logger = logging.getLogger("ea-mcp-server.tools.query")
 
@@ -47,7 +48,13 @@ def run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
     Can carry SELECT, DML, or DDL statements. Buffers the entire result set
     in client memory before returning.
 
-    Returns {"success": True, "rows": [...], "row_count": N} on success, or
+    Large result sets are truncated to keep the response manageable: the
+    response then carries truncated: true plus a result_id, and the remaining
+    rows are read with get_large_result.
+
+    Returns {"success": True, "rows": [...], "row_count": N,
+    "truncated": false} on success; a truncated response additionally carries
+    "returned_row_count", "result_id" and "next_offset"; or
     {"success": False, "error": "..."} on failure.
     """
     cluster = get_cluster_connection(ctx)
@@ -56,7 +63,7 @@ def run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
         result = cluster.execute_query(statement)
         rows = result.get_all_rows()
         logger.info(f"Query returned {len(rows)} row(s)")
-        return tool_success(rows=rows, row_count=len(rows))
+        return deliver_rows(ctx, rows, statement)
     except Exception as e:
         logger.error(f"Error running query: {e}", exc_info=True)
         return tool_error(e, statement=statement)
@@ -201,11 +208,16 @@ def get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
         logger.info(
             f"Fetched {len(rows)} row(s) for async query (token={query_handle})"
         )
-        return tool_success(
+        # Buffer under the query_handle itself, so a truncated async result is
+        # paged with the id the caller already holds rather than a second one.
+        return deliver_rows(
+            ctx,
+            rows,
+            entry.statement,
+            result_id=query_handle,
+            is_async=True,
             query_handle=query_handle,
             ready=True,
-            rows=rows,
-            row_count=len(rows),
             metadata=metadata,
         )
     except Exception as e:
@@ -250,8 +262,15 @@ def discard_async_query_results(ctx: Context, query_handle: str) -> dict[str, An
 
         status.result_handle().discard_results()
         registry.remove(query_handle)
+        # Rows buffered by a truncated fetch share this id, so free them too —
+        # otherwise they would linger with no handle left to reach them.
+        rows_released = release_buffered_rows(ctx, query_handle)
         logger.info(f"Discarded results for async query (token={query_handle})")
-        return tool_success(query_handle=query_handle, discarded=True)
+        return tool_success(
+            query_handle=query_handle,
+            discarded=True,
+            buffered_rows_released=rows_released,
+        )
     except Exception as e:
         logger.error(f"Error discarding async query results: {e}", exc_info=True)
         return tool_error(e, query_handle=query_handle)
@@ -300,11 +319,18 @@ def cancel_async_query(ctx: Context, query_handle: str) -> dict[str, Any]:
 
         entry.handle.cancel()
         registry.remove(query_handle)
+        rows_released = release_buffered_rows(ctx, query_handle)
         logger.info(f"Cancelled async query (token={query_handle})")
-        return tool_success(query_handle=query_handle, cancelled=True)
+        return tool_success(
+            query_handle=query_handle,
+            cancelled=True,
+            buffered_rows_released=rows_released,
+        )
     except Exception as e:
         logger.error(f"Error cancelling async query: {e}", exc_info=True)
         return tool_error(e, query_handle=query_handle)
+
+
 def explain_query(ctx: Context, statement: str) -> dict[str, Any]:
     """Generate the query plan for a SQL++ statement using EXPLAIN, without executing it.
 

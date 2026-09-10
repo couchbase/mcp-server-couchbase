@@ -15,6 +15,7 @@ from couchbase_analytics.credential import Credential
 from fastmcp import Context
 
 from .handle_registry import HandleRegistry
+from .result_store import ResultStore
 
 logger = logging.getLogger("ea-mcp-server.connection")
 
@@ -31,6 +32,7 @@ class AppContext:
 
     cluster: Cluster
     handle_registry: HandleRegistry = field(default_factory=HandleRegistry)
+    result_store: ResultStore = field(default_factory=ResultStore)
 
 
 def connect_to_analytics_cluster(
@@ -61,3 +63,8 @@ def get_cluster_connection(ctx: Context) -> Cluster:
 def get_handle_registry(ctx: Context) -> HandleRegistry:
     """Return the async query handle registry for this server process."""
     return ctx.request_context.lifespan_context.handle_registry  # type: ignore
+
+
+def get_result_store(ctx: Context) -> ResultStore:
+    """Return the buffered large-result store for this server process."""
+    return ctx.request_context.lifespan_context.result_store  # type: ignore

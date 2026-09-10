@@ -9,6 +9,7 @@ from collections.abc import Callable
 from mcp.types import ToolAnnotations
 
 from .index import create_index, list_indexes
+from .large_result import get_large_result, release_large_result
 from .metadata import (
     get_collections_in_scope,
     get_databases_in_cluster,
@@ -18,11 +19,11 @@ from .metadata import (
 from .query import (
     cancel_async_query,
     discard_async_query_results,
+    explain_query,
     get_async_query_results,
     run_query_async,
     run_query_sync,
 )
-from .query import explain_query, run_query_sync
 
 TOOLS: list[Callable] = [
     get_databases_in_cluster,
@@ -38,6 +39,10 @@ TOOLS: list[Callable] = [
     discard_async_query_results,
     cancel_async_query,
     explain_query,
+    # Shared paging + cleanup for any query whose result was truncated
+    # (sync or async). See tools/large_result.py.
+    get_large_result,
+    release_large_result,
 ]
 
 TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
@@ -60,6 +65,10 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_async_query_results": ToolAnnotations(readOnlyHint=True),
     "discard_async_query_results": ToolAnnotations(destructiveHint=True),
     "cancel_async_query": ToolAnnotations(destructiveHint=True),
+    # Reads an already-buffered result: repeatable, no side effects.
+    "get_large_result": ToolAnnotations(readOnlyHint=True),
+    # Frees the buffer, and discards the EA query when the id is an async one.
+    "release_large_result": ToolAnnotations(destructiveHint=True),
     "explain_query": ToolAnnotations(readOnlyHint=True),
 }
 
@@ -67,15 +76,17 @@ __all__ = [
     "TOOLS",
     "TOOL_ANNOTATIONS",
     "cancel_async_query",
-    "discard_async_query_results",
-    "get_async_query_results",
     "create_index",
+    "discard_async_query_results",
     "explain_query",
+    "get_async_query_results",
     "get_collections_in_scope",
     "get_databases_in_cluster",
+    "get_large_result",
     "get_schema_for_collection",
     "get_scopes_in_database",
-    "run_query_async",
     "list_indexes",
+    "release_large_result",
+    "run_query_async",
     "run_query_sync",
 ]
