@@ -1,8 +1,9 @@
 """Identity constants for the operational Couchbase server.
 
-Separate from ``__init__`` so the tool and helper modules can import the
-logger namespace without importing the spec — which would import the tools,
-which import these.
+Separate from ``__init__`` so this server's tool and helper modules can
+import its logger namespace cheaply. Note the separation alone is not what
+avoids the import cycle — importing any submodule runs the package
+``__init__`` first, so that file must also stay inert. See its docstring.
 """
 
 from ...utils.constants import LOGGER_NAMESPACE
