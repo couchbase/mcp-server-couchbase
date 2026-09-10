@@ -7,13 +7,39 @@ on:
       - completed
 
 jobs:
+  gate:
+    # Downloads the version artifact from Docker and checks if this is a version tag run.
+    # workflow_run chains always execute on the default branch, so head_branch is always
+    # "main" by this point — we use the artifact to recover the original tag name instead.
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    permissions:
+      actions: read
+    outputs:
+      version: ${{ steps.read-version.outputs.version }}
+      is-version-tag: ${{ steps.read-version.outputs.is-version-tag }}
+    steps:
+      - name: Download version artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-version
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Read and validate version tag
+        id: read-version
+        run: |
+          VERSION=$(tr -d '\r\n' < version.txt)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "is-version-tag=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is-version-tag=false" >> "$GITHUB_OUTPUT"
+          fi
+
   check-and-update-registry:
-    # Only run on version tag releases (originating from a tag push) and if the docker workflow succeeded.
-    # Docker is now a downstream workflow_run job (not push-triggered), so event == 'push' is omitted;
-    # startsWith(head_branch, 'v') is sufficient to identify version tag runs through the chain.
-    if: |
-      github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'v')
+    needs: gate
+    if: needs.gate.outputs.is-version-tag == 'true'
 
     runs-on: ubuntu-latest
     permissions:
@@ -24,28 +50,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.workflow_run.head_branch }}
-
-      - name: Wait for PyPI release to complete
-        uses: fountainhead/action-wait-for-check@5a908a24814494009c4bb27c242ea38c93c593be # v1.2.0
-        id: wait-for-pypi
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          checkName: "Upload to PyPI via Jenkins"
-          ref: ${{ github.event.workflow_run.head_sha }}
-          timeoutSeconds: 600
-          intervalSeconds: 10
-
-      - name: Check PyPI release status
-        if: steps.wait-for-pypi.outputs.conclusion != 'success'
-        run: |
-          echo "PyPI release did not succeed. Status: ${{ steps.wait-for-pypi.outputs.conclusion }}"
-          exit 1
+          ref: ${{ needs.gate.outputs.version }}
 
       - name: Validate version consistency
         id: version
         env:
-          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_BRANCH: ${{ needs.gate.outputs.version }}
         run: |
           # Read versions from files
           ROOT_VERSION=$(jq -r '.version' server.json)

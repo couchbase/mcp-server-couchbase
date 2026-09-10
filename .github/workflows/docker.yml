@@ -137,3 +137,37 @@ jobs:
           REGISTRY: "public"
           TAG_LATEST: ${{ steps.check-stable.outputs.is_stable }}
           JOB_NAME: "docker-publish"
+
+      - name: Checkout repository for Docker Hub description
+        if: steps.check-stable.outputs.is_stable == 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.inputs.version || steps.artifact-version.outputs.version }}
+          sparse-checkout: DOCKER.md
+          sparse-checkout-cone-mode: false
+
+      - name: Update Docker Hub description
+        if: steps.check-stable.outputs.is_stable == 'true'
+        continue-on-error: true
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: couchbase/mcp-server
+          readme-filepath: ./DOCKER.md
+
+      - name: Save version for downstream workflows
+        env:
+          VERSION: ${{ github.event.inputs.version || steps.artifact-version.outputs.version }}
+        run: |
+          if [ -z "$VERSION" ]; then
+            echo "ERROR: VERSION is empty, cannot save version artifact"
+            exit 1
+          fi
+          echo "$VERSION" > version.txt
+
+      - name: Upload version artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-version
+          path: version.txt
