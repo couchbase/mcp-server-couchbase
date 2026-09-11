@@ -46,9 +46,12 @@ def list_fts_indexes(
       bucket_name is required.
 
     Each entry contains: name, uuid, source_name, source_type, idx_type, bucket, scope.
-    bucket/scope are None for cluster-level (legacy) entries. This is a summary view —
-    call get_fts_index_definition with the same bucket_name/scope_name pairing to get
-    the full index definition (mappings, analyzers, plan params) for a specific index.
+    bucket/scope are None for cluster-level (legacy) entries. This is a summary view — to
+    get one index's full definition (mappings, analyzers, plan params), call
+    get_fts_index_definition with that entry's name and its own bucket/scope values
+    (both, for a scoped entry; neither, when they're None). Don't reuse this call's
+    filters: listing by bucket_name alone spans several scopes, and
+    get_fts_index_definition rejects a bucket without a scope.
     """
     if scope_name and not bucket_name:
         return [{"error": "bucket_name is required when filtering by scope_name"}]
@@ -212,7 +215,10 @@ def run_fts_query(
 
     Returns {"index_name", "explain", "total_hits", "hits", "facets", "metadata":
     {"errors","metrics"}} on success, or {"error": ...} if the input is invalid or the
-    query fails (e.g. bad query syntax, index not found). hits entries are
+    query fails (e.g. bad query syntax, index not found). total_hits counts the hits
+    actually returned, so it is capped by limit — for how many documents matched overall,
+    read metadata.metrics.total_rows instead, and don't report total_hits as the size of
+    the match set. hits entries are
     {"id","score","fields","locations","fragments"} when explain=False, or
     {"id","score","explanation"} when explain=True (facets is empty in that case).
     """
