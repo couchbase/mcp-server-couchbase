@@ -224,7 +224,7 @@ Write tools (marked ✏️) are **not loaded** while [read-only mode](#read-only
 | `insert_document_by_id` ✏️ | Insert a new document (fails if it exists) |
 | `replace_document_by_id` ✏️ | Replace an existing document (fails if it doesn't exist) |
 | `delete_document_by_id` ✏️ | Delete a document by ID |
-| `mutate_subdocument` ✏️ | Modify paths in an existing document (upsert, insert, replace, remove, array ops, counters) |
+| `mutate_subdocument` ✏️ | Modify paths in an existing document (upsert, insert, replace, remove, array ops, counters). Optionally takes `store_semantics` to create the document when it is missing |
 
 #### Query and indexing
 
