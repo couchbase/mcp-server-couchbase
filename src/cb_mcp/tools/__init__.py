@@ -20,6 +20,13 @@ from .collection_management import (
     delete_scope,
 )
 
+# FTS tools
+from .fts import (
+    get_fts_index_definition,
+    list_fts_indexes,
+    run_fts_query,
+)
+
 # Index tools
 from .index import (
     build_index,
@@ -52,12 +59,6 @@ from .query import (
     get_queries_with_largest_response_sizes,
     get_schema_for_collection,
     run_sql_plus_plus_query,
-)
-
-# FTS/Search tools
-from .search import (
-    list_search_indexes,
-    run_fts_query,
 )
 
 # Server tools
@@ -93,8 +94,9 @@ READ_ONLY_TOOLS = [
     # Index tools
     get_index_advisor_recommendations,
     list_indexes,
-    # FTS/Search tools
-    list_search_indexes,
+    # FTS tools
+    list_fts_indexes,
+    get_fts_index_definition,
     run_fts_query,
     # Query performance analysis tools
     get_queries_not_selective,
@@ -149,8 +151,9 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     # Index tools (read-only)
     "get_index_advisor_recommendations": ToolAnnotations(readOnlyHint=True),
     "list_indexes": ToolAnnotations(readOnlyHint=True),
-    # FTS/Search tools (read-only)
-    "list_search_indexes": ToolAnnotations(readOnlyHint=True),
+    # FTS tools (read-only)
+    "list_fts_indexes": ToolAnnotations(readOnlyHint=True),
+    "get_fts_index_definition": ToolAnnotations(readOnlyHint=True),
     "run_fts_query": ToolAnnotations(readOnlyHint=True),
     # Query performance analysis tools (read-only)
     "get_longest_running_queries": ToolAnnotations(readOnlyHint=True),
@@ -220,7 +223,8 @@ __all__ = [
     "create_index",
     "build_index",
     "drop_index",
-    "list_search_indexes",
+    "list_fts_indexes",
+    "get_fts_index_definition",
     "run_fts_query",
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",

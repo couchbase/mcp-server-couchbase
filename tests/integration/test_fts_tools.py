@@ -1,8 +1,9 @@
 """
-Integration tests for search.py (FTS/Search) tools.
+Integration tests for fts.py (FTS/Search) tools.
 
 Tests for:
-- list_search_indexes (list mode and full-definition mode via index_name)
+- list_fts_indexes (cluster-level and scope-level listing)
+- get_fts_index_definition (single-index full definition)
 - run_fts_query (query mode and explain mode via explain=True)
 
 There is no MCP write tool for Search index management (out of scope for this
@@ -111,7 +112,7 @@ def _wait_for_seeded_document(
 
 
 @pytest.fixture(scope="module")
-def seeded_search_index() -> Iterator[dict[str, Any]]:
+def seeded_fts_index() -> Iterator[dict[str, Any]]:
     """Create a scope-level Search index on the test bucket/scope/collection,
     seed one uniquely-markered document into that collection, wait for the
     index to actually pick that document up, and drop the index (and doc)
@@ -198,9 +199,9 @@ def seeded_search_index() -> Iterator[dict[str, Any]]:
 
 
 @pytest.fixture(scope="module")
-def seeded_cluster_level_search_index() -> Iterator[dict[str, str]]:
+def seeded_cluster_level_fts_index() -> Iterator[dict[str, str]]:
     """Create a cluster-level (legacy) Search index for the duration of the
-    module, and drop it afterward. Ensures test_list_search_indexes_no_filters
+    module, and drop it afterward. Ensures test_list_fts_indexes_no_filters
     always has a cluster-level index to find instead of skipping.
 
     The index deliberately matches **zero documents**: it is only ever listed,
@@ -259,71 +260,71 @@ def seeded_cluster_level_search_index() -> Iterator[dict[str, str]]:
 
 
 @pytest.mark.asyncio
-async def test_list_search_indexes_no_filters(
-    seeded_cluster_level_search_index: dict[str, str],
+async def test_list_fts_indexes_no_filters(
+    seeded_cluster_level_fts_index: dict[str, str],
 ) -> None:
     """No-filter call must return cluster-level (legacy) indexes only, and
     must surface the seeded cluster-level index."""
     async with create_mcp_session() as session:
-        response = await session.call_tool("list_search_indexes", arguments={})
+        response = await session.call_tool("list_fts_indexes", arguments={})
         payload = extract_payload(response)
 
     assert isinstance(payload, list)
     names = {entry["name"] for entry in payload}
-    assert seeded_cluster_level_search_index["index_name"] in names
+    assert seeded_cluster_level_fts_index["index_name"] in names
     for entry in payload:
         assert entry["bucket"] is None
         assert entry["scope"] is None
 
 
 @pytest.mark.asyncio
-async def test_list_search_indexes_by_bucket_and_scope(
-    seeded_search_index: dict[str, Any],
+async def test_list_fts_indexes_by_bucket_and_scope(
+    seeded_fts_index: dict[str, Any],
 ) -> None:
     """Filtering by bucket_name + scope_name must return the seeded index."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "list_search_indexes",
+            "list_fts_indexes",
             arguments={
-                "bucket_name": seeded_search_index["bucket_name"],
-                "scope_name": seeded_search_index["scope_name"],
+                "bucket_name": seeded_fts_index["bucket_name"],
+                "scope_name": seeded_fts_index["scope_name"],
             },
         )
         payload = extract_payload(response)
 
     assert isinstance(payload, list)
     names = {entry["name"] for entry in payload}
-    assert seeded_search_index["index_name"] in names
+    assert seeded_fts_index["index_name"] in names
     for entry in payload:
-        assert entry["bucket"] == seeded_search_index["bucket_name"]
-        assert entry["scope"] == seeded_search_index["scope_name"]
+        assert entry["bucket"] == seeded_fts_index["bucket_name"]
+        assert entry["scope"] == seeded_fts_index["scope_name"]
 
 
 @pytest.mark.asyncio
-async def test_list_search_indexes_by_bucket_only(
-    seeded_search_index: dict[str, Any],
+async def test_list_fts_indexes_by_bucket_only(
+    seeded_fts_index: dict[str, Any],
 ) -> None:
     """Filtering by bucket_name only must enumerate across all scopes and
     still surface the seeded index."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "list_search_indexes",
-            arguments={"bucket_name": seeded_search_index["bucket_name"]},
+            "list_fts_indexes",
+            arguments={"bucket_name": seeded_fts_index["bucket_name"]},
         )
         payload = extract_payload(response)
 
     assert isinstance(payload, list)
     names = {entry["name"] for entry in payload}
-    assert seeded_search_index["index_name"] in names
+    assert seeded_fts_index["index_name"] in names
 
 
 @pytest.mark.asyncio
-async def test_list_search_indexes_scope_without_bucket_returns_error() -> None:
+async def test_list_fts_indexes_scope_without_bucket_returns_error() -> None:
     """scope_name without bucket_name must be rejected with a descriptive
     error entry, not a raised MCP error."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "list_search_indexes", arguments={"scope_name": get_test_scope()}
+            "list_fts_indexes", arguments={"scope_name": get_test_scope()}
         )
         payload = extract_payload(response)
 
@@ -332,65 +333,63 @@ async def test_list_search_indexes_scope_without_bucket_returns_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_search_indexes_by_index_name_scope_level(
-    seeded_search_index: dict[str, Any],
+async def test_get_fts_index_definition_scope_level(
+    seeded_fts_index: dict[str, Any],
 ) -> None:
-    """Fetching the seeded scope-level index via index_name must return a
-    single-entry list with native nested dicts for params (not JSON-encoded
-    strings)."""
+    """Fetching the seeded scope-level index must return its definition with
+    native nested dicts for params (not JSON-encoded strings)."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "list_search_indexes",
+            "get_fts_index_definition",
             arguments={
-                "index_name": seeded_search_index["index_name"],
-                "bucket_name": seeded_search_index["bucket_name"],
-                "scope_name": seeded_search_index["scope_name"],
+                "index_name": seeded_fts_index["index_name"],
+                "bucket_name": seeded_fts_index["bucket_name"],
+                "scope_name": seeded_fts_index["scope_name"],
             },
         )
         payload = extract_payload(response)
 
-    assert isinstance(payload, list) and len(payload) == 1
-    entry = payload[0]
-    assert entry["name"] == seeded_search_index["index_name"]
-    assert isinstance(entry["params"], dict)
-    assert entry["bucket"] == seeded_search_index["bucket_name"]
-    assert entry["scope"] == seeded_search_index["scope_name"]
+    assert isinstance(payload, dict)
+    assert payload["name"] == seeded_fts_index["index_name"]
+    assert isinstance(payload["params"], dict)
+    assert payload["bucket"] == seeded_fts_index["bucket_name"]
+    assert payload["scope"] == seeded_fts_index["scope_name"]
 
 
 @pytest.mark.asyncio
-async def test_list_search_indexes_by_index_name_partial_pair_returns_error() -> None:
-    """Passing index_name with only bucket_name (no scope_name) must return
-    a descriptive error entry, not a raised MCP error."""
+async def test_get_fts_index_definition_partial_pair_returns_error() -> None:
+    """Passing only bucket_name (no scope_name) must return a descriptive
+    error dict, not a raised MCP error."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "list_search_indexes",
+            "get_fts_index_definition",
             arguments={"index_name": "whatever", "bucket_name": "b"},
         )
         payload = extract_payload(response)
 
-    assert isinstance(payload, list) and len(payload) == 1
-    assert "must be provided together" in payload[0]["error"]
+    assert isinstance(payload, dict)
+    assert "must be provided together" in payload["error"]
 
 
 @pytest.mark.asyncio
-async def test_list_search_indexes_by_index_name_not_found_returns_error(
-    seeded_search_index: dict[str, Any],
+async def test_get_fts_index_definition_not_found_returns_error(
+    seeded_fts_index: dict[str, Any],
 ) -> None:
-    """Looking up a nonexistent index name must return an error entry
+    """Looking up a nonexistent index name must return an error dict
     rather than raising or returning None."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "list_search_indexes",
+            "get_fts_index_definition",
             arguments={
                 "index_name": f"does_not_exist_{uuid.uuid4().hex[:8]}",
-                "bucket_name": seeded_search_index["bucket_name"],
-                "scope_name": seeded_search_index["scope_name"],
+                "bucket_name": seeded_fts_index["bucket_name"],
+                "scope_name": seeded_fts_index["scope_name"],
             },
         )
         payload = extract_payload(response)
 
-    assert isinstance(payload, list) and len(payload) == 1
-    assert "error" in payload[0]
+    assert isinstance(payload, dict)
+    assert "error" in payload
 
 
 def _assert_query_succeeded(payload: object) -> dict[str, Any]:
@@ -406,7 +405,7 @@ def _assert_query_succeeded(payload: object) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_run_fts_query_match_all(seeded_search_index: dict[str, Any]) -> None:
+async def test_run_fts_query_match_all(seeded_fts_index: dict[str, Any]) -> None:
     """A match_all query against the seeded index must return real hits with
     a well-formed shape.
 
@@ -417,26 +416,26 @@ async def test_run_fts_query_match_all(seeded_search_index: dict[str, Any]) -> N
     travel-sample documents, so match_all returns arbitrary ones.
     test_run_fts_query_matches_seeded_document covers document identity.
     """
-    assert seeded_search_index["indexed"], (
+    assert seeded_fts_index["indexed"], (
         f"Search index never picked up the seeded document within "
         f"{FTS_READY_TIMEOUT}s. Last error from the Search service: "
-        f"{seeded_search_index['index_error']}"
+        f"{seeded_fts_index['index_error']}"
     )
 
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "run_fts_query",
             arguments={
-                "index_name": seeded_search_index["index_name"],
-                "bucket_name": seeded_search_index["bucket_name"],
-                "scope_name": seeded_search_index["scope_name"],
+                "index_name": seeded_fts_index["index_name"],
+                "bucket_name": seeded_fts_index["bucket_name"],
+                "scope_name": seeded_fts_index["scope_name"],
                 "query": {"match_all": {}},
                 "limit": 5,
             },
         )
         payload = _assert_query_succeeded(extract_payload(response))
 
-    assert payload["index_name"] == seeded_search_index["index_name"]
+    assert payload["index_name"] == seeded_fts_index["index_name"]
     assert payload["total_hits"] > 0
     assert isinstance(payload["hits"], list) and payload["hits"]
     hit = payload["hits"][0]
@@ -446,53 +445,53 @@ async def test_run_fts_query_match_all(seeded_search_index: dict[str, Any]) -> N
 
 @pytest.mark.asyncio
 async def test_run_fts_query_matches_seeded_document(
-    seeded_search_index: dict[str, Any],
+    seeded_fts_index: dict[str, Any],
 ) -> None:
     """Querying the seeded document's unique marker must return exactly that
     document — the real proof that search returns the right result, and
     deterministic whether or not the collection holds other data."""
-    assert seeded_search_index["indexed"], (
+    assert seeded_fts_index["indexed"], (
         f"Search index never picked up the seeded document within "
         f"{FTS_READY_TIMEOUT}s. Last error from the Search service: "
-        f"{seeded_search_index['index_error']}"
+        f"{seeded_fts_index['index_error']}"
     )
 
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "run_fts_query",
             arguments={
-                "index_name": seeded_search_index["index_name"],
-                "bucket_name": seeded_search_index["bucket_name"],
-                "scope_name": seeded_search_index["scope_name"],
-                "query": {"match": seeded_search_index["marker"], "field": "marker"},
+                "index_name": seeded_fts_index["index_name"],
+                "bucket_name": seeded_fts_index["bucket_name"],
+                "scope_name": seeded_fts_index["scope_name"],
+                "query": {"match": seeded_fts_index["marker"], "field": "marker"},
                 "limit": 5,
             },
         )
         payload = _assert_query_succeeded(extract_payload(response))
 
     assert payload["total_hits"] == 1
-    assert payload["hits"][0]["id"] == seeded_search_index["doc_id"]
+    assert payload["hits"][0]["id"] == seeded_fts_index["doc_id"]
 
 
 @pytest.mark.asyncio
 async def test_run_fts_query_explain_default_limit(
-    seeded_search_index: dict[str, Any],
+    seeded_fts_index: dict[str, Any],
 ) -> None:
     """run_fts_query with explain=True and no limit must default to 1 and
     return an explanation for the single returned hit."""
-    assert seeded_search_index["indexed"], (
+    assert seeded_fts_index["indexed"], (
         f"Search index never picked up the seeded document within "
         f"{FTS_READY_TIMEOUT}s. Last error from the Search service: "
-        f"{seeded_search_index['index_error']}"
+        f"{seeded_fts_index['index_error']}"
     )
 
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "run_fts_query",
             arguments={
-                "index_name": seeded_search_index["index_name"],
-                "bucket_name": seeded_search_index["bucket_name"],
-                "scope_name": seeded_search_index["scope_name"],
+                "index_name": seeded_fts_index["index_name"],
+                "bucket_name": seeded_fts_index["bucket_name"],
+                "scope_name": seeded_fts_index["scope_name"],
                 "query": {"match_all": {}},
                 "explain": True,
             },
@@ -510,17 +509,17 @@ async def test_run_fts_query_explain_default_limit(
 
 
 @pytest.mark.asyncio
-async def test_list_search_indexes_entries_have_expected_keys(
-    seeded_search_index: dict[str, Any],
+async def test_list_fts_indexes_entries_have_expected_keys(
+    seeded_fts_index: dict[str, Any],
 ) -> None:
-    """Schema contract: every list_search_indexes entry must carry the keys
+    """Schema contract: every list_fts_indexes entry must carry the keys
     our summary formatter promises, so an SDK-shape change is caught early."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "list_search_indexes",
+            "list_fts_indexes",
             arguments={
-                "bucket_name": seeded_search_index["bucket_name"],
-                "scope_name": seeded_search_index["scope_name"],
+                "bucket_name": seeded_fts_index["bucket_name"],
+                "scope_name": seeded_fts_index["scope_name"],
             },
         )
         payload = extract_payload(response)

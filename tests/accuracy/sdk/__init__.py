@@ -18,12 +18,12 @@ from .scorer import calculate_tool_calling_accuracy
 from .seeding import (
     delete_document,
     doc_id,
+    drop_fts_index,
     drop_scope,
-    drop_search_index,
     seed_collection,
     seed_document,
+    seed_fts_index,
     seed_scope,
-    seed_search_index,
     unique_name,
 )
 from .types import ExpectedToolCall, LLMToolCall, ModelResponse, PromptResult
@@ -46,14 +46,14 @@ __all__ = [
     "calculate_tool_calling_accuracy",
     "delete_document",
     "doc_id",
+    "drop_fts_index",
     "drop_scope",
-    "drop_search_index",
     "extract_tool_results",
     "run_accuracy_case",
     "run_result_case",
     "seed_collection",
     "seed_document",
+    "seed_fts_index",
     "seed_scope",
-    "seed_search_index",
     "unique_name",
 ]

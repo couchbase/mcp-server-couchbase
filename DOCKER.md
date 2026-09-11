@@ -63,7 +63,8 @@ Requires Couchbase Server 7.6+ and the Search service. Vector search is not supp
 
 | Tool Name | Description |
 | --------- | ----------- |
-| `list_search_indexes` | List Search (FTS) indexes, or fetch one index's full definition. With no `index_name`: no filters lists cluster-level (legacy) indexes, `bucket_name` lists scope-level indexes across every scope in that bucket, `bucket_name`+`scope_name` lists indexes in that one scope. With `index_name`: returns a single-entry list with the full definition (mappings, analyzers, plan params) — pass `bucket_name`+`scope_name` together for a scope-level index, or omit both for a cluster-level (legacy) index. |
+| `list_fts_indexes` | List Search (FTS) indexes. With no filters, lists cluster-level (legacy) indexes; with `bucket_name`, lists scope-level (scoped) indexes across every scope in that bucket; with `bucket_name` and `scope_name`, lists scope-level indexes in that one scope. |
+| `get_fts_index_definition` | Get the full definition of a single Search index (mappings, analyzers, plan params). Pass `bucket_name` and `scope_name` together for a scope-level index, or omit both for a cluster-level (legacy) index. |
 | `run_fts_query` | Run an FTS query against a Search index, or fetch its execution plan. `query` is the raw FTS query JSON body, supporting any non-vector query type (match, match_phrase, term, conjuncts, disjuncts, geo, date/numeric range, query_string, ...). Pass `explain=true` to fetch the execution plan instead of results — this still executes the query (`limit` defaulting to 1) since the Search service only exposes the plan per matched hit, not as a separate dry-run call. |
 
 ### Query performance analysis tools

@@ -74,8 +74,9 @@ EXPECTED_TOOLS = {
     "create_index",
     "build_index",
     "drop_index",
-    # FTS/Search tools
-    "list_search_indexes",
+    # FTS tools
+    "list_fts_indexes",
+    "get_fts_index_definition",
     "run_fts_query",
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
@@ -122,8 +123,9 @@ TOOLS_BY_CATEGORY = {
         "build_index",
         "drop_index",
     },
-    "search": {
-        "list_search_indexes",
+    "fts": {
+        "list_fts_indexes",
+        "get_fts_index_definition",
         "run_fts_query",
     },
     "management": {
@@ -198,6 +200,7 @@ TOOL_REQUIRED_PARAMS = {
     ],
     "build_index": ["bucket_name", "scope_name", "collection_name"],
     "drop_index": ["bucket_name", "scope_name", "collection_name", "index_name"],
+    "get_fts_index_definition": ["index_name"],
     "run_fts_query": ["index_name", "query"],
 }
 

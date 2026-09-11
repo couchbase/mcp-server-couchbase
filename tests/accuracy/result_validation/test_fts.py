@@ -1,4 +1,4 @@
-"""Result-validation evals for the FTS/Search tools (LLM-as-judge).
+"""Result-validation evals for the FTS tools (LLM-as-judge).
 
 Faithfulness checks — index state and query results are not fixed ground
 truth, so the judge verifies the answer is consistent with the tool output
@@ -11,7 +11,7 @@ import uuid
 
 import pytest
 
-from accuracy.sdk import ResultCase, drop_search_index, seed_search_index
+from accuracy.sdk import ResultCase, drop_fts_index, seed_fts_index
 
 from ._harness import assert_result_case
 
@@ -19,12 +19,12 @@ from ._harness import assert_result_case
 def _build_cases(bucket: str, scope: str, collection: str) -> list[ResultCase]:
     cases: list[ResultCase] = []
     index_name = f"res_fts_idx_{uuid.uuid4().hex[:8]}"
-    seed = seed_search_index(bucket, scope, collection, index_name)
-    cleanup = drop_search_index(bucket, scope, index_name)
+    seed = seed_fts_index(bucket, scope, collection, index_name)
+    cleanup = drop_fts_index(bucket, scope, index_name)
 
     cases.append(
         ResultCase(
-            test_id="list_search_indexes_by_index_name_faithful",
+            test_id="get_fts_index_definition_faithful",
             prompt=(
                 f"What is the idx_type (index type) of the Search index "
                 f"'{index_name}' in scope '{scope}' of bucket '{bucket}'?"
@@ -88,22 +88,22 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[ResultCase]:
 
 
 @pytest.fixture()
-def search_cases(test_bucket: str, test_scope: str, test_collection: str):
+def fts_cases(test_bucket: str, test_scope: str, test_collection: str):
     return _build_cases(test_bucket, test_scope, test_collection)
 
 
-SEARCH_RESULT_CASE_IDS = [
-    "list_search_indexes_by_index_name_faithful",
+FTS_RESULT_CASE_IDS = [
+    "get_fts_index_definition_faithful",
     "run_fts_query_faithful",
     "run_fts_query_explain_faithful",
 ]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("case_id", SEARCH_RESULT_CASE_IDS)
-async def test_search_result(
+@pytest.mark.parametrize("case_id", FTS_RESULT_CASE_IDS)
+async def test_fts_result(
     case_id: str,
-    search_cases: list[ResultCase],
+    fts_cases: list[ResultCase],
     accuracy_client,
     openai_agent,
     judge,
@@ -112,7 +112,7 @@ async def test_search_result(
     accuracy_run_id: str,
     commit_sha: str,
 ) -> None:
-    case = next(c for c in search_cases if c.test_id == case_id)
+    case = next(c for c in fts_cases if c.test_id == case_id)
     await assert_result_case(
         case,
         accuracy_client=accuracy_client,

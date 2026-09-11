@@ -1,12 +1,12 @@
 """
 Tools for Full Text Search (FTS / Search service) index discovery and querying.
 
-This module covers listing/looking-up Search indexes and executing/explaining FTS
-queries. Both scope-level (scoped) indexes and cluster-level ("legacy") indexes are
-supported. Vector search is explicitly out of scope here — a raw FTS query body (match,
-match_phrase, term, conjuncts, disjuncts, geo, date/numeric range, query_string, ...) is
-supported via a raw-JSON passthrough, but vector queries require the SDK's SearchRequest +
-VectorSearch combination, which these tools do not build.
+This module covers listing Search indexes, reading a single index's definition, and
+executing/explaining FTS queries. Both scope-level (scoped) indexes and cluster-level
+("legacy") indexes are supported. Vector search is explicitly out of scope here — a raw
+FTS query body (match, match_phrase, term, conjuncts, disjuncts, geo, date/numeric range,
+query_string, ...) is supported via a raw-JSON passthrough, but vector queries require the
+SDK's SearchRequest + VectorSearch combination, which these tools do not build.
 
 Error handling: these tools only let an exception propagate when the cluster itself
 can't be reached (get_cluster_connection). Everything else — bad input combinations,
@@ -26,44 +26,30 @@ from ..utils.connection import connect_to_bucket
 from ..utils.constants import MCP_SERVER_NAME
 from ..utils.context import get_cluster_connection
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.search")
+logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.fts")
 
 
-def list_search_indexes(
+def list_fts_indexes(
     ctx: Context,
-    index_name: str | None = None,
     bucket_name: str | None = None,
     scope_name: str | None = None,
 ) -> list[dict[str, Any]]:
-    """List Search (FTS) indexes, or fetch one index's full definition.
+    """List Search (FTS) indexes, optionally filtered by bucket and scope.
 
-    Two modes, selected by whether index_name is given. Always returns a list.
-
-    Summary mode (index_name omitted) — filtering behavior:
-    - No bucket_name/scope_name: lists cluster-level ("legacy") Search indexes only — the
-      original, pre-scoped FTS index model, defined at the cluster level.
+    Filtering behavior:
+    - No filters: lists cluster-level ("legacy") Search indexes only — the original,
+      pre-scoped FTS index model, defined at the cluster level.
     - bucket_name only: lists scope-level (scoped) Search indexes across every scope in
       that bucket.
     - bucket_name and scope_name: lists scope-level Search indexes in that one scope only.
     - scope_name without bucket_name is invalid — returns an error entry explaining that
       bucket_name is required.
+
     Each entry contains: name, uuid, source_name, source_type, idx_type, bucket, scope.
-    bucket/scope are None for cluster-level (legacy) entries.
-
-    Full-definition mode (index_name given) — returns a list containing at most one entry:
-    the full definition of that single index (name, source_type, idx_type, source_name,
-    uuid, params [mapping/analyzer configuration], source_uuid, source_params, and
-    plan_params [num replicas/partitions], plus the bucket/scope it was looked up in). Pass
-    both bucket_name and scope_name together to look up a scope-level (scoped) index in
-    that scope, or omit both to look up a cluster-level ("legacy") index. Passing only one
-    of the two is invalid — Couchbase allows the same index name to exist in different
-    scopes, so the location must be stated explicitly rather than guessed. If no index with
-    this name exists at the given location, returns [{"error": ...}] — confirm the exact
-    name and location first by calling this tool without index_name.
+    bucket/scope are None for cluster-level (legacy) entries. This is a summary view —
+    call get_fts_index_definition with the same bucket_name/scope_name pairing to get
+    the full index definition (mappings, analyzers, plan params) for a specific index.
     """
-    if index_name is not None:
-        return _get_search_index_definition(ctx, index_name, bucket_name, scope_name)
-
     if scope_name and not bucket_name:
         return [{"error": "bucket_name is required when filtering by scope_name"}]
 
@@ -118,21 +104,29 @@ def list_search_indexes(
         return [{"error": str(e)}]
 
 
-def _get_search_index_definition(
+def get_fts_index_definition(
     ctx: Context,
     index_name: str,
-    bucket_name: str | None,
-    scope_name: str | None,
-) -> list[dict[str, Any]]:
-    """Full-definition lookup for a single named Search index — the
-    index_name branch of list_search_indexes, split out only to keep that
-    public function's branch count manageable."""
+    bucket_name: str | None = None,
+    scope_name: str | None = None,
+) -> dict[str, Any]:
+    """Get the full definition of a single Search (FTS) index.
+
+    Pass both bucket_name and scope_name together to look up a scope-level (scoped) index
+    in that scope, or omit both to look up a cluster-level ("legacy") index. Passing only
+    one of the two is invalid — Couchbase allows the same index name to exist in different
+    scopes, so the location must be stated explicitly rather than guessed.
+
+    Returns the index's name, source_type, idx_type, source_name, uuid, params (mapping/
+    analyzer configuration), source_uuid, source_params, and plan_params (num replicas/
+    partitions), plus the bucket/scope it was looked up in. If no index with this name
+    exists at the given location, returns {"error": ...} — confirm the exact name and
+    location first with list_fts_indexes.
+    """
     if (bucket_name is None) != (scope_name is None):
-        return [
-            {
-                "error": "bucket_name and scope_name must be provided together, or omitted together"
-            }
-        ]
+        return {
+            "error": "bucket_name and scope_name must be provided together, or omitted together"
+        }
 
     cluster = get_cluster_connection(ctx)
 
@@ -148,24 +142,22 @@ def _get_search_index_definition(
             index = cluster.search_indexes().get_index(index_name)
 
         logger.info(f"Fetched Search index {index_name!r}")
-        return [
-            {
-                "name": index.name,
-                "source_type": index.source_type,
-                "idx_type": index.idx_type,
-                "source_name": index.source_name,
-                "uuid": index.uuid,
-                "params": index.params,
-                "source_uuid": index.source_uuid,
-                "source_params": index.source_params,
-                "plan_params": index.plan_params,
-                "bucket": bucket_name,
-                "scope": scope_name,
-            }
-        ]
+        return {
+            "name": index.name,
+            "source_type": index.source_type,
+            "idx_type": index.idx_type,
+            "source_name": index.source_name,
+            "uuid": index.uuid,
+            "params": index.params,
+            "source_uuid": index.source_uuid,
+            "source_params": index.source_params,
+            "plan_params": index.plan_params,
+            "bucket": bucket_name,
+            "scope": scope_name,
+        }
     except Exception as e:
         logger.error(f"Error fetching Search index {index_name!r}: {e}", exc_info=True)
-        return [{"error": str(e), "index_name": index_name}]
+        return {"error": str(e), "index_name": index_name}
 
 
 def run_fts_query(
@@ -201,7 +193,10 @@ def run_fts_query(
 
     Pass both bucket_name and scope_name together to query a scope-level (scoped) index,
     or omit both to query a cluster-level ("legacy") index. Passing only one is invalid.
-    Confirm the index's exact name/location first with list_search_indexes.
+    Confirm the index's exact name/location first with list_fts_indexes. Don't guess which
+    fields a query body can target — if you don't already know what the index maps and how
+    those fields are analyzed, call get_fts_index_definition first; a field-scoped query
+    against an unmapped field matches nothing rather than erroring.
 
     explain: if True, fetches the execution plan instead of normal results. The Search
     service exposes the query plan per matched document, not as a separate plan-only/

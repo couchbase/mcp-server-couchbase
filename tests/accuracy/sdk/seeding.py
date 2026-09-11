@@ -126,7 +126,7 @@ def delete_document(
     return _hook
 
 
-def seed_search_index(
+def seed_fts_index(
     bucket: str, scope: str, collection: str, index_name: str
 ) -> SetupHook:
     """Return a hook that creates a scope-level Search (FTS) index.
@@ -174,10 +174,10 @@ def seed_search_index(
     return _hook
 
 
-def drop_search_index(bucket: str, scope: str, index_name: str) -> SetupHook:
+def drop_fts_index(bucket: str, scope: str, index_name: str) -> SetupHook:
     """Return a hook that drops a scope-level Search index (best-effort).
 
-    SDK-direct for the same reason as :func:`seed_search_index`; also runs in
+    SDK-direct for the same reason as :func:`seed_fts_index`; also runs in
     a thread and closes the cluster for the same reason.
     """
 
