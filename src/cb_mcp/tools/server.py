@@ -8,13 +8,24 @@ import json
 import logging
 from typing import Any
 
+import httpx
 from couchbase.diagnostics import ServiceType
 from couchbase.options import PingOptions
 from fastmcp import Context
 
 from ..utils.config import get_settings
 from ..utils.connection import connect_to_bucket
-from ..utils.constants import MCP_SERVER_NAME
+from ..utils.connection_string import (
+    determine_ssl_verification,
+    extract_hosts_from_connection_string,
+    is_capella_connection,
+    validate_connection_settings,
+)
+from ..utils.constants import (
+    MANAGEMENT_REST_PORT_PLAIN,
+    MANAGEMENT_REST_PORT_TLS,
+    MCP_SERVER_NAME,
+)
 from ..utils.context import (
     get_cluster_connection,
     get_cluster_provider,
@@ -293,4 +304,108 @@ def get_cluster_diagnostics_report(ctx: Context) -> dict[str, Any]:
             "status": "error",
             "error": str(e),
             "message": "Failed to get cluster diagnostics information",
+        }
+
+
+def get_cluster_metrics(
+    ctx: Context,
+    metrics: list[dict[str, Any]],
+    timeout: int = 30,
+) -> dict[str, Any]:
+    """Get one or more cluster statistics over a historic time window in a single call.
+
+    Use this to quantify a suspected problem (e.g. after get_cluster_health_and_services or
+    get_cluster_diagnostics_report) — is a metric spiking, climbing, or stable over time?
+
+    Self-managed Couchbase Server 7.6+ only — rejects Capella connections without a REST call.
+    Calls POST /pools/default/stats/range.
+
+    `metrics` is passed through as the request body: a list of specs, each with a required
+    "metric" (list of {"label", "value"} pairs, e.g. [{"label": "name", "value":
+    "kv_disk_write_queue"}]), an optional "nodes" ("host:port" targets; omit it to cover every
+    node, which is usually what you want), and optional "applyFunctions",
+    "nodesAggregation", "start"/"end" (negative seconds relative to now; default -60/now),
+    "step" (seconds, default 10), "alignTimestamps".
+
+    To find metric names, call discover_tool_input_values(tool_name="get_cluster_metrics") — it
+    lists or searches the full Couchbase metrics reference bundled with this server, offline.
+    Don't guess a metric name: an unknown name comes back as a per-spec error with no data.
+
+    Not bounded: any number of specs, window, step, or node count is passed straight through to
+    the REST call, so a broad request (long window, fine step, many nodes/specs) can return a
+    large response.
+
+    Returns {"status": "success", "data": [...]} (one entry per spec, each with "data" and any
+    per-spec "errors") or {"status": "error", "error": "..."}.
+    """
+    try:
+        settings = get_settings(ctx)
+        validate_connection_settings(settings)
+        connection_string = settings["connection_string"]
+        if is_capella_connection(connection_string):
+            raise ValueError("get_cluster_metrics is not supported on Capella clusters")
+
+        for i, spec in enumerate(metrics):
+            if not isinstance(spec, dict):
+                raise ValueError(f"metrics[{i}] must be an object, got {spec!r}")
+            step = spec.get("step", 10)
+            end = spec.get("end", 0)
+            start = spec.get("start", -60)
+            if not all(
+                isinstance(v, int) and not isinstance(v, bool)
+                for v in (step, end, start)
+            ):
+                raise ValueError(
+                    f"metrics[{i}] has non-integer 'step'/'start'/'end' "
+                    f"(step={step!r}, start={start!r}, end={end!r}); all three must be integers."
+                )
+
+        is_tls = connection_string.lower().startswith("couchbases://")
+        protocol, port = (
+            ("https", MANAGEMENT_REST_PORT_TLS)
+            if is_tls
+            else ("http", MANAGEMENT_REST_PORT_PLAIN)
+        )
+        verify_ssl = determine_ssl_verification(
+            connection_string, settings.get("ca_cert_path")
+        )
+        hosts = extract_hosts_from_connection_string(connection_string)
+        if not hosts:
+            raise ValueError(
+                f"No hosts found in connection_string: {connection_string!r}"
+            )
+
+        last_error: Exception | None = None
+        with httpx.Client(verify=verify_ssl, timeout=timeout) as client:
+            for host in hosts:
+                try:
+                    response = client.post(
+                        f"{protocol}://{host}:{port}/pools/default/stats/range",
+                        json=metrics,
+                        auth=(settings["username"], settings["password"]),
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    logger.info(
+                        f"Retrieved cluster metrics for {len(metrics)} spec(s) from {host}"
+                    )
+                    return {"status": "success", "data": data}
+                except Exception as e:
+                    last_error = e
+        raise RuntimeError(f"Failed to reach any host in {hosts}: {last_error}")
+    except ValueError as e:
+        # Up-front, documented rejections (bad input, Capella, no hosts) — not a
+        # system fault, so no traceback noise in the logs.
+        logger.warning(f"Rejected get_cluster_metrics request: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to get cluster metrics",
+        }
+    except Exception as e:
+        logger.error(f"Error getting cluster metrics: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to get cluster metrics",
         }

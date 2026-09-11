@@ -80,6 +80,7 @@ EXPECTED_TOOLS = {
     "run_fts_query",
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
+    "get_cluster_metrics",
     # Performance analysis tools
     "get_longest_running_queries",
     "get_most_frequent_queries",
@@ -88,6 +89,8 @@ EXPECTED_TOOLS = {
     "get_queries_using_primary_index",
     "get_queries_not_using_covering_index",
     "get_queries_not_selective",
+    # Reference data tools
+    "discover_tool_input_values",
 }
 
 # Tools organized by category for validation
@@ -101,6 +104,7 @@ TOOLS_BY_CATEGORY = {
         "get_collections_in_scope",
         "get_cluster_health_and_services",
         "get_cluster_diagnostics_report",
+        "get_cluster_metrics",
     },
     "kv": {
         "get_document_by_id",
@@ -143,10 +147,15 @@ TOOLS_BY_CATEGORY = {
         "get_queries_not_using_covering_index",
         "get_queries_not_selective",
     },
+    "reference": {
+        "discover_tool_input_values",
+    },
 }
 
 # Expected required parameters for tools that need them
 TOOL_REQUIRED_PARAMS = {
+    # tool_name is the only required argument -- omitting search_keywords is browse mode.
+    "discover_tool_input_values": ["tool_name"],
     "get_scopes_in_bucket": ["bucket_name"],
     "get_scopes_and_collections_in_bucket": ["bucket_name"],
     "get_collections_in_scope": ["bucket_name", "scope_name"],

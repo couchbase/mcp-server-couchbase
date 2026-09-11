@@ -61,11 +61,17 @@ from .query import (
     run_sql_plus_plus_query,
 )
 
+# Reference data tools
+from .reference import (
+    discover_tool_input_values,
+)
+
 # Server tools
 from .server import (
     get_buckets_in_cluster,
     get_cluster_diagnostics_report,
     get_cluster_health_and_services,
+    get_cluster_metrics,
     get_collections_in_scope,
     get_scopes_and_collections_in_bucket,
     get_scopes_in_bucket,
@@ -84,6 +90,7 @@ READ_ONLY_TOOLS = [
     get_scopes_in_bucket,
     get_cluster_health_and_services,
     get_cluster_diagnostics_report,
+    get_cluster_metrics,
     # KV read tools
     get_document_by_id,
     lookup_subdocument,
@@ -106,6 +113,8 @@ READ_ONLY_TOOLS = [
     get_queries_with_largest_response_sizes,
     get_longest_running_queries,
     get_most_frequent_queries,
+    # Reference data tools
+    discover_tool_input_values,
 ]
 
 # Write tools - disabled when READ_ONLY_MODE is True
@@ -141,6 +150,7 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_scopes_in_bucket": ToolAnnotations(readOnlyHint=True),
     "get_cluster_health_and_services": ToolAnnotations(readOnlyHint=True),
     "get_cluster_diagnostics_report": ToolAnnotations(readOnlyHint=True),
+    "get_cluster_metrics": ToolAnnotations(readOnlyHint=True),
     # KV read tools
     "get_document_by_id": ToolAnnotations(readOnlyHint=True),
     "lookup_subdocument": ToolAnnotations(readOnlyHint=True),
@@ -163,6 +173,8 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_queries_using_primary_index": ToolAnnotations(readOnlyHint=True),
     "get_queries_not_using_covering_index": ToolAnnotations(readOnlyHint=True),
     "get_queries_not_selective": ToolAnnotations(readOnlyHint=True),
+    # Reference data tools (read-only, no cluster access at all)
+    "discover_tool_input_values": ToolAnnotations(readOnlyHint=True),
     # KV write tools
     "upsert_document_by_id": ToolAnnotations(idempotentHint=True),
     "insert_document_by_id": ToolAnnotations(idempotentHint=True),
@@ -228,6 +240,7 @@ __all__ = [
     "run_fts_query",
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
+    "get_cluster_metrics",
     "get_queries_not_selective",
     "get_queries_not_using_covering_index",
     "get_queries_using_primary_index",
@@ -235,6 +248,7 @@ __all__ = [
     "get_queries_with_largest_response_sizes",
     "get_longest_running_queries",
     "get_most_frequent_queries",
+    "discover_tool_input_values",
     # Tool categories
     "READ_ONLY_TOOLS",
     "WRITE_TOOLS",

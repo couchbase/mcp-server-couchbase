@@ -11,7 +11,6 @@ Tests for:
 
 from __future__ import annotations
 
-import os
 import threading
 from unittest.mock import MagicMock, patch
 
@@ -24,6 +23,7 @@ from cb_mcp.tools.index import (
 )
 from cb_mcp.utils.config import get_settings
 from cb_mcp.utils.connection import connect_to_bucket, connect_to_couchbase_cluster
+from cb_mcp.utils.connection_string import validate_connection_settings
 from cb_mcp.utils.constants import (
     ALLOWED_TRANSPORTS,
     DEFAULT_READ_ONLY_MODE,
@@ -37,16 +37,12 @@ from cb_mcp.utils.context import (
 )
 from cb_mcp.utils.index_utils import (
     _build_query_params,
-    _determine_ssl_verification,
-    _extract_hosts_from_connection_string,
-    _get_capella_root_ca_path,
     clean_index_definition,
     fetch_indexes_from_rest_api,
     parse_major_version,
     process_index_data_from_query,
     process_index_data_from_rest_api,
     resolve_cluster_major_version,
-    validate_connection_settings,
     validate_filter_params,
 )
 from providers.static import StaticClusterProvider
@@ -251,36 +247,6 @@ class TestIndexUtilsFunctions:
         assert result is not None
         assert result["isPrimary"] is True
 
-    def test_extract_hosts_single_host(self) -> None:
-        """Extract single host from connection string."""
-        conn_str = "couchbase://localhost"
-        hosts = _extract_hosts_from_connection_string(conn_str)
-        assert hosts == ["localhost"]
-
-    def test_extract_hosts_multiple_hosts(self) -> None:
-        """Extract multiple hosts from connection string."""
-        conn_str = "couchbase://host1,host2,host3"
-        hosts = _extract_hosts_from_connection_string(conn_str)
-        assert hosts == ["host1", "host2", "host3"]
-
-    def test_extract_hosts_with_port(self) -> None:
-        """Extract hosts with port numbers."""
-        conn_str = "couchbase://localhost:8091"
-        hosts = _extract_hosts_from_connection_string(conn_str)
-        assert hosts == ["localhost"]
-
-    def test_extract_hosts_tls_connection(self) -> None:
-        """Extract hosts from TLS connection string."""
-        conn_str = "couchbases://secure-host.example.com"
-        hosts = _extract_hosts_from_connection_string(conn_str)
-        assert hosts == ["secure-host.example.com"]
-
-    def test_extract_hosts_capella(self) -> None:
-        """Extract hosts from Capella connection string."""
-        conn_str = "couchbases://cb.abc123.cloud.couchbase.com"
-        hosts = _extract_hosts_from_connection_string(conn_str)
-        assert hosts == ["cb.abc123.cloud.couchbase.com"]
-
     def test_build_query_params_all(self) -> None:
         """Build query params with all fields."""
         params = _build_query_params(
@@ -313,23 +279,6 @@ class TestIndexUtilsFunctions:
             collection_name=None,
         )
         assert params == {}
-
-    def test_determine_ssl_non_tls(self) -> None:
-        """Non-TLS connection should disable SSL verification."""
-        result = _determine_ssl_verification("couchbase://localhost", None)
-        assert result is False
-
-    def test_determine_ssl_tls_no_cert(self) -> None:
-        """TLS connection without cert uses system CA bundle."""
-        result = _determine_ssl_verification("couchbases://localhost", None)
-        assert result is True
-
-    def test_determine_ssl_tls_with_cert(self) -> None:
-        """TLS connection with cert uses provided cert."""
-        result = _determine_ssl_verification(
-            "couchbases://localhost", "/path/to/ca.pem"
-        )
-        assert result == "/path/to/ca.pem"
 
     def test_parse_major_version_basic(self) -> None:
         """Parse a typical full version string."""
@@ -1336,179 +1285,6 @@ class TestListIndexesVersionRouting:
         mock_rest.assert_called_once()
         assert len(result) == 1
         assert result[0]["name"] == "idx1"
-
-
-class TestExtractHostsFallback:
-    """_extract_hosts_from_connection_string fallback when urlparse can't
-    populate netloc (e.g., scheme-less or oddly formatted inputs)."""
-
-    def test_bare_host_no_scheme(self) -> None:
-        """A bare host string with no scheme has no netloc; the fallback
-        path should still return the host."""
-        # urlparse treats "host.example.com" as a path, not a netloc.
-        hosts = _extract_hosts_from_connection_string("host.example.com")
-        assert hosts == ["host.example.com"]
-
-    def test_bare_host_with_port_no_scheme(self) -> None:
-        """Bare host:port (no scheme) should still strip the port."""
-        hosts = _extract_hosts_from_connection_string("host.example.com:8091")
-        assert hosts == ["host.example.com"]
-
-    def test_bare_multiple_hosts_no_scheme(self) -> None:
-        """Comma-separated bare hosts should be split apart."""
-        hosts = _extract_hosts_from_connection_string("h1,h2,h3")
-        assert hosts == ["h1", "h2", "h3"]
-
-
-class TestDetermineSSLCapella:
-    """_determine_ssl_verification Capella branch."""
-
-    def test_capella_returns_bundled_ca_when_present(self) -> None:
-        """For *.cloud.couchbase.com hosts, the Capella CA bundle should
-        be returned when the file is present on disk."""
-        capella_conn = "couchbases://cb.abc123.cloud.couchbase.com"
-
-        with (
-            patch(
-                "cb_mcp.utils.index_utils._get_capella_root_ca_path",
-                return_value="/fake/capella_root_ca.pem",
-            ),
-            patch(
-                "cb_mcp.utils.index_utils.os.path.exists",
-                return_value=True,
-            ),
-        ):
-            result = _determine_ssl_verification(capella_conn, None)
-
-        assert result == "/fake/capella_root_ca.pem"
-
-    def test_capella_detected_with_port_and_query_params(self) -> None:
-        """Ports and query parameters must not break Capella detection."""
-        capella_conn = "couchbases://cb.abc123.cloud.couchbase.com:11207?network=auto"
-
-        with (
-            patch(
-                "cb_mcp.utils.index_utils._get_capella_root_ca_path",
-                return_value="/fake/capella_root_ca.pem",
-            ),
-            patch(
-                "cb_mcp.utils.index_utils.os.path.exists",
-                return_value=True,
-            ),
-        ):
-            result = _determine_ssl_verification(capella_conn, None)
-
-        assert result == "/fake/capella_root_ca.pem"
-
-    def test_capella_detected_with_query_params_only(self) -> None:
-        """Query parameters without a port must not break Capella detection."""
-        capella_conn = "couchbases://cb.abc123.cloud.couchbase.com?network=external"
-
-        with (
-            patch(
-                "cb_mcp.utils.index_utils._get_capella_root_ca_path",
-                return_value="/fake/capella_root_ca.pem",
-            ),
-            patch(
-                "cb_mcp.utils.index_utils.os.path.exists",
-                return_value=True,
-            ),
-        ):
-            result = _determine_ssl_verification(capella_conn, None)
-
-        assert result == "/fake/capella_root_ca.pem"
-
-    def test_capella_falls_back_to_system_bundle_when_missing(self) -> None:
-        """If the bundled Capella CA cannot be located on disk, fall back
-        to the system CA bundle (verify=True) so connections still work."""
-        capella_conn = "couchbases://cb.abc123.cloud.couchbase.com"
-
-        with (
-            patch(
-                "cb_mcp.utils.index_utils._get_capella_root_ca_path",
-                return_value="/missing/capella_root_ca.pem",
-            ),
-            patch(
-                "cb_mcp.utils.index_utils.os.path.exists",
-                return_value=False,
-            ),
-        ):
-            result = _determine_ssl_verification(capella_conn, None)
-
-        assert result is True
-
-    def test_capella_ignores_user_ca_path(self) -> None:
-        """A Capella host should pick the bundled Capella CA over a
-        user-supplied CA path — Capella certs are pinned."""
-        capella_conn = "couchbases://cb.abc123.cloud.couchbase.com"
-
-        with (
-            patch(
-                "cb_mcp.utils.index_utils._get_capella_root_ca_path",
-                return_value="/fake/capella_root_ca.pem",
-            ),
-            patch(
-                "cb_mcp.utils.index_utils.os.path.exists",
-                return_value=True,
-            ),
-        ):
-            result = _determine_ssl_verification(capella_conn, "/user/supplied/ca.pem")
-
-        assert result == "/fake/capella_root_ca.pem"
-
-
-class TestGetCapellaRootCAPath:
-    """_get_capella_root_ca_path resource resolution."""
-
-    def test_uses_importlib_resources_when_available(self) -> None:
-        """The installed-package path uses importlib.resources.files()."""
-        fake_path = MagicMock()
-        fake_path.__str__ = lambda self: (
-            "/site-packages/cb_mcp/certs/capella_root_ca.pem"
-        )
-
-        with patch("cb_mcp.utils.index_utils.files") as mock_files:
-            mock_files.return_value.joinpath.return_value = fake_path
-            result = _get_capella_root_ca_path()
-
-        assert result == "/site-packages/cb_mcp/certs/capella_root_ca.pem"
-        mock_files.assert_called_once_with("cb_mcp.certs")
-
-    def test_falls_back_to_dev_path_when_importlib_fails(self) -> None:
-        """When importlib.resources raises, the fallback returns a path
-        derived from this module's location and logs a fallback message
-        when the file exists."""
-        with (
-            patch(
-                "cb_mcp.utils.index_utils.files",
-                side_effect=FileNotFoundError("no resource"),
-            ),
-            patch(
-                "cb_mcp.utils.index_utils.os.path.exists",
-                return_value=True,
-            ),
-        ):
-            result = _get_capella_root_ca_path()
-
-        # Path must end with the expected filename and the certs/ dir.
-        assert result.endswith(os.path.join("certs", "capella_root_ca.pem"))
-
-    def test_returns_fallback_path_even_when_file_missing(self) -> None:
-        """If both the resource lookup AND the fallback file are missing,
-        the fallback path is still returned (with a warning logged)."""
-        with (
-            patch(
-                "cb_mcp.utils.index_utils.files",
-                side_effect=ImportError("no module"),
-            ),
-            patch(
-                "cb_mcp.utils.index_utils.os.path.exists",
-                return_value=False,
-            ),
-        ):
-            result = _get_capella_root_ca_path()
-
-        assert result.endswith(os.path.join("certs", "capella_root_ca.pem"))
 
 
 class TestFetchIndexesFromRestApi:

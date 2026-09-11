@@ -20,6 +20,14 @@ NETWORK_TRANSPORTS_SDK_MAPPING = {
 # network transport but is explicitly out of scope for OAuth in this build.
 STREAMABLE_HTTP_TRANSPORT = "http"
 
+# Couchbase Server REST API ports. TLS/plaintext port pairs differ per service —
+# these are used to build request URLs once TLS-vs-plaintext is decided from the
+# connection string's scheme.
+MANAGEMENT_REST_PORT_TLS = 18091
+MANAGEMENT_REST_PORT_PLAIN = 8091
+INDEX_REST_PORT_TLS = 19102
+INDEX_REST_PORT_PLAIN = 9102
+
 # Index Service Configuration
 # Cluster major version at which list_indexes prefers the query service over
 # the Index Service REST API. From this version, system:indexes exposes the
