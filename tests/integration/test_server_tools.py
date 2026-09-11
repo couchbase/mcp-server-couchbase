@@ -11,7 +11,6 @@ Tests for:
 - get_cluster_diagnostics_report
 - test_cluster_connection
 - get_cluster_metrics
-- get_nodes_in_cluster
 """
 
 from __future__ import annotations
@@ -25,20 +24,6 @@ from conftest import (
     is_error_response,
     require_test_bucket,
 )
-
-_METRICS_TEST_NODE_LIMIT = 2
-
-
-async def _get_metrics_target_nodes(session) -> list[str]:
-    """Fetch a couple of real node targets for a get_cluster_metrics spec.
-
-    Falls back to a placeholder when get_nodes_in_cluster itself errors (e.g. against
-    Capella) — get_cluster_metrics rejects Capella before making any REST call anyway.
-    """
-    response = await session.call_tool("get_nodes_in_cluster", arguments={})
-    payload = extract_payload(response)
-    nodes = payload.get("data") if isinstance(payload, dict) else None
-    return (nodes or ["127.0.0.1:8091"])[:_METRICS_TEST_NODE_LIMIT]
 
 
 @pytest.mark.asyncio
@@ -231,7 +216,6 @@ async def test_get_cluster_metrics() -> None:
     {"status": "error", ...} envelope rather than an unhandled exception.
     """
     async with create_mcp_session() as session:
-        nodes = await _get_metrics_target_nodes(session)
         response = await session.call_tool(
             "get_cluster_metrics",
             arguments={
@@ -243,7 +227,6 @@ async def test_get_cluster_metrics() -> None:
                         "applyFunctions": ["avg"],
                         "step": 10,
                         "start": -60,
-                        "nodes": nodes,
                     }
                 ]
             },
@@ -264,14 +247,12 @@ async def test_get_cluster_metrics() -> None:
 async def test_get_cluster_metrics_invalid_metric_reports_per_spec_error() -> None:
     """An unrecognized metric name should surface inline, not fail the whole call."""
     async with create_mcp_session() as session:
-        nodes = await _get_metrics_target_nodes(session)
         response = await session.call_tool(
             "get_cluster_metrics",
             arguments={
                 "metrics": [
                     {
                         "metric": [{"label": "name", "value": "not_a_real_metric_xyz"}],
-                        "nodes": nodes,
                     }
                 ]
             },
@@ -293,28 +274,3 @@ async def test_get_cluster_metrics_invalid_metric_reports_per_spec_error() -> No
         # The server reports the unrecognized metric via a per-spec error rather
         # than failing the whole request.
         assert data[0].get("errors") or data[0].get("data") == []
-
-
-@pytest.mark.asyncio
-async def test_get_nodes_in_cluster() -> None:
-    """Verify get_nodes_in_cluster returns cluster node targets.
-
-    Self-managed Couchbase Server only. Against Capella, expect a clean
-    {"status": "error", ...} envelope rather than an unhandled exception.
-    """
-    async with create_mcp_session() as session:
-        response = await session.call_tool("get_nodes_in_cluster", arguments={})
-        payload = extract_payload(response)
-
-        assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
-        assert payload.get("status") in ("success", "error"), (
-            f"Expected a status envelope: {payload}"
-        )
-        if payload.get("status") == "success":
-            data = payload.get("data")
-            assert isinstance(data, list) and len(data) > 0, (
-                "Expected at least one node target"
-            )
-            assert all(":" in target for target in data), (
-                f"Expected 'host:port' targets, got: {data}"
-            )

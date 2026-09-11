@@ -2,7 +2,7 @@
 Integration tests for reference.py tools.
 
 Tests for:
-- discover_tool_input_values (browse mode, search mode, chapter filters)
+- discover_tool_input_values (full listing, search mode, chapter filters)
 
 This tool never touches the cluster, so it is also exercised via
 ``create_logging_test_session`` — which strips cluster credentials — to prove it keeps working
@@ -23,8 +23,8 @@ METRICS_TOOL = "get_cluster_metrics"
 
 
 @pytest.mark.asyncio
-async def test_browse_returns_chapters_and_a_sample_record() -> None:
-    """Passing tool_name alone is a valid call and returns the table of contents."""
+async def test_default_call_lists_every_record() -> None:
+    """Passing tool_name alone lists the whole dataset over the wire, not just a sample."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "discover_tool_input_values", arguments={"tool_name": METRICS_TOOL}
@@ -33,10 +33,12 @@ async def test_browse_returns_chapters_and_a_sample_record() -> None:
 
         assert isinstance(payload, dict), f"Expected dict response, got {type(payload)}"
         assert payload.get("success") is True
-        assert payload.get("chapters"), "Browse mode must return chapters"
-        assert payload.get("sample_record"), "Browse mode must return a sample record"
-        assert "next_step" in payload
-        assert "results" not in payload, "Browse mode must not run a search"
+        assert payload.get("chapters"), "The listing must still carry chapters"
+        assert payload["record_count"] == len(payload["records"])
+        assert payload["record_count"] > 1000, (
+            f"Expected the full metrics dataset, got {payload['record_count']}"
+        )
+        assert "results" not in payload, "The default call must not run a search"
 
 
 @pytest.mark.asyncio

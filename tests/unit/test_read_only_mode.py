@@ -35,9 +35,9 @@ WRITE_TOOL_NAMES = {
     "drop_index",
 }
 
-# Read-only tool names that should always be available (25 tools)
+# Read-only tool names that should always be available (24 tools)
 READ_ONLY_TOOL_NAMES = {
-    # Server/Cluster management tools (10)
+    # Server/Cluster management tools (9)
     "get_buckets_in_cluster",
     "get_server_configuration_status",
     "test_cluster_connection",
@@ -47,7 +47,6 @@ READ_ONLY_TOOL_NAMES = {
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
     "get_cluster_metrics",
-    "get_nodes_in_cluster",
     # KV read tools (2)
     "get_document_by_id",
     "lookup_subdocument",
@@ -173,15 +172,15 @@ class TestToolCounts:
         """Verify correct number of tools in read-only mode."""
         tools = get_tools(read_only_mode=True)
         assert len(tools) == len(READ_ONLY_TOOLS)
-        assert len(tools) == 25  # Expected count of read-only tools
+        assert len(tools) == 24  # Expected count of read-only tools
 
     def test_all_tools_mode_tool_count(self):
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (25 read-only + 5 KV write + 4 collection write
+        # Expected total count (24 read-only + 5 KV write + 4 collection write
         # + 3 index write)
-        assert len(tools) == 37
+        assert len(tools) == 36
 
     def test_write_tools_count(self):
         """Verify exactly 12 write tools exist."""

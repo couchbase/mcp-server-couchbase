@@ -34,6 +34,18 @@ SUPPORTED_SCHEMA_VERSIONS = frozenset({1})
 MAX_CHAPTER_FIELDS = 3
 MAX_CHAPTER_VALUES = 25
 
+# Above this response size, a dataset is not listed in full -- the caller is pointed at search
+# instead. This is measured on the SERIALISED RESPONSE, not the dataset file: the file is only a
+# lower bound (the response re-serialises the records and adds the dataset/chapters blocks on top),
+# and what a client rejects is the response. The file size is still used as a cheap pre-check so a
+# huge dataset is never materialised just to be discarded.
+#
+# The default is deliberately well under typical MCP client output limits. Raising it past what the
+# client accepts does not get you a bigger answer -- it gets the whole tool result discarded.
+MAX_LIST_RESPONSE_BYTES = int(
+    os.environ.get("CB_MCP_MAX_LIST_RESPONSE_BYTES", 64 * 1024)
+)
+
 
 def _dataset_dir() -> str:
     """Locate the bundled reference_data directory.
@@ -150,11 +162,19 @@ def chapters(path: str) -> dict[str, dict[str, int]]:
     return {field: dict(counter.most_common()) for field, counter in counters.items()}
 
 
-def sample_record(path: str) -> dict[str, Any] | None:
-    """The dataset's first record, to show callers the shape of what they're searching."""
-    for record in iter_records(path):
-        return record
-    return None
+def dataset_size_bytes(path: str) -> int:
+    """On-disk size of a dataset, used to decide whether it is small enough to list in full."""
+    return os.path.getsize(path)
+
+
+def list_records(path: str) -> list[dict[str, Any]]:
+    """Every record in the dataset, exactly as stored (the envelope line is not included).
+
+    This is the default view: the caller gets the whole namespace in one response and can pick an
+    identifier without a second call. Applies no cap itself -- the caller is responsible for
+    checking the resulting response against ``MAX_LIST_RESPONSE_BYTES``.
+    """
+    return list(iter_records(path))
 
 
 def _searchable_text(record: dict[str, Any], field_spec: dict[str, Any]) -> str:

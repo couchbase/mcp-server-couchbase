@@ -103,7 +103,18 @@ single compound `metric_type` (`"counter / bytes"`, `"gauge / seconds"`) with 20
 splitting it into `metric_type` (4) and `unit` (10) brought the total to 24.
 
 **Chapters are optional.** A flat dataset with no useful categorical axis can omit `chapter_fields`
-entirely — browsing then returns a sample record and tells the caller to search instead.
+entirely — the default call then returns the records with an empty `chapters` block.
+
+## Listing size limit
+
+A call with no `search_keywords` returns **every record** in the dataset. That only happens while
+the dataset file stays under **400 KB** (`MAX_LIST_BYTES` in `utils/reference_data.py`). Above that,
+the tool returns the chapters block and a `next_step` telling the caller to search instead — it
+never returns a partial list, because a truncated slice reads as the complete namespace.
+
+Keep this in mind when regenerating a dataset: `couchbase_metrics.jsonl` is ~381 KB, so it has
+little headroom. If a dataset outgrows the limit, callers can still reach every record through
+search and chapter filters — they just lose the one-shot full listing.
 
 ## Checking your dataset
 

@@ -10,7 +10,7 @@ reached against a live cluster:
 - get_cluster_health_and_services returns an error envelope on ping failure.
 - get_cluster_health_and_services translates service_types into PingOptions and
   rejects unrecognized service type strings via the same error envelope.
-- get_cluster_metrics / get_nodes_in_cluster return error envelopes on REST
+- get_cluster_metrics returns error envelopes on REST
   failures and success envelopes wrapping the raw REST response otherwise, and
   reject Capella connections up front without attempting the REST call.
 - get_cluster_metrics rejects malformed specs (non-object spec, non-integer
@@ -28,7 +28,6 @@ from couchbase.diagnostics import ServiceType
 from cb_mcp.tools.server import (
     get_cluster_health_and_services,
     get_cluster_metrics,
-    get_nodes_in_cluster,
     get_scopes_and_collections_in_bucket,
     get_scopes_in_bucket,
 )
@@ -542,120 +541,3 @@ class TestGetClusterMetrics:
 
         mock_client.post.assert_called_once()
         assert result == {"status": "success", "data": [{"data": []}]}
-
-
-class TestGetNodesInCluster:
-    """get_nodes_in_cluster: Capella rejection, REST call, and error/success envelopes."""
-
-    @staticmethod
-    def _patch_httpx_client(side_effect_method: str, side_effect):
-        """Patch httpx.Client so *side_effect_method* ("get"/"post") returns *side_effect*."""
-        mock_client_cm = MagicMock()
-        mock_client = MagicMock()
-        setattr(mock_client, side_effect_method, MagicMock(side_effect=side_effect))
-        mock_client_cm.__enter__.return_value = mock_client
-        mock_client_cm.__exit__.return_value = False
-        return (
-            patch("cb_mcp.tools.server.httpx.Client", return_value=mock_client_cm),
-            mock_client,
-        )
-
-    @staticmethod
-    def _ok_response(payload: list | None = None) -> MagicMock:
-        """Build a mock httpx.Response that mimics .raise_for_status / .json."""
-        response = MagicMock()
-        response.raise_for_status = MagicMock()
-        response.json.return_value = payload if payload is not None else []
-        return response
-
-    def test_returns_error_envelope_on_missing_settings(self) -> None:
-        """Missing connection settings must not raise past the tool boundary."""
-        ctx = _make_ctx_with_settings({})
-
-        result = get_nodes_in_cluster(ctx)
-
-        assert result["status"] == "error"
-        assert "Failed to get cluster nodes" in result["message"]
-
-    def test_rejects_capella_connection_without_rest_call(self) -> None:
-        """A Capella connection must be rejected up front, with no REST attempt."""
-        ctx = _make_ctx_with_settings(_CAPELLA_SETTINGS)
-
-        with patch("cb_mcp.tools.server.httpx.Client") as mock_client_cls:
-            result = get_nodes_in_cluster(ctx)
-
-        mock_client_cls.assert_not_called()
-        assert result["status"] == "error"
-        assert "Capella" in result["error"]
-        assert "Failed to get cluster nodes" in result["message"]
-
-    def test_rejects_malformed_connection_string_without_rest_call(self) -> None:
-        """A connection string with no extractable host must fail fast, not
-        raise RuntimeError with no underlying error."""
-        settings = {**_VALID_SETTINGS, "connection_string": "not-a-url"}
-        ctx = _make_ctx_with_settings(settings)
-
-        with patch("cb_mcp.tools.server.httpx.Client") as mock_client_cls:
-            result = get_nodes_in_cluster(ctx)
-
-        mock_client_cls.assert_not_called()
-        assert result["status"] == "error"
-        assert "No hosts found" in result["error"]
-        assert "Failed to get cluster nodes" in result["message"]
-
-    def test_returns_success_envelope_with_deduped_targets(self) -> None:
-        """Happy path flattens+dedupes targets across response elements."""
-        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
-        rest_response = [
-            {"targets": ["node1:18091", "node2:18091"]},
-            {"targets": ["node2:18091"]},
-        ]
-        client_patch, mock_client = self._patch_httpx_client(
-            "get", [self._ok_response(rest_response)]
-        )
-
-        with client_patch:
-            result = get_nodes_in_cluster(
-                ctx, use_secure_ports=False, network="external"
-            )
-
-        called_url = mock_client.get.call_args[0][0]
-        assert called_url == "http://localhost:8091/prometheus_sd_config"
-        assert mock_client.get.call_args[1]["params"] == {
-            "type": "json",
-            "port": "insecure",
-            "network": "external",
-        }
-        assert result == {"status": "success", "data": ["node1:18091", "node2:18091"]}
-
-    def test_multi_host_failover(self) -> None:
-        """If the first host fails, the second one should be tried."""
-        settings = {**_VALID_SETTINGS, "connection_string": "couchbase://host1,host2"}
-        ctx = _make_ctx_with_settings(settings)
-        client_patch, mock_client = self._patch_httpx_client(
-            "get",
-            [
-                httpx.ConnectError("refused"),
-                self._ok_response([{"targets": ["n:8091"]}]),
-            ],
-        )
-
-        with client_patch:
-            result = get_nodes_in_cluster(ctx)
-
-        assert result == {"status": "success", "data": ["n:8091"]}
-        assert mock_client.get.call_count == 2
-
-    def test_returns_error_envelope_when_all_hosts_fail(self) -> None:
-        """When every host fails, the tool returns a structured error response."""
-        settings = {**_VALID_SETTINGS, "connection_string": "couchbase://host1,host2"}
-        ctx = _make_ctx_with_settings(settings)
-        error = httpx.ConnectError("refused")
-        client_patch, _ = self._patch_httpx_client("get", [error, error])
-
-        with client_patch:
-            result = get_nodes_in_cluster(ctx)
-
-        assert result["status"] == "error"
-        assert "host1" in result["error"] and "host2" in result["error"]
-        assert "Failed to get cluster nodes" in result["message"]

@@ -11,16 +11,19 @@ values for whatever was wrong, so the caller can correct itself in one round tri
 guessing again.
 """
 
+import json
 import logging
 from typing import Any
 
 from ..utils.constants import MCP_SERVER_NAME
 from ..utils.reference_data import (
+    MAX_LIST_RESPONSE_BYTES,
     chapters,
+    dataset_size_bytes,
+    list_records,
     load_envelope,
     registered_tool_names,
     resolve_dataset,
-    sample_record,
     search,
 )
 from ..utils.responses import tool_error, tool_success
@@ -51,11 +54,11 @@ def discover_tool_input_values(
     tool_name is the only required argument; everything else is optional.
 
     Two ways to call it:
-    1. Browse -- pass tool_name alone. Returns the dataset's "chapters" (the small set of fields you
-       can filter on, with every legal value and a record count for each) plus one "sample_record"
-       showing what a record looks like and which field to feed into the target tool. Use this when
-       you do not yet know how the data is organised. If the dataset has no chapters, you still get
-       the sample and a note telling you to search instead.
+    1. List -- pass tool_name alone. Returns EVERY record in the dataset, plus the "chapters" block
+       (the small set of fields you can filter on, with every legal value and a record count each).
+       This is a large response: prefer search when you already know roughly what you want, and use
+       the full list when you need to see the whole namespace. A dataset too large to list returns
+       chapters and a "next_step" telling you to search instead of a partial list.
     2. Search -- pass tool_name and search_keywords. Returns records ranked by fuzzy relevance, best
        first. Matching is fuzzy over identifiers and descriptions, so partial words and near-misses
        still hit.
@@ -84,9 +87,9 @@ def discover_tool_input_values(
           missed, so change them rather than reading further down the list. Raise this only to
           suppress weak matches you have already seen.
 
-    Returns {"success": True, "dataset": ..., "chapters": ..., ...} plus either "sample_record" and
-    "next_step" (browse) or "matches" (total found), "returned" and "results" (ranked, each record
-    plus its "score") (search). On failure returns {"success": False, "error": ...} listing the
+    Returns {"success": True, "dataset": ..., "chapters": ..., ...} plus either "record_count" and
+    "records" (the full list) or "matches" (total found), "returned" and "results" (ranked, each
+    record plus its "score") (search). On failure returns {"success": False, "error": ...} listing the
     valid values for whatever was wrong -- e.g. an unrecognised tool_name comes back with
     "available_tool_names", a bad chapter filter with "valid_chapter_fields" or "valid_values".
     Zero matches is a successful response with an empty "results" list -- refine your keywords, drop
@@ -161,17 +164,59 @@ def discover_tool_input_values(
     }
 
     if not query:
-        return tool_success(
-            dataset=dataset_summary,
-            chapters=dataset_chapters,
-            sample_record=sample_record(dataset_path),
-            next_step=(
-                "Call again with search_keywords describing what you need, optionally narrowed "
-                "with chapter_filters."
-                if dataset_chapters
-                else "This dataset has no chapters to browse. Call again with search_keywords "
-                "describing what you are looking for."
+        # No keywords: hand back the whole dataset so the caller can pick an identifier without a
+        # second call -- but only if the response actually fits. An over-size listing is not
+        # truncated, because a partial slice reads as the complete namespace; the caller is told to
+        # search instead.
+        #
+        # Two checks, cheapest first. The file size is a lower bound on the response, so a dataset
+        # far too big is rejected without ever being read. Anything that clears that is built and
+        # measured for real, because the response carries the dataset/chapters blocks on top of the
+        # records and can cross the limit even when the file did not.
+        file_bytes = dataset_size_bytes(dataset_path)
+        declared_count = envelope.get("record_count")
+        listing: dict[str, Any] = {}
+        response_bytes = None
+
+        if file_bytes <= MAX_LIST_RESPONSE_BYTES:
+            records = list_records(dataset_path)
+            candidate = tool_success(
+                dataset=dataset_summary,
+                chapters=dataset_chapters,
+                record_count=len(records),
+                records=records,
+                next_step=(
+                    "Every record is listed above. To narrow instead of scanning, call again "
+                    "with search_keywords, optionally with chapter_filters."
+                ),
+            )
+            response_bytes = len(json.dumps(candidate, default=str))
+            if response_bytes <= MAX_LIST_RESPONSE_BYTES:
+                logger.info(
+                    f"discover_tool_input_values({tool_name!r}) listed {len(records)} record(s) "
+                    f"({response_bytes} bytes)"
+                )
+                return candidate
+            declared_count = len(records)
+
+        # Too large to list. Log the measured size so a client-side rejection is explainable.
+        logger.info(
+            f"discover_tool_input_values({tool_name!r}) not listing in full: "
+            f"file {file_bytes} bytes, response "
+            f"{response_bytes if response_bytes is not None else 'not built'} bytes, "
+            f"limit {MAX_LIST_RESPONSE_BYTES} bytes"
+        )
+        listing = {
+            "record_count": declared_count,
+            "next_step": (
+                f"This dataset has {declared_count} records and is too large to list in one "
+                f"response (limit {MAX_LIST_RESPONSE_BYTES // 1024} KB). Call again with "
+                "search_keywords describing what you need, optionally narrowed with "
+                "chapter_filters, to get the matching records."
             ),
+        }
+        return tool_success(
+            dataset=dataset_summary, chapters=dataset_chapters, **listing
         )
 
     try:

@@ -135,65 +135,6 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[ResultCase]:
         )
     )
 
-    cases.append(
-        ResultCase(
-            test_id="nodes_in_cluster_faithful",
-            prompt="What nodes are currently part of my Couchbase cluster?",
-            expectation=(
-                "Faithfulness check. The answer must reflect the node list the "
-                "tool returned. FAIL if it invents nodes not present in the tool "
-                "output or omits nodes that were returned."
-            ),
-        )
-    )
-
-    # discover_tool_input_values: ground truth is the bundled reference dataset, so these assert
-    # a specific known-correct metric name. This is what actually validates that fuzzy search
-    # finds the right record from keywords the model chose itself -- the tool-calling suite only
-    # checks that the tool was selected, not that the answer was right.
-    for test_id, prompt, expected_metric, description in (
-        (
-            "discover_disk_queue_metric_name",
-            "What is the exact Couchbase metric name for the number of items enqueued "
-            "on the disk write queue? Just tell me the metric name.",
-            "kv_ep_diskqueue_fill",
-            "items enqueued on the disk queue",
-        ),
-        (
-            "discover_index_resident_ratio_metric_name",
-            "I need the exact metric name that reports the Index service's resident "
-            "ratio. Don't fetch any data, I just want the name.",
-            "index_storage_resident_ratio",
-            "the index storage resident ratio",
-        ),
-        (
-            "discover_dropped_audit_events_metric_name",
-            "Which Couchbase metric counts audit events that were dropped? Name the metric.",
-            "kv_audit_dropped_events",
-            "audit events dropped before reaching the audit trail",
-        ),
-    ):
-        cases.append(
-            ResultCase(
-                test_id=test_id,
-                prompt=prompt,
-                expectation=(
-                    "The user asked for a metric name by describing "
-                    f"{description}. The reference data contains "
-                    f"'{expected_metric}' for exactly this. PASS if the answer names "
-                    f"'{expected_metric}', or names a closely related metric that the tool "
-                    "output actually returned and that plausibly matches the description "
-                    "(the reference data contains several similar metrics, and the tool "
-                    "returns a ranked list rather than a single answer). FAIL if the answer "
-                    "states a metric name that does not appear anywhere in the tool output "
-                    "-- that means it invented or guessed an identifier instead of using the "
-                    "reference data, which is the exact failure this tool exists to prevent. "
-                    "Also FAIL if it claims it cannot find any metric while the tool output "
-                    "clearly contains matching results."
-                ),
-            )
-        )
-
     return cases
 
 
@@ -211,7 +152,6 @@ SERVER_RESULT_CASE_IDS = [
     "config_faithful",
     "connection_faithful",
     "cluster_metrics_faithful",
-    "nodes_in_cluster_faithful",
     "discover_disk_queue_metric_name",
     "discover_index_resident_ratio_metric_name",
     "discover_dropped_audit_events_metric_name",

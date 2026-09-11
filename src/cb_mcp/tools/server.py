@@ -6,7 +6,7 @@ This module contains tools for getting the server status, testing the connection
 
 import json
 import logging
-from typing import Any, Literal
+from typing import Any
 
 import httpx
 from couchbase.diagnostics import ServiceType
@@ -318,21 +318,18 @@ def get_cluster_metrics(
     get_cluster_diagnostics_report) — is a metric spiking, climbing, or stable over time?
 
     Self-managed Couchbase Server 7.6+ only — rejects Capella connections without a REST call.
-    Calls POST /pools/default/stats/range
-    (https://docs.couchbase.com/server/current/rest-api/rest-statistics-multiple.html).
+    Calls POST /pools/default/stats/range.
 
     `metrics` is passed through as the request body: a list of specs, each with a required
     "metric" (list of {"label", "value"} pairs, e.g. [{"label": "name", "value":
-    "kv_disk_write_queue"}]), an optional "nodes" ("host:port" targets — call
-    get_nodes_in_cluster first if you don't already know them), and optional "applyFunctions",
+    "kv_disk_write_queue"}]), an optional "nodes" ("host:port" targets; omit it to cover every
+    node, which is usually what you want), and optional "applyFunctions",
     "nodesAggregation", "start"/"end" (negative seconds relative to now; default -60/now),
     "step" (seconds, default 10), "alignTimestamps".
 
-    To find metric names, call discover_tool_input_values(tool_name="get_cluster_metrics",
-    search_keywords=[...]) — it searches the full Couchbase metrics reference bundled with this
-    server, offline. Don't guess a metric name: an unknown name
-    comes back as a per-spec error with no data. (The same reference is published at
-    https://docs.couchbase.com/server/current/metrics-reference/metrics-reference.html.)
+    To find metric names, call discover_tool_input_values(tool_name="get_cluster_metrics") — it
+    lists or searches the full Couchbase metrics reference bundled with this server, offline.
+    Don't guess a metric name: an unknown name comes back as a per-spec error with no data.
 
     Not bounded: any number of specs, window, step, or node count is passed straight through to
     the REST call, so a broad request (long window, fine step, many nodes/specs) can return a
@@ -411,100 +408,4 @@ def get_cluster_metrics(
             "status": "error",
             "error": str(e),
             "message": "Failed to get cluster metrics",
-        }
-
-
-def get_nodes_in_cluster(
-    ctx: Context,
-    use_secure_ports: bool = True,
-    network: Literal["default", "external"] = "default",
-    timeout: int = 30,
-) -> dict[str, Any]:
-    """List cluster nodes as host:port targets, the way Prometheus would discover them.
-
-    Useful before calling get_cluster_metrics with a "nodes" filter — returns the authoritative,
-    complete cluster membership as exact host:port targets, unlike get_cluster_diagnostics_report
-    (only endpoints already touched by this connection) or get_cluster_health_and_services (only
-    services that answer a live ping right now).
-
-    Self-managed Couchbase Server only — rejects Capella connections without a REST call.
-    Calls GET /prometheus_sd_config
-    (https://docs.couchbase.com/server/current/rest-api/rest-discovery-api.html). Requires the
-    "External Stats Reader" role (or broader).
-
-    Args:
-        use_secure_ports: TLS ports (e.g. 18091) if True (default), plaintext (e.g. 8091) if
-          False.
-        network: "default" or "external" — which advertised address to return.
-
-    Returns {"status": "success", "data": ["host:port", ...]} or
-    {"status": "error", "error": "..."}.
-    """
-    try:
-        settings = get_settings(ctx)
-        validate_connection_settings(settings)
-        connection_string = settings["connection_string"]
-        if is_capella_connection(connection_string):
-            raise ValueError(
-                "get_nodes_in_cluster is not supported on Capella clusters"
-            )
-
-        is_tls = connection_string.lower().startswith("couchbases://")
-        protocol, port = (
-            ("https", MANAGEMENT_REST_PORT_TLS)
-            if is_tls
-            else ("http", MANAGEMENT_REST_PORT_PLAIN)
-        )
-        params = {
-            "type": "json",
-            "port": "secure" if use_secure_ports else "insecure",
-            "network": network,
-        }
-        verify_ssl = determine_ssl_verification(
-            connection_string, settings.get("ca_cert_path")
-        )
-        hosts = extract_hosts_from_connection_string(connection_string)
-        if not hosts:
-            raise ValueError(
-                f"No hosts found in connection_string: {connection_string!r}"
-            )
-
-        last_error: Exception | None = None
-        with httpx.Client(verify=verify_ssl, timeout=timeout) as client:
-            for host in hosts:
-                try:
-                    response = client.get(
-                        f"{protocol}://{host}:{port}/prometheus_sd_config",
-                        params=params,
-                        auth=(settings["username"], settings["password"]),
-                    )
-                    response.raise_for_status()
-                    targets = [
-                        target
-                        for entry in response.json()
-                        for target in entry.get("targets", [])
-                    ]
-                    deduped_targets = list(dict.fromkeys(targets))
-                    logger.info(
-                        f"Found {len(deduped_targets)} node target(s) from {host}"
-                    )
-                    return {"status": "success", "data": deduped_targets}
-                except Exception as e:
-                    last_error = e
-        raise RuntimeError(f"Failed to reach any host in {hosts}: {last_error}")
-    except ValueError as e:
-        # Up-front, documented rejections (bad input, Capella, no hosts) — not a
-        # system fault, so no traceback noise in the logs.
-        logger.warning(f"Rejected get_nodes_in_cluster request: {e}")
-        return {
-            "status": "error",
-            "error": str(e),
-            "message": "Failed to get cluster nodes",
-        }
-    except Exception as e:
-        logger.error(f"Error getting cluster nodes: {e}", exc_info=True)
-        return {
-            "status": "error",
-            "error": str(e),
-            "message": "Failed to get cluster nodes",
         }
