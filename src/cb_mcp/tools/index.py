@@ -31,7 +31,7 @@ from .query import run_cluster_query, run_sql_plus_plus_query
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.index")
 
 
-def get_index_advisor_recommendations(
+async def get_index_advisor_recommendations(
     ctx: Context, bucket_name: str, scope_name: str, query: str
 ) -> dict[str, Any]:
     """Get index recommendations from Couchbase Index Advisor for a given SQL++ query.
@@ -58,7 +58,7 @@ def get_index_advisor_recommendations(
         # Execute in scope context so the advised query can use bare collection
         # names. ADVISOR is a read-only SELECT, so the read-only-mode write guard
         # in run_sql_plus_plus_query is a no-op here.
-        advisor_results = run_sql_plus_plus_query(
+        advisor_results = await run_sql_plus_plus_query(
             ctx,
             bucket_name,
             scope_name,
@@ -110,7 +110,7 @@ def get_index_advisor_recommendations(
         raise
 
 
-def fetch_indexes_via_query_service(
+async def fetch_indexes_via_query_service(
     ctx: Context,
     bucket_name: str | None,
     scope_name: str | None,
@@ -163,11 +163,11 @@ def fetch_indexes_via_query_service(
     )
     logger.debug("Running list_indexes query")
 
-    rows = run_cluster_query(ctx, query, named_parameters=params)
+    rows = await run_cluster_query(ctx, query, named_parameters=params)
     return [row for row in rows if isinstance(row, dict)]
 
 
-def list_indexes(
+async def list_indexes(
     ctx: Context,
     bucket_name: str | None = None,
     scope_name: str | None = None,
@@ -196,8 +196,8 @@ def list_indexes(
         settings = get_settings(ctx)
 
         # Decide which path to use based on cluster version (via SDK).
-        cluster = get_cluster_connection(ctx)
-        major_version = resolve_cluster_major_version(cluster)
+        cluster = await get_cluster_connection(ctx)
+        major_version = await resolve_cluster_major_version(cluster)
 
         if major_version >= QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION:
             logger.info(
@@ -205,7 +205,7 @@ def list_indexes(
                 f"bucket={bucket_name}, scope={scope_name}, "
                 f"collection={collection_name}, index={index_name}"
             )
-            raw_indexes = fetch_indexes_via_query_service(
+            raw_indexes = await fetch_indexes_via_query_service(
                 ctx,
                 bucket_name=bucket_name,
                 scope_name=scope_name,
@@ -229,7 +229,7 @@ def list_indexes(
             f"bucket={bucket_name}, scope={scope_name}, "
             f"collection={collection_name}, index={index_name}"
         )
-        raw_indexes = fetch_indexes_from_rest_api(
+        raw_indexes = await fetch_indexes_from_rest_api(
             settings["connection_string"],
             settings["username"],
             settings["password"],
@@ -253,7 +253,7 @@ def list_indexes(
         raise
 
 
-def create_index(
+async def create_index(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
@@ -286,13 +286,13 @@ def create_index(
     ignore_if_exists=True) or the keys/condition are invalid.
     """
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
-    cluster = get_cluster_connection(ctx)
-    bucket = connect_to_bucket(cluster, bucket_name)
+    cluster = await get_cluster_connection(ctx)
+    bucket = await connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Creating index {index_name!r} on {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
         index_manager = collection.query_indexes()
-        index_manager.create_index(
+        await index_manager.create_index(
             index_name,
             keys,
             CreateQueryIndexOptions(
@@ -317,7 +317,7 @@ def create_index(
         return tool_error(e, index_name=index_name, keyspace=keyspace)
 
 
-def build_index(
+async def build_index(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
@@ -337,13 +337,13 @@ def build_index(
     {"success": False, "error": ...} on failure.
     """
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
-    cluster = get_cluster_connection(ctx)
-    bucket = connect_to_bucket(cluster, bucket_name)
+    cluster = await get_cluster_connection(ctx)
+    bucket = await connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Building deferred indexes on {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
         index_manager = collection.query_indexes()
-        index_manager.build_deferred_indexes()
+        await index_manager.build_deferred_indexes()
         logger.info(f"Triggered build of deferred indexes on {keyspace}")
         return tool_success(keyspace=keyspace)
     except Exception as e:
@@ -353,7 +353,7 @@ def build_index(
         return tool_error(e, keyspace=keyspace)
 
 
-def drop_index(
+async def drop_index(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
@@ -374,13 +374,13 @@ def drop_index(
     (without ignore_if_not_exists=True).
     """
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
-    cluster = get_cluster_connection(ctx)
-    bucket = connect_to_bucket(cluster, bucket_name)
+    cluster = await get_cluster_connection(ctx)
+    bucket = await connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Dropping index {index_name!r} on {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
         index_manager = collection.query_indexes()
-        index_manager.drop_index(
+        await index_manager.drop_index(
             index_name,
             DropQueryIndexOptions(ignore_if_not_exists=ignore_if_not_exists),
         )
