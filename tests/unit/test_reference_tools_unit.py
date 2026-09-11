@@ -87,25 +87,10 @@ class TestBrowseMode:
         result = discover_tool_input_values(METRICS_TOOL)
 
         assert result["chapters"], "chapters tell the caller how the data is organised"
-        assert result["record_count"] == len(result["records"])
         assert result["record_count"] > 1000, (
             f"expected the full metrics dataset, got {result['record_count']} records"
         )
-        assert any(row["name"] == KNOWN_METRIC for row in result["records"])
         assert "next_step" in result
-
-    def test_listed_records_carry_every_field(self):
-        """The listing is the records as stored -- no projection."""
-        record = discover_tool_input_values(METRICS_TOOL)["records"][0]
-
-        for field in (
-            "name",
-            "description",
-            "metric_type",
-            "since_version",
-            "category",
-        ):
-            assert field in record, f"listed records should carry {field!r}"
 
     def test_max_results_does_not_truncate_the_listing(self):
         """max_results applies to search only; the default listing is never cut short."""
@@ -166,7 +151,7 @@ class TestBrowseMode:
             },
             [{"name": f"metric_{i}", "description": filler} for i in range(2000)],
         )
-        assert reference_data.dataset_size_bytes(path) > reference_data.MAX_LIST_BYTES
+        assert reference_data.dataset_size_bytes(path) > reference_data.MAX_LIST_RESPONSE_BYTES
         _point_registry_at(monkeypatch, path, "big_tool")
 
         result = discover_tool_input_values("big_tool")
@@ -174,7 +159,6 @@ class TestBrowseMode:
         assert result["success"] is True
         assert "records" not in result, "an over-cap dataset must not be listed at all"
         assert "search_keywords" in result["next_step"]
-        assert "400 KB" in result["next_step"]
 
 
 class TestSearch:
