@@ -8,6 +8,8 @@ Cases:
     single-field prompts
   - mutate_subdocument selected over upsert_document_by_id for single-field
     set/append/increment prompts
+  - get_documents_by_ids selected over repeated get_document_by_id for a
+    known list of IDs, and NOT selected when the IDs are unknown
 """
 
 from __future__ import annotations
@@ -434,6 +436,52 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
         )
     )
 
+    # get_documents_by_ids competes directly with both get_document_by_id
+    # (repeated) and run_sql_plus_plus_query, so both directions are worth
+    # pinning: chosen when the IDs are known, avoided when they are not.
+    bulk_ids = [_doc_id("acc_bulk") for _ in range(3)]
+    cases.append(
+        AccuracyCase(
+            test_id="get_documents_by_ids_for_known_ids",
+            prompt=(
+                f"Fetch the documents with ids {bulk_ids[0]!r}, {bulk_ids[1]!r} "
+                f"and {bulk_ids[2]!r} from bucket '{bucket}', scope '{scope}', "
+                f"collection '{collection}'. Get them in one call, not one at a time."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_documents_by_ids",
+                    parameters={
+                        "bucket_name": bucket,
+                        "scope_name": scope,
+                        "collection_name": collection,
+                        "document_ids": bulk_ids,
+                    },
+                ),
+            ],
+            seed=_seed_doc(bucket, scope, collection, bulk_ids[0], {"n": 1}),
+            cleanup=_delete_doc(bucket, scope, collection, bulk_ids[0]),
+        )
+    )
+
+    unknown_ids_case = _doc_id("acc_bulk_query")
+    cases.append(
+        AccuracyCase(
+            test_id="unknown_ids_use_query_not_bulk_get",
+            prompt=(
+                f"In bucket '{bucket}', scope '{scope}', collection "
+                f"'{collection}', find every document whose type is "
+                f"'{unknown_ids_case}'. I do not know their ids."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="run_sql_plus_plus_query",
+                    parameters={"bucket_name": bucket, "scope_name": scope},
+                ),
+            ],
+        )
+    )
+
     return cases
 
 
@@ -457,6 +505,8 @@ KV_CASE_IDS = [
     "mutate_subdocument_upsert_single_field",
     "mutate_subdocument_array_append",
     "mutate_subdocument_counter",
+    "get_documents_by_ids_for_known_ids",
+    "unknown_ids_use_query_not_bulk_get",
 ]
 
 

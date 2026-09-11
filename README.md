@@ -84,6 +84,7 @@ Once the server is connected, you can talk to your Couchbase cluster in natural 
 | Tool Name | Description |
 | --------- | ----------- |
 | `get_document_by_id` | Get a document by ID from a specified scope and collection |
+| `get_documents_by_ids` | Get up to 100 documents by ID in a single round trip; missing or unreadable documents are reported per ID rather than failing the batch |
 | `lookup_subdocument` | Look up parts of a document (specific fields, existence checks, or array/object counts) by path without fetching the whole document |
 | `upsert_document_by_id` | Upsert a document by ID to a specified scope and collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `insert_document_by_id` | Insert a new document by ID (fails if document exists). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
