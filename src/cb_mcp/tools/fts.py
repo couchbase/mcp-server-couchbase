@@ -10,9 +10,9 @@ SDK's SearchRequest + VectorSearch combination, which these tools do not build.
 
 Error handling: these tools only let an exception propagate when the cluster itself
 can't be reached (get_cluster_connection). Everything else — bad input combinations,
-an index that doesn't exist, a malformed query — is reported back as
-{"error": "<what's wrong>"} instead of raising, so the caller (an LLM) sees an
-actionable message rather than a bare stack trace.
+an index that doesn't exist, a malformed query — is reported back via the
+tool_success/tool_error envelopes from utils.responses instead of raising, so the
+caller (an LLM) sees an actionable message rather than a bare stack trace.
 """
 
 import logging
@@ -25,6 +25,7 @@ from fastmcp import Context
 from ..utils.connection import connect_to_bucket
 from ..utils.constants import MCP_SERVER_NAME
 from ..utils.context import get_cluster_connection
+from ..utils.responses import tool_error, tool_success
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.fts")
 
@@ -54,7 +55,7 @@ def list_fts_indexes(
     get_fts_index_definition rejects a bucket without a scope.
     """
     if scope_name and not bucket_name:
-        return [{"error": "bucket_name is required when filtering by scope_name"}]
+        return [tool_error("bucket_name is required when filtering by scope_name")]
 
     cluster = get_cluster_connection(ctx)
 
@@ -104,7 +105,7 @@ def list_fts_indexes(
         return results
     except Exception as e:
         logger.error(f"Error listing Search indexes: {e}", exc_info=True)
-        return [{"error": str(e)}]
+        return [tool_error(e)]
 
 
 def get_fts_index_definition(
@@ -120,16 +121,16 @@ def get_fts_index_definition(
     one of the two is invalid — Couchbase allows the same index name to exist in different
     scopes, so the location must be stated explicitly rather than guessed.
 
-    Returns the index's name, source_type, idx_type, source_name, uuid, params (mapping/
-    analyzer configuration), source_uuid, source_params, and plan_params (num replicas/
-    partitions), plus the bucket/scope it was looked up in. If no index with this name
-    exists at the given location, returns {"error": ...} — confirm the exact name and
-    location first with list_fts_indexes.
+    Returns {"success": True, "name", "source_type", "idx_type", "source_name", "uuid",
+    "params" (mapping/analyzer configuration), "source_uuid", "source_params",
+    "plan_params" (num replicas/partitions), "bucket", "scope"}. If no index with this
+    name exists at the given location, returns {"success": False, "error": ...} —
+    confirm the exact name and location first with list_fts_indexes.
     """
     if (bucket_name is None) != (scope_name is None):
-        return {
-            "error": "bucket_name and scope_name must be provided together, or omitted together"
-        }
+        return tool_error(
+            "bucket_name and scope_name must be provided together, or omitted together"
+        )
 
     cluster = get_cluster_connection(ctx)
 
@@ -145,22 +146,22 @@ def get_fts_index_definition(
             index = cluster.search_indexes().get_index(index_name)
 
         logger.info(f"Fetched Search index {index_name!r}")
-        return {
-            "name": index.name,
-            "source_type": index.source_type,
-            "idx_type": index.idx_type,
-            "source_name": index.source_name,
-            "uuid": index.uuid,
-            "params": index.params,
-            "source_uuid": index.source_uuid,
-            "source_params": index.source_params,
-            "plan_params": index.plan_params,
-            "bucket": bucket_name,
-            "scope": scope_name,
-        }
+        return tool_success(
+            name=index.name,
+            source_type=index.source_type,
+            idx_type=index.idx_type,
+            source_name=index.source_name,
+            uuid=index.uuid,
+            params=index.params,
+            source_uuid=index.source_uuid,
+            source_params=index.source_params,
+            plan_params=index.plan_params,
+            bucket=bucket_name,
+            scope=scope_name,
+        )
     except Exception as e:
         logger.error(f"Error fetching Search index {index_name!r}: {e}", exc_info=True)
-        return {"error": str(e), "index_name": index_name}
+        return tool_error(e, index_name=index_name)
 
 
 def run_fts_query(
@@ -210,33 +211,35 @@ def run_fts_query(
     apply when explain=False.
 
     limit/skip/fields/sort/facets/highlight_fields/disable_scoring map to the equivalent
-    Search options. raw is a passthrough dict for any other SearchOptions field not
-    exposed directly (e.g. highlight_style, consistent_with).
+    Search options. limit defaults to 10 when explain=False (matching the other query
+    tools in this server) and to 1 when explain=True. raw is a passthrough dict for any
+    other SearchOptions field not exposed directly (e.g. highlight_style, consistent_with).
 
-    Returns {"index_name", "explain", "total_hits", "hits", "facets", "metadata":
-    {"errors","metrics"}} on success, or {"error": ...} if the input is invalid or the
-    query fails (e.g. bad query syntax, index not found). total_hits counts the hits
-    actually returned, so it is capped by limit — for how many documents matched overall,
-    read metadata.metrics.total_rows instead, and don't report total_hits as the size of
-    the match set. hits entries are
-    {"id","score","fields","locations","fragments"} when explain=False, or
+    Returns {"success": True, "index_name", "explain", "limit" (the limit actually
+    applied, since it defaults differently depending on explain), "total_hits",
+    "hits", "facets", "metadata": {"errors","metrics"}} on success, or
+    {"success": False, "error": ...} if the input is invalid or the query fails (e.g. bad
+    query syntax, index not found). total_hits counts the hits actually returned, so it is
+    capped by limit — for how many documents matched overall, read
+    metadata.metrics.total_rows instead, and don't report total_hits as the size of the
+    match set. hits entries are {"id","score","fields","fragments"} when explain=False, or
     {"id","score","explanation"} when explain=True (facets is empty in that case).
     """
     if (bucket_name is None) != (scope_name is None):
-        return {
-            "error": "bucket_name and scope_name must be provided together, or omitted together"
-        }
+        return tool_error(
+            "bucket_name and scope_name must be provided together, or omitted together"
+        )
 
     cluster = get_cluster_connection(ctx)
 
     try:
         if explain:
-            options = SearchOptions(
-                explain=True, limit=limit if limit is not None else 1
-            )
+            applied_limit = limit if limit is not None else 1
+            options = SearchOptions(explain=True, limit=applied_limit)
         else:
+            applied_limit = limit if limit is not None else 10
             options = SearchOptions(
-                limit=limit,
+                limit=applied_limit,
                 skip=skip,
                 fields=fields,
                 sort=sort,
@@ -264,7 +267,6 @@ def run_fts_query(
                     "id": row.id,
                     "score": row.score,
                     "fields": row.fields,
-                    "locations": row.locations,
                     "fragments": row.fragments,
                 }
                 for row in result.rows()
@@ -277,13 +279,14 @@ def run_fts_query(
             f"run_fts_query on {index_name!r} (explain={explain}) returned "
             f"{len(hits)} hit(s)"
         )
-        return {
-            "index_name": index_name,
-            "explain": explain,
-            "total_hits": len(hits),
-            "hits": hits,
-            "facets": facets_result,
-            "metadata": {
+        return tool_success(
+            index_name=index_name,
+            explain=explain,
+            limit=applied_limit,
+            total_hits=len(hits),
+            hits=hits,
+            facets=facets_result,
+            metadata={
                 "errors": metadata.errors(),
                 "metrics": None
                 if metrics is None
@@ -296,9 +299,9 @@ def run_fts_query(
                     "took": str(metrics.took()),
                 },
             },
-        }
+        )
     except Exception as e:
         logger.error(
             f"Error running Search query on {index_name!r}: {e}", exc_info=True
         )
-        return {"error": str(e), "index_name": index_name}
+        return tool_error(e, index_name=index_name)

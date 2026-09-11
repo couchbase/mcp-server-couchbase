@@ -158,7 +158,10 @@ class TestListFtsIndexes:
         result = list_fts_indexes(ctx, scope_name="s")
 
         assert result == [
-            {"error": "bucket_name is required when filtering by scope_name"}
+            {
+                "success": False,
+                "error": "bucket_name is required when filtering by scope_name",
+            }
         ]
 
     def test_sdk_error_returns_error_entry_not_raised(self) -> None:
@@ -170,7 +173,7 @@ class TestListFtsIndexes:
         with patch("cb_mcp.tools.fts.get_cluster_connection", return_value=cluster):
             result = list_fts_indexes(ctx)
 
-        assert result == [{"error": "search unavailable"}]
+        assert result == [{"success": False, "error": "search unavailable"}]
 
     def test_connection_failure_propagates(self) -> None:
         """The one case that must still raise: the cluster is unreachable."""
@@ -241,7 +244,11 @@ class TestGetFtsIndexDefinition:
         with patch("cb_mcp.tools.fts.get_cluster_connection", return_value=cluster):
             result = get_fts_index_definition(ctx, "idx1")
 
-        assert result == {"error": "index not found", "index_name": "idx1"}
+        assert result == {
+            "success": False,
+            "error": "index not found",
+            "index_name": "idx1",
+        }
 
     def test_connection_failure_propagates(self) -> None:
         """The one case that must still raise: the cluster is unreachable."""
@@ -333,6 +340,21 @@ class TestRunFtsQuery:
         assert result["hits"][0]["id"] == "doc1"
         assert result["hits"][0]["score"] == 1.5
 
+    def test_default_limit_is_ten_when_omitted(self) -> None:
+        ctx, cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
+        cluster.search.return_value = _make_search_result()
+
+        with (
+            patch("cb_mcp.tools.fts.get_cluster_connection", return_value=cluster),
+            patch("cb_mcp.tools.fts.SearchOptions") as mock_options,
+            patch("cb_mcp.tools.fts.RawQuery"),
+            patch("cb_mcp.tools.fts.SearchRequest"),
+        ):
+            result = run_fts_query(ctx, "idx1", {"match": "ale"})
+
+        assert mock_options.call_args.kwargs["limit"] == 10
+        assert result["limit"] == 10
+
     def test_scoped_query_uses_bucket_scope_search(self) -> None:
         ctx, cluster, _cluster_index_manager, bucket = _make_ctx_with_fts_managers()
         scope_obj = MagicMock()
@@ -373,7 +395,11 @@ class TestRunFtsQuery:
         ):
             result = run_fts_query(ctx, "idx1", {"match": "ale"})
 
-        assert result == {"error": "query failed", "index_name": "idx1"}
+        assert result == {
+            "success": False,
+            "error": "query failed",
+            "index_name": "idx1",
+        }
 
     def test_connection_failure_propagates(self) -> None:
         """The one case that must still raise: the cluster is unreachable."""
@@ -439,7 +465,11 @@ class TestRunFtsQueryExplain:
         ):
             result = run_fts_query(ctx, "idx1", {"match": "ale"}, explain=True)
 
-        assert result == {"error": "explain failed", "index_name": "idx1"}
+        assert result == {
+            "success": False,
+            "error": "explain failed",
+            "index_name": "idx1",
+        }
 
     def test_connection_failure_propagates(self) -> None:
         """The one case that must still raise: the cluster is unreachable."""
