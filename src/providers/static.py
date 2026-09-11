@@ -68,12 +68,12 @@ class StaticClusterProvider:
             )
             raise
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Close the cluster connection and reset internal state."""
-        # AsyncCluster.close() is a coroutine and the lifespan teardown that
-        # calls this is synchronous, so drop the handle and let the SDK's
-        # own finalisation release the connection.
-        self._cluster = None
+        cluster = self._cluster
+        if cluster is not None:
+            await cluster.close()
+            self._cluster = None
 
     def get_configuration(
         self, ctx: Context

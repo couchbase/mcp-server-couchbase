@@ -12,9 +12,10 @@ from __future__ import annotations
 import asyncio
 from contextlib import contextmanager
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _async_mocks import make_bucket
 from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
@@ -331,18 +332,18 @@ class TestSqlPlusPlusScopeGate:
     Without this, a :read-only token could escalate to writes via SQL++.
     """
 
-    def test_read_only_token_blocks_insert(self):
+    async def test_read_only_token_blocks_insert(self):
         """A token with only SCOPE_READ must NOT be able to INSERT via SQL++."""
         ctx = _ctx_with_modes(read_only_mode=False)
         token = SimpleNamespace(scopes=[SCOPE_READ])
 
         with (
             patch("cb_mcp.tools.query.get_access_token", return_value=token),
-            patch("cb_mcp.tools.query.get_cluster_connection"),
-            patch("cb_mcp.tools.query.connect_to_bucket"),
+            patch("cb_mcp.tools.query.get_cluster_connection", new_callable=AsyncMock),
+            patch("cb_mcp.tools.query.connect_to_bucket", new_callable=AsyncMock),
             pytest.raises(PermissionError) as excinfo,
         ):
-            run_sql_plus_plus_query(
+            await run_sql_plus_plus_query(
                 ctx,
                 "b",
                 "s",
@@ -350,25 +351,25 @@ class TestSqlPlusPlusScopeGate:
             )
         assert SCOPE_WRITE in str(excinfo.value)
 
-    def test_read_only_token_blocks_ddl(self):
+    async def test_read_only_token_blocks_ddl(self):
         """Structure-modifying queries (CREATE INDEX, etc.) also require :write."""
         ctx = _ctx_with_modes(read_only_mode=False)
         token = SimpleNamespace(scopes=[SCOPE_READ])
 
         with (
             patch("cb_mcp.tools.query.get_access_token", return_value=token),
-            patch("cb_mcp.tools.query.get_cluster_connection"),
-            patch("cb_mcp.tools.query.connect_to_bucket"),
+            patch("cb_mcp.tools.query.get_cluster_connection", new_callable=AsyncMock),
+            patch("cb_mcp.tools.query.connect_to_bucket", new_callable=AsyncMock),
             pytest.raises(PermissionError),
         ):
-            run_sql_plus_plus_query(
+            await run_sql_plus_plus_query(
                 ctx,
                 "b",
                 "s",
                 "CREATE INDEX foo ON c(name)",
             )
 
-    def test_read_only_token_blocks_dcl_grant(self):
+    async def test_read_only_token_blocks_dcl_grant(self):
         """DCL (GRANT/REVOKE) via SQL++ also requires :write, not just :read.
 
         Regression guard for the reported read-only bypass: GRANT/REVOKE are
@@ -380,11 +381,11 @@ class TestSqlPlusPlusScopeGate:
 
         with (
             patch("cb_mcp.tools.query.get_access_token", return_value=token),
-            patch("cb_mcp.tools.query.get_cluster_connection"),
-            patch("cb_mcp.tools.query.connect_to_bucket"),
+            patch("cb_mcp.tools.query.get_cluster_connection", new_callable=AsyncMock),
+            patch("cb_mcp.tools.query.connect_to_bucket", new_callable=AsyncMock),
             pytest.raises(PermissionError) as excinfo,
         ):
-            run_sql_plus_plus_query(
+            await run_sql_plus_plus_query(
                 ctx,
                 "b",
                 "s",
@@ -392,41 +393,45 @@ class TestSqlPlusPlusScopeGate:
             )
         assert SCOPE_WRITE in str(excinfo.value)
 
-    def test_both_scopes_allow_writes_through_sqlpp(self):
+    async def test_both_scopes_allow_writes_through_sqlpp(self):
         """A token with BOTH scopes can mutate via SQL++ (subject to CB RBAC)."""
         ctx = _ctx_with_modes(read_only_mode=False)
         token = SimpleNamespace(scopes=[SCOPE_READ, SCOPE_WRITE])
 
         # Force scope().query() to raise a sentinel so we can prove execution
         # reached the cluster path rather than being blocked by the gate.
-        bucket = MagicMock()
+        bucket = make_bucket()
         bucket.scope.return_value.query.side_effect = RuntimeError("reached cluster")
 
         with (
             patch("cb_mcp.tools.query.get_access_token", return_value=token),
-            patch("cb_mcp.tools.query.get_cluster_connection"),
-            patch("cb_mcp.tools.query.connect_to_bucket", return_value=bucket),
+            patch("cb_mcp.tools.query.get_cluster_connection", new_callable=AsyncMock),
+            patch(
+                "cb_mcp.tools.query.connect_to_bucket",
+                return_value=bucket,
+                new_callable=AsyncMock,
+            ),
             pytest.raises(RuntimeError, match="reached cluster"),
         ):
-            run_sql_plus_plus_query(
+            await run_sql_plus_plus_query(
                 ctx,
                 "b",
                 "s",
                 "INSERT INTO c (KEY, VALUE) VALUES ('k', {'a': 1})",
             )
 
-    def test_no_token_falls_back_to_config_only(self):
+    async def test_no_token_falls_back_to_config_only(self):
         """Without OAuth (no token), historical config-only behavior applies."""
         # read_only_mode=True should block writes regardless of scope.
         ctx = _ctx_with_modes(read_only_mode=True)
 
         with (
             patch("cb_mcp.tools.query.get_access_token", return_value=None),
-            patch("cb_mcp.tools.query.get_cluster_connection"),
-            patch("cb_mcp.tools.query.connect_to_bucket"),
+            patch("cb_mcp.tools.query.get_cluster_connection", new_callable=AsyncMock),
+            patch("cb_mcp.tools.query.connect_to_bucket", new_callable=AsyncMock),
             pytest.raises(ValueError, match="not allowed in read-only mode"),
         ):
-            run_sql_plus_plus_query(
+            await run_sql_plus_plus_query(
                 ctx,
                 "b",
                 "s",

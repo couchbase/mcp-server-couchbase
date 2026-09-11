@@ -6,7 +6,7 @@ regression to f-string concatenation (the original injection vector) would
 fail these tests without needing a live Couchbase cluster.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -23,7 +23,7 @@ QUOTE_HEAVY_QUERIES = [
 
 
 @pytest.mark.parametrize("user_query", QUOTE_HEAVY_QUERIES)
-def test_advisor_binds_user_query_as_named_parameter(user_query: str) -> None:
+async def test_advisor_binds_user_query_as_named_parameter(user_query: str) -> None:
     """The user query must reach the SDK only as a bound parameter."""
     ctx = MagicMock()
     fake_results = [
@@ -33,8 +33,9 @@ def test_advisor_binds_user_query_as_named_parameter(user_query: str) -> None:
     with patch(
         "cb_mcp.tools.index.run_sql_plus_plus_query",
         return_value=fake_results,
+        new_callable=AsyncMock,
     ) as mock_run:
-        result = get_index_advisor_recommendations(
+        result = await get_index_advisor_recommendations(
             ctx, "travel-sample", "inventory", user_query
         )
 

@@ -30,7 +30,7 @@ class ClusterProvider(Protocol):
         """Return (or begin returning) a cluster for this request."""
         ...
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Release any clusters held by this provider and perform cleanup."""
         ...
 
