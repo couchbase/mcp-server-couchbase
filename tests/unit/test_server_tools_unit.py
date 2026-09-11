@@ -14,7 +14,9 @@ reached against a live cluster:
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from _async_mocks import make_bucket, make_cluster
 
 from cb_mcp.tools.server import (
     get_cluster_diagnostics_report,
@@ -30,7 +32,7 @@ from cb_mcp.tools.server import (
 
 def _make_ctx(cluster: MagicMock | None = None) -> SimpleNamespace:
     """Build a fake Context with a cluster_provider that returns *cluster*."""
-    provider = SimpleNamespace(get_cluster=lambda c: cluster)
+    provider = SimpleNamespace(get_cluster=AsyncMock(return_value=cluster))
     return SimpleNamespace(
         request_context=SimpleNamespace(
             lifespan_context=SimpleNamespace(
@@ -43,7 +45,7 @@ def _make_ctx(cluster: MagicMock | None = None) -> SimpleNamespace:
 class TestTestClusterConnection:
     """test_cluster_connection error envelope."""
 
-    def test_returns_error_envelope_on_failure(self) -> None:
+    async def test_returns_error_envelope_on_failure(self) -> None:
         """When get_cluster_connection raises, the tool must return a
         structured error response rather than propagating the exception."""
         ctx = _make_ctx(cluster=None)
@@ -53,8 +55,9 @@ class TestTestClusterConnection:
         with patch(
             "cb_mcp.tools.server.get_cluster_connection",
             side_effect=Exception("auth failed"),
+            new_callable=AsyncMock,
         ):
-            result = cluster_connection_tool(ctx)
+            result = await cluster_connection_tool(ctx)
 
         assert result == {
             "status": "error",
@@ -65,40 +68,43 @@ class TestTestClusterConnection:
             "message": "Failed to connect to Couchbase cluster",
         }
 
-    def test_returns_success_envelope_on_connect(self) -> None:
+    async def test_returns_success_envelope_on_connect(self) -> None:
         """Happy path returns success with bucket_connected=False when no
         bucket_name is supplied."""
-        cluster = MagicMock()
+        cluster = make_cluster()
         ctx = _make_ctx(cluster=cluster)
 
         with patch(
             "cb_mcp.tools.server.get_cluster_connection",
             return_value=cluster,
+            new_callable=AsyncMock,
         ):
-            result = cluster_connection_tool(ctx)
+            result = await cluster_connection_tool(ctx)
 
         assert result["status"] == "success"
         assert result["cluster_connected"] is True
         assert result["bucket_connected"] is False
         assert result["bucket_name"] is None
 
-    def test_bucket_connection_attempted_when_name_provided(self) -> None:
+    async def test_bucket_connection_attempted_when_name_provided(self) -> None:
         """A bucket_name argument should drive a connect_to_bucket call and
         set bucket_connected=True on success."""
-        cluster = MagicMock()
+        cluster = make_cluster()
         ctx = _make_ctx(cluster=cluster)
 
         with (
             patch(
                 "cb_mcp.tools.server.get_cluster_connection",
                 return_value=cluster,
+                new_callable=AsyncMock,
             ),
             patch(
                 "cb_mcp.tools.server.connect_to_bucket",
-                return_value=MagicMock(),
+                return_value=make_bucket(),
+                new_callable=AsyncMock,
             ) as mock_connect_bucket,
         ):
-            result = cluster_connection_tool(ctx, bucket_name="travel-sample")
+            result = await cluster_connection_tool(ctx, bucket_name="travel-sample")
 
         mock_connect_bucket.assert_called_once_with(cluster, "travel-sample")
         assert result["status"] == "success"
@@ -109,11 +115,11 @@ class TestTestClusterConnection:
 class TestGetScopesAndCollectionsInBucket:
     """get_scopes_and_collections_in_bucket: error and happy path."""
 
-    def test_propagates_collection_manager_failure(self) -> None:
+    async def test_propagates_collection_manager_failure(self) -> None:
         """SDK failures must be re-raised — callers need to see why a bucket
         introspection failed rather than getting an empty result."""
-        cluster = MagicMock()
-        bucket = MagicMock()
+        cluster = make_cluster()
+        bucket = make_bucket()
         bucket.collections.side_effect = Exception("collections RPC failed")
         ctx = _make_ctx(cluster=cluster)
 
@@ -121,23 +127,25 @@ class TestGetScopesAndCollectionsInBucket:
             patch(
                 "cb_mcp.tools.server.get_cluster_connection",
                 return_value=cluster,
+                new_callable=AsyncMock,
             ),
             patch(
                 "cb_mcp.tools.server.connect_to_bucket",
                 return_value=bucket,
+                new_callable=AsyncMock,
             ),
         ):
             try:
-                get_scopes_and_collections_in_bucket(ctx, "b")
+                await get_scopes_and_collections_in_bucket(ctx, "b")
             except Exception as e:
                 assert "collections RPC failed" in str(e)
                 return
             raise AssertionError("expected exception")
 
-    def test_returns_scope_to_collection_map(self) -> None:
+    async def test_returns_scope_to_collection_map(self) -> None:
         """Happy path: produces a {scope: [collection, ...]} mapping."""
-        cluster = MagicMock()
-        bucket = MagicMock()
+        cluster = make_cluster()
+        bucket = make_bucket()
         # Two scopes, each with two collections.
         scope_a = SimpleNamespace(
             name="_default",
@@ -160,13 +168,15 @@ class TestGetScopesAndCollectionsInBucket:
             patch(
                 "cb_mcp.tools.server.get_cluster_connection",
                 return_value=cluster,
+                new_callable=AsyncMock,
             ),
             patch(
                 "cb_mcp.tools.server.connect_to_bucket",
                 return_value=bucket,
+                new_callable=AsyncMock,
             ),
         ):
-            result = get_scopes_and_collections_in_bucket(ctx, "b")
+            result = await get_scopes_and_collections_in_bucket(ctx, "b")
 
         assert result == {
             "_default": ["_default", "users"],
@@ -177,10 +187,10 @@ class TestGetScopesAndCollectionsInBucket:
 class TestGetScopesInBucket:
     """get_scopes_in_bucket: error and happy path."""
 
-    def test_propagates_failure(self) -> None:
+    async def test_propagates_failure(self) -> None:
         """SDK failure must propagate so callers see the actual root cause."""
-        cluster = MagicMock()
-        bucket = MagicMock()
+        cluster = make_cluster()
+        bucket = make_bucket()
         bucket.collections.side_effect = Exception("scopes RPC failed")
         ctx = _make_ctx(cluster=cluster)
 
@@ -188,23 +198,25 @@ class TestGetScopesInBucket:
             patch(
                 "cb_mcp.tools.server.get_cluster_connection",
                 return_value=cluster,
+                new_callable=AsyncMock,
             ),
             patch(
                 "cb_mcp.tools.server.connect_to_bucket",
                 return_value=bucket,
+                new_callable=AsyncMock,
             ),
         ):
             try:
-                get_scopes_in_bucket(ctx, "b")
+                await get_scopes_in_bucket(ctx, "b")
             except Exception as e:
                 assert "scopes RPC failed" in str(e)
                 return
             raise AssertionError("expected exception")
 
-    def test_returns_scope_names(self) -> None:
+    async def test_returns_scope_names(self) -> None:
         """Happy path returns just the list of scope names."""
-        cluster = MagicMock()
-        bucket = MagicMock()
+        cluster = make_cluster()
+        bucket = make_bucket()
         bucket.collections.return_value.get_all_scopes.return_value = [
             SimpleNamespace(name="_default"),
             SimpleNamespace(name="analytics"),
@@ -215,13 +227,15 @@ class TestGetScopesInBucket:
             patch(
                 "cb_mcp.tools.server.get_cluster_connection",
                 return_value=cluster,
+                new_callable=AsyncMock,
             ),
             patch(
                 "cb_mcp.tools.server.connect_to_bucket",
                 return_value=bucket,
+                new_callable=AsyncMock,
             ),
         ):
-            result = get_scopes_in_bucket(ctx, "b")
+            result = await get_scopes_in_bucket(ctx, "b")
 
         assert result == ["_default", "analytics"]
 
@@ -229,25 +243,26 @@ class TestGetScopesInBucket:
 class TestGetClusterHealthAndServices:
     """get_cluster_health_and_services: error envelope and bucket-scoped path."""
 
-    def test_returns_error_envelope_on_failure(self) -> None:
+    async def test_returns_error_envelope_on_failure(self) -> None:
         """A ping failure must be reported as a structured error response."""
-        cluster = MagicMock()
+        cluster = make_cluster()
         cluster.ping.side_effect = Exception("ping timeout")
         ctx = _make_ctx(cluster=cluster)
 
         with patch(
             "cb_mcp.tools.server.get_cluster_connection",
             return_value=cluster,
+            new_callable=AsyncMock,
         ):
-            result = get_cluster_health_and_services(ctx)
+            result = await get_cluster_health_and_services(ctx)
 
         assert result["status"] == "error"
         assert "ping timeout" in result["error"]
         assert "Failed to get cluster health" in result["message"]
 
-    def test_cluster_level_ping_when_no_bucket(self) -> None:
+    async def test_cluster_level_ping_when_no_bucket(self) -> None:
         """No bucket_name means we ping at the cluster level."""
-        cluster = MagicMock()
+        cluster = make_cluster()
         ping_result = MagicMock()
         ping_result.as_json.return_value = '{"services": {}}'
         cluster.ping.return_value = ping_result
@@ -256,17 +271,18 @@ class TestGetClusterHealthAndServices:
         with patch(
             "cb_mcp.tools.server.get_cluster_connection",
             return_value=cluster,
+            new_callable=AsyncMock,
         ):
-            result = get_cluster_health_and_services(ctx)
+            result = await get_cluster_health_and_services(ctx)
 
         cluster.ping.assert_called_once()
         assert result["status"] == "success"
         assert result["data"] == {"services": {}}
 
-    def test_bucket_level_ping_when_bucket_supplied(self) -> None:
+    async def test_bucket_level_ping_when_bucket_supplied(self) -> None:
         """A bucket_name must route the ping through bucket.ping()."""
-        cluster = MagicMock()
-        bucket = MagicMock()
+        cluster = make_cluster()
+        bucket = make_bucket()
         ping_result = MagicMock()
         ping_result.as_json.return_value = '{"services": {"kv": []}}'
         bucket.ping.return_value = ping_result
@@ -276,13 +292,15 @@ class TestGetClusterHealthAndServices:
             patch(
                 "cb_mcp.tools.server.get_cluster_connection",
                 return_value=cluster,
+                new_callable=AsyncMock,
             ),
             patch(
                 "cb_mcp.tools.server.connect_to_bucket",
                 return_value=bucket,
+                new_callable=AsyncMock,
             ),
         ):
-            result = get_cluster_health_and_services(ctx, bucket_name="b")
+            result = await get_cluster_health_and_services(ctx, bucket_name="b")
 
         bucket.ping.assert_called_once()
         cluster.ping.assert_not_called()
@@ -293,25 +311,26 @@ class TestGetClusterHealthAndServices:
 class TestGetClusterDiagnosticsReport:
     """get_cluster_diagnostics_report: error envelope and happy path."""
 
-    def test_returns_error_envelope_on_failure(self) -> None:
+    async def test_returns_error_envelope_on_failure(self) -> None:
         """A diagnostics failure must be reported as a structured error response."""
-        cluster = MagicMock()
+        cluster = make_cluster()
         cluster.diagnostics.side_effect = Exception("diagnostics failed")
         ctx = _make_ctx(cluster=cluster)
 
         with patch(
             "cb_mcp.tools.server.get_cluster_connection",
             return_value=cluster,
+            new_callable=AsyncMock,
         ):
-            result = get_cluster_diagnostics_report(ctx)
+            result = await get_cluster_diagnostics_report(ctx)
 
         assert result["status"] == "error"
         assert "diagnostics failed" in result["error"]
         assert "Failed to get cluster diagnostics" in result["message"]
 
-    def test_returns_success_envelope_with_diagnostics_data(self) -> None:
+    async def test_returns_success_envelope_with_diagnostics_data(self) -> None:
         """Happy path returns the SDK's diagnostics report under 'data'."""
-        cluster = MagicMock()
+        cluster = make_cluster()
         diagnostics_result = MagicMock()
         diagnostics_result.as_json.return_value = (
             '{"state": "online", "services": {"kv": []}}'
@@ -322,8 +341,9 @@ class TestGetClusterDiagnosticsReport:
         with patch(
             "cb_mcp.tools.server.get_cluster_connection",
             return_value=cluster,
+            new_callable=AsyncMock,
         ):
-            result = get_cluster_diagnostics_report(ctx)
+            result = await get_cluster_diagnostics_report(ctx)
 
         cluster.diagnostics.assert_called_once()
         assert result["status"] == "success"

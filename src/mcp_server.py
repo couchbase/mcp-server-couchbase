@@ -255,7 +255,7 @@ def build_mcp_server(params: Mapping[str, Any]) -> FastMCP:
             raise
         finally:
             if app_context.cluster_provider:
-                app_context.cluster_provider.close()
+                await app_context.cluster_provider.close()
             logger.info("Closing MCP server")
 
     mcp = FastMCP(MCP_SERVER_NAME, lifespan=app_lifespan, auth=auth)

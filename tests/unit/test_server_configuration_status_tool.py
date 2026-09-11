@@ -31,7 +31,7 @@ def _make_ctx(settings=None, cluster_provider=None, logging_config=None) -> Cont
     )
 
 
-def test_configuration_status_exposes_tool_lists():
+async def test_configuration_status_exposes_tool_lists():
     ctx = _make_ctx(
         {
             "connection_string": "couchbases://example",
@@ -45,7 +45,7 @@ def test_configuration_status_exposes_tool_lists():
         }
     )
 
-    payload = get_server_configuration_status(ctx)
+    payload = await get_server_configuration_status(ctx)
     config = payload["configuration"]
 
     assert config["disabled_tools"] == ["a_tool", "z_tool"]
@@ -55,15 +55,15 @@ def test_configuration_status_exposes_tool_lists():
     ]
 
 
-def test_configuration_status_defaults_tool_lists_to_empty():
-    payload = get_server_configuration_status(_make_ctx())
+async def test_configuration_status_defaults_tool_lists_to_empty():
+    payload = await get_server_configuration_status(_make_ctx())
     config = payload["configuration"]
 
     assert config["disabled_tools"] == []
     assert config["confirmation_required_tools"] == []
 
 
-def test_configuration_status_exposes_oauth_config():
+async def test_configuration_status_exposes_oauth_config():
     """OAuth resource-server config surfaces (non-secret IdP coordinates).
 
     Mirrors the env-info diagnostic record so support sees the same OAuth
@@ -82,7 +82,7 @@ def test_configuration_status_exposes_oauth_config():
         }
     )
 
-    config = get_server_configuration_status(ctx)["configuration"]
+    config = (await get_server_configuration_status(ctx))["configuration"]
 
     assert config["oauth_enabled"] is True
     assert config["oauth_jwks_uri"] == "https://auth.example.com/.well-known/jwks.json"
@@ -94,9 +94,9 @@ def test_configuration_status_exposes_oauth_config():
     assert config["oauth_scope_write_label"] == "couchbase-mcp/write"
 
 
-def test_configuration_status_oauth_defaults_when_unset():
+async def test_configuration_status_oauth_defaults_when_unset():
     """With no OAuth settings, enabled is False and coordinates are None."""
-    config = get_server_configuration_status(_make_ctx())["configuration"]
+    config = (await get_server_configuration_status(_make_ctx()))["configuration"]
 
     assert config["oauth_enabled"] is False
     assert config["oauth_jwks_uri"] is None
@@ -105,7 +105,7 @@ def test_configuration_status_oauth_defaults_when_unset():
     assert config["oauth_mcp_base_url"] is None
 
 
-def test_logging_block_passed_through_from_lifespan_context():
+async def test_logging_block_passed_through_from_lifespan_context():
     """The tool surfaces whatever shape AppContext.logging_config carries.
 
     The tool itself has no dependency on the logging module — it just reads
@@ -129,13 +129,13 @@ def test_logging_block_passed_through_from_lifespan_context():
             "ERROR": 1048576,
         },
     }
-    payload = get_server_configuration_status(
+    payload = await get_server_configuration_status(
         _make_ctx(logging_config=logging_snapshot)
     )
     assert payload["logging"] == logging_snapshot
 
 
-def test_logging_block_is_none_when_lifespan_omits_it():
+async def test_logging_block_is_none_when_lifespan_omits_it():
     """A host server that doesn't populate logging_config gets a clean ``None``.
 
     Decoupling check: a third-party implementation using a different logging
@@ -154,13 +154,13 @@ def test_logging_block_is_none_when_lifespan_omits_it():
         SimpleNamespace(request_context=SimpleNamespace(lifespan_context=lifespan)),
     )
 
-    payload = get_server_configuration_status(ctx)
+    payload = await get_server_configuration_status(ctx)
     assert payload["logging"] is None
 
 
-def test_logging_block_alongside_existing_configuration_keys():
+async def test_logging_block_alongside_existing_configuration_keys():
     """The new logging block is a peer of configuration/connections, not nested."""
-    payload = get_server_configuration_status(
+    payload = await get_server_configuration_status(
         _make_ctx(
             settings={"read_only_mode": True},
             logging_config={"level": "INFO", "sinks": ["stderr"]},

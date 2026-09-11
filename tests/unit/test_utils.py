@@ -11,12 +11,13 @@ Tests for:
 
 from __future__ import annotations
 
+import asyncio
 import os
-import threading
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from _async_mocks import make_bucket, make_cluster
 
 from cb_mcp.tools.index import (
     fetch_indexes_via_query_service,
@@ -763,21 +764,23 @@ class TestConfigModule:
 class TestConnectionModule:
     """Unit tests for connection.py module."""
 
-    def test_connect_to_couchbase_cluster_with_password(self) -> None:
+    async def test_connect_to_couchbase_cluster_with_password(self) -> None:
         """Verify password authentication path is used correctly."""
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
 
         with (
             patch("cb_mcp.utils.connection.PasswordAuthenticator") as mock_auth,
             patch("cb_mcp.utils.connection.ClusterOptions") as mock_options,
             patch(
-                "cb_mcp.utils.connection.Cluster", return_value=mock_cluster
+                "cb_mcp.utils.connection.Cluster.connect",
+                new_callable=AsyncMock,
+                return_value=mock_cluster,
             ) as mock_cluster_class,
         ):
             mock_options_instance = MagicMock()
             mock_options.return_value = mock_options_instance
 
-            result = connect_to_couchbase_cluster(
+            result = await connect_to_couchbase_cluster(
                 connection_string="couchbase://localhost",
                 username="admin",
                 password="password",
@@ -788,20 +791,24 @@ class TestConnectionModule:
             mock_cluster.wait_until_ready.assert_called_once()
             assert result == mock_cluster
 
-    def test_connect_to_couchbase_cluster_with_certificate(self) -> None:
+    async def test_connect_to_couchbase_cluster_with_certificate(self) -> None:
         """Verify certificate authentication path is used when certs provided."""
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
 
         with (
             patch("cb_mcp.utils.connection.CertificateAuthenticator") as mock_cert_auth,
             patch("cb_mcp.utils.connection.ClusterOptions") as mock_options,
-            patch("cb_mcp.utils.connection.Cluster", return_value=mock_cluster),
+            patch(
+                "cb_mcp.utils.connection.Cluster.connect",
+                new_callable=AsyncMock,
+                return_value=mock_cluster,
+            ),
             patch("cb_mcp.utils.connection.os.path.exists", return_value=True),
         ):
             mock_options_instance = MagicMock()
             mock_options.return_value = mock_options_instance
 
-            result = connect_to_couchbase_cluster(
+            result = await connect_to_couchbase_cluster(
                 connection_string="couchbases://localhost",
                 username="admin",
                 password="password",
@@ -817,7 +824,7 @@ class TestConnectionModule:
             )
             assert result == mock_cluster
 
-    def test_connect_to_couchbase_cluster_missing_cert_file(self) -> None:
+    async def test_connect_to_couchbase_cluster_missing_cert_file(self) -> None:
         """Verify FileNotFoundError raised when cert files don't exist."""
         with (
             patch("cb_mcp.utils.connection.os.path.exists", return_value=False),
@@ -825,7 +832,7 @@ class TestConnectionModule:
                 FileNotFoundError, match="Client certificate files not found"
             ),
         ):
-            connect_to_couchbase_cluster(
+            await connect_to_couchbase_cluster(
                 connection_string="couchbases://localhost",
                 username="admin",
                 password="password",
@@ -833,61 +840,62 @@ class TestConnectionModule:
                 client_key_path="/path/to/missing.key",
             )
 
-    def test_connect_to_couchbase_cluster_only_cert_path(self) -> None:
+    async def test_connect_to_couchbase_cluster_only_cert_path(self) -> None:
         """Verify ValueError raised when only client_cert_path is provided."""
         with pytest.raises(ValueError, match="must be provided together"):
-            connect_to_couchbase_cluster(
+            await connect_to_couchbase_cluster(
                 connection_string="couchbases://localhost",
                 username="admin",
                 password="password",
                 client_cert_path="/path/to/client.pem",
             )
 
-    def test_connect_to_couchbase_cluster_only_key_path(self) -> None:
+    async def test_connect_to_couchbase_cluster_only_key_path(self) -> None:
         """Verify ValueError raised when only client_key_path is provided."""
         with pytest.raises(ValueError, match="must be provided together"):
-            connect_to_couchbase_cluster(
+            await connect_to_couchbase_cluster(
                 connection_string="couchbases://localhost",
                 username="admin",
                 password="password",
                 client_key_path="/path/to/client.key",
             )
 
-    def test_connect_to_couchbase_cluster_connection_failure(self) -> None:
+    async def test_connect_to_couchbase_cluster_connection_failure(self) -> None:
         """Verify exceptions are re-raised on connection failure."""
         with (
             patch("cb_mcp.utils.connection.PasswordAuthenticator"),
             patch("cb_mcp.utils.connection.ClusterOptions"),
             patch(
-                "cb_mcp.utils.connection.Cluster",
+                "cb_mcp.utils.connection.Cluster.connect",
+                new_callable=AsyncMock,
                 side_effect=Exception("Connection refused"),
             ),
             pytest.raises(Exception, match="Connection refused"),
         ):
-            connect_to_couchbase_cluster(
+            await connect_to_couchbase_cluster(
                 connection_string="couchbase://invalid-host",
                 username="admin",
                 password="password",
             )
 
-    def test_connect_to_bucket_success(self) -> None:
+    async def test_connect_to_bucket_success(self) -> None:
         """Verify connect_to_bucket returns bucket object."""
-        mock_cluster = MagicMock()
-        mock_bucket = MagicMock()
+        mock_cluster = make_cluster()
+        mock_bucket = make_bucket()
         mock_cluster.bucket.return_value = mock_bucket
 
-        result = connect_to_bucket(mock_cluster, "my-bucket")
+        result = await connect_to_bucket(mock_cluster, "my-bucket")
 
         mock_cluster.bucket.assert_called_once_with("my-bucket")
         assert result == mock_bucket
 
-    def test_connect_to_bucket_failure(self) -> None:
+    async def test_connect_to_bucket_failure(self) -> None:
         """Verify connect_to_bucket raises exception on failure."""
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
         mock_cluster.bucket.side_effect = Exception("Bucket not found")
 
         with pytest.raises(Exception, match="Bucket not found"):
-            connect_to_bucket(mock_cluster, "nonexistent-bucket")
+            await connect_to_bucket(mock_cluster, "nonexistent-bucket")
 
 
 class TestContextModule:
@@ -907,31 +915,31 @@ class TestContextModule:
         assert ctx.cluster_provider is mock_provider
         assert ctx.read_only_mode is False
 
-    def test_get_cluster_connection_delegates_to_provider(self) -> None:
+    async def test_get_cluster_connection_delegates_to_provider(self) -> None:
         """get_cluster_connection calls into the provider attached to AppContext."""
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
         mock_provider = MagicMock()
-        mock_provider.get_cluster = MagicMock(return_value=mock_cluster)
+        mock_provider.get_cluster = AsyncMock(return_value=mock_cluster)
 
         mock_ctx = MagicMock()
         mock_ctx.request_context.lifespan_context.cluster_provider = mock_provider
 
-        result = get_cluster_connection(mock_ctx)
+        result = await get_cluster_connection(mock_ctx)
 
         assert result is mock_cluster
         mock_provider.get_cluster.assert_called_once_with(mock_ctx)
 
-    def test_get_cluster_connection_raises_without_provider(self) -> None:
+    async def test_get_cluster_connection_raises_without_provider(self) -> None:
         """get_cluster_connection fails fast if the lifespan forgot to wire a provider."""
         mock_ctx = MagicMock()
         mock_ctx.request_context.lifespan_context.cluster_provider = None
 
         with pytest.raises(RuntimeError, match="Cluster provider not initialized"):
-            get_cluster_connection(mock_ctx)
+            await get_cluster_connection(mock_ctx)
 
-    def test_static_cluster_provider_connects_lazily(self) -> None:
+    async def test_static_cluster_provider_connects_lazily(self) -> None:
         """StaticClusterProvider defers connection until first get_cluster call."""
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
         mock_settings = {
             "connection_string": "couchbase://localhost",
             "username": "admin",
@@ -946,13 +954,13 @@ class TestContextModule:
             # Constructor alone must not open a connection.
             mock_connect.assert_not_called()
 
-            result = provider.get_cluster(MagicMock())
+            result = await provider.get_cluster(MagicMock())
             assert result is mock_cluster
             mock_connect.assert_called_once()
 
-    def test_static_cluster_provider_caches_cluster(self) -> None:
+    async def test_static_cluster_provider_caches_cluster(self) -> None:
         """Repeated get_cluster calls reuse the first cluster."""
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
         mock_settings = {
             "connection_string": "couchbase://localhost",
             "username": "admin",
@@ -964,13 +972,13 @@ class TestContextModule:
             return_value=mock_cluster,
         ) as mock_connect:
             provider = StaticClusterProvider(settings=mock_settings)
-            first = provider.get_cluster(MagicMock())
-            second = provider.get_cluster(MagicMock())
+            first = await provider.get_cluster(MagicMock())
+            second = await provider.get_cluster(MagicMock())
 
         assert first is second is mock_cluster
         mock_connect.assert_called_once()
 
-    def test_static_cluster_provider_propagates_connection_failure(self) -> None:
+    async def test_static_cluster_provider_propagates_connection_failure(self) -> None:
         """A failed connect raises and does not poison the cache."""
         mock_settings = {
             "connection_string": "couchbase://invalid",
@@ -984,72 +992,60 @@ class TestContextModule:
         ):
             provider = StaticClusterProvider(settings=mock_settings)
             with pytest.raises(Exception, match="Auth failed"):
-                provider.get_cluster(MagicMock())
+                await provider.get_cluster(MagicMock())
 
         # Cache stayed empty so a subsequent attempt can retry.
         assert provider._cluster is None
 
-    def test_static_cluster_provider_coalesces_concurrent_first_calls(self) -> None:
-        """The threading.Lock in StaticClusterProvider must coalesce concurrent
-        first-call attempts so we don't open multiple cluster connections when
-        several tool handlers race to be the first caller.
+    async def test_static_cluster_provider_coalesces_concurrent_first_calls(
+        self,
+    ) -> None:
+        """The asyncio.Lock must coalesce concurrent first-call attempts so we
+        do not open several cluster connections when tool handlers race to be
+        the first caller.
+
+        The provider's callers are coroutines on one event loop, so this
+        contends with asyncio tasks rather than threads.
         """
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
         mock_settings = {
             "connection_string": "couchbase://localhost",
             "username": "admin",
             "password": "password",
         }
 
-        # Events let us hold the first connect attempt inside the lock so
-        # the other threads actually contend on it.
-        connect_started = threading.Event()
-        connect_allowed = threading.Event()
+        connect_started = asyncio.Event()
+        connect_allowed = asyncio.Event()
 
-        def slow_connect(*args, **kwargs):
+        async def slow_connect(*args, **kwargs):
             connect_started.set()
-            # Block until the test releases us — guarantees that other
-            # threads queue up behind the lock during this window.
-            connect_allowed.wait(timeout=2.0)
+            # Hold the first attempt inside the lock so the others queue behind it.
+            await asyncio.wait_for(connect_allowed.wait(), timeout=2.0)
             return mock_cluster
 
         with patch(
             "providers.static.connect_to_couchbase_cluster",
+            new_callable=AsyncMock,
             side_effect=slow_connect,
         ) as mock_connect:
             provider = StaticClusterProvider(settings=mock_settings)
 
-            results: list = []
-            results_lock = threading.Lock()
-
-            def worker():
-                cluster = provider.get_cluster(MagicMock())
-                with results_lock:
-                    results.append(cluster)
-
-            threads = [threading.Thread(target=worker) for _ in range(5)]
-            for t in threads:
-                t.start()
-
-            # Wait for the first thread to enter slow_connect, then release.
-            assert connect_started.wait(timeout=2.0), (
-                "no thread reached the connect callback"
-            )
+            tasks = [
+                asyncio.create_task(provider.get_cluster(MagicMock())) for _ in range(5)
+            ]
+            await asyncio.wait_for(connect_started.wait(), timeout=2.0)
             connect_allowed.set()
+            results = await asyncio.gather(*tasks)
 
-            for t in threads:
-                t.join(timeout=5.0)
-
-        # Every thread saw the same cluster reference.
         assert len(results) == 5
         assert all(r is mock_cluster for r in results)
-        # The crucial assertion: the lock coalesced the racers into one
-        # actual connection attempt — without it this would be 5.
+        # The crucial assertion: the lock coalesced the racers into one actual
+        # connection attempt — without it this would be 5.
         mock_connect.assert_called_once()
 
-    def test_static_cluster_provider_close_releases_cluster(self) -> None:
+    async def test_static_cluster_provider_close_releases_cluster(self) -> None:
         """close() calls cluster.close() and clears the cache."""
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
         mock_settings = {
             "connection_string": "couchbase://localhost",
             "username": "admin",
@@ -1061,8 +1057,8 @@ class TestContextModule:
             return_value=mock_cluster,
         ):
             provider = StaticClusterProvider(settings=mock_settings)
-            provider.get_cluster(MagicMock())
-            provider.close()
+            await provider.get_cluster(MagicMock())
+            await provider.close()
 
         mock_cluster.close.assert_called_once()
         assert provider._cluster is None
@@ -1078,7 +1074,7 @@ class TestFetchIndexesViaQueryService:
     )
     _BASE_WHERE = "s.namespace_id = 'default' AND s.`using` = 'gsi'"
 
-    def test_no_filters(self) -> None:
+    async def test_no_filters(self) -> None:
         """With no filters, query should carry the namespace + GSI guards
         and the LET-based bucket/scope/collection normalization."""
         mock_ctx = MagicMock()
@@ -1090,17 +1086,19 @@ class TestFetchIndexesViaQueryService:
 
         with patch(
             "cb_mcp.tools.index.run_cluster_query",
-            new_callable=MagicMock,
+            new_callable=AsyncMock,
             return_value=[{"name": "idx1"}, {"name": "idx2"}],
         ) as mock_query:
-            result = fetch_indexes_via_query_service(mock_ctx, None, None, None, None)
+            result = await fetch_indexes_via_query_service(
+                mock_ctx, None, None, None, None
+            )
 
         mock_query.assert_called_once_with(
             mock_ctx, expected_query, named_parameters={}
         )
         assert len(result) == 2
 
-    def test_raw_mode_selects_raw_source_rows(self) -> None:
+    async def test_raw_mode_selects_raw_source_rows(self) -> None:
         """return_raw_index_stats=True must SELECT RAW s — no injected
         bucket/scope/collection on the result rows."""
         mock_ctx = MagicMock()
@@ -1111,10 +1109,10 @@ class TestFetchIndexesViaQueryService:
 
         with patch(
             "cb_mcp.tools.index.run_cluster_query",
-            new_callable=MagicMock,
+            new_callable=AsyncMock,
             return_value=[{"name": "idx1"}],
         ) as mock_query:
-            fetch_indexes_via_query_service(
+            await fetch_indexes_via_query_service(
                 mock_ctx, None, None, None, None, return_raw_index_stats=True
             )
 
@@ -1122,17 +1120,17 @@ class TestFetchIndexesViaQueryService:
             mock_ctx, expected_query, named_parameters={}
         )
 
-    def test_all_filters(self) -> None:
+    async def test_all_filters(self) -> None:
         """All filters should apply against the normalized LET aliases so
         legacy indexes match by bucket symmetrically with modern ones."""
         mock_ctx = MagicMock()
 
         with patch(
             "cb_mcp.tools.index.run_cluster_query",
-            new_callable=MagicMock,
+            new_callable=AsyncMock,
             return_value=[{"name": "idx1"}],
         ) as mock_query:
-            result = fetch_indexes_via_query_service(
+            result = await fetch_indexes_via_query_service(
                 mock_ctx, "bucket", "scope", "collection", "idx1"
             )
 
@@ -1152,16 +1150,18 @@ class TestFetchIndexesViaQueryService:
         assert "s.name = $index_name" in sent_query
         assert len(result) == 1
 
-    def test_non_dict_rows_filtered(self) -> None:
+    async def test_non_dict_rows_filtered(self) -> None:
         """Non-dict rows returned by the query should be dropped."""
         mock_ctx = MagicMock()
 
         with patch(
             "cb_mcp.tools.index.run_cluster_query",
-            new_callable=MagicMock,
+            new_callable=AsyncMock,
             return_value=[{"name": "idx1"}, "stray_string", 42, None],
         ):
-            result = fetch_indexes_via_query_service(mock_ctx, None, None, None, None)
+            result = await fetch_indexes_via_query_service(
+                mock_ctx, None, None, None, None
+            )
 
         assert result == [{"name": "idx1"}]
 
@@ -1169,9 +1169,9 @@ class TestFetchIndexesViaQueryService:
 class TestResolveClusterMajorVersion:
     """Unit tests for resolve_cluster_major_version."""
 
-    def test_dict_nodes(self) -> None:
+    async def test_dict_nodes(self) -> None:
         """Version detection with nodes represented as dicts."""
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
         info = MagicMock()
         info.nodes = [
             {"version": "8.0.0-1928-enterprise"},
@@ -1179,26 +1179,26 @@ class TestResolveClusterMajorVersion:
         ]
         mock_cluster.cluster_info.return_value = info
 
-        result = resolve_cluster_major_version(mock_cluster)
+        result = await resolve_cluster_major_version(mock_cluster)
 
         assert result == 8
 
-    def test_object_nodes(self) -> None:
+    async def test_object_nodes(self) -> None:
         """Version detection with nodes represented as objects with attributes."""
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
         info = MagicMock()
         node = MagicMock()
         node.version = "7.6.0"
         info.nodes = [node]
         mock_cluster.cluster_info.return_value = info
 
-        result = resolve_cluster_major_version(mock_cluster)
+        result = await resolve_cluster_major_version(mock_cluster)
 
         assert result == 7
 
-    def test_mixed_versions_returns_min(self) -> None:
+    async def test_mixed_versions_returns_min(self) -> None:
         """Mixed-version cluster returns the minimum major version."""
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
         info = MagicMock()
         info.nodes = [
             {"version": "8.0.0-enterprise"},
@@ -1206,36 +1206,36 @@ class TestResolveClusterMajorVersion:
         ]
         mock_cluster.cluster_info.return_value = info
 
-        result = resolve_cluster_major_version(mock_cluster)
+        result = await resolve_cluster_major_version(mock_cluster)
 
         assert result == 7
 
-    def test_cluster_info_exception_propagates(self) -> None:
+    async def test_cluster_info_exception_propagates(self) -> None:
         """If cluster_info() throws, the exception should propagate."""
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
         mock_cluster.cluster_info.side_effect = Exception("connection refused")
 
         with pytest.raises(Exception, match="connection refused"):
-            resolve_cluster_major_version(mock_cluster)
+            await resolve_cluster_major_version(mock_cluster)
 
-    def test_empty_nodes_raises(self) -> None:
+    async def test_empty_nodes_raises(self) -> None:
         """If cluster reports no nodes, raise RuntimeError."""
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
         info = MagicMock()
         info.nodes = []
         mock_cluster.cluster_info.return_value = info
 
         with pytest.raises(RuntimeError, match="no nodes"):
-            resolve_cluster_major_version(mock_cluster)
+            await resolve_cluster_major_version(mock_cluster)
 
 
 class TestListIndexesVersionRouting:
     """Integration-level tests verifying list_indexes routes to the correct path."""
 
-    def test_version_8_uses_query_service(self) -> None:
+    async def test_version_8_uses_query_service(self) -> None:
         """Cluster version >= 8 should use system:indexes, not REST API."""
         mock_ctx = MagicMock()
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
         info = MagicMock()
         info.nodes = [{"version": "8.0.0-enterprise"}]
         mock_cluster.cluster_info.return_value = info
@@ -1251,12 +1251,12 @@ class TestListIndexesVersionRouting:
             ),
             patch(
                 "cb_mcp.tools.index.get_cluster_connection",
-                new_callable=MagicMock,
+                new_callable=AsyncMock,
                 return_value=mock_cluster,
             ),
             patch(
                 "cb_mcp.tools.index.run_cluster_query",
-                new_callable=MagicMock,
+                new_callable=AsyncMock,
                 return_value=[
                     {
                         "name": "idx1",
@@ -1281,17 +1281,17 @@ class TestListIndexesVersionRouting:
                 "cb_mcp.tools.index.fetch_indexes_from_rest_api", new_callable=MagicMock
             ) as mock_rest,
         ):
-            result = list_indexes(mock_ctx)
+            result = await list_indexes(mock_ctx)
 
         mock_query.assert_called_once()
         mock_rest.assert_not_called()
         assert len(result) == 1
         assert result[0]["name"] == "idx1"
 
-    def test_version_7_uses_rest_api(self) -> None:
+    async def test_version_7_uses_rest_api(self) -> None:
         """Cluster version < 8 should fall back to the REST API."""
         mock_ctx = MagicMock()
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
         info = MagicMock()
         info.nodes = [{"version": "7.6.11-enterprise"}]
         mock_cluster.cluster_info.return_value = info
@@ -1307,7 +1307,7 @@ class TestListIndexesVersionRouting:
             ),
             patch(
                 "cb_mcp.tools.index.get_cluster_connection",
-                new_callable=MagicMock,
+                new_callable=AsyncMock,
                 return_value=mock_cluster,
             ),
             patch(
@@ -1315,7 +1315,7 @@ class TestListIndexesVersionRouting:
             ) as mock_query,
             patch(
                 "cb_mcp.tools.index.fetch_indexes_from_rest_api",
-                new_callable=MagicMock,
+                new_callable=AsyncMock,
                 return_value=[
                     {
                         "name": "idx1",
@@ -1330,7 +1330,7 @@ class TestListIndexesVersionRouting:
                 ],
             ) as mock_rest,
         ):
-            result = list_indexes(mock_ctx)
+            result = await list_indexes(mock_ctx)
 
         mock_query.assert_not_called()
         mock_rest.assert_called_once()
@@ -1523,17 +1523,19 @@ class TestFetchIndexesFromRestApi:
         return response
 
     def _patch_client(self, get_side_effect):
-        """Patch httpx.Client so .get() returns the supplied side effect."""
+        """Patch httpx.AsyncClient so .get() returns the supplied side effect."""
+        # httpx.AsyncClient is an *async* context manager whose .get() is a
+        # coroutine, so both must be async-aware or the tool just raises.
         mock_client_cm = MagicMock()
         mock_client = MagicMock()
-        mock_client.get = MagicMock(side_effect=get_side_effect)
-        mock_client_cm.__enter__.return_value = mock_client
-        mock_client_cm.__exit__.return_value = False
+        mock_client.get = AsyncMock(side_effect=get_side_effect)
+        mock_client_cm.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client_cm.__aexit__ = AsyncMock(return_value=False)
         return patch(
-            "cb_mcp.utils.index_utils.httpx.Client", return_value=mock_client_cm
+            "cb_mcp.utils.index_utils.httpx.AsyncClient", return_value=mock_client_cm
         ), mock_client
 
-    def test_single_host_success(self) -> None:
+    async def test_single_host_success(self) -> None:
         """A single-host success path should return indexes from response.status."""
         indexes = [{"indexName": "idx1", "bucket": "b", "definition": "CREATE..."}]
         client_patch, mock_client = self._patch_client(
@@ -1541,7 +1543,7 @@ class TestFetchIndexesFromRestApi:
         )
 
         with client_patch:
-            result = fetch_indexes_from_rest_api(
+            result = await fetch_indexes_from_rest_api(
                 "couchbase://host1",
                 "u",
                 "p",
@@ -1553,14 +1555,14 @@ class TestFetchIndexesFromRestApi:
         called_url = mock_client.get.call_args[0][0]
         assert called_url == "http://host1:9102/getIndexStatus"
 
-    def test_tls_uses_https_and_secure_port(self) -> None:
+    async def test_tls_uses_https_and_secure_port(self) -> None:
         """TLS connection strings should select https + the secure port (19102)."""
         client_patch, mock_client = self._patch_client(
             [self._ok_response({"status": []})]
         )
 
         with client_patch:
-            fetch_indexes_from_rest_api(
+            await fetch_indexes_from_rest_api(
                 "couchbases://host1",
                 "u",
                 "p",
@@ -1569,14 +1571,14 @@ class TestFetchIndexesFromRestApi:
         called_url = mock_client.get.call_args[0][0]
         assert called_url == "https://host1:19102/getIndexStatus"
 
-    def test_filter_params_forwarded(self) -> None:
+    async def test_filter_params_forwarded(self) -> None:
         """Bucket/scope/collection/index filters must be sent as query params."""
         client_patch, mock_client = self._patch_client(
             [self._ok_response({"status": []})]
         )
 
         with client_patch:
-            fetch_indexes_from_rest_api(
+            await fetch_indexes_from_rest_api(
                 "couchbase://host1",
                 "u",
                 "p",
@@ -1594,14 +1596,14 @@ class TestFetchIndexesFromRestApi:
             "index": "idx",
         }
 
-    def test_basic_auth_forwarded(self) -> None:
+    async def test_basic_auth_forwarded(self) -> None:
         """Username/password must be forwarded as HTTP basic auth."""
         client_patch, mock_client = self._patch_client(
             [self._ok_response({"status": []})]
         )
 
         with client_patch:
-            fetch_indexes_from_rest_api(
+            await fetch_indexes_from_rest_api(
                 "couchbase://host1",
                 "admin",
                 "secret",
@@ -1609,7 +1611,7 @@ class TestFetchIndexesFromRestApi:
 
         assert mock_client.get.call_args[1]["auth"] == ("admin", "secret")
 
-    def test_multi_host_failover(self) -> None:
+    async def test_multi_host_failover(self) -> None:
         """If the first host fails, the second one should be tried."""
         first_error = httpx.ConnectError("connection refused")
         success_response = self._ok_response({"status": [{"indexName": "idx1"}]})
@@ -1617,7 +1619,7 @@ class TestFetchIndexesFromRestApi:
         client_patch, mock_client = self._patch_client([first_error, success_response])
 
         with client_patch:
-            result = fetch_indexes_from_rest_api(
+            result = await fetch_indexes_from_rest_api(
                 "couchbase://host1,host2",
                 "u",
                 "p",
@@ -1630,20 +1632,20 @@ class TestFetchIndexesFromRestApi:
         assert "host1" in urls[0]
         assert "host2" in urls[1]
 
-    def test_all_hosts_fail_raises_runtime_error(self) -> None:
+    async def test_all_hosts_fail_raises_runtime_error(self) -> None:
         """When every host raises, the helper must raise RuntimeError with
         the list of attempted hosts in the message."""
         error = httpx.ConnectError("connection refused")
         client_patch, _ = self._patch_client([error, error])
 
         with client_patch, pytest.raises(RuntimeError, match=r"host1.*host2"):
-            fetch_indexes_from_rest_api(
+            await fetch_indexes_from_rest_api(
                 "couchbase://host1,host2",
                 "u",
                 "p",
             )
 
-    def test_unexpected_exception_continues_to_next_host(self) -> None:
+    async def test_unexpected_exception_continues_to_next_host(self) -> None:
         """Non-HTTPError exceptions on one host should not abort failover —
         the next host should still be tried."""
         unexpected = ValueError("weird parser bug")
@@ -1652,7 +1654,7 @@ class TestFetchIndexesFromRestApi:
         client_patch, mock_client = self._patch_client([unexpected, success])
 
         with client_patch:
-            result = fetch_indexes_from_rest_api(
+            result = await fetch_indexes_from_rest_api(
                 "couchbase://host1,host2",
                 "u",
                 "p",
@@ -1661,7 +1663,7 @@ class TestFetchIndexesFromRestApi:
         assert result == []
         assert mock_client.get.call_count == 2
 
-    def test_http_error_status_continues_to_next_host(self) -> None:
+    async def test_http_error_status_continues_to_next_host(self) -> None:
         """raise_for_status() failures (e.g., 500) should be treated as a
         host failure and not stop the failover loop."""
         bad_response = MagicMock()
@@ -1673,7 +1675,7 @@ class TestFetchIndexesFromRestApi:
         client_patch, mock_client = self._patch_client([bad_response, success])
 
         with client_patch:
-            result = fetch_indexes_from_rest_api(
+            result = await fetch_indexes_from_rest_api(
                 "couchbase://host1,host2",
                 "u",
                 "p",

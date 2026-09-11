@@ -14,9 +14,10 @@ statement to trigger a read-only block:
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
+from _async_mocks import async_rows, make_cluster, make_scope
 from lark_sqlpp import modifies_data, modifies_structure, parse_sqlpp
 
 from cb_mcp.tools.query import (
@@ -36,17 +37,17 @@ def _make_ctx(*, read_only_mode: bool = True):
     The cluster's `scope().query()` returns an iterable of rows so the tool
     body's `for row in result` loop works without a real SDK.
     """
-    cluster = MagicMock()
-    scope = MagicMock()
+    cluster = make_cluster()
+    scope = make_scope()
     cluster.bucket.return_value.scope.return_value = scope
     # Default: query returns no rows. Tests override scope.query as needed.
-    scope.query.return_value = iter([])
+    scope.query.return_value = async_rows([])
 
     ctx = SimpleNamespace(
         request_context=SimpleNamespace(
             lifespan_context=SimpleNamespace(
                 cluster_provider=SimpleNamespace(
-                    get_cluster=lambda c: cluster,
+                    get_cluster=AsyncMock(return_value=cluster),
                 ),
                 read_only_mode=read_only_mode,
             )
@@ -58,30 +59,32 @@ def _make_ctx(*, read_only_mode: bool = True):
 class TestRunSqlPlusPlusQueryReadOnly:
     """Read-only mode must block DML/DDL but allow EXPLAIN passthrough."""
 
-    def test_data_modification_blocked_in_read_only_mode(self) -> None:
+    async def test_data_modification_blocked_in_read_only_mode(self) -> None:
         """UPDATE in read-only mode must raise ValueError before hitting the cluster."""
         ctx, _, scope = _make_ctx(read_only_mode=True)
 
         with pytest.raises(ValueError, match="Data modification query is not allowed"):
-            run_sql_plus_plus_query(
+            await run_sql_plus_plus_query(
                 ctx, "b", "s", "UPDATE users SET age = 25 WHERE id = 1"
             )
 
         # Query must not have been forwarded to the cluster.
         scope.query.assert_not_called()
 
-    def test_structure_modification_blocked_in_read_only_mode(self) -> None:
+    async def test_structure_modification_blocked_in_read_only_mode(self) -> None:
         """CREATE INDEX in read-only mode must raise ValueError."""
         ctx, _, scope = _make_ctx(read_only_mode=True)
 
         with pytest.raises(
             ValueError, match="Structure modification query is not allowed"
         ):
-            run_sql_plus_plus_query(ctx, "b", "s", "CREATE INDEX idx ON users(name)")
+            await run_sql_plus_plus_query(
+                ctx, "b", "s", "CREATE INDEX idx ON users(name)"
+            )
 
         scope.query.assert_not_called()
 
-    def test_grant_blocked_in_read_only_mode(self) -> None:
+    async def test_grant_blocked_in_read_only_mode(self) -> None:
         """GRANT (SQL++ DCL) in read-only mode must raise before hitting the cluster.
 
         Regression guard for the read-only bypass reported against DCL: lark-sqlpp
@@ -94,115 +97,117 @@ class TestRunSqlPlusPlusQueryReadOnly:
         with pytest.raises(
             ValueError, match="Privilege modification query is not allowed"
         ):
-            run_sql_plus_plus_query(
+            await run_sql_plus_plus_query(
                 ctx, "b", "s", "GRANT cluster_admin ON default TO attacker_user"
             )
 
         scope.query.assert_not_called()
 
-    def test_revoke_blocked_in_read_only_mode(self) -> None:
+    async def test_revoke_blocked_in_read_only_mode(self) -> None:
         """REVOKE (SQL++ DCL) in read-only mode must also be blocked."""
         ctx, _, scope = _make_ctx(read_only_mode=True)
 
         with pytest.raises(
             ValueError, match="Privilege modification query is not allowed"
         ):
-            run_sql_plus_plus_query(
+            await run_sql_plus_plus_query(
                 ctx, "b", "s", "REVOKE query_select ON `travel-sample` FROM alice"
             )
 
         scope.query.assert_not_called()
 
-    def test_explain_bypasses_read_only_check(self) -> None:
+    async def test_explain_bypasses_read_only_check(self) -> None:
         """EXPLAIN of a DML query must NOT be blocked — EXPLAIN is read-only."""
         ctx, _, scope = _make_ctx(read_only_mode=True)
-        scope.query.return_value = iter([{"plan": "..."}])
+        scope.query.return_value = async_rows([{"plan": "..."}])
 
         # Should not raise.
-        result = run_sql_plus_plus_query(
+        result = await run_sql_plus_plus_query(
             ctx, "b", "s", "EXPLAIN UPDATE users SET x = 1"
         )
 
         assert result == [{"plan": "..."}]
         scope.query.assert_called_once()
 
-    def test_writes_allowed_when_read_only_mode_false(self) -> None:
+    async def test_writes_allowed_when_read_only_mode_false(self) -> None:
         """With read-only mode off, DML must pass through."""
         ctx, _, scope = _make_ctx(read_only_mode=False)
-        scope.query.return_value = iter([])
+        scope.query.return_value = async_rows([])
 
-        result = run_sql_plus_plus_query(ctx, "b", "s", "UPDATE users SET age = 25")
+        result = await run_sql_plus_plus_query(
+            ctx, "b", "s", "UPDATE users SET age = 25"
+        )
         assert result == []
         scope.query.assert_called_once()
 
-    def test_select_returns_rows(self) -> None:
+    async def test_select_returns_rows(self) -> None:
         """A SELECT query should collect all yielded rows into a list."""
         ctx, _, scope = _make_ctx(read_only_mode=True)
-        scope.query.return_value = iter([{"id": 1}, {"id": 2}])
+        scope.query.return_value = async_rows([{"id": 1}, {"id": 2}])
 
-        result = run_sql_plus_plus_query(ctx, "b", "s", "SELECT * FROM users")
+        result = await run_sql_plus_plus_query(ctx, "b", "s", "SELECT * FROM users")
         assert result == [{"id": 1}, {"id": 2}]
 
-    def test_cluster_query_failure_propagates(self) -> None:
+    async def test_cluster_query_failure_propagates(self) -> None:
         """If the SDK raises during query execution, the error must propagate."""
         ctx, _, scope = _make_ctx(read_only_mode=True)
         scope.query.side_effect = Exception("query timeout")
 
         with pytest.raises(Exception, match="query timeout"):
-            run_sql_plus_plus_query(ctx, "b", "s", "SELECT 1")
+            await run_sql_plus_plus_query(ctx, "b", "s", "SELECT 1")
 
 
 class TestExplainSqlPlusPlusQuery:
     """explain_sql_plus_plus_query input validation and EXPLAIN prefixing."""
 
-    def test_empty_query_raises_value_error(self) -> None:
+    async def test_empty_query_raises_value_error(self) -> None:
         """Empty / whitespace-only queries must be rejected before any work."""
         ctx, _, _ = _make_ctx(read_only_mode=True)
 
         with pytest.raises(ValueError, match="Query cannot be empty"):
-            explain_sql_plus_plus_query(ctx, "b", "s", "   \n  \t ")
+            await explain_sql_plus_plus_query(ctx, "b", "s", "   \n  \t ")
 
-    def test_prepends_explain_when_missing(self) -> None:
+    async def test_prepends_explain_when_missing(self) -> None:
         """A plain SELECT must be wrapped in EXPLAIN before execution."""
         ctx, _, scope = _make_ctx(read_only_mode=True)
-        scope.query.return_value = iter([{"plan": {"#operator": "Sequence"}}])
+        scope.query.return_value = async_rows([{"plan": {"#operator": "Sequence"}}])
 
-        result = explain_sql_plus_plus_query(ctx, "b", "s", "SELECT 1")
+        result = await explain_sql_plus_plus_query(ctx, "b", "s", "SELECT 1")
 
         assert result["explain_statement"] == "EXPLAIN SELECT 1"
         assert result["query"] == "SELECT 1"
         assert result["query_context"] == {"bucket_name": "b", "scope_name": "s"}
 
-    def test_keeps_existing_explain_prefix(self) -> None:
+    async def test_keeps_existing_explain_prefix(self) -> None:
         """If the caller already provided EXPLAIN, do not double-prefix."""
         ctx, _, scope = _make_ctx(read_only_mode=True)
-        scope.query.return_value = iter([{"plan": {"#operator": "Sequence"}}])
+        scope.query.return_value = async_rows([{"plan": {"#operator": "Sequence"}}])
 
-        result = explain_sql_plus_plus_query(ctx, "b", "s", "EXPLAIN SELECT 1")
+        result = await explain_sql_plus_plus_query(ctx, "b", "s", "EXPLAIN SELECT 1")
         assert result["explain_statement"] == "EXPLAIN SELECT 1"
 
 
 class TestGetSchemaForCollection:
     """get_schema_for_collection error propagation."""
 
-    def test_propagates_underlying_failure(self) -> None:
+    async def test_propagates_underlying_failure(self) -> None:
         """Failures from INFER should be re-raised — the schema tool must
         not swallow connectivity / parsing errors."""
         ctx, _, scope = _make_ctx(read_only_mode=True)
         scope.query.side_effect = Exception("infer failed")
 
         with pytest.raises(Exception, match="infer failed"):
-            get_schema_for_collection(ctx, "b", "s", "users")
+            await get_schema_for_collection(ctx, "b", "s", "users")
 
-    def test_empty_schema_when_no_results(self) -> None:
+    async def test_empty_schema_when_no_results(self) -> None:
         """If INFER returns no rows, schema should be the empty default."""
         ctx, _, scope = _make_ctx(read_only_mode=True)
-        scope.query.return_value = iter([])
+        scope.query.return_value = async_rows([])
 
-        result = get_schema_for_collection(ctx, "b", "s", "users")
+        result = await get_schema_for_collection(ctx, "b", "s", "users")
         assert result == {"collection_name": "users", "schema": []}
 
-    def test_escapes_embedded_backtick_in_collection_name(self) -> None:
+    async def test_escapes_embedded_backtick_in_collection_name(self) -> None:
         """A collection_name containing a backtick must not be able to close
         the identifier early and inject a second SQL++ statement.
 
@@ -211,15 +216,17 @@ class TestGetSchemaForCollection:
         test_infer_with_doubled_backtick_is_unparseable_by_write_guard below.
         """
         ctx, _, scope = _make_ctx(read_only_mode=False)
-        scope.query.return_value = iter([])
+        scope.query.return_value = async_rows([])
         malicious_name = "x`; DELETE FROM `users"
 
-        get_schema_for_collection(ctx, "b", "s", malicious_name)
+        await get_schema_for_collection(ctx, "b", "s", malicious_name)
 
         query = scope.query.call_args[0][0]
         assert query == "INFER `x``; DELETE FROM ``users`"
 
-    def test_infer_with_doubled_backtick_is_unparseable_by_write_guard(self) -> None:
+    async def test_infer_with_doubled_backtick_is_unparseable_by_write_guard(
+        self,
+    ) -> None:
         """Known lark_sqlpp limitation: its INFER grammar rule can't parse a
         doubled-backtick escaped identifier (unlike its SELECT/FROM rule, which
         can). Under the default read_only_mode=True, this means a
@@ -228,11 +235,11 @@ class TestGetSchemaForCollection:
         regression, since real Couchbase collection names can't contain
         backticks anyway."""
         ctx, _, scope = _make_ctx(read_only_mode=True)
-        scope.query.return_value = iter([])
+        scope.query.return_value = async_rows([])
         malicious_name = "x`; DELETE FROM `users"
 
         with pytest.raises(Exception, match="terminal"):
-            get_schema_for_collection(ctx, "b", "s", malicious_name)
+            await get_schema_for_collection(ctx, "b", "s", malicious_name)
 
 
 class TestSafeIdent:
@@ -248,35 +255,35 @@ class TestSafeIdent:
 class TestRunClusterQuery:
     """run_cluster_query error propagation."""
 
-    def test_failure_propagates(self) -> None:
+    async def test_failure_propagates(self) -> None:
         """Cluster-level query errors should not be hidden by the helper."""
         ctx, cluster, _ = _make_ctx(read_only_mode=True)
         cluster.query.side_effect = Exception("network error")
 
         with pytest.raises(Exception, match="network error"):
-            run_cluster_query(ctx, "SELECT 1")
+            await run_cluster_query(ctx, "SELECT 1")
 
 
 class TestRunQueryToolWithEmptyMessage:
     """Empty-result envelope used by every performance analysis tool."""
 
-    def test_results_returned_when_present(self) -> None:
+    async def test_results_returned_when_present(self) -> None:
         """When the cluster returns rows, the helper returns them verbatim."""
         ctx, cluster, _ = _make_ctx(read_only_mode=True)
-        cluster.query.return_value = iter([{"statement": "SELECT 1"}])
+        cluster.query.return_value = async_rows([{"statement": "SELECT 1"}])
 
-        result = _run_query_tool_with_empty_message(
+        result = await _run_query_tool_with_empty_message(
             ctx, "SELECT * FROM x", limit=10, empty_message="nope"
         )
 
         assert result == [{"statement": "SELECT 1"}]
 
-    def test_extra_payload_merged_on_empty(self) -> None:
+    async def test_extra_payload_merged_on_empty(self) -> None:
         """When no rows, the empty envelope merges any extra_payload fields."""
         ctx, cluster, _ = _make_ctx(read_only_mode=True)
-        cluster.query.return_value = iter([])
+        cluster.query.return_value = async_rows([])
 
-        result = _run_query_tool_with_empty_message(
+        result = await _run_query_tool_with_empty_message(
             ctx,
             "SELECT * FROM x",
             limit=10,
@@ -286,12 +293,12 @@ class TestRunQueryToolWithEmptyMessage:
 
         assert result == [{"message": "No data", "results": [], "hint": "try later"}]
 
-    def test_empty_envelope_without_extra_payload(self) -> None:
+    async def test_empty_envelope_without_extra_payload(self) -> None:
         """Empty results without extras should yield just message + results."""
         ctx, cluster, _ = _make_ctx(read_only_mode=True)
-        cluster.query.return_value = iter([])
+        cluster.query.return_value = async_rows([])
 
-        result = _run_query_tool_with_empty_message(
+        result = await _run_query_tool_with_empty_message(
             ctx, "SELECT * FROM x", limit=10, empty_message="No data"
         )
         assert result == [{"message": "No data", "results": []}]
@@ -358,12 +365,12 @@ class TestCollectionExpressionReadOnlyGuard:
     """
 
     @pytest.mark.parametrize("query", COLLECTION_EXPR_QUERIES)
-    def test_not_blocked_in_read_only_mode(self, query: str) -> None:
+    async def test_not_blocked_in_read_only_mode(self, query: str) -> None:
         """In read-only mode the query must reach the cluster and return rows."""
         ctx, _, scope = _make_ctx(read_only_mode=True)
-        scope.query.return_value = iter([{"ok": 1}])
+        scope.query.return_value = async_rows([{"ok": 1}])
 
-        result = run_sql_plus_plus_query(ctx, "b", "s", query)
+        result = await run_sql_plus_plus_query(ctx, "b", "s", query)
 
         assert result == [{"ok": 1}]
         scope.query.assert_called_once()

@@ -28,7 +28,7 @@ def safe_ident(name: str) -> str:
     return "`" + name.replace("`", "``") + "`"
 
 
-def get_schema_for_collection(
+async def get_schema_for_collection(
     ctx: Context, bucket_name: str, scope_name: str, collection_name: str
 ) -> dict[str, Any]:
     """Get the schema for a collection in the specified scope.
@@ -40,7 +40,7 @@ def get_schema_for_collection(
             f"Inferring schema for {format_keyspace(bucket_name, scope_name, collection_name)}"
         )
         query = f"INFER {safe_ident(collection_name)}"
-        result = run_sql_plus_plus_query(ctx, bucket_name, scope_name, query)
+        result = await run_sql_plus_plus_query(ctx, bucket_name, scope_name, query)
         # Result is a list of list of schemas. We convert it to a list of schemas.
         if result:
             schema["schema"] = result[0]
@@ -107,7 +107,7 @@ def _blocked_write_kind(parsed_query: Any) -> str | None:
     return "write"
 
 
-def run_sql_plus_plus_query(
+async def run_sql_plus_plus_query(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
@@ -131,9 +131,9 @@ def run_sql_plus_plus_query(
     here — it defers the build by default and tells you the recommended next step. Use
     list_indexes to check whether an index is online before relying on it in a query plan.
     """
-    cluster = get_cluster_connection(ctx)
+    cluster = await get_cluster_connection(ctx)
 
-    bucket = connect_to_bucket(cluster, bucket_name)
+    bucket = await connect_to_bucket(cluster, bucket_name)
 
     app_context = ctx.request_context.lifespan_context
     read_only_mode = app_context.read_only_mode
@@ -186,7 +186,7 @@ def run_sql_plus_plus_query(
             if named_parameters is not None
             else scope.query(query)
         )
-        for row in result:
+        async for row in result:
             results.append(row)
         logger.info(
             f"SQL++ query in {bucket_name}.{scope_name} returned {len(results)} row(s)"
@@ -197,7 +197,7 @@ def run_sql_plus_plus_query(
         raise
 
 
-def explain_sql_plus_plus_query(
+async def explain_sql_plus_plus_query(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
@@ -218,7 +218,7 @@ def explain_sql_plus_plus_query(
         else f"EXPLAIN {normalized_query}"
     )
 
-    explain_results = run_sql_plus_plus_query(
+    explain_results = await run_sql_plus_plus_query(
         ctx,
         bucket_name,
         scope_name,
@@ -237,16 +237,18 @@ def explain_sql_plus_plus_query(
     }
 
 
-def run_cluster_query(ctx: Context, query: str, **kwargs: Any) -> list[dict[str, Any]]:
+async def run_cluster_query(
+    ctx: Context, query: str, **kwargs: Any
+) -> list[dict[str, Any]]:
     """Run a query on the cluster object and return the results as a list of JSON objects."""
 
-    cluster = get_cluster_connection(ctx)
+    cluster = await get_cluster_connection(ctx)
     results = []
 
     try:
         logger.debug("Executing cluster query")
         result = cluster.query(query, **kwargs)
-        for row in result:
+        async for row in result:
             results.append(row)
         logger.info(f"Cluster query returned {len(results)} row(s)")
         return results
@@ -255,7 +257,7 @@ def run_cluster_query(ctx: Context, query: str, **kwargs: Any) -> list[dict[str,
         raise
 
 
-def _run_query_tool_with_empty_message(
+async def _run_query_tool_with_empty_message(
     ctx: Context,
     query: str,
     *,
@@ -265,7 +267,7 @@ def _run_query_tool_with_empty_message(
     **query_kwargs: Any,
 ) -> list[dict[str, Any]]:
     """Execute a cluster query with a consistent empty-result response."""
-    results = run_cluster_query(ctx, query, limit=limit, **query_kwargs)
+    results = await run_cluster_query(ctx, query, limit=limit, **query_kwargs)
 
     if results:
         return results
@@ -276,7 +278,9 @@ def _run_query_tool_with_empty_message(
     return [payload]
 
 
-def get_longest_running_queries(ctx: Context, limit: int = 10) -> list[dict[str, Any]]:
+async def get_longest_running_queries(
+    ctx: Context, limit: int = 10
+) -> list[dict[str, Any]]:
     """Get the N longest running queries from the system:completed_requests catalog.
 
     Prefer this over writing a raw system:completed_requests query via run_sql_plus_plus_query.
@@ -302,7 +306,7 @@ def get_longest_running_queries(ctx: Context, limit: int = 10) -> list[dict[str,
     LIMIT $limit
     """
 
-    return _run_query_tool_with_empty_message(
+    return await _run_query_tool_with_empty_message(
         ctx,
         query,
         limit=limit,
@@ -312,7 +316,9 @@ def get_longest_running_queries(ctx: Context, limit: int = 10) -> list[dict[str,
     )
 
 
-def get_most_frequent_queries(ctx: Context, limit: int = 10) -> list[dict[str, Any]]:
+async def get_most_frequent_queries(
+    ctx: Context, limit: int = 10
+) -> list[dict[str, Any]]:
     """Get the N most frequent queries from the system:completed_requests catalog.
 
     Prefer this over writing a raw system:completed_requests query via run_sql_plus_plus_query.
@@ -339,7 +345,7 @@ def get_most_frequent_queries(ctx: Context, limit: int = 10) -> list[dict[str, A
     LIMIT $limit
     """
 
-    return _run_query_tool_with_empty_message(
+    return await _run_query_tool_with_empty_message(
         ctx,
         query,
         limit=limit,
@@ -349,7 +355,7 @@ def get_most_frequent_queries(ctx: Context, limit: int = 10) -> list[dict[str, A
     )
 
 
-def get_queries_with_largest_response_sizes(
+async def get_queries_with_largest_response_sizes(
     ctx: Context, limit: int = 10
 ) -> list[dict[str, Any]]:
     """Get queries with the largest response sizes from the system:completed_requests catalog.
@@ -379,7 +385,7 @@ def get_queries_with_largest_response_sizes(
     LIMIT $limit
     """
 
-    return _run_query_tool_with_empty_message(
+    return await _run_query_tool_with_empty_message(
         ctx,
         query,
         limit=limit,
@@ -389,7 +395,7 @@ def get_queries_with_largest_response_sizes(
     )
 
 
-def get_queries_with_large_result_count(
+async def get_queries_with_large_result_count(
     ctx: Context, limit: int = 10
 ) -> list[dict[str, Any]]:
     """Get queries with the largest result counts from the system:completed_requests catalog.
@@ -417,7 +423,7 @@ def get_queries_with_large_result_count(
     LIMIT $limit
     """
 
-    return _run_query_tool_with_empty_message(
+    return await _run_query_tool_with_empty_message(
         ctx,
         query,
         limit=limit,
@@ -427,7 +433,7 @@ def get_queries_with_large_result_count(
     )
 
 
-def get_queries_using_primary_index(
+async def get_queries_using_primary_index(
     ctx: Context, limit: int = 10
 ) -> list[dict[str, Any]]:
     """Get queries that use a primary index from the system:completed_requests catalog.
@@ -449,7 +455,7 @@ def get_queries_using_primary_index(
     LIMIT $limit
     """
 
-    return _run_query_tool_with_empty_message(
+    return await _run_query_tool_with_empty_message(
         ctx,
         query,
         limit=limit,
@@ -459,7 +465,7 @@ def get_queries_using_primary_index(
     )
 
 
-def get_queries_not_using_covering_index(
+async def get_queries_not_using_covering_index(
     ctx: Context, limit: int = 10
 ) -> list[dict[str, Any]]:
     """Get queries that don't use a covering index from the system:completed_requests catalog.
@@ -482,7 +488,7 @@ def get_queries_not_using_covering_index(
     LIMIT $limit
     """
 
-    return _run_query_tool_with_empty_message(
+    return await _run_query_tool_with_empty_message(
         ctx,
         query,
         limit=limit,
@@ -493,7 +499,9 @@ def get_queries_not_using_covering_index(
     )
 
 
-def get_queries_not_selective(ctx: Context, limit: int = 10) -> list[dict[str, Any]]:
+async def get_queries_not_selective(
+    ctx: Context, limit: int = 10
+) -> list[dict[str, Any]]:
     """Get queries that are not very selective from the system:completed_requests catalog.
 
     Prefer this over writing a raw system:completed_requests query via run_sql_plus_plus_query.
@@ -514,7 +522,7 @@ def get_queries_not_selective(ctx: Context, limit: int = 10) -> list[dict[str, A
     LIMIT $limit
     """
 
-    return _run_query_tool_with_empty_message(
+    return await _run_query_tool_with_empty_message(
         ctx,
         query,
         limit=limit,

@@ -11,9 +11,10 @@ Covers:
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _async_mocks import make_bucket, make_cluster, make_collection
 
 from cb_mcp.tools.index import (
     build_index,
@@ -30,10 +31,10 @@ def _make_ctx_with_index_manager() -> tuple[SimpleNamespace, MagicMock, MagicMoc
     Returns (ctx, cluster, index_manager) so each test can program the
     manager's individual ops via ``index_manager.<op>.side_effect``.
     """
-    cluster = MagicMock()
-    bucket = MagicMock()
-    collection = MagicMock()
-    index_manager = MagicMock()
+    cluster = make_cluster()
+    bucket = make_bucket()
+    collection = make_collection()
+    index_manager = AsyncMock()
     collection.query_indexes.return_value = index_manager
     bucket.scope.return_value.collection.return_value = collection
     cluster.bucket.return_value = bucket
@@ -45,7 +46,7 @@ def _make_ctx_with_index_manager() -> tuple[SimpleNamespace, MagicMock, MagicMoc
 class TestGetIndexAdvisorRecommendations:
     """Branches of get_index_advisor_recommendations."""
 
-    def test_empty_advisor_response(self) -> None:
+    async def test_empty_advisor_response(self) -> None:
         """An empty advisor result must return the documented empty envelope
         rather than raising or returning an unstructured payload."""
         mock_ctx = MagicMock()
@@ -53,8 +54,9 @@ class TestGetIndexAdvisorRecommendations:
         with patch(
             "cb_mcp.tools.index.run_sql_plus_plus_query",
             return_value=[],
+            new_callable=AsyncMock,
         ):
-            result = get_index_advisor_recommendations(
+            result = await get_index_advisor_recommendations(
                 mock_ctx, "b", "s", "SELECT * FROM x"
             )
 
@@ -65,7 +67,7 @@ class TestGetIndexAdvisorRecommendations:
             "recommended_covering_indexes": [],
         }
 
-    def test_summary_reflects_recommendation_counts(self) -> None:
+    async def test_summary_reflects_recommendation_counts(self) -> None:
         """The summary block must report counts that match the data arrays."""
         mock_ctx = MagicMock()
         advisor_payload = [
@@ -84,8 +86,9 @@ class TestGetIndexAdvisorRecommendations:
         with patch(
             "cb_mcp.tools.index.run_sql_plus_plus_query",
             return_value=advisor_payload,
+            new_callable=AsyncMock,
         ):
-            result = get_index_advisor_recommendations(
+            result = await get_index_advisor_recommendations(
                 mock_ctx, "b", "s", "SELECT * FROM x"
             )
 
@@ -94,7 +97,7 @@ class TestGetIndexAdvisorRecommendations:
         assert result["summary"]["recommended_covering_indexes_count"] == 1
         assert result["summary"]["has_recommendations"] is True
 
-    def test_no_recommendations_flag_when_empty(self) -> None:
+    async def test_no_recommendations_flag_when_empty(self) -> None:
         """has_recommendations is False when both recommendation arrays are empty."""
         mock_ctx = MagicMock()
         advisor_payload = [
@@ -110,14 +113,15 @@ class TestGetIndexAdvisorRecommendations:
         with patch(
             "cb_mcp.tools.index.run_sql_plus_plus_query",
             return_value=advisor_payload,
+            new_callable=AsyncMock,
         ):
-            result = get_index_advisor_recommendations(
+            result = await get_index_advisor_recommendations(
                 mock_ctx, "b", "s", "SELECT * FROM x"
             )
 
         assert result["summary"]["has_recommendations"] is False
 
-    def test_error_propagates(self) -> None:
+    async def test_error_propagates(self) -> None:
         """Underlying query failures must be re-raised so the caller can
         see the real Couchbase error rather than a fabricated empty result."""
         mock_ctx = MagicMock()
@@ -126,12 +130,17 @@ class TestGetIndexAdvisorRecommendations:
             patch(
                 "cb_mcp.tools.index.run_sql_plus_plus_query",
                 side_effect=Exception("syntax error in ADVISOR"),
+                new_callable=AsyncMock,
             ),
             pytest.raises(Exception, match="syntax error in ADVISOR"),
         ):
-            get_index_advisor_recommendations(mock_ctx, "b", "s", "SELECT * FROM x")
+            await get_index_advisor_recommendations(
+                mock_ctx, "b", "s", "SELECT * FROM x"
+            )
 
-    def test_advised_query_bound_as_named_parameter_not_reserved_name(self) -> None:
+    async def test_advised_query_bound_as_named_parameter_not_reserved_name(
+        self,
+    ) -> None:
         """Regression: the advisor must bind the advised query via a named
         parameter whose name is NOT ``query``.
 
@@ -149,8 +158,9 @@ class TestGetIndexAdvisorRecommendations:
         with patch(
             "cb_mcp.tools.index.run_sql_plus_plus_query",
             return_value=[],
+            new_callable=AsyncMock,
         ) as mock_run:
-            get_index_advisor_recommendations(mock_ctx, "b", "s", user_query)
+            await get_index_advisor_recommendations(mock_ctx, "b", "s", user_query)
 
         # The advisor SQL is passed positionally; named_parameters as a kwarg.
         args, kwargs = mock_run.call_args
@@ -175,11 +185,11 @@ class TestGetIndexAdvisorRecommendations:
 class TestListIndexesRestRawPath:
     """The REST-API + return_raw_index_stats=True branch."""
 
-    def test_rest_path_returns_raw_rows_unprocessed(self) -> None:
+    async def test_rest_path_returns_raw_rows_unprocessed(self) -> None:
         """On a pre-8 cluster, raw mode must short-circuit before the row
         processor runs — REST rows pass through verbatim."""
         mock_ctx = MagicMock()
-        mock_cluster = MagicMock()
+        mock_cluster = make_cluster()
         info = MagicMock()
         info.nodes = [{"version": "7.6.11-enterprise"}]
         mock_cluster.cluster_info.return_value = info
@@ -209,16 +219,18 @@ class TestListIndexesRestRawPath:
             patch(
                 "cb_mcp.tools.index.get_cluster_connection",
                 return_value=mock_cluster,
+                new_callable=AsyncMock,
             ),
             patch(
                 "cb_mcp.tools.index.fetch_indexes_from_rest_api",
                 return_value=raw_rows,
+                new_callable=AsyncMock,
             ),
             patch(
                 "cb_mcp.tools.index.process_index_data_from_rest_api"
             ) as mock_process,
         ):
-            result = list_indexes(mock_ctx, return_raw_index_stats=True)
+            result = await list_indexes(mock_ctx, return_raw_index_stats=True)
 
         # Raw mode must NOT invoke the processor — that's the whole point.
         mock_process.assert_not_called()
@@ -230,7 +242,7 @@ class TestListIndexesRestRawPath:
 class TestListIndexesErrorPropagation:
     """list_indexes wraps everything in a try/except — verify the re-raise."""
 
-    def test_resolve_version_failure_propagates(self) -> None:
+    async def test_resolve_version_failure_propagates(self) -> None:
         """If cluster version detection fails, the error must surface so the
         caller can diagnose connectivity rather than seeing an empty list."""
         mock_ctx = MagicMock()
@@ -247,24 +259,29 @@ class TestListIndexesErrorPropagation:
             patch(
                 "cb_mcp.tools.index.get_cluster_connection",
                 side_effect=Exception("cluster down"),
+                new_callable=AsyncMock,
             ),
             pytest.raises(Exception, match="cluster down"),
         ):
-            list_indexes(mock_ctx)
+            await list_indexes(mock_ctx)
 
 
 class TestCreateIndex:
     """create_index happy path and log-and-return error handling."""
 
-    def test_creates_deferred_by_default(self) -> None:
+    async def test_creates_deferred_by_default(self) -> None:
         """deferred defaults to True and is threaded through to the SDK options."""
         ctx, cluster, index_manager = _make_ctx_with_index_manager()
 
         with (
-            patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster),
+            patch(
+                "cb_mcp.tools.index.get_cluster_connection",
+                return_value=cluster,
+                new_callable=AsyncMock,
+            ),
             patch("cb_mcp.tools.index.CreateQueryIndexOptions") as mock_options,
         ):
-            result = create_index(ctx, "b", "s", "c", "idx1", ["email"])
+            result = await create_index(ctx, "b", "s", "c", "idx1", ["email"])
 
         assert result["success"] is True
         assert result["index_name"] == "idx1"
@@ -282,15 +299,19 @@ class TestCreateIndex:
             deferred=True, condition=None, num_replicas=None, ignore_if_exists=False
         )
 
-    def test_options_forwarded(self) -> None:
+    async def test_options_forwarded(self) -> None:
         """condition, num_replicas, and ignore_if_exists all reach the SDK options."""
         ctx, cluster, _index_manager = _make_ctx_with_index_manager()
 
         with (
-            patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster),
+            patch(
+                "cb_mcp.tools.index.get_cluster_connection",
+                return_value=cluster,
+                new_callable=AsyncMock,
+            ),
             patch("cb_mcp.tools.index.CreateQueryIndexOptions") as mock_options,
         ):
-            create_index(
+            await create_index(
                 ctx,
                 "b",
                 "s",
@@ -310,13 +331,17 @@ class TestCreateIndex:
             ignore_if_exists=True,
         )
 
-    def test_sdk_error_returns_error_dict_not_raised(self) -> None:
+    async def test_sdk_error_returns_error_dict_not_raised(self) -> None:
         """An existing-index error must be caught, logged, and returned — not raised."""
         ctx, cluster, index_manager = _make_ctx_with_index_manager()
         index_manager.create_index.side_effect = Exception("index already exists")
 
-        with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
-            result = create_index(ctx, "b", "s", "c", "idx1", ["email"])
+        with patch(
+            "cb_mcp.tools.index.get_cluster_connection",
+            return_value=cluster,
+            new_callable=AsyncMock,
+        ):
+            result = await create_index(ctx, "b", "s", "c", "idx1", ["email"])
 
         assert result == {
             "success": False,
@@ -334,24 +359,32 @@ class TestBuildIndex:
     anything to do (a harmless no-op when there's nothing deferred).
     """
 
-    def test_triggers_build(self) -> None:
+    async def test_triggers_build(self) -> None:
         """Happy path calls build_deferred_indexes exactly once."""
         ctx, cluster, index_manager = _make_ctx_with_index_manager()
 
-        with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
-            result = build_index(ctx, "b", "s", "c")
+        with patch(
+            "cb_mcp.tools.index.get_cluster_connection",
+            return_value=cluster,
+            new_callable=AsyncMock,
+        ):
+            result = await build_index(ctx, "b", "s", "c")
 
         assert result == {"success": True, "keyspace": "b.s.c"}
         index_manager.build_deferred_indexes.assert_called_once()
         index_manager.get_all_indexes.assert_not_called()
 
-    def test_sdk_error_returns_error_dict_not_raised(self) -> None:
+    async def test_sdk_error_returns_error_dict_not_raised(self) -> None:
         """An SDK failure building indexes must be caught and returned."""
         ctx, cluster, index_manager = _make_ctx_with_index_manager()
         index_manager.build_deferred_indexes.side_effect = Exception("connection reset")
 
-        with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
-            result = build_index(ctx, "b", "s", "c")
+        with patch(
+            "cb_mcp.tools.index.get_cluster_connection",
+            return_value=cluster,
+            new_callable=AsyncMock,
+        ):
+            result = await build_index(ctx, "b", "s", "c")
 
         assert result == {
             "success": False,
@@ -363,28 +396,38 @@ class TestBuildIndex:
 class TestDropIndex:
     """drop_index happy path and log-and-return error handling."""
 
-    def test_drops_index(self) -> None:
+    async def test_drops_index(self) -> None:
         """Happy path forwards index_name and ignore_if_not_exists to the SDK."""
         ctx, cluster, index_manager = _make_ctx_with_index_manager()
 
         with (
-            patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster),
+            patch(
+                "cb_mcp.tools.index.get_cluster_connection",
+                return_value=cluster,
+                new_callable=AsyncMock,
+            ),
             patch("cb_mcp.tools.index.DropQueryIndexOptions") as mock_options,
         ):
-            result = drop_index(ctx, "b", "s", "c", "idx1", ignore_if_not_exists=True)
+            result = await drop_index(
+                ctx, "b", "s", "c", "idx1", ignore_if_not_exists=True
+            )
 
         assert result == {"success": True, "index_name": "idx1", "keyspace": "b.s.c"}
         args, _kwargs = index_manager.drop_index.call_args
         assert args[0] == "idx1"
         mock_options.assert_called_once_with(ignore_if_not_exists=True)
 
-    def test_sdk_error_returns_error_dict_not_raised(self) -> None:
+    async def test_sdk_error_returns_error_dict_not_raised(self) -> None:
         """A not-found error (without ignore_if_not_exists) must be caught and returned."""
         ctx, cluster, index_manager = _make_ctx_with_index_manager()
         index_manager.drop_index.side_effect = Exception("index not found")
 
-        with patch("cb_mcp.tools.index.get_cluster_connection", return_value=cluster):
-            result = drop_index(ctx, "b", "s", "c", "idx1")
+        with patch(
+            "cb_mcp.tools.index.get_cluster_connection",
+            return_value=cluster,
+            new_callable=AsyncMock,
+        ):
+            result = await drop_index(ctx, "b", "s", "c", "idx1")
 
         assert result == {
             "success": False,

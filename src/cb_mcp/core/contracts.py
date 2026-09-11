@@ -12,7 +12,7 @@ interface.
 from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
-from couchbase.cluster import Cluster
+from acouchbase.cluster import AsyncCluster as Cluster
 from fastmcp import Context
 
 
@@ -26,11 +26,11 @@ class ClusterProvider(Protocol):
 
     """
 
-    def get_cluster(self, ctx: Context) -> Cluster:
+    async def get_cluster(self, ctx: Context) -> Cluster:
         """Return (or begin returning) a cluster for this request."""
         ...
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Release any clusters held by this provider and perform cleanup."""
         ...
 

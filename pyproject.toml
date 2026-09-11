@@ -155,7 +155,9 @@ line-ending = "auto"
 
 # Pytest configuration
 [tool.pytest.ini_options]
-asyncio_mode = "strict"
+# Tools are coroutines on this branch, so nearly every tool test is async.
+# "auto" runs bare `async def test_*` without a per-test marker.
+asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 # Put tests/ on sys.path so shared helpers (tests/_test_env.py) are importable
 # from any subdirectory (tests/unit, tests/integration, tests/accuracy).

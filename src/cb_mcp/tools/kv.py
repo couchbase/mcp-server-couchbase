@@ -25,7 +25,7 @@ from ..utils.responses import tool_error, tool_success
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.kv")
 
 
-def get_document_by_id(
+async def get_document_by_id(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
@@ -36,12 +36,12 @@ def get_document_by_id(
     If the document is not found, it will raise an exception."""
 
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
-    cluster = get_cluster_connection(ctx)
-    bucket = connect_to_bucket(cluster, bucket_name)
+    cluster = await get_cluster_connection(ctx)
+    bucket = await connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Getting document from {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        result = collection.get(document_id)
+        result = await collection.get(document_id)
         logger.info(f"Retrieved document from {keyspace}")
         return result.content_as[dict]
     except Exception as e:
@@ -49,7 +49,7 @@ def get_document_by_id(
         raise
 
 
-def upsert_document_by_id(
+async def upsert_document_by_id(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
@@ -67,12 +67,12 @@ def upsert_document_by_id(
     Returns {"success": True} on success, or {"success": False, "error": "..."} on
     failure with the reason (e.g. permission denied, network error, invalid content)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
-    cluster = get_cluster_connection(ctx)
-    bucket = connect_to_bucket(cluster, bucket_name)
+    cluster = await get_cluster_connection(ctx)
+    bucket = await connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Upserting document in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.upsert(document_id, document_content)
+        await collection.upsert(document_id, document_content)
         logger.info(f"Successfully upserted document in {keyspace}")
         return tool_success()
     except Exception as e:
@@ -80,7 +80,7 @@ def upsert_document_by_id(
         return tool_error(e)
 
 
-def delete_document_by_id(
+async def delete_document_by_id(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
@@ -92,12 +92,12 @@ def delete_document_by_id(
     Returns {"success": True} on success, or {"success": False, "error": "..."} on
     failure with the reason (e.g. document not found, permission denied, network error)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
-    cluster = get_cluster_connection(ctx)
-    bucket = connect_to_bucket(cluster, bucket_name)
+    cluster = await get_cluster_connection(ctx)
+    bucket = await connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Deleting document from {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.remove(document_id)
+        await collection.remove(document_id)
         logger.info(f"Successfully deleted document from {keyspace}")
         return tool_success()
     except Exception as e:
@@ -105,7 +105,7 @@ def delete_document_by_id(
         return tool_error(e)
 
 
-def insert_document_by_id(
+async def insert_document_by_id(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
@@ -121,12 +121,12 @@ def insert_document_by_id(
     Returns {"success": True} on success, or {"success": False, "error": "..."} on
     failure with the reason (e.g. document already exists, permission denied, network error)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
-    cluster = get_cluster_connection(ctx)
-    bucket = connect_to_bucket(cluster, bucket_name)
+    cluster = await get_cluster_connection(ctx)
+    bucket = await connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Inserting document in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.insert(document_id, document_content)
+        await collection.insert(document_id, document_content)
         logger.info(f"Successfully inserted document in {keyspace}")
         return tool_success()
     except Exception as e:
@@ -134,7 +134,7 @@ def insert_document_by_id(
         return tool_error(e)
 
 
-def replace_document_by_id(
+async def replace_document_by_id(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
@@ -150,12 +150,12 @@ def replace_document_by_id(
     Returns {"success": True} on success, or {"success": False, "error": "..."} on
     failure with the reason (e.g. document does not exist, permission denied, network error)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
-    cluster = get_cluster_connection(ctx)
-    bucket = connect_to_bucket(cluster, bucket_name)
+    cluster = await get_cluster_connection(ctx)
+    bucket = await connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Replacing document in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.replace(document_id, document_content)
+        await collection.replace(document_id, document_content)
         logger.info(f"Successfully replaced document in {keyspace}")
         return tool_success()
     except Exception as e:
@@ -163,7 +163,7 @@ def replace_document_by_id(
         return tool_error(e)
 
 
-def lookup_subdocument(
+async def lookup_subdocument(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
@@ -240,13 +240,13 @@ def lookup_subdocument(
         logger.error(f"Error performing sub-document lookup in {keyspace}: {error}")
         return {"error": error}
 
-    cluster = get_cluster_connection(ctx)
-    bucket = connect_to_bucket(cluster, bucket_name)
+    cluster = await get_cluster_connection(ctx)
+    bucket = await connect_to_bucket(cluster, bucket_name)
 
     try:
         logger.debug(f"Performing sub-document lookup in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        result = collection.lookup_in(document_id, specs)
+        result = await collection.lookup_in(document_id, specs)
     except Exception as e:
         logger.error(
             f"Error performing sub-document lookup in {keyspace}: {e}", exc_info=True
@@ -270,7 +270,7 @@ def lookup_subdocument(
     return response
 
 
-def mutate_subdocument(
+async def mutate_subdocument(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
@@ -425,13 +425,13 @@ def mutate_subdocument(
         logger.warning(f"Error performing sub-document mutation in {keyspace}: {error}")
         return {"error": error}
 
-    cluster = get_cluster_connection(ctx)
-    bucket = connect_to_bucket(cluster, bucket_name)
+    cluster = await get_cluster_connection(ctx)
+    bucket = await connect_to_bucket(cluster, bucket_name)
 
     try:
         logger.debug(f"Performing sub-document mutation in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        result = collection.mutate_in(document_id, specs)
+        result = await collection.mutate_in(document_id, specs)
     except Exception as e:
         error_context = getattr(e, "error_context", None)
         failed_index = getattr(error_context, "first_error_index", None)
