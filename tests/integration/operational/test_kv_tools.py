@@ -50,7 +50,7 @@ async def test_upsert_document_by_id() -> None:
         payload = extract_payload(response)
 
         # upsert returns {"success": True} on success
-        assert payload == {"success": True}, (
+        assert payload["success"] is True and payload["cas"].isdigit(), (
             f"Expected success on upsert, got {payload}"
         )
 
@@ -156,7 +156,7 @@ async def test_delete_document_by_id() -> None:
         payload = extract_payload(response)
 
         # delete returns {"success": True} on success
-        assert payload == {"success": True}, (
+        assert payload["success"] is True and payload["cas"].isdigit(), (
             f"Expected success on delete, got {payload}"
         )
 
@@ -250,7 +250,7 @@ async def test_insert_document_by_id() -> None:
         payload = extract_payload(response)
 
         # insert returns {"success": True} on success
-        assert payload == {"success": True}, (
+        assert payload["success"] is True and payload["cas"].isdigit(), (
             f"Expected success on insert, got {payload}"
         )
 
@@ -372,7 +372,7 @@ async def test_replace_document_by_id() -> None:
         payload = extract_payload(response)
 
         # replace returns {"success": True} on success
-        assert payload == {"success": True}, (
+        assert payload["success"] is True and payload["cas"].isdigit(), (
             f"Expected success on replace, got {payload}"
         )
 

@@ -15,12 +15,24 @@ from typing import Any
 
 import couchbase.subdocument as subdoc
 from couchbase.exceptions import CouchbaseException
+from couchbase.options import (
+    InsertOptions,
+    MutateInOptions,
+    RemoveOptions,
+    ReplaceOptions,
+    UpsertOptions,
+)
 from fastmcp import Context
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.operational.connection import connect_to_bucket, format_keyspace
 from ...utils.operational.context import get_cluster_connection
-from ...utils.responses import tool_error, tool_success
+from ...utils.operational.kv_utils import (
+    kv_error,
+    sdk_kv_options,
+    with_cas,
+)
+from ...utils.responses import tool_success
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.kv")
 
@@ -56,6 +68,9 @@ def upsert_document_by_id(
     collection_name: str,
     document_id: str,
     document_content: dict[str, Any],
+    durability: str | None = None,
+    expiry_seconds: int | None = None,
+    preserve_expiry: bool = False,
 ) -> dict[str, Any]:
     """Insert or update a document by its ID.
 
@@ -64,20 +79,55 @@ def upsert_document_by_id(
 
     DO NOT use this as a fallback when insert_document_by_id or replace_document_by_id fails.
 
-    Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. permission denied, network error, invalid content)."""
+    durability: how durable the write must be before the tool reports success:
+    "NONE" acknowledges from the active node's memory only, "MAJORITY" waits
+    for a majority of replicas to hold it in memory,
+    "MAJORITY_AND_PERSIST_TO_ACTIVE" adds a write to disk on the active node,
+    and "PERSIST_TO_MAJORITY" waits for a disk write on a majority of nodes.
+    Stronger levels cost latency and FAIL outright if the cluster has too few
+    replicas to satisfy them. Omit this parameter for the cluster's own
+    default; passing "NONE" explicitly requests no durability.
+
+    expiry_seconds: time-to-live in seconds, after which the document is
+    deleted automatically. 0 means no expiry. IMPORTANT: this is a
+    full-document write, which resets the document's expiry either way -
+    omitting this parameter clears any TTL the document already had, it does
+    not preserve it. Pass the intended TTL on every write to a document that
+    should keep expiring.
+
+    preserve_expiry: if True, keeps the document's existing TTL through this
+    write instead of clearing it. Use it to update content without disturbing
+    an expiry set earlier. Cannot be combined with expiry_seconds (the call is
+    rejected with code invalid_expiry).
+
+    Returns {"success": True, "cas": "<token>"} on success (cas is the document's new
+    revision as a decimal string, when the server returns one), or
+    {"success": False, "error": "...", "code": "..."} on
+    failure with the reason (e.g. permission denied, network error, invalid content,
+    durability not satisfiable by this cluster)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    try:
+        options = sdk_kv_options(
+            UpsertOptions, durability, expiry_seconds, preserve_expiry
+        )
+    except ValueError as e:
+        logger.warning(f"Invalid upsert options for {keyspace}: {e}")
+        return kv_error(e)
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Upserting document in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.upsert(document_id, document_content)
+        if options is None:
+            result = collection.upsert(document_id, document_content)
+        else:
+            result = collection.upsert(document_id, document_content, options)
         logger.info(f"Successfully upserted document in {keyspace}")
-        return tool_success()
+        return with_cas(tool_success(), result)
     except Exception as e:
         logger.error(f"Error upserting document in {keyspace}: {e}", exc_info=True)
-        return tool_error(e)
+        return kv_error(e)
 
 
 def delete_document_by_id(
@@ -86,23 +136,45 @@ def delete_document_by_id(
     scope_name: str,
     collection_name: str,
     document_id: str,
+    durability: str | None = None,
 ) -> dict[str, Any]:
     """Delete a document by its ID.
 
-    Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document not found, permission denied, network error)."""
+    durability: how durable the write must be before the tool reports success:
+    "NONE" acknowledges from the active node's memory only, "MAJORITY" waits
+    for a majority of replicas to hold it in memory,
+    "MAJORITY_AND_PERSIST_TO_ACTIVE" adds a write to disk on the active node,
+    and "PERSIST_TO_MAJORITY" waits for a disk write on a majority of nodes.
+    Stronger levels cost latency and FAIL outright if the cluster has too few
+    replicas to satisfy them. Omit this parameter for the cluster's own
+    default; passing "NONE" explicitly requests no durability.
+
+    Returns {"success": True, "cas": "<token>"} on success (cas is the document's new
+    revision as a decimal string, when the server returns one), or
+    {"success": False, "error": "...", "code": "..."} on
+    failure with the reason (e.g. document not found, permission denied, network error,
+    durability not satisfiable by this cluster)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    try:
+        options = sdk_kv_options(RemoveOptions, durability)
+    except ValueError as e:
+        logger.warning(f"Invalid delete options for {keyspace}: {e}")
+        return kv_error(e)
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Deleting document from {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.remove(document_id)
+        if options is None:
+            result = collection.remove(document_id)
+        else:
+            result = collection.remove(document_id, options)
         logger.info(f"Successfully deleted document from {keyspace}")
-        return tool_success()
+        return with_cas(tool_success(), result)
     except Exception as e:
         logger.error(f"Error deleting document from {keyspace}: {e}", exc_info=True)
-        return tool_error(e)
+        return kv_error(e)
 
 
 def insert_document_by_id(
@@ -112,26 +184,52 @@ def insert_document_by_id(
     collection_name: str,
     document_id: str,
     document_content: dict[str, Any],
+    durability: str | None = None,
+    expiry_seconds: int | None = None,
 ) -> dict[str, Any]:
     """Insert a new document by its ID. This operation will FAIL if the document already exists.
 
     IMPORTANT: If this operation fails, DO NOT automatically try replace or upsert.
     Report the failure to the user. They can choose to 'replace' or 'upsert' if desired.
 
-    Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document already exists, permission denied, network error)."""
+    durability: how durable the write must be before the tool reports success:
+    "NONE" acknowledges from the active node's memory only, "MAJORITY" waits
+    for a majority of replicas to hold it in memory,
+    "MAJORITY_AND_PERSIST_TO_ACTIVE" adds a write to disk on the active node,
+    and "PERSIST_TO_MAJORITY" waits for a disk write on a majority of nodes.
+    Stronger levels cost latency and FAIL outright if the cluster has too few
+    replicas to satisfy them. Omit this parameter for the cluster's own
+    default; passing "NONE" explicitly requests no durability.
+
+    expiry_seconds: time-to-live in seconds, after which the document is
+    deleted automatically. 0 means no expiry.
+
+    Returns {"success": True, "cas": "<token>"} on success (cas is the document's new
+    revision as a decimal string, when the server returns one), or
+    {"success": False, "error": "...", "code": "..."} on
+    failure with the reason (e.g. document already exists, permission denied, network
+    error, durability not satisfiable by this cluster)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    try:
+        options = sdk_kv_options(InsertOptions, durability, expiry_seconds)
+    except ValueError as e:
+        logger.warning(f"Invalid insert options for {keyspace}: {e}")
+        return kv_error(e)
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Inserting document in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.insert(document_id, document_content)
+        if options is None:
+            result = collection.insert(document_id, document_content)
+        else:
+            result = collection.insert(document_id, document_content, options)
         logger.info(f"Successfully inserted document in {keyspace}")
-        return tool_success()
+        return with_cas(tool_success(), result)
     except Exception as e:
         logger.error(f"Error inserting document in {keyspace}: {e}", exc_info=True)
-        return tool_error(e)
+        return kv_error(e)
 
 
 def replace_document_by_id(
@@ -141,26 +239,64 @@ def replace_document_by_id(
     collection_name: str,
     document_id: str,
     document_content: dict[str, Any],
+    durability: str | None = None,
+    expiry_seconds: int | None = None,
+    preserve_expiry: bool = False,
 ) -> dict[str, Any]:
     """Replace an existing document by its ID. This operation will FAIL if the document does not exist.
 
     IMPORTANT: If this operation fails, DO NOT automatically try insert or upsert.
     Report the failure to the user. They can choose to 'insert' or 'upsert' if desired.
 
-    Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document does not exist, permission denied, network error)."""
+    durability: how durable the write must be before the tool reports success:
+    "NONE" acknowledges from the active node's memory only, "MAJORITY" waits
+    for a majority of replicas to hold it in memory,
+    "MAJORITY_AND_PERSIST_TO_ACTIVE" adds a write to disk on the active node,
+    and "PERSIST_TO_MAJORITY" waits for a disk write on a majority of nodes.
+    Stronger levels cost latency and FAIL outright if the cluster has too few
+    replicas to satisfy them. Omit this parameter for the cluster's own
+    default; passing "NONE" explicitly requests no durability.
+
+    expiry_seconds: time-to-live in seconds, after which the document is
+    deleted automatically. 0 means no expiry. IMPORTANT: this is a
+    full-document write, which resets the document's expiry either way -
+    omitting this parameter clears any TTL the document already had, it does
+    not preserve it. Pass the intended TTL on every write to a document that
+    should keep expiring.
+
+    preserve_expiry: if True, keeps the document's existing TTL through this
+    write instead of clearing it. Use it to update content without disturbing
+    an expiry set earlier. Cannot be combined with expiry_seconds (the call is
+    rejected with code invalid_expiry).
+
+    Returns {"success": True, "cas": "<token>"} on success (cas is the document's new
+    revision as a decimal string, when the server returns one), or
+    {"success": False, "error": "...", "code": "..."} on
+    failure with the reason (e.g. document does not exist, permission denied, network
+    error, durability not satisfiable by this cluster)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    try:
+        options = sdk_kv_options(
+            ReplaceOptions, durability, expiry_seconds, preserve_expiry
+        )
+    except ValueError as e:
+        logger.warning(f"Invalid replace options for {keyspace}: {e}")
+        return kv_error(e)
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Replacing document in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.replace(document_id, document_content)
+        if options is None:
+            result = collection.replace(document_id, document_content)
+        else:
+            result = collection.replace(document_id, document_content, options)
         logger.info(f"Successfully replaced document in {keyspace}")
-        return tool_success()
+        return with_cas(tool_success(), result)
     except Exception as e:
         logger.error(f"Error replacing document in {keyspace}: {e}", exc_info=True)
-        return tool_error(e)
+        return kv_error(e)
 
 
 def lookup_subdocument(
@@ -270,6 +406,52 @@ def lookup_subdocument(
     return response
 
 
+def _mutate_in_response(
+    result: Any,
+    spec_meta: list[tuple[str, str]],
+    keyspace: str,
+) -> dict[str, Any]:
+    """Build the per-category path -> outcome mapping for a committed mutate_in.
+
+    Extracted from mutate_subdocument unchanged. Adding the store_semantics
+    parameter pushed that function past the project's configured branch and
+    statement limits; lifting this block out is what brings it back under them.
+    """
+    response: dict[str, Any] = {}
+    for index, (op, path) in enumerate(spec_meta):
+        bucket_for_op = response.setdefault(op, {})
+        if op != "counter":
+            bucket_for_op[path] = {"success": True}
+            continue
+
+        # The installed SDK constructs MutateInResult without a transcoder
+        # (unlike LookupInResult), which makes content_as always raise for
+        # mutate_in results — fall back to decoding the raw field value.
+        new_value = None
+        for read_new_value in (
+            lambda index=index: result.content_as[int](index),
+            lambda index=index: int(
+                json.loads(result._orig.raw_result["fields"][index]["value"])
+            ),
+        ):
+            try:
+                new_value = read_new_value()
+                break
+            except Exception:  # noqa: S112 (expected fallback attempt, not a swallowed bug)
+                continue
+
+        if new_value is None:
+            logger.warning(
+                f"Counter mutation at '{path}' in {keyspace} committed but "
+                "its new value could not be read from the SDK result."
+            )
+            bucket_for_op[path] = {"success": True}
+            continue
+        bucket_for_op[path] = {"success": True, "value": new_value}
+
+    return response
+
+
 def mutate_subdocument(
     ctx: Context,
     bucket_name: str,
@@ -286,6 +468,9 @@ def mutate_subdocument(
     array_add_unique_specs: list[dict[str, Any]] | None = None,
     counter_specs: list[dict[str, Any]] | None = None,
     create_parents: bool = False,
+    durability: str | None = None,
+    expiry_seconds: int | None = None,
+    preserve_expiry: bool = False,
 ) -> dict[str, Any]:
     """Modify parts of an EXISTING document without rewriting the whole thing, using
     Couchbase sub-document mutation operations. The document must already exist — use
@@ -326,6 +511,20 @@ def mutate_subdocument(
     always require the full path (for array_insert, the array itself) to already exist.
     The server doesn't support create_parents on array inserts, so it is ignored for them.
 
+    durability: how durable the write must be before the tool reports success:
+    "NONE", "MAJORITY", "MAJORITY_AND_PERSIST_TO_ACTIVE" or "PERSIST_TO_MAJORITY".
+    Stronger levels cost latency and FAIL outright if the cluster has too few
+    replicas to satisfy them. Omit it for the cluster's own default. The level
+    applies to the whole resulting document revision, not to individual paths.
+
+    expiry_seconds: time-to-live in seconds, after which the document is deleted
+    automatically. 0 means no expiry. Omitting it leaves the document's existing
+    TTL unchanged.
+
+    preserve_expiry: if True, keeps the document's existing TTL. A sub-document
+    mutation does not reset expiry on its own, so this matters mainly for callers
+    who want it stated explicitly. Cannot be combined with expiry_seconds.
+
     At least one spec must be provided. As a rule of thumb, keep the combined number of
     specs across all categories to 16 or fewer — Couchbase limits subdocument operations
     per call, though the exact limit is server-side and may change. If the server rejects
@@ -338,8 +537,11 @@ def mutate_subdocument(
         "counter": {"<path>": {"success": true, "value": <new value>}},
         ...
     }
+    Also includes "cas": "<token>" (the document's new revision, as a decimal string)
+    when the server returns one.
     On a connection/mutation failure, or an invalid request, returns {"error": "<message>"}
-    instead and no mutations are applied.
+    instead, plus "code" when the failure has a stable name (invalid_durability_level,
+    invalid_expiry, durability_impossible, sync_write_ambiguous); no mutations are applied.
     """
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
 
@@ -424,13 +626,25 @@ def mutate_subdocument(
         logger.warning(f"Error performing sub-document mutation in {keyspace}: {error}")
         return {"error": error}
 
+    try:
+        options = sdk_kv_options(
+            MutateInOptions, durability, expiry_seconds, preserve_expiry
+        )
+    except ValueError as e:
+        logger.warning(f"Invalid sub-document mutation options for {keyspace}: {e}")
+        failure = kv_error(e)
+        return {"error": failure["error"], "code": failure["code"]}
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
 
     try:
         logger.debug(f"Performing sub-document mutation in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        result = collection.mutate_in(document_id, specs)
+        if options is None:
+            result = collection.mutate_in(document_id, specs)
+        else:
+            result = collection.mutate_in(document_id, specs, options)
     except Exception as e:
         error_context = getattr(e, "error_context", None)
         failed_index = getattr(error_context, "first_error_index", None)
@@ -441,38 +655,13 @@ def mutate_subdocument(
             f"Error performing sub-document mutation in {keyspace}: {e}{detail}",
             exc_info=True,
         )
-        return {"error": f"{e}{detail}"}
+        failure = kv_error(e)
+        return {
+            "error": f"{e}{detail}",
+            **({"code": failure["code"]} if "code" in failure else {}),
+        }
 
-    response: dict[str, Any] = {}
-    for index, (op, path) in enumerate(spec_meta):
-        bucket_for_op = response.setdefault(op, {})
-        if op == "counter":
-            # The installed SDK constructs MutateInResult without a transcoder
-            # (unlike LookupInResult), which makes content_as always raise for
-            # mutate_in results — fall back to decoding the raw field value.
-            new_value = None
-            for read_new_value in (
-                lambda index=index: result.content_as[int](index),
-                lambda index=index: int(
-                    json.loads(result._orig.raw_result["fields"][index]["value"])
-                ),
-            ):
-                try:
-                    new_value = read_new_value()
-                    break
-                except Exception:  # noqa: S112 (expected fallback attempt, not a swallowed bug)
-                    continue
-
-            if new_value is None:
-                logger.warning(
-                    f"Counter mutation at '{path}' in {keyspace} committed but "
-                    "its new value could not be read from the SDK result."
-                )
-                bucket_for_op[path] = {"success": True}
-                continue
-            bucket_for_op[path] = {"success": True, "value": new_value}
-            continue
-        bucket_for_op[path] = {"success": True}
+    response = _mutate_in_response(result, spec_meta, keyspace)
 
     logger.info(f"Successfully performed sub-document mutation in {keyspace}")
-    return response
+    return with_cas(response, result)

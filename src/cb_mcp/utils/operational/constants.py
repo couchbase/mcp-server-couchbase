@@ -12,6 +12,8 @@ at ``utils/operational`` — never from a helper package back up into a
 ``servers/`` package.
 """
 
+from couchbase.durability import DurabilityLevel
+
 #: Couchbase Server REST API ports. TLS/plaintext port pairs differ per
 #: service — these are used to build request URLs once TLS-vs-plaintext is
 #: decided from the connection string's scheme.
@@ -30,3 +32,14 @@ QUERY_REST_PORT_PLAIN = 8093
 #: profile). Healthy nodes answer well within it; a node that does not is
 #: reported with a "timeout" state rather than holding up the whole call.
 ENDPOINT_PING_TIMEOUT_SECONDS = 8
+
+#: Durability levels accepted by the ``durability`` parameter of the write
+#: tools, mapped to the SDK enum. Exposed as strings because MCP tool
+#: parameters are JSON-typed and LLM-generated; the mapping doubles as input
+#: validation at the tool boundary.
+DURABILITY_LEVELS: dict[str, DurabilityLevel] = {
+    "NONE": DurabilityLevel.NONE,
+    "MAJORITY": DurabilityLevel.MAJORITY,
+    "MAJORITY_AND_PERSIST_TO_ACTIVE": DurabilityLevel.MAJORITY_AND_PERSIST_TO_ACTIVE,
+    "PERSIST_TO_MAJORITY": DurabilityLevel.PERSIST_TO_MAJORITY,
+}

@@ -71,7 +71,10 @@ class TestUpsertDocument:
 
     def test_returns_true_on_success(self) -> None:
         """Happy path returns {"success": True} after invoking collection.upsert."""
-        ctx, cluster, _collection = _make_ctx_with_collection()
+        ctx, cluster, collection = _make_ctx_with_collection()
+        collection.upsert.return_value = SimpleNamespace(
+            cas=0
+        )  # no CAS from the server
 
         with patch(
             "cb_mcp.tools.operational.kv.get_cluster_connection",
