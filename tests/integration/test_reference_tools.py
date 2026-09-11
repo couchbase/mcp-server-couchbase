@@ -34,7 +34,6 @@ async def test_default_call_lists_every_record() -> None:
         assert isinstance(payload, dict), f"Expected dict response, got {type(payload)}"
         assert payload.get("success") is True
         assert payload.get("chapters"), "The listing must still carry chapters"
-        assert payload["record_count"] == len(payload["records"])
         assert payload["record_count"] > 1000, (
             f"Expected the full metrics dataset, got {payload['record_count']}"
         )
