@@ -103,6 +103,16 @@ Once the server is connected, you can talk to your Couchbase cluster in natural 
 | `run_sql_plus_plus_query` | Run a [SQL++ query](https://www.couchbase.com/sqlplusplus/) on a specified scope.<br><br>Queries are automatically scoped to the specified bucket and scope, so use collection names directly (e.g., `SELECT * FROM users` instead of `SELECT * FROM bucket.scope.users`).<br><br>`CB_MCP_READ_ONLY_MODE` is `true` by default, which means that **all write operations (KV, Query, scope/collection management, and index management)** are disabled. When enabled (i.e. `CB_MCP_READ_ONLY_MODE=true`), write tools are not loaded and SQL++ queries that modify data are blocked. |
 | `explain_sql_plus_plus_query` | Generate and evaluate an EXPLAIN plan for a SQL++ query. Returns query metadata, extracted plan, and plan evaluation findings. |
 
+### Full-text search (FTS) tools
+
+Requires Couchbase Server 7.6+ and the Search service. Vector search is not supported by these tools (see the separate vector search tooling).
+
+| Tool Name | Description |
+| --------- | ----------- |
+| `list_fts_indexes` | List Search (FTS) indexes. With no filters, lists cluster-level (legacy) indexes; with `bucket_name`, lists scope-level (scoped) indexes across every scope in that bucket; with `bucket_name` and `scope_name`, lists scope-level indexes in that one scope. |
+| `get_fts_index_definition` | Get the full definition of a single Search index (mappings, analyzers, plan params). Pass `bucket_name` and `scope_name` together for a scope-level index, or omit both for a cluster-level (legacy) index. |
+| `run_fts_query` | Run an FTS query against a Search index, or fetch its execution plan. `query` is the raw FTS query JSON body, supporting any non-vector query type (match, match_phrase, term, conjuncts, disjuncts, geo, date/numeric range, query_string, ...). Pass `explain=true` to fetch the execution plan instead of results — this still executes the query (`limit` defaulting to 1) since the Search service only exposes the plan per matched hit, not as a separate dry-run call. |
+
 ### Query performance analysis tools
 
 | Tool Name | Description |

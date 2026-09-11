@@ -18,9 +18,11 @@ from .scorer import calculate_tool_calling_accuracy
 from .seeding import (
     delete_document,
     doc_id,
+    drop_fts_index,
     drop_scope,
     seed_collection,
     seed_document,
+    seed_fts_index,
     seed_scope,
     unique_name,
 )
@@ -44,12 +46,14 @@ __all__ = [
     "calculate_tool_calling_accuracy",
     "delete_document",
     "doc_id",
+    "drop_fts_index",
     "drop_scope",
     "extract_tool_results",
     "run_accuracy_case",
     "run_result_case",
     "seed_collection",
     "seed_document",
+    "seed_fts_index",
     "seed_scope",
     "unique_name",
 ]
