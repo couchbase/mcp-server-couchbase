@@ -15,6 +15,8 @@ from typing import Any
 
 import couchbase.subdocument as subdoc
 from couchbase.exceptions import CouchbaseException
+from couchbase.options import MutateInOptions
+from couchbase.subdocument import StoreSemantics
 from fastmcp import Context
 
 from ..utils.connection import connect_to_bucket, format_keyspace
@@ -23,6 +25,15 @@ from ..utils.context import get_cluster_connection
 from ..utils.responses import tool_error, tool_success
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.kv")
+
+# Store semantics accepted by mutate_subdocument, mapped to the SDK enum.
+# Exposed as strings because MCP tool parameters are JSON-typed and
+# LLM-generated; the mapping doubles as input validation.
+STORE_SEMANTICS: dict[str, StoreSemantics] = {
+    "REPLACE": StoreSemantics.REPLACE,
+    "UPSERT": StoreSemantics.UPSERT,
+    "INSERT": StoreSemantics.INSERT,
+}
 
 
 def get_document_by_id(
@@ -270,6 +281,70 @@ def lookup_subdocument(
     return response
 
 
+def _mutate_in_response(
+    result: Any,
+    spec_meta: list[tuple[str, str]],
+    keyspace: str,
+) -> dict[str, Any]:
+    """Build the per-category path -> outcome mapping for a committed mutate_in.
+
+    Extracted from mutate_subdocument unchanged. Adding the store_semantics
+    parameter pushed that function past the project's configured branch and
+    statement limits; lifting this block out is what brings it back under them.
+    """
+    response: dict[str, Any] = {}
+    for index, (op, path) in enumerate(spec_meta):
+        bucket_for_op = response.setdefault(op, {})
+        if op != "counter":
+            bucket_for_op[path] = {"success": True}
+            continue
+
+        # The installed SDK constructs MutateInResult without a transcoder
+        # (unlike LookupInResult), which makes content_as always raise for
+        # mutate_in results — fall back to decoding the raw field value.
+        new_value = None
+        for read_new_value in (
+            lambda index=index: result.content_as[int](index),
+            lambda index=index: int(
+                json.loads(result._orig.raw_result["fields"][index]["value"])
+            ),
+        ):
+            try:
+                new_value = read_new_value()
+                break
+            except Exception:  # noqa: S112 (expected fallback attempt, not a swallowed bug)
+                continue
+
+        if new_value is None:
+            logger.warning(
+                f"Counter mutation at '{path}' in {keyspace} committed but "
+                "its new value could not be read from the SDK result."
+            )
+            bucket_for_op[path] = {"success": True}
+            continue
+        bucket_for_op[path] = {"success": True, "value": new_value}
+
+    return response
+
+
+def _store_semantics_options(store_semantics: str | None) -> MutateInOptions | None:
+    """Build MutateInOptions carrying store semantics, or None if unset.
+
+    Returning None when nothing is requested keeps the call path identical to
+    the one used before this parameter existed, so the default behaviour -
+    failing when the document is missing - is untouched.
+    """
+    if store_semantics is None:
+        return None
+    semantics = STORE_SEMANTICS.get(store_semantics)
+    if semantics is None:
+        raise ValueError(
+            f"store_semantics must be one of {sorted(STORE_SEMANTICS)}; "
+            f"got {store_semantics!r}"
+        )
+    return MutateInOptions(store_semantics=semantics)
+
+
 def mutate_subdocument(
     ctx: Context,
     bucket_name: str,
@@ -286,10 +361,12 @@ def mutate_subdocument(
     array_add_unique_specs: list[dict[str, Any]] | None = None,
     counter_specs: list[dict[str, Any]] | None = None,
     create_parents: bool = False,
+    store_semantics: str | None = None,
 ) -> dict[str, Any]:
     """Modify parts of an EXISTING document without rewriting the whole thing, using
-    Couchbase sub-document mutation operations. The document must already exist — use
-    upsert_document_by_id first if it doesn't.
+    Couchbase sub-document mutation operations. By default the document must already
+    exist — either call upsert_document_by_id first, or pass store_semantics="UPSERT"
+    to have this call create it.
 
     Use this instead of upsert_document_by_id/replace_document_by_id when you only need to
     change, add, or remove a few fields — AND you already know the exact field path(s) to
@@ -324,6 +401,17 @@ def mutate_subdocument(
     create_parents: if True, missing intermediate path segments are created automatically
     for every category except replace_specs and remove_paths, which always require the full
     path to already exist.
+
+    store_semantics controls what happens when the DOCUMENT does not exist. Note the
+    distinction from create_parents: that one is about missing paths INSIDE a document,
+    this one is about the document itself.
+    - "REPLACE" (the default, and the previous behaviour): fail if the document is missing.
+    - "UPSERT": create the document if it is missing, then apply the mutations. This turns
+      the common "set this field, creating the record if needed" pattern into one call
+      instead of a get, a branch and a write.
+    - "INSERT": create the document, failing if it already exists.
+    With "UPSERT" or "INSERT" against a document that did not exist, replace_specs and
+    remove_paths have nothing to act on and will fail — use upsert_specs instead.
 
     At least one spec must be provided. As a rule of thumb, keep the combined number of
     specs across all categories to 16 or fewer — Couchbase limits subdocument operations
@@ -397,12 +485,12 @@ def mutate_subdocument(
         (
             "counter",
             counter_specs or [],
-            lambda s: subdoc.increment(
-                s["path"], s["delta"], create_parents=create_parents
-            )
-            if s["delta"] >= 0
-            else subdoc.decrement(
-                s["path"], abs(s["delta"]), create_parents=create_parents
+            lambda s: (
+                subdoc.increment(s["path"], s["delta"], create_parents=create_parents)
+                if s["delta"] >= 0
+                else subdoc.decrement(
+                    s["path"], abs(s["delta"]), create_parents=create_parents
+                )
             ),
         ),
     ]
@@ -425,13 +513,22 @@ def mutate_subdocument(
         logger.warning(f"Error performing sub-document mutation in {keyspace}: {error}")
         return {"error": error}
 
+    try:
+        options = _store_semantics_options(store_semantics)
+    except ValueError as e:
+        logger.warning(f"Invalid sub-document mutation for {keyspace}: {e}")
+        return {"error": str(e)}
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
 
     try:
         logger.debug(f"Performing sub-document mutation in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        result = collection.mutate_in(document_id, specs)
+        if options is None:
+            result = collection.mutate_in(document_id, specs)
+        else:
+            result = collection.mutate_in(document_id, specs, options)
     except Exception as e:
         error_context = getattr(e, "error_context", None)
         failed_index = getattr(error_context, "first_error_index", None)
@@ -444,36 +541,6 @@ def mutate_subdocument(
         )
         return {"error": f"{e}{detail}"}
 
-    response: dict[str, Any] = {}
-    for index, (op, path) in enumerate(spec_meta):
-        bucket_for_op = response.setdefault(op, {})
-        if op == "counter":
-            # The installed SDK constructs MutateInResult without a transcoder
-            # (unlike LookupInResult), which makes content_as always raise for
-            # mutate_in results — fall back to decoding the raw field value.
-            new_value = None
-            for read_new_value in (
-                lambda index=index: result.content_as[int](index),
-                lambda index=index: int(
-                    json.loads(result._orig.raw_result["fields"][index]["value"])
-                ),
-            ):
-                try:
-                    new_value = read_new_value()
-                    break
-                except Exception:  # noqa: S112 (expected fallback attempt, not a swallowed bug)
-                    continue
-
-            if new_value is None:
-                logger.warning(
-                    f"Counter mutation at '{path}' in {keyspace} committed but "
-                    "its new value could not be read from the SDK result."
-                )
-                bucket_for_op[path] = {"success": True}
-                continue
-            bucket_for_op[path] = {"success": True, "value": new_value}
-            continue
-        bucket_for_op[path] = {"success": True}
-
+    response = _mutate_in_response(result, spec_meta, keyspace)
     logger.info(f"Successfully performed sub-document mutation in {keyspace}")
     return response
