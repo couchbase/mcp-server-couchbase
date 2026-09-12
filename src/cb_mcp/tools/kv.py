@@ -24,6 +24,12 @@ from ..utils.responses import tool_error, tool_success
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.kv")
 
+# Upper bound on how many documents one bulk read may fetch. Tool output goes
+# into an LLM context window, so the batch is bounded rather than unlimited.
+# Note this bounds the COUNT, not the total size: 100 large documents are
+# still a lot of tokens, which the tool docstring warns about.
+MAX_BULK_GET_IDS = 100
+
 
 def get_document_by_id(
     ctx: Context,
@@ -477,3 +483,81 @@ def mutate_subdocument(
 
     logger.info(f"Successfully performed sub-document mutation in {keyspace}")
     return response
+
+
+def get_documents_by_ids(
+    ctx: Context,
+    bucket_name: str,
+    scope_name: str,
+    collection_name: str,
+    document_ids: list[str],
+) -> dict[str, Any]:
+    """Get several documents by their IDs in a single round trip, from the specified
+    scope and collection.
+
+    Use this instead of calling get_document_by_id repeatedly when you already know
+    several document IDs — it is one network round trip rather than one per document.
+    Do NOT use it to hunt for IDs you are guessing at, and do not use it to read a
+    whole collection: if you don't already know the IDs, or you want documents matching
+    some condition, use run_sql_plus_plus_query instead.
+
+    document_ids: the IDs to fetch, between 1 and 100. WHOLE documents are returned, so
+    a batch of large documents can be very large even well under that limit — prefer a
+    SQL++ projection of just the fields you need when the documents are big. Duplicate
+    IDs are fetched once and appear once in the result; the result is keyed by ID rather
+    than ordered, so the order you pass them in is not preserved.
+
+    Unlike get_document_by_id, a missing or unreadable document does NOT fail the call.
+    Every requested ID lands in exactly one of two maps, so a partial result is still
+    useful:
+    {
+        "documents": {"<id>": <document>, ...},
+        "errors": {"<id>": "<reason, e.g. document not found>", ...}
+    }
+    Check "errors" before concluding a document does not exist — an entry there may also
+    mean a permission or decoding problem. On a connection failure or an invalid request
+    the whole call returns {"error": "<message>"} instead, and nothing was read."""
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+
+    if not document_ids:
+        error = "At least one document ID must be provided"
+        logger.warning(f"Error getting documents from {keyspace}: {error}")
+        return {"error": error}
+    if len(document_ids) > MAX_BULK_GET_IDS:
+        error = (
+            f"Too many document IDs: {len(document_ids)} requested, "
+            f"at most {MAX_BULK_GET_IDS} per call"
+        )
+        logger.warning(f"Error getting documents from {keyspace}: {error}")
+        return {"error": error}
+
+    cluster = get_cluster_connection(ctx)
+    bucket = connect_to_bucket(cluster, bucket_name)
+    try:
+        logger.debug(f"Getting {len(document_ids)} documents from {keyspace}")
+        collection = bucket.scope(scope_name).collection(collection_name)
+        # return_exceptions keeps one missing key from raising for the whole
+        # batch, so an absent document still yields the rest. It is the SDK
+        # default, but passed explicitly so the partial-success behaviour does
+        # not silently depend on that default.
+        result = collection.get_multi(document_ids, return_exceptions=True)
+    except Exception as e:
+        logger.error(f"Error getting documents from {keyspace}: {e}", exc_info=True)
+        return {"error": str(e)}
+
+    documents: dict[str, Any] = {}
+    errors: dict[str, str] = {}
+    for document_id, document_result in result.results.items():
+        try:
+            documents[document_id] = document_result.content_as[dict]
+        except Exception as e:
+            # Reported against this document rather than raised, so one
+            # undecodable document does not discard the rest of the batch.
+            errors[document_id] = str(e)
+    for document_id, exception in result.exceptions.items():
+        errors[document_id] = str(exception)
+
+    logger.info(
+        f"Retrieved {len(documents)} of {len(document_ids)} documents from {keyspace}"
+    )
+    return {"documents": documents, "errors": errors}

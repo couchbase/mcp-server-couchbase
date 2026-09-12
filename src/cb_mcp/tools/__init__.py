@@ -40,6 +40,7 @@ from .index import (
 from .kv import (
     delete_document_by_id,
     get_document_by_id,
+    get_documents_by_ids,
     insert_document_by_id,
     lookup_subdocument,
     mutate_subdocument,
@@ -86,6 +87,7 @@ READ_ONLY_TOOLS = [
     get_cluster_diagnostics_report,
     # KV read tools
     get_document_by_id,
+    get_documents_by_ids,
     lookup_subdocument,
     # Query tools (read operations)
     get_schema_for_collection,
@@ -143,6 +145,7 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_cluster_diagnostics_report": ToolAnnotations(readOnlyHint=True),
     # KV read tools
     "get_document_by_id": ToolAnnotations(readOnlyHint=True),
+    "get_documents_by_ids": ToolAnnotations(readOnlyHint=True),
     "lookup_subdocument": ToolAnnotations(readOnlyHint=True),
     # Query tools
     "get_schema_for_collection": ToolAnnotations(readOnlyHint=True),
@@ -205,6 +208,7 @@ __all__ = [
     "get_scopes_in_bucket",
     "get_buckets_in_cluster",
     "get_document_by_id",
+    "get_documents_by_ids",
     "lookup_subdocument",
     "mutate_subdocument",
     "upsert_document_by_id",
