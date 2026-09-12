@@ -43,7 +43,7 @@ Documentation: <https://docs.couchbase.com/mcp-server/get-started/overview.html>
 | `insert_document_by_id` | Insert a new document by ID (fails if document exists). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `replace_document_by_id` | Replace an existing document by ID (fails if document doesn't exist). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `delete_document_by_id` | Delete a document by ID from a specified scope and collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
-| `mutate_subdocument` | Modify parts of an existing document (upsert, insert, replace, remove, array ops, counters) by path without rewriting the whole document. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `mutate_subdocument` | Modify parts of an existing document (upsert, insert, replace, remove, array ops, counters) by path without rewriting the whole document. Optional `durability`. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 
 ### Query and indexing tools
 
