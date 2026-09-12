@@ -11,10 +11,18 @@ This module contains tools for document operations by ID:
 
 import json
 import logging
+from datetime import timedelta
 from typing import Any
 
 import couchbase.subdocument as subdoc
+from couchbase.durability import DurabilityLevel, ServerDurability
 from couchbase.exceptions import CouchbaseException
+from couchbase.options import (
+    InsertOptions,
+    RemoveOptions,
+    ReplaceOptions,
+    UpsertOptions,
+)
 from fastmcp import Context
 
 from ..utils.connection import connect_to_bucket, format_keyspace
@@ -23,6 +31,63 @@ from ..utils.context import get_cluster_connection
 from ..utils.responses import tool_error, tool_success
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.kv")
+
+# Durability levels accepted by the ``durability`` parameter of the write
+# tools, mapped to the SDK enum. Exposed as strings because MCP tool
+# parameters are JSON-typed and LLM-generated; the mapping doubles as input
+# validation at the tool boundary.
+DURABILITY_LEVELS: dict[str, DurabilityLevel] = {
+    "NONE": DurabilityLevel.NONE,
+    "MAJORITY": DurabilityLevel.MAJORITY,
+    "MAJORITY_AND_PERSIST_TO_ACTIVE": DurabilityLevel.MAJORITY_AND_PERSIST_TO_ACTIVE,
+    "PERSIST_TO_MAJORITY": DurabilityLevel.PERSIST_TO_MAJORITY,
+}
+
+
+def _write_options(
+    option_cls: Any,
+    durability: str | None = None,
+    expiry_seconds: int | None = None,
+) -> Any:
+    """Build an SDK options object for a KV write, or None if nothing is set.
+
+    Returning None when no option is requested keeps the call path identical
+    to the one used before these parameters existed, so default behavior is
+    unchanged.
+
+    Raises ValueError for an unknown durability level or a negative expiry so
+    the calling tool can report an actionable message rather than handing an
+    invalid value to the SDK.
+    """
+    kwargs: dict[str, Any] = {}
+
+    if durability is not None:
+        level = DURABILITY_LEVELS.get(durability)
+        if level is None:
+            raise ValueError(
+                f"durability must be one of {sorted(DURABILITY_LEVELS)}; "
+                f"got {durability!r}"
+            )
+        # The SDK reads the ``durability`` option key and derives the
+        # wire-level durability_level from it. ``durability_level`` is not a
+        # supported option key: the Options classes are unvalidated dict
+        # subclasses, so passing it is accepted and then silently dropped,
+        # which would turn the guarantee into a no-op.
+        kwargs["durability"] = ServerDurability(level=level)
+
+    if expiry_seconds is not None:
+        if expiry_seconds < 0:
+            raise ValueError(
+                f"expiry_seconds must be zero or positive; got {expiry_seconds}"
+            )
+        # Couchbase treats an expiry of 0 as "no expiry", which is also how
+        # the SDK interprets a zero timedelta, so 0 clears an existing TTL.
+        kwargs["expiry"] = timedelta(seconds=expiry_seconds)
+
+    if not kwargs:
+        return None
+    return option_cls(**kwargs)
+
 
 
 def get_document_by_id(
@@ -56,6 +121,8 @@ def upsert_document_by_id(
     collection_name: str,
     document_id: str,
     document_content: dict[str, Any],
+    durability: str | None = None,
+    expiry_seconds: int | None = None,
 ) -> dict[str, Any]:
     """Insert or update a document by its ID.
 
@@ -64,15 +131,41 @@ def upsert_document_by_id(
 
     DO NOT use this as a fallback when insert_document_by_id or replace_document_by_id fails.
 
+    durability: how durable the write must be before the tool reports success:
+    "NONE" acknowledges from the active node's memory only, "MAJORITY" waits
+    for a majority of replicas to hold it in memory,
+    "MAJORITY_AND_PERSIST_TO_ACTIVE" adds a write to disk on the active node,
+    and "PERSIST_TO_MAJORITY" waits for a disk write on a majority of nodes.
+    Stronger levels cost latency and FAIL outright if the cluster has too few
+    replicas to satisfy them. Omit this parameter for the cluster's own
+    default; passing "NONE" explicitly requests no durability.
+
+    expiry_seconds: time-to-live in seconds, after which the document is
+    deleted automatically. 0 means no expiry. IMPORTANT: this is a
+    full-document write, which resets the document's expiry either way -
+    omitting this parameter clears any TTL the document already had, it does
+    not preserve it. Pass the intended TTL on every write to a document that
+    should keep expiring.
+
     Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. permission denied, network error, invalid content)."""
+    failure with the reason (e.g. permission denied, network error, invalid content,
+    durability not satisfiable by this cluster)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    try:
+        options = _write_options(UpsertOptions, durability, expiry_seconds)
+    except ValueError as e:
+        logger.warning(f"Invalid upsert options for {keyspace}: {e}")
+        return tool_error(e)
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Upserting document in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.upsert(document_id, document_content)
+        if options is None:
+            collection.upsert(document_id, document_content)
+        else:
+            collection.upsert(document_id, document_content, options)
         logger.info(f"Successfully upserted document in {keyspace}")
         return tool_success()
     except Exception as e:
@@ -86,18 +179,38 @@ def delete_document_by_id(
     scope_name: str,
     collection_name: str,
     document_id: str,
+    durability: str | None = None,
 ) -> dict[str, Any]:
     """Delete a document by its ID.
 
+    durability: how durable the write must be before the tool reports success:
+    "NONE" acknowledges from the active node's memory only, "MAJORITY" waits
+    for a majority of replicas to hold it in memory,
+    "MAJORITY_AND_PERSIST_TO_ACTIVE" adds a write to disk on the active node,
+    and "PERSIST_TO_MAJORITY" waits for a disk write on a majority of nodes.
+    Stronger levels cost latency and FAIL outright if the cluster has too few
+    replicas to satisfy them. Omit this parameter for the cluster's own
+    default; passing "NONE" explicitly requests no durability.
+
     Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document not found, permission denied, network error)."""
+    failure with the reason (e.g. document not found, permission denied, network error,
+    durability not satisfiable by this cluster)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    try:
+        options = _write_options(RemoveOptions, durability)
+    except ValueError as e:
+        logger.warning(f"Invalid delete options for {keyspace}: {e}")
+        return tool_error(e)
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Deleting document from {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.remove(document_id)
+        if options is None:
+            collection.remove(document_id)
+        else:
+            collection.remove(document_id, options)
         logger.info(f"Successfully deleted document from {keyspace}")
         return tool_success()
     except Exception as e:
@@ -112,21 +225,45 @@ def insert_document_by_id(
     collection_name: str,
     document_id: str,
     document_content: dict[str, Any],
+    durability: str | None = None,
+    expiry_seconds: int | None = None,
 ) -> dict[str, Any]:
     """Insert a new document by its ID. This operation will FAIL if the document already exists.
 
     IMPORTANT: If this operation fails, DO NOT automatically try replace or upsert.
     Report the failure to the user. They can choose to 'replace' or 'upsert' if desired.
 
+    durability: how durable the write must be before the tool reports success:
+    "NONE" acknowledges from the active node's memory only, "MAJORITY" waits
+    for a majority of replicas to hold it in memory,
+    "MAJORITY_AND_PERSIST_TO_ACTIVE" adds a write to disk on the active node,
+    and "PERSIST_TO_MAJORITY" waits for a disk write on a majority of nodes.
+    Stronger levels cost latency and FAIL outright if the cluster has too few
+    replicas to satisfy them. Omit this parameter for the cluster's own
+    default; passing "NONE" explicitly requests no durability.
+
+    expiry_seconds: time-to-live in seconds, after which the document is
+    deleted automatically. 0 means no expiry.
+
     Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document already exists, permission denied, network error)."""
+    failure with the reason (e.g. document already exists, permission denied, network
+    error, durability not satisfiable by this cluster)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    try:
+        options = _write_options(InsertOptions, durability, expiry_seconds)
+    except ValueError as e:
+        logger.warning(f"Invalid insert options for {keyspace}: {e}")
+        return tool_error(e)
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Inserting document in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.insert(document_id, document_content)
+        if options is None:
+            collection.insert(document_id, document_content)
+        else:
+            collection.insert(document_id, document_content, options)
         logger.info(f"Successfully inserted document in {keyspace}")
         return tool_success()
     except Exception as e:
@@ -141,21 +278,49 @@ def replace_document_by_id(
     collection_name: str,
     document_id: str,
     document_content: dict[str, Any],
+    durability: str | None = None,
+    expiry_seconds: int | None = None,
 ) -> dict[str, Any]:
     """Replace an existing document by its ID. This operation will FAIL if the document does not exist.
 
     IMPORTANT: If this operation fails, DO NOT automatically try insert or upsert.
     Report the failure to the user. They can choose to 'insert' or 'upsert' if desired.
 
+    durability: how durable the write must be before the tool reports success:
+    "NONE" acknowledges from the active node's memory only, "MAJORITY" waits
+    for a majority of replicas to hold it in memory,
+    "MAJORITY_AND_PERSIST_TO_ACTIVE" adds a write to disk on the active node,
+    and "PERSIST_TO_MAJORITY" waits for a disk write on a majority of nodes.
+    Stronger levels cost latency and FAIL outright if the cluster has too few
+    replicas to satisfy them. Omit this parameter for the cluster's own
+    default; passing "NONE" explicitly requests no durability.
+
+    expiry_seconds: time-to-live in seconds, after which the document is
+    deleted automatically. 0 means no expiry. IMPORTANT: this is a
+    full-document write, which resets the document's expiry either way -
+    omitting this parameter clears any TTL the document already had, it does
+    not preserve it. Pass the intended TTL on every write to a document that
+    should keep expiring.
+
     Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document does not exist, permission denied, network error)."""
+    failure with the reason (e.g. document does not exist, permission denied, network
+    error, durability not satisfiable by this cluster)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    try:
+        options = _write_options(ReplaceOptions, durability, expiry_seconds)
+    except ValueError as e:
+        logger.warning(f"Invalid replace options for {keyspace}: {e}")
+        return tool_error(e)
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Replacing document in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.replace(document_id, document_content)
+        if options is None:
+            collection.replace(document_id, document_content)
+        else:
+            collection.replace(document_id, document_content, options)
         logger.info(f"Successfully replaced document in {keyspace}")
         return tool_success()
     except Exception as e:
