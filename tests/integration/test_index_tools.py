@@ -11,6 +11,7 @@ Tests for:
 
 from __future__ import annotations
 
+import asyncio
 import re
 import uuid
 
@@ -633,17 +634,32 @@ async def test_create_index_deferred_by_default() -> None:
             assert payload["deferred"] is True
             assert payload["index_name"] == index_name
 
-            list_response = await session.call_tool(
-                "list_indexes",
-                arguments={
-                    "bucket_name": bucket,
-                    "scope_name": scope,
-                    "collection_name": collection,
-                    "index_name": index_name,
-                },
+            # A deferred CREATE INDEX publishes its metadata asynchronously, so
+            # list_indexes can legitimately come back empty for a beat (most
+            # visibly on pre-8.x clusters, which read the Index Service's
+            # /getIndexStatus rather than the query service). Retry briefly
+            # rather than asserting on the first, possibly-empty answer —
+            # extract_payload returns None, not [], for an empty list result.
+            indexes = None
+            for _ in range(10):
+                list_response = await session.call_tool(
+                    "list_indexes",
+                    arguments={
+                        "bucket_name": bucket,
+                        "scope_name": scope,
+                        "collection_name": collection,
+                        "index_name": index_name,
+                    },
+                )
+                indexes = extract_payload(list_response)
+                if indexes is not None and isinstance(indexes, list) and indexes:
+                    break
+                await asyncio.sleep(1)
+
+            assert isinstance(indexes, list) and len(indexes) == 1, (
+                f"Expected exactly one index named {index_name!r} after "
+                f"create_index; got: {indexes!r}"
             )
-            indexes = extract_payload(list_response)
-            assert isinstance(indexes, list) and len(indexes) == 1
             # A deferred (not-yet-built) index reports status "created" on newer
             # clusters and "deferred" on older ones — accept either.
             assert indexes[0]["status"].lower() in {"created", "deferred"}
