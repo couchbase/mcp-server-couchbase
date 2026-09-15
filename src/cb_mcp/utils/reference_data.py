@@ -43,7 +43,7 @@ MAX_CHAPTER_VALUES = 25
 # The default is deliberately well under typical MCP client output limits. Raising it past what the
 # client accepts does not get you a bigger answer -- it gets the whole tool result discarded.
 MAX_LIST_RESPONSE_BYTES = int(
-    os.environ.get("CB_MCP_MAX_LIST_RESPONSE_BYTES", 64 * 1024)
+    os.environ.get("CB_MCP_MAX_LIST_RESPONSE_BYTES", 400 * 1024)
 )
 
 
