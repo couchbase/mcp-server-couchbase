@@ -234,13 +234,19 @@ async def test_get_cluster_metrics() -> None:
         payload = extract_payload(response)
 
         assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
-        assert payload.get("status") in ("success", "error"), (
-            f"Expected a status envelope: {payload}"
-        )
-        if payload.get("status") == "success":
-            assert isinstance(payload.get("data"), list), (
-                "Expected 'data' to be a list of per-metric-spec results"
+        if payload.get("status") == "error":
+            # Only the documented Capella rejection is an acceptable error here —
+            # anything else (bad nodes, bounds rejection, connectivity) is a real
+            # failure this test should catch, not silently pass through.
+            assert "Capella" in payload.get("error", ""), (
+                f"Expected only a Capella-rejection error, got: {payload}"
             )
+            return
+
+        assert payload.get("status") == "success", f"Expected a status envelope: {payload}"
+        assert isinstance(payload.get("data"), list), (
+            "Expected 'data' to be a list of per-metric-spec results"
+        )
 
 
 @pytest.mark.asyncio

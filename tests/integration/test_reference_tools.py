@@ -2,7 +2,7 @@
 Integration tests for reference.py tools.
 
 Tests for:
-- discover_tool_input_values (full listing, search mode, chapter filters)
+- discover_tool_input_values (browse mode, search mode, chapter filters)
 
 This tool never touches the cluster, so it is also exercised via
 ``create_logging_test_session`` — which strips cluster credentials — to prove it keeps working
@@ -23,8 +23,8 @@ METRICS_TOOL = "get_cluster_metrics"
 
 
 @pytest.mark.asyncio
-async def test_default_call_lists_every_record() -> None:
-    """Passing tool_name alone lists the whole dataset over the wire, not just a sample."""
+async def test_default_call_reports_record_count_and_a_sample() -> None:
+    """Passing tool_name alone reports the dataset's true size plus a sample, not a full list."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "discover_tool_input_values", arguments={"tool_name": METRICS_TOOL}
@@ -37,6 +37,8 @@ async def test_default_call_lists_every_record() -> None:
         assert payload["record_count"] > 1000, (
             f"Expected the full metrics dataset, got {payload['record_count']}"
         )
+        assert "records" not in payload, "every dataset is currently too large to list in full"
+        assert payload.get("sample_records"), "a sample should still be offered"
         assert "results" not in payload, "The default call must not run a search"
 
 

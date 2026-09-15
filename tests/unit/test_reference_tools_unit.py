@@ -82,18 +82,20 @@ class TestBrowseMode:
         assert result["success"] is True
         assert "results" not in result, "browse mode must not run a search"
 
-    def test_default_call_lists_every_record(self):
-        """No keywords means the caller gets the whole namespace in one response."""
+    def test_default_call_reports_the_full_record_count(self):
+        """No keywords means the caller gets the dataset's true size plus a sample, not a list."""
         result = discover_tool_input_values(METRICS_TOOL)
 
         assert result["chapters"], "chapters tell the caller how the data is organised"
         assert result["record_count"] > 1000, (
             f"expected the full metrics dataset, got {result['record_count']} records"
         )
+        assert "records" not in result, "every dataset is currently too large to list in full"
+        assert result["sample_records"], "a sample should still be offered"
         assert "next_step" in result
 
-    def test_max_results_does_not_truncate_the_listing(self):
-        """max_results applies to search only; the default listing is never cut short."""
+    def test_max_results_does_not_affect_the_reported_record_count(self):
+        """max_results applies to search only; browse mode's record_count is never cut short."""
         capped = discover_tool_input_values(METRICS_TOOL, max_results=5)
 
         assert capped["record_count"] > 5
@@ -127,7 +129,7 @@ class TestBrowseMode:
 
         assert result["success"] is True
         assert result["chapters"] == {}
-        assert result["records"] == [{"code": "E001"}, {"code": "E002"}]
+        assert result["sample_records"] == [{"code": "E001"}, {"code": "E002"}]
 
     def test_dataset_over_the_size_cap_is_not_listed(self, tmp_path, monkeypatch):
         """Above MAX_LIST_BYTES the caller is pointed at search, never given a partial list.

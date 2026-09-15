@@ -11,7 +11,6 @@ values for whatever was wrong, so the caller can correct itself in one round tri
 guessing again.
 """
 
-import json
 import logging
 from typing import Any
 
@@ -20,7 +19,6 @@ from ..utils.reference_data import (
     MAX_LIST_RESPONSE_BYTES,
     chapters,
     dataset_size_bytes,
-    list_records,
     load_envelope,
     registered_tool_names,
     resolve_dataset,
@@ -55,11 +53,10 @@ def discover_tool_input_values(
     tool_name is the only required argument; everything else is optional.
 
     Two ways to call it:
-    1. List -- pass tool_name alone. Returns EVERY record in the dataset, plus the "chapters" block
-       (the small set of fields you can filter on, with every legal value and a record count each).
-       This is a large response: prefer search when you already know roughly what you want, and use
-       the full list when you need to see the whole namespace. A dataset too large to list returns
-       chapters and a "next_step" telling you to search instead of a partial list.
+    1. Browse -- pass tool_name alone. Every registered dataset is currently treated as too large
+       to list in full, so this returns "record_count", a small "sample_records" preview, the
+       "chapters" block (the small set of fields you can filter on, with every legal value and a
+       record count each), and a "next_step" pointing you at search instead of a partial list.
     2. Search -- pass tool_name and search_keywords. Returns records ranked by fuzzy relevance, best
        first. Matching is fuzzy over identifiers and descriptions, so partial words and near-misses
        still hit.
@@ -89,10 +86,10 @@ def discover_tool_input_values(
           suppress weak matches you have already seen.
 
     Returns {"success": True, "dataset": ..., "chapters": ..., ...} plus either "record_count" and
-    "records" (the full list), "record_count" and "sample_records" (a preview, when the dataset is
-    too large to list in full), or "matches" (total found), "returned" and "results" (ranked, each
-    record plus its "score") (search). On failure returns {"success": False, "error": ...} listing the
-    valid values for whatever was wrong -- e.g. an unrecognised tool_name comes back with
+    "sample_records" (browse -- a preview, since every dataset is currently treated as too large to
+    list in full) or "matches" (total found), "returned" and "results" (ranked, each record plus
+    its "score") (search). On failure returns {"success": False, "error": ...} listing the valid
+    values for whatever was wrong -- e.g. an unrecognised tool_name comes back with
     "available_tool_names", a bad chapter filter with "valid_chapter_fields" or "valid_values".
     Zero matches is a successful response with an empty "results" list -- refine your keywords, drop
     a chapter_filter, or lower min_score and call again.
@@ -180,26 +177,31 @@ def discover_tool_input_values(
         listing: dict[str, Any] = {}
         response_bytes = None
 
-        if file_bytes <= MAX_LIST_RESPONSE_BYTES:
-            records = list_records(dataset_path)
-            candidate = tool_success(
-                dataset=dataset_summary,
-                chapters=dataset_chapters,
-                record_count=len(records),
-                records=records,
-                next_step=(
-                    "Every record is listed above. To narrow instead of scanning, call again "
-                    "with search_keywords, optionally with chapter_filters."
-                ),
-            )
-            response_bytes = len(json.dumps(candidate, default=str))
-            if response_bytes <= MAX_LIST_RESPONSE_BYTES:
-                logger.info(
-                    f"discover_tool_input_values({tool_name!r}) listed {len(records)} record(s) "
-                    f"({response_bytes} bytes)"
-                )
-                return candidate
-            declared_count = len(records)
+        # Disabled for now: every registered dataset is treated as too large to list in full, so
+        # browse mode always falls through to the sample_records response below. Kept here,
+        # commented out rather than deleted, because this is the code path that will list a
+        # dataset in full once one is added that's actually small enough to fit -- re-enable it
+        # then instead of rewriting it from scratch.
+        # if file_bytes <= MAX_LIST_RESPONSE_BYTES:
+        #     records = list_records(dataset_path)
+        #     candidate = tool_success(
+        #         dataset=dataset_summary,
+        #         chapters=dataset_chapters,
+        #         record_count=len(records),
+        #         records=records,
+        #         next_step=(
+        #             "Every record is listed above. To narrow instead of scanning, call again "
+        #             "with search_keywords, optionally with chapter_filters."
+        #         ),
+        #     )
+        #     response_bytes = len(json.dumps(candidate, default=str))
+        #     if response_bytes <= MAX_LIST_RESPONSE_BYTES:
+        #         logger.info(
+        #             f"discover_tool_input_values({tool_name!r}) listed {len(records)} record(s) "
+        #             f"({response_bytes} bytes)"
+        #         )
+        #         return candidate
+        #     declared_count = len(records)
 
         # Too large to list. Log the measured size so a client-side rejection is explainable.
         logger.info(
