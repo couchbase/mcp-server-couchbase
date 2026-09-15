@@ -15,6 +15,7 @@ from typing import Any
 
 import couchbase.subdocument as subdoc
 from couchbase.exceptions import CouchbaseException
+from couchbase.options import MutateInOptions, RemoveOptions, ReplaceOptions
 from fastmcp import Context
 
 from ..utils.connection import connect_to_bucket, format_keyspace
@@ -25,15 +26,60 @@ from ..utils.responses import tool_error, tool_success
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.kv")
 
 
+def _parse_cas(cas: str) -> int:
+    """Parse a CAS value supplied as a decimal string into an int.
+
+    CAS crosses the tool boundary as a *string* because it is an unsigned
+    64-bit value: above 2**53 a JSON number round-trip silently alters it, and
+    a concurrency guard built on an altered CAS is worse than none at all - it
+    would fail against the very revision it was meant to match.
+
+    Validation is strict rather than relying on int(), which would accept
+    "1_0", " 10 " and "+10". Tool parameters are LLM-generated, so a value
+    that looks plausible but means something else is exactly the failure mode
+    worth closing here.
+    """
+    if not isinstance(cas, str) or not cas.isdigit():
+        raise ValueError(
+            "cas must be a decimal string of an unsigned 64-bit integer "
+            f"(digits only); got {cas!r}"
+        )
+    parsed = int(cas)
+    if parsed >= 2**64:
+        raise ValueError(f"cas must fit in an unsigned 64-bit integer; got {parsed}")
+    return parsed
+
+
+def _cas_options(option_cls: Any, cas: str | None) -> Any:
+    """Build an SDK options object carrying a CAS, or None if none is given.
+
+    Returning None when no CAS is requested keeps the call path identical to
+    the one used before this parameter existed, so unguarded writes behave
+    exactly as they did.
+    """
+    if cas is None:
+        return None
+    return option_cls(cas=_parse_cas(cas))
+
+
 def get_document_by_id(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
     collection_name: str,
     document_id: str,
+    with_cas: bool = False,
 ) -> dict[str, Any]:
     """Get a document by its ID from the specified scope and collection.
-    If the document is not found, it will raise an exception."""
+    If the document is not found, it will raise an exception.
+
+    with_cas: leave False (the default) for a plain read, which returns the
+    document itself. Set it to True when you intend to write this document
+    back afterwards: the return value becomes
+    {"content": <document>, "cas": "<revision>"}, and passing that "cas" to
+    replace_document_by_id, delete_document_by_id or mutate_subdocument makes
+    the write fail if anything changed in between, instead of silently
+    discarding the other change."""
 
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
@@ -43,7 +89,12 @@ def get_document_by_id(
         collection = bucket.scope(scope_name).collection(collection_name)
         result = collection.get(document_id)
         logger.info(f"Retrieved document from {keyspace}")
-        return result.content_as[dict]
+        content = result.content_as[dict]
+        if not with_cas:
+            return content
+        # Decimal string: CAS is unsigned 64-bit and would not survive a JSON
+        # number round-trip intact above 2**53.
+        return {"content": content, "cas": str(result.cas)}
     except Exception as e:
         logger.error(f"Error getting document from {keyspace}: {e}", exc_info=True)
         raise
@@ -86,18 +137,38 @@ def delete_document_by_id(
     scope_name: str,
     collection_name: str,
     document_id: str,
+    cas: str | None = None,
 ) -> dict[str, Any]:
     """Delete a document by its ID.
 
+    cas: the exact document revision this operation is allowed to act on, as
+    the decimal string returned by get_document_by_id(with_cas=True). If the
+    document has changed since that read, the operation FAILS instead of
+    overwriting the newer revision. Use this for any read-modify-write: read
+    with with_cas=True, decide what to change, then write back with the cas
+    you were given. Omit it to act unconditionally.
+    Use it whenever the decision to delete was based on document content you
+    read earlier.
+
     Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document not found, permission denied, network error)."""
+    failure with the reason (e.g. document not found, the document changed since the
+    cas you supplied, permission denied, network error)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    try:
+        options = _cas_options(RemoveOptions, cas)
+    except ValueError as e:
+        logger.warning(f"Invalid delete options for {keyspace}: {e}")
+        return tool_error(e)
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Deleting document from {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.remove(document_id)
+        if options is None:
+            collection.remove(document_id)
+        else:
+            collection.remove(document_id, options)
         logger.info(f"Successfully deleted document from {keyspace}")
         return tool_success()
     except Exception as e:
@@ -141,21 +212,39 @@ def replace_document_by_id(
     collection_name: str,
     document_id: str,
     document_content: dict[str, Any],
+    cas: str | None = None,
 ) -> dict[str, Any]:
     """Replace an existing document by its ID. This operation will FAIL if the document does not exist.
 
     IMPORTANT: If this operation fails, DO NOT automatically try insert or upsert.
     Report the failure to the user. They can choose to 'insert' or 'upsert' if desired.
 
+    cas: the exact document revision this operation is allowed to act on, as
+    the decimal string returned by get_document_by_id(with_cas=True). If the
+    document has changed since that read, the operation FAILS instead of
+    overwriting the newer revision. Use this for any read-modify-write: read
+    with with_cas=True, decide what to change, then write back with the cas
+    you were given. Omit it to act unconditionally.
+
     Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document does not exist, permission denied, network error)."""
+    failure with the reason (e.g. document does not exist, the document changed since
+    the cas you supplied, permission denied, network error)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    try:
+        options = _cas_options(ReplaceOptions, cas)
+    except ValueError as e:
+        logger.warning(f"Invalid replace options for {keyspace}: {e}")
+        return tool_error(e)
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Replacing document in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.replace(document_id, document_content)
+        if options is None:
+            collection.replace(document_id, document_content)
+        else:
+            collection.replace(document_id, document_content, options)
         logger.info(f"Successfully replaced document in {keyspace}")
         return tool_success()
     except Exception as e:
@@ -270,6 +359,52 @@ def lookup_subdocument(
     return response
 
 
+def _mutate_in_response(
+    result: Any,
+    spec_meta: list[tuple[str, str]],
+    keyspace: str,
+) -> dict[str, Any]:
+    """Build the per-category path -> outcome mapping for a committed mutate_in.
+
+    Extracted from mutate_subdocument unchanged. Adding the cas parameter
+    pushed that function past the project's configured branch and statement
+    limits; lifting this block out is what brings it back under them.
+    """
+    response: dict[str, Any] = {}
+    for index, (op, path) in enumerate(spec_meta):
+        bucket_for_op = response.setdefault(op, {})
+        if op != "counter":
+            bucket_for_op[path] = {"success": True}
+            continue
+
+        # The installed SDK constructs MutateInResult without a transcoder
+        # (unlike LookupInResult), which makes content_as always raise for
+        # mutate_in results — fall back to decoding the raw field value.
+        new_value = None
+        for read_new_value in (
+            lambda index=index: result.content_as[int](index),
+            lambda index=index: int(
+                json.loads(result._orig.raw_result["fields"][index]["value"])
+            ),
+        ):
+            try:
+                new_value = read_new_value()
+                break
+            except Exception:  # noqa: S112 (expected fallback attempt, not a swallowed bug)
+                continue
+
+        if new_value is None:
+            logger.warning(
+                f"Counter mutation at '{path}' in {keyspace} committed but "
+                "its new value could not be read from the SDK result."
+            )
+            bucket_for_op[path] = {"success": True}
+            continue
+        bucket_for_op[path] = {"success": True, "value": new_value}
+
+    return response
+
+
 def mutate_subdocument(
     ctx: Context,
     bucket_name: str,
@@ -286,6 +421,7 @@ def mutate_subdocument(
     array_add_unique_specs: list[dict[str, Any]] | None = None,
     counter_specs: list[dict[str, Any]] | None = None,
     create_parents: bool = False,
+    cas: str | None = None,
 ) -> dict[str, Any]:
     """Modify parts of an EXISTING document without rewriting the whole thing, using
     Couchbase sub-document mutation operations. The document must already exist — use
@@ -324,6 +460,12 @@ def mutate_subdocument(
     create_parents: if True, missing intermediate path segments are created automatically
     for every category except replace_specs and remove_paths, which always require the full
     path to already exist.
+
+    cas: the exact document revision these mutations are allowed to apply to, as the
+    decimal string returned by get_document_by_id(with_cas=True). If the document has
+    changed since that read, the whole call FAILS rather than applying mutations on top
+    of a revision you never saw. Use it for any read-modify-write; omit it to mutate
+    unconditionally.
 
     At least one spec must be provided. As a rule of thumb, keep the combined number of
     specs across all categories to 16 or fewer — Couchbase limits subdocument operations
@@ -397,12 +539,12 @@ def mutate_subdocument(
         (
             "counter",
             counter_specs or [],
-            lambda s: subdoc.increment(
-                s["path"], s["delta"], create_parents=create_parents
-            )
-            if s["delta"] >= 0
-            else subdoc.decrement(
-                s["path"], abs(s["delta"]), create_parents=create_parents
+            lambda s: (
+                subdoc.increment(s["path"], s["delta"], create_parents=create_parents)
+                if s["delta"] >= 0
+                else subdoc.decrement(
+                    s["path"], abs(s["delta"]), create_parents=create_parents
+                )
             ),
         ),
     ]
@@ -425,13 +567,22 @@ def mutate_subdocument(
         logger.warning(f"Error performing sub-document mutation in {keyspace}: {error}")
         return {"error": error}
 
+    try:
+        options = _cas_options(MutateInOptions, cas)
+    except ValueError as e:
+        logger.warning(f"Invalid sub-document mutation options for {keyspace}: {e}")
+        return {"error": str(e)}
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
 
     try:
         logger.debug(f"Performing sub-document mutation in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        result = collection.mutate_in(document_id, specs)
+        if options is None:
+            result = collection.mutate_in(document_id, specs)
+        else:
+            result = collection.mutate_in(document_id, specs, options)
     except Exception as e:
         error_context = getattr(e, "error_context", None)
         failed_index = getattr(error_context, "first_error_index", None)
@@ -444,36 +595,6 @@ def mutate_subdocument(
         )
         return {"error": f"{e}{detail}"}
 
-    response: dict[str, Any] = {}
-    for index, (op, path) in enumerate(spec_meta):
-        bucket_for_op = response.setdefault(op, {})
-        if op == "counter":
-            # The installed SDK constructs MutateInResult without a transcoder
-            # (unlike LookupInResult), which makes content_as always raise for
-            # mutate_in results — fall back to decoding the raw field value.
-            new_value = None
-            for read_new_value in (
-                lambda index=index: result.content_as[int](index),
-                lambda index=index: int(
-                    json.loads(result._orig.raw_result["fields"][index]["value"])
-                ),
-            ):
-                try:
-                    new_value = read_new_value()
-                    break
-                except Exception:  # noqa: S112 (expected fallback attempt, not a swallowed bug)
-                    continue
-
-            if new_value is None:
-                logger.warning(
-                    f"Counter mutation at '{path}' in {keyspace} committed but "
-                    "its new value could not be read from the SDK result."
-                )
-                bucket_for_op[path] = {"success": True}
-                continue
-            bucket_for_op[path] = {"success": True, "value": new_value}
-            continue
-        bucket_for_op[path] = {"success": True}
-
+    response = _mutate_in_response(result, spec_meta, keyspace)
     logger.info(f"Successfully performed sub-document mutation in {keyspace}")
     return response
