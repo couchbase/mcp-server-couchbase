@@ -42,7 +42,7 @@ MAX_CHAPTER_VALUES = 25
 #
 # The default is deliberately well under typical MCP client output limits. Raising it past what the
 # client accepts does not get you a bigger answer -- it gets the whole tool result discarded.
-MAX_LIST_RESPONSE_BYTES = int(64 * 1024)
+MAX_LIST_RESPONSE_BYTES = 64 * 1024
 
 # When a dataset is too large to list in full, this many records are still included as a sample
 # so the caller sees the record shape and some real identifiers without a second round trip.
