@@ -7,9 +7,9 @@ from importlib.resources import files
 from typing import Any
 from urllib.parse import urlparse
 
-from .constants import MCP_SERVER_NAME
+from .constants import LOGGER_NAMESPACE
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.connection_string")
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.utils.connection_string")
 
 
 def validate_connection_settings(settings: Mapping[str, Any]) -> None:
@@ -54,14 +54,17 @@ def _get_capella_root_ca_path() -> str:
     """
     try:
         # Use importlib.resources to get the certificate path (works for installed packages)
-        cert_file = files("cb_mcp.certs").joinpath("capella_root_ca.pem")
+        cert_file = files("cb_mcp.utils.operational.certs").joinpath(
+            "capella_root_ca.pem"
+        )
         # Convert to string path - this works for both installed packages and dev mode
         return str(cert_file)
     except (ImportError, FileNotFoundError, TypeError):
-        # Fallback for development: use src/certs/ directory
+        # Fallback for development: certs/ sits under utils/operational/.
         utils_dir = os.path.dirname(os.path.abspath(__file__))
-        src_dir = os.path.dirname(utils_dir)
-        fallback_path = os.path.join(src_dir, "certs", "capella_root_ca.pem")
+        fallback_path = os.path.join(
+            utils_dir, "operational", "certs", "capella_root_ca.pem"
+        )
 
         if os.path.exists(fallback_path):
             logger.info(f"Using fallback certificate path: {fallback_path}")

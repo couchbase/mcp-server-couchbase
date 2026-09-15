@@ -13,7 +13,7 @@ from collections import Counter
 
 import pytest
 
-from cb_mcp.utils.reference_data import (
+from cb_mcp.utils.operational.reference_data import (
     MAX_CHAPTER_FIELDS,
     MAX_CHAPTER_VALUES,
     SUPPORTED_SCHEMA_VERSIONS,

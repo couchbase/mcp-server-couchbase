@@ -15,8 +15,8 @@ from collections.abc import Iterator
 
 import pytest
 
-from cb_mcp.tools.reference import discover_tool_input_values
-from cb_mcp.utils import reference_data
+from cb_mcp.tools.operational.reference import discover_tool_input_values
+from cb_mcp.utils.operational import reference_data
 
 METRICS_TOOL = "get_cluster_metrics"
 

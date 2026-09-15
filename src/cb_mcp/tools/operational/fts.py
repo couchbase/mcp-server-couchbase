@@ -22,12 +22,12 @@ from couchbase.options import SearchOptions
 from couchbase.search import RawQuery, SearchRequest
 from fastmcp import Context
 
-from ..utils.connection import connect_to_bucket
-from ..utils.constants import MCP_SERVER_NAME
-from ..utils.context import get_cluster_connection
-from ..utils.responses import tool_error, tool_success
+from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
+from ...utils.context import get_cluster_connection
+from ...utils.operational.connection import connect_to_bucket
+from ...utils.responses import tool_error, tool_success
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.fts")
+logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.fts")
 
 
 def list_fts_indexes(

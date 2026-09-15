@@ -51,14 +51,18 @@ EXPECTED_LOGGER_NAMES = {
     "cb_mcp.utils.logging": "couchbase.mcp.utils.logging",
     "cb_mcp.utils.scope_enforcement": "couchbase.mcp.utils.scope_enforcement",
     "cb_mcp.utils.telemetry": "couchbase.mcp.utils.telemetry",
+    "cb_mcp.utils.connection_string": "couchbase.mcp.utils.connection_string",
     # operational server
     "cb_mcp.tools.operational.collection_management": "couchbase.mcp.operational.tools.collection_management",
+    "cb_mcp.tools.operational.fts": "couchbase.mcp.operational.tools.fts",
     "cb_mcp.tools.operational.index": "couchbase.mcp.operational.tools.index",
     "cb_mcp.tools.operational.kv": "couchbase.mcp.operational.tools.kv",
     "cb_mcp.tools.operational.query": "couchbase.mcp.operational.tools.query",
+    "cb_mcp.tools.operational.reference": "couchbase.mcp.operational.tools.reference",
     "cb_mcp.tools.operational.server": "couchbase.mcp.operational.tools.server",
     "cb_mcp.utils.operational.connection": "couchbase.mcp.operational.utils.connection",
     "cb_mcp.utils.operational.index_utils": "couchbase.mcp.operational.utils.index_utils",
+    "cb_mcp.utils.operational.reference_data": "couchbase.mcp.operational.utils.reference_data",
     "providers.static": "couchbase.mcp.operational.providers.static",
 }
 

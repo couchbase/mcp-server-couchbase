@@ -1,6 +1,6 @@
 """Tool for looking up the exact input values another tool requires.
 
-Backed by reference datasets bundled under ``cb_mcp/reference_data`` -- see the README there for
+Backed by reference datasets bundled under ``cb_mcp/utils/operational/reference_datasets`` -- see the README there for
 the format. This tool never touches the cluster, so it keeps working when the cluster is
 unreachable, which is exactly when someone is likely to be looking up a metric name.
 
@@ -14,8 +14,8 @@ guessing again.
 import logging
 from typing import Any
 
-from ..utils.constants import MCP_SERVER_NAME
-from ..utils.reference_data import (
+from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
+from ...utils.operational.reference_data import (
     MAX_LIST_RESPONSE_BYTES,
     chapters,
     dataset_size_bytes,
@@ -25,9 +25,9 @@ from ..utils.reference_data import (
     sample_records,
     search,
 )
-from ..utils.responses import tool_error, tool_success
+from ...utils.responses import tool_error, tool_success
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.reference")
+logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.reference")
 
 
 def discover_tool_input_values(

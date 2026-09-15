@@ -19,7 +19,7 @@ from typing import Any
 
 from couchbase.management.search import SearchIndex
 
-from cb_mcp.utils.connection import connect_to_couchbase_cluster
+from cb_mcp.utils.operational.connection import connect_to_couchbase_cluster
 
 from .client import AccuracyTestingClient
 

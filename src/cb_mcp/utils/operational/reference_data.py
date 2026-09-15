@@ -1,8 +1,8 @@
-"""Loading and searching the reference datasets bundled under ``cb_mcp/reference_data``.
+"""Loading and searching the reference datasets bundled under ``cb_mcp/utils/operational/reference_datasets``.
 
 Each dataset is a JSON Lines file: line 1 is the envelope (which tool it serves, which fields
 are searchable, which are browsable "chapters"), every subsequent line is one record. See
-``cb_mcp/reference_data/README.md`` for the format contract.
+``cb_mcp/utils/operational/reference_datasets/README.md`` for the format contract.
 
 Everything here streams. A dataset is never held in memory as a whole -- searching keeps only a
 top-K heap, and browsing keeps only per-chapter counters (capped at 25 values by the format).
@@ -21,11 +21,11 @@ from functools import cache, lru_cache
 from importlib.resources import files
 from typing import Any
 
-from .constants import MCP_SERVER_NAME
+from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.reference_data")
+logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.utils.reference_data")
 
-REFERENCE_DATA_PACKAGE = "cb_mcp.reference_data"
+REFERENCE_DATA_PACKAGE = "cb_mcp.utils.operational.reference_datasets"
 DATASET_SUFFIX = ".jsonl"
 SUPPORTED_SCHEMA_VERSIONS = frozenset({1})
 
@@ -52,14 +52,14 @@ SAMPLE_RECORD_COUNT = 10
 def _dataset_dir() -> str:
     """Locate the bundled reference_data directory.
 
-    Mirrors ``_get_capella_root_ca_path`` in index_utils: importlib.resources for installed
-    packages, with a path-based fallback for running straight from a source checkout.
+    Mirrors ``_get_capella_root_ca_path`` in connection_string.py: importlib.resources for
+    installed packages, with a path-based fallback for running straight from a source checkout.
     """
     try:
         return str(files(REFERENCE_DATA_PACKAGE))
     except (ImportError, FileNotFoundError, TypeError, NotADirectoryError):
-        utils_dir = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(os.path.dirname(utils_dir), "reference_data")
+        module_dir = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(module_dir, "reference_datasets")
 
 
 def _dataset_paths() -> list[str]:

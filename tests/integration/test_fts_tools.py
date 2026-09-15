@@ -35,7 +35,7 @@ from couchbase.mutation_state import MutationState
 from couchbase.options import SearchOptions
 from couchbase.search import RawQuery, SearchRequest
 
-from cb_mcp.utils.connection import connect_to_couchbase_cluster
+from cb_mcp.utils.operational.connection import connect_to_couchbase_cluster
 
 try:
     from couchbase.management.search import SearchIndex

@@ -205,7 +205,7 @@ class TestGetCapellaRootCAPath:
             result = _get_capella_root_ca_path()
 
         assert result == "/site-packages/cb_mcp/certs/capella_root_ca.pem"
-        mock_files.assert_called_once_with("cb_mcp.certs")
+        mock_files.assert_called_once_with("cb_mcp.utils.operational.certs")
 
     def test_falls_back_to_dev_path_when_importlib_fails(self) -> None:
         """When importlib.resources raises, the fallback returns a path
