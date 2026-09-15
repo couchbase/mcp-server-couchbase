@@ -42,9 +42,11 @@ MAX_CHAPTER_VALUES = 25
 #
 # The default is deliberately well under typical MCP client output limits. Raising it past what the
 # client accepts does not get you a bigger answer -- it gets the whole tool result discarded.
-MAX_LIST_RESPONSE_BYTES = int(
-    os.environ.get("CB_MCP_MAX_LIST_RESPONSE_BYTES", 400 * 1024)
-)
+MAX_LIST_RESPONSE_BYTES = int(64 * 1024)
+
+# When a dataset is too large to list in full, this many records are still included as a sample
+# so the caller sees the record shape and some real identifiers without a second round trip.
+SAMPLE_RECORD_COUNT = 10
 
 
 def _dataset_dir() -> str:
@@ -175,6 +177,20 @@ def list_records(path: str) -> list[dict[str, Any]]:
     checking the resulting response against ``MAX_LIST_RESPONSE_BYTES``.
     """
     return list(iter_records(path))
+
+
+def sample_records(path: str, count: int = SAMPLE_RECORD_COUNT) -> list[dict[str, Any]]:
+    """The first `count` records, for datasets too large to list in full.
+
+    Streams via ``iter_records`` and stops early, so this stays cheap even on a dataset with
+    hundreds of thousands of records.
+    """
+    sample: list[dict[str, Any]] = []
+    for record in iter_records(path):
+        if len(sample) >= count:
+            break
+        sample.append(record)
+    return sample
 
 
 def _searchable_text(record: dict[str, Any], field_spec: dict[str, Any]) -> str:

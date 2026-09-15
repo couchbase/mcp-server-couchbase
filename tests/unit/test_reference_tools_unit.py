@@ -159,6 +159,10 @@ class TestBrowseMode:
         assert result["success"] is True
         assert "records" not in result, "an over-cap dataset must not be listed at all"
         assert "search_keywords" in result["next_step"]
+        assert result["sample_records"] == [
+            {"name": f"metric_{i}", "description": filler}
+            for i in range(reference_data.SAMPLE_RECORD_COUNT)
+        ], "a sample should still be offered so the caller sees the record shape"
 
 
 class TestSearch:

@@ -24,6 +24,7 @@ from ..utils.reference_data import (
     load_envelope,
     registered_tool_names,
     resolve_dataset,
+    sample_records,
     search,
 )
 from ..utils.responses import tool_error, tool_success
@@ -88,7 +89,8 @@ def discover_tool_input_values(
           suppress weak matches you have already seen.
 
     Returns {"success": True, "dataset": ..., "chapters": ..., ...} plus either "record_count" and
-    "records" (the full list) or "matches" (total found), "returned" and "results" (ranked, each
+    "records" (the full list), "record_count" and "sample_records" (a preview, when the dataset is
+    too large to list in full), or "matches" (total found), "returned" and "results" (ranked, each
     record plus its "score") (search). On failure returns {"success": False, "error": ...} listing the
     valid values for whatever was wrong -- e.g. an unrecognised tool_name comes back with
     "available_tool_names", a bad chapter filter with "valid_chapter_fields" or "valid_values".
@@ -206,13 +208,16 @@ def discover_tool_input_values(
             f"{response_bytes if response_bytes is not None else 'not built'} bytes, "
             f"limit {MAX_LIST_RESPONSE_BYTES} bytes"
         )
+        # A partial listing would read as the complete namespace, so a small sample is offered
+        # instead -- enough to show record shape and a few real identifiers.
         listing = {
             "record_count": declared_count,
+            "sample_records": sample_records(dataset_path),
             "next_step": (
                 f"This dataset has {declared_count} records and is too large to list in one "
-                f"response (limit {MAX_LIST_RESPONSE_BYTES // 1024} KB). Call again with "
-                "search_keywords describing what you need, optionally narrowed with "
-                "chapter_filters, to get the matching records."
+                f"response (limit {MAX_LIST_RESPONSE_BYTES // 1024} KB). A small sample is "
+                "included above. Call again with search_keywords describing what you need, "
+                "optionally narrowed with chapter_filters, to get the matching records."
             ),
         }
         return tool_success(
