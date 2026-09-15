@@ -14,7 +14,9 @@ import logging
 from typing import Any
 
 import couchbase.subdocument as subdoc
+from couchbase.durability import DurabilityLevel, ServerDurability
 from couchbase.exceptions import CouchbaseException
+from couchbase.options import MutateInOptions
 from fastmcp import Context
 
 from ..utils.connection import connect_to_bucket, format_keyspace
@@ -23,6 +25,48 @@ from ..utils.context import get_cluster_connection
 from ..utils.responses import tool_error, tool_success
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.kv")
+
+# Durability levels accepted by the sub-document mutation tool, mapped to the
+# SDK enum. Exposed as strings because MCP tool parameters are JSON-typed and
+# LLM-generated; the mapping doubles as input validation at the tool boundary.
+DURABILITY_LEVELS: dict[str, DurabilityLevel] = {
+    "NONE": DurabilityLevel.NONE,
+    "MAJORITY": DurabilityLevel.MAJORITY,
+    "MAJORITY_AND_PERSIST_TO_ACTIVE": DurabilityLevel.MAJORITY_AND_PERSIST_TO_ACTIVE,
+    "PERSIST_TO_MAJORITY": DurabilityLevel.PERSIST_TO_MAJORITY,
+}
+
+
+def _mutate_in_write_options(durability: str | None = None) -> MutateInOptions | None:
+    """Build MutateInOptions carrying durability, or None if unset.
+
+    Returning None when nothing is requested keeps the call path identical to
+    the one used before this parameter existed, so default behavior is
+    unchanged.
+
+    Raises ValueError for an unknown durability level so the calling tool can
+    report an actionable message rather than handing an invalid value to the
+    SDK.
+    """
+    kwargs: dict[str, Any] = {}
+
+    if durability is not None:
+        level = DURABILITY_LEVELS.get(durability)
+        if level is None:
+            raise ValueError(
+                f"durability must be one of {sorted(DURABILITY_LEVELS)}; "
+                f"got {durability!r}"
+            )
+        # The SDK reads the ``durability`` option key and derives the
+        # wire-level durability_level from it. ``durability_level`` is not a
+        # supported option key: the Options classes are unvalidated dict
+        # subclasses, so passing it is accepted and then silently dropped,
+        # which would turn the guarantee into a no-op.
+        kwargs["durability"] = ServerDurability(level=level)
+
+    if not kwargs:
+        return None
+    return MutateInOptions(**kwargs)
 
 
 def get_document_by_id(
@@ -270,6 +314,52 @@ def lookup_subdocument(
     return response
 
 
+def _mutate_in_response(
+    result: Any,
+    spec_meta: list[tuple[str, str]],
+    keyspace: str,
+) -> dict[str, Any]:
+    """Build the per-category path -> outcome mapping for a committed mutate_in.
+
+    Extracted from mutate_subdocument unchanged. Adding the durability
+    parameter pushed that function past the project's configured branch and
+    statement limits; lifting this block out is what brings it back under them.
+    """
+    response: dict[str, Any] = {}
+    for index, (op, path) in enumerate(spec_meta):
+        bucket_for_op = response.setdefault(op, {})
+        if op != "counter":
+            bucket_for_op[path] = {"success": True}
+            continue
+
+        # The installed SDK constructs MutateInResult without a transcoder
+        # (unlike LookupInResult), which makes content_as always raise for
+        # mutate_in results - fall back to decoding the raw field value.
+        new_value = None
+        for read_new_value in (
+            lambda index=index: result.content_as[int](index),
+            lambda index=index: int(
+                json.loads(result._orig.raw_result["fields"][index]["value"])
+            ),
+        ):
+            try:
+                new_value = read_new_value()
+                break
+            except Exception:  # noqa: S112 (expected fallback attempt, not a swallowed bug)
+                continue
+
+        if new_value is None:
+            logger.warning(
+                f"Counter mutation at '{path}' in {keyspace} committed but "
+                "its new value could not be read from the SDK result."
+            )
+            bucket_for_op[path] = {"success": True}
+            continue
+        bucket_for_op[path] = {"success": True, "value": new_value}
+
+    return response
+
+
 def mutate_subdocument(
     ctx: Context,
     bucket_name: str,
@@ -286,6 +376,7 @@ def mutate_subdocument(
     array_add_unique_specs: list[dict[str, Any]] | None = None,
     counter_specs: list[dict[str, Any]] | None = None,
     create_parents: bool = False,
+    durability: str | None = None,
 ) -> dict[str, Any]:
     """Modify parts of an EXISTING document without rewriting the whole thing, using
     Couchbase sub-document mutation operations. The document must already exist — use
@@ -324,6 +415,18 @@ def mutate_subdocument(
     create_parents: if True, missing intermediate path segments are created automatically
     for every category except replace_specs and remove_paths, which always require the full
     path to already exist.
+
+    durability: optional write-durability guarantee for the mutation, one of "NONE"
+    (default: acknowledged from the active node's memory), "MAJORITY" (replicated to a
+    majority of nodes), "MAJORITY_AND_PERSIST_TO_ACTIVE" (replicated to a majority and
+    written to disk on the active node) or "PERSIST_TO_MAJORITY" (written to disk on a
+    majority of nodes). Anything above "NONE" needs enough replicas to satisfy it; if the
+    cluster cannot, the call fails rather than quietly downgrading. An unrecognised value
+    is rejected before the mutation is attempted.
+
+    Note that mutate_in has no expiry option of its own. MutateInOptions accepts cas,
+    durability, store_semantics, access_deleted and preserve_expiry, and no expiry, so a
+    document's TTL has to be set by a full-document write rather than here.
 
     At least one spec must be provided. As a rule of thumb, keep the combined number of
     specs across all categories to 16 or fewer — Couchbase limits subdocument operations
@@ -425,13 +528,25 @@ def mutate_subdocument(
         logger.warning(f"Error performing sub-document mutation in {keyspace}: {error}")
         return {"error": error}
 
+    try:
+        options = _mutate_in_write_options(durability)
+    except ValueError as e:
+        logger.warning(f"Error performing sub-document mutation in {keyspace}: {e}")
+        return {"error": str(e)}
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
 
     try:
         logger.debug(f"Performing sub-document mutation in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        result = collection.mutate_in(document_id, specs)
+        # Call without an options object when none was requested, so the
+        # default path is byte-for-byte the one used before this parameter
+        # existed.
+        if options is None:
+            result = collection.mutate_in(document_id, specs)
+        else:
+            result = collection.mutate_in(document_id, specs, options)
     except Exception as e:
         error_context = getattr(e, "error_context", None)
         failed_index = getattr(error_context, "first_error_index", None)
@@ -444,36 +559,5 @@ def mutate_subdocument(
         )
         return {"error": f"{e}{detail}"}
 
-    response: dict[str, Any] = {}
-    for index, (op, path) in enumerate(spec_meta):
-        bucket_for_op = response.setdefault(op, {})
-        if op == "counter":
-            # The installed SDK constructs MutateInResult without a transcoder
-            # (unlike LookupInResult), which makes content_as always raise for
-            # mutate_in results — fall back to decoding the raw field value.
-            new_value = None
-            for read_new_value in (
-                lambda index=index: result.content_as[int](index),
-                lambda index=index: int(
-                    json.loads(result._orig.raw_result["fields"][index]["value"])
-                ),
-            ):
-                try:
-                    new_value = read_new_value()
-                    break
-                except Exception:  # noqa: S112 (expected fallback attempt, not a swallowed bug)
-                    continue
-
-            if new_value is None:
-                logger.warning(
-                    f"Counter mutation at '{path}' in {keyspace} committed but "
-                    "its new value could not be read from the SDK result."
-                )
-                bucket_for_op[path] = {"success": True}
-                continue
-            bucket_for_op[path] = {"success": True, "value": new_value}
-            continue
-        bucket_for_op[path] = {"success": True}
-
     logger.info(f"Successfully performed sub-document mutation in {keyspace}")
-    return response
+    return _mutate_in_response(result, spec_meta, keyspace)
