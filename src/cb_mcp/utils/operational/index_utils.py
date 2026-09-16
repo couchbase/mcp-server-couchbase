@@ -307,8 +307,11 @@ def fetch_indexes_from_rest_api(
     Returns:
         List of index status dictionaries containing name, definition, and other metadata
     """
-    # Extract all hosts from connection string
-    hosts = extract_hosts_from_connection_string(connection_string)
+    # Extract all hosts from connection string, bracketing IPv6 literals for URL use
+    hosts = [
+        f"[{host}]" if ":" in host else host
+        for host in extract_hosts_from_connection_string(connection_string)
+    ]
 
     # Determine protocol and port based on whether TLS is enabled
     is_tls_enabled = connection_string.lower().startswith("couchbases://")

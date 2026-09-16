@@ -372,7 +372,10 @@ def get_cluster_metrics(
         verify_ssl = determine_ssl_verification(
             connection_string, settings.get("ca_cert_path")
         )
-        hosts = extract_hosts_from_connection_string(connection_string)
+        hosts = [
+            f"[{host}]" if ":" in host else host
+            for host in extract_hosts_from_connection_string(connection_string)
+        ]
         if not hosts:
             raise ValueError(
                 f"No hosts found in connection_string: {connection_string!r}"
