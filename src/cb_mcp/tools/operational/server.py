@@ -325,7 +325,7 @@ def get_cluster_metrics(
 
     `metrics` is passed through as the request body: a list of specs, each with a required
     "metric" (list of {"label", "value"} pairs, e.g. [{"label": "name", "value":
-    "kv_disk_write_queue"}]), an optional "nodes" ("host:port" targets; omit it to cover every
+    "kv_ep_diskqueue_fill"}]), an optional "nodes" ("host:port" targets; omit it to cover every
     node, which is usually what you want), and optional "applyFunctions",
     "nodesAggregation", "start"/"end" (negative seconds relative to now; default -60/now),
     "step" (seconds, default 10), "alignTimestamps".
