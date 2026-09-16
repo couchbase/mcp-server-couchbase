@@ -19,7 +19,7 @@ import logging
 from typing import Any
 
 from couchbase.options import SearchOptions
-from couchbase.search import RawQuery, SearchRequest
+from couchbase.search import MatchNoneQuery, SearchRequest
 from fastmcp import Context
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
@@ -235,7 +235,9 @@ def run_fts_query(
     try:
         if explain:
             applied_limit = limit if limit is not None else 1
-            options = SearchOptions(explain=True, limit=applied_limit)
+            options = SearchOptions(
+                explain=True, limit=applied_limit, raw={"query": query}
+            )
         else:
             applied_limit = limit if limit is not None else 10
             options = SearchOptions(
@@ -246,9 +248,9 @@ def run_fts_query(
                 facets=facets,
                 highlight_fields=highlight_fields,
                 disable_scoring=disable_scoring,
-                raw=raw,
+                raw={**(raw or {}), "query": query},
             )
-        request = SearchRequest.create(RawQuery(query))
+        request = SearchRequest.create(MatchNoneQuery())
         if bucket_name and scope_name:
             bucket = connect_to_bucket(cluster, bucket_name)
             result = bucket.scope(scope_name).search(index_name, request, options)

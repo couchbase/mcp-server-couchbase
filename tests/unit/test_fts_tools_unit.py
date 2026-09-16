@@ -5,9 +5,11 @@ Covers:
   bucket+scope, invalid filter combo, error propagation.
 - get_fts_index_definition: cluster-level and scope-level happy paths,
   invalid bucket/scope pairing, error propagation.
-- run_fts_query: RawQuery/SearchOptions construction, cluster-level vs
-  scope-level branching, result formatting from a mocked SearchResult, and
-  explain=True forcing explain/default limit=1 with explanation extraction.
+- run_fts_query: MatchNoneQuery/SearchOptions construction (the query body is
+  smuggled through SearchOptions.raw={"query": ...} rather than
+  couchbase.search.RawQuery), cluster-level vs scope-level branching, result
+  formatting from a mocked SearchResult, and explain=True forcing
+  explain/default limit=1 with explanation extraction.
 """
 
 from __future__ import annotations
@@ -289,7 +291,7 @@ def _make_row(
 
 
 class TestRunFtsQuery:
-    """RawQuery/SearchOptions construction and result formatting (explain=False)."""
+    """MatchNoneQuery/SearchOptions construction and result formatting (explain=False)."""
 
     def test_cluster_level_query_builds_options_and_formats_hits(self) -> None:
         ctx, cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
@@ -302,7 +304,7 @@ class TestRunFtsQuery:
         with (
             patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
             patch("cb_mcp.tools.operational.fts.SearchOptions") as mock_options,
-            patch("cb_mcp.tools.operational.fts.RawQuery") as mock_raw_query,
+            patch("cb_mcp.tools.operational.fts.MatchNoneQuery") as mock_match_none,
             patch("cb_mcp.tools.operational.fts.SearchRequest") as mock_search_request,
         ):
             result = run_fts_query(
@@ -327,10 +329,10 @@ class TestRunFtsQuery:
             facets={"types": {}},
             highlight_fields=["type"],
             disable_scoring=True,
-            raw={"foo": "bar"},
+            raw={"foo": "bar", "query": {"match": "ale"}},
         )
-        mock_raw_query.assert_called_once_with({"match": "ale"})
-        mock_search_request.create.assert_called_once_with(mock_raw_query.return_value)
+        mock_match_none.assert_called_once_with()
+        mock_search_request.create.assert_called_once_with(mock_match_none.return_value)
         cluster.search.assert_called_once_with(
             "idx1", mock_search_request.create.return_value, mock_options.return_value
         )
@@ -347,7 +349,7 @@ class TestRunFtsQuery:
         with (
             patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
             patch("cb_mcp.tools.operational.fts.SearchOptions") as mock_options,
-            patch("cb_mcp.tools.operational.fts.RawQuery"),
+            patch("cb_mcp.tools.operational.fts.MatchNoneQuery"),
             patch("cb_mcp.tools.operational.fts.SearchRequest"),
         ):
             result = run_fts_query(ctx, "idx1", {"match": "ale"})
@@ -365,7 +367,7 @@ class TestRunFtsQuery:
             patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
             patch("cb_mcp.tools.operational.fts.connect_to_bucket", return_value=bucket),
             patch("cb_mcp.tools.operational.fts.SearchOptions"),
-            patch("cb_mcp.tools.operational.fts.RawQuery"),
+            patch("cb_mcp.tools.operational.fts.MatchNoneQuery"),
             patch("cb_mcp.tools.operational.fts.SearchRequest"),
         ):
             run_fts_query(
@@ -390,7 +392,7 @@ class TestRunFtsQuery:
         with (
             patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
             patch("cb_mcp.tools.operational.fts.SearchOptions"),
-            patch("cb_mcp.tools.operational.fts.RawQuery"),
+            patch("cb_mcp.tools.operational.fts.MatchNoneQuery"),
             patch("cb_mcp.tools.operational.fts.SearchRequest"),
         ):
             result = run_fts_query(ctx, "idx1", {"match": "ale"})
@@ -427,12 +429,14 @@ class TestRunFtsQueryExplain:
         with (
             patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
             patch("cb_mcp.tools.operational.fts.SearchOptions") as mock_options,
-            patch("cb_mcp.tools.operational.fts.RawQuery"),
+            patch("cb_mcp.tools.operational.fts.MatchNoneQuery"),
             patch("cb_mcp.tools.operational.fts.SearchRequest"),
         ):
             result = run_fts_query(ctx, "idx1", {"match": "ale"}, explain=True)
 
-        mock_options.assert_called_once_with(explain=True, limit=1)
+        mock_options.assert_called_once_with(
+            explain=True, limit=1, raw={"query": {"match": "ale"}}
+        )
         assert result["explain"] is True
         assert result["hits"] == [
             {"id": "doc1", "score": 2.0, "explanation": {"plan": "x"}}
@@ -446,12 +450,14 @@ class TestRunFtsQueryExplain:
         with (
             patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
             patch("cb_mcp.tools.operational.fts.SearchOptions") as mock_options,
-            patch("cb_mcp.tools.operational.fts.RawQuery"),
+            patch("cb_mcp.tools.operational.fts.MatchNoneQuery"),
             patch("cb_mcp.tools.operational.fts.SearchRequest"),
         ):
             run_fts_query(ctx, "idx1", {"match": "ale"}, explain=True, limit=5)
 
-        mock_options.assert_called_once_with(explain=True, limit=5)
+        mock_options.assert_called_once_with(
+            explain=True, limit=5, raw={"query": {"match": "ale"}}
+        )
 
     def test_sdk_error_returns_error_dict_not_raised(self) -> None:
         ctx, cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
@@ -460,7 +466,7 @@ class TestRunFtsQueryExplain:
         with (
             patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
             patch("cb_mcp.tools.operational.fts.SearchOptions"),
-            patch("cb_mcp.tools.operational.fts.RawQuery"),
+            patch("cb_mcp.tools.operational.fts.MatchNoneQuery"),
             patch("cb_mcp.tools.operational.fts.SearchRequest"),
         ):
             result = run_fts_query(ctx, "idx1", {"match": "ale"}, explain=True)
