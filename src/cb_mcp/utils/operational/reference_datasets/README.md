@@ -107,10 +107,10 @@ entirely — the default call then returns the records with an empty `chapters` 
 
 ## Listing size limit
 
-A call with no `search_keywords` returns **every record** in the dataset. That only happens while
-the dataset file stays under **400 KB** (`MAX_LIST_BYTES` in `utils/reference_data.py`). Above that,
-the tool returns the chapters block and a `next_step` telling the caller to search instead — it
-never returns a partial list, because a truncated slice reads as the complete namespace.
+A call with no `search_keywords` returns a small sample plus `record_count`; browse mode currently
+does not list records in full. The response is capped at **64 KiB**
+(`MAX_LIST_RESPONSE_BYTES` in `utils/operational/reference_data.py`), so callers should search
+for identifiers rather than relying on a complete listing.
 
 Keep this in mind when regenerating a dataset: `couchbase_metrics.jsonl` is ~381 KB, so it has
 little headroom. If a dataset outgrows the limit, callers can still reach every record through
