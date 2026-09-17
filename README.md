@@ -192,6 +192,10 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_THREAD_POOL_SIZE` | `--thread-pool-size` | Maximum tool calls executed concurrently per worker process (see [Tuning Tool-Call Concurrency](#tuning-tool-call-concurrency)). Raises the concurrency ceiling, not CPU-bound throughput | `40` |
 | `CB_MCP_STATELESS_HTTP` | `--stateless-http` | Handle each HTTP request with a fresh MCP transport instead of keeping per-session state in the server. Only honored with `--transport=http`. Unrecognised values fall back to the default with an error log entry; a value that cannot work with the rest of the configuration is overridden with a warning | `true` when `--workers` > 1, otherwise `false` |
 | `CB_MCP_DISABLE_STRUCTURED_OUTPUT` | `--disable-structured-output` | Register every tool without an output schema, so tool results are returned as text content only instead of also carrying structured content (see [Disabling Structured Output](#disabling-structured-output)). Applies to all tools | `false` |
+| `CB_MCP_TELEMETRY_SENDERS` | — | Threads delivering usage-telemetry events. Sized for the collector's distance (see [Usage Telemetry Delivery](#usage-telemetry-delivery)) | `2` |
+| `CB_MCP_TELEMETRY_SAMPLE` | — | Fraction of tool-call telemetry events kept, `0.0` to `1.0` | `1.0` |
+| `CB_MCP_TELEMETRY_QUEUE` | — | Telemetry events buffered before the oldest is dropped. Absorbs bursts only | `10000` |
+| `CB_MCP_TELEMETRY_MODE` | — | `dispatch` (default) or `legacy` to restore one delivery thread per tool call | `dispatch` |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Elicitation/Confirmation Required Tools](#elicitationconfirmation-for-tool-calls)) | None |
 | `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
@@ -333,6 +337,51 @@ uvx couchbase-mcp-server --disable-structured-output true
 ```
 
 This is an all-or-nothing setting — it cannot be applied to individual tools. The tools themselves are unchanged; only the response shape the client receives differs. The effective value is reported by the `get_server_configuration_status` tool.
+
+### Usage Telemetry Delivery
+
+The server reports anonymous usage events. These settings control only **how
+those events are delivered**, not what is collected; `DO_NOT_TRACK=1` disables
+telemetry entirely, as it always has.
+
+Events are queued and delivered by a small pool of long-lived threads. A sender
+delivers one event, waits for the collector to answer, then takes the next, so
+the sustainable rate is **the number of senders divided by the per-event round
+trip**. That round trip is larger than it looks: each event opens its own
+connection, so it pays a TCP handshake and a TLS handshake before the request
+itself.
+
+The practical consequence is that **the right sender count depends on how far
+away the collector is**. The default of 2 suits a collector on the same host or
+the same rack. A collector tens of milliseconds away needs considerably more,
+and if it does not get them the queue fills and events are dropped oldest
+first.
+
+The failure is quiet by design: tool calls are never blocked or slowed by
+telemetry, so a server dropping most of its events still serves requests
+normally. To see whether that is happening:
+
+- `get_server_configuration_status` reports the delivery mode, the sender
+  count, the current queue depth, the raw counters, and `delivered_pct`, the
+  share of events produced that actually reached the collector.
+- The first drop is logged at `warning`.
+
+If `delivered_pct` is low, raise `CB_MCP_TELEMETRY_SENDERS`, or lower
+`CB_MCP_TELEMETRY_SAMPLE` so that fewer events have to be delivered. Raising
+`CB_MCP_TELEMETRY_QUEUE` will not help: the queue absorbs bursts and cannot
+change the steady-state rate.
+
+```bash
+# a collector that is not nearby
+CB_MCP_TELEMETRY_SENDERS=16
+
+# or keep a tenth of the events and full throughput
+CB_MCP_TELEMETRY_SAMPLE=0.1
+```
+
+`CB_MCP_TELEMETRY_MODE=legacy` restores the previous behaviour, one delivery
+thread per tool call. It retries every event rather than dropping any, at the
+cost of a thread and a connection per call.
 
 ### Elicitation/Confirmation for Tool Calls
 
