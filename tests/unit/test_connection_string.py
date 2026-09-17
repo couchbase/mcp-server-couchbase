@@ -1,11 +1,11 @@
-"""Unit tests for utils/connection_string.py."""
+"""Unit tests for utils/operational/connection_string.py."""
 
 from __future__ import annotations
 
 import os
 from unittest.mock import MagicMock, patch
 
-from cb_mcp.utils.connection_string import (
+from cb_mcp.utils.operational.connection_string import (
     _get_capella_root_ca_path,
     determine_ssl_verification,
     extract_hosts_from_connection_string,
@@ -103,11 +103,11 @@ class TestDetermineSSLVerificationCapella:
 
         with (
             patch(
-                "cb_mcp.utils.connection_string._get_capella_root_ca_path",
+                "cb_mcp.utils.operational.connection_string._get_capella_root_ca_path",
                 return_value="/fake/capella_root_ca.pem",
             ),
             patch(
-                "cb_mcp.utils.connection_string.os.path.exists",
+                "cb_mcp.utils.operational.connection_string.os.path.exists",
                 return_value=True,
             ),
         ):
@@ -121,11 +121,11 @@ class TestDetermineSSLVerificationCapella:
 
         with (
             patch(
-                "cb_mcp.utils.connection_string._get_capella_root_ca_path",
+                "cb_mcp.utils.operational.connection_string._get_capella_root_ca_path",
                 return_value="/fake/capella_root_ca.pem",
             ),
             patch(
-                "cb_mcp.utils.connection_string.os.path.exists",
+                "cb_mcp.utils.operational.connection_string.os.path.exists",
                 return_value=True,
             ),
         ):
@@ -139,11 +139,11 @@ class TestDetermineSSLVerificationCapella:
 
         with (
             patch(
-                "cb_mcp.utils.connection_string._get_capella_root_ca_path",
+                "cb_mcp.utils.operational.connection_string._get_capella_root_ca_path",
                 return_value="/fake/capella_root_ca.pem",
             ),
             patch(
-                "cb_mcp.utils.connection_string.os.path.exists",
+                "cb_mcp.utils.operational.connection_string.os.path.exists",
                 return_value=True,
             ),
         ):
@@ -158,11 +158,11 @@ class TestDetermineSSLVerificationCapella:
 
         with (
             patch(
-                "cb_mcp.utils.connection_string._get_capella_root_ca_path",
+                "cb_mcp.utils.operational.connection_string._get_capella_root_ca_path",
                 return_value="/missing/capella_root_ca.pem",
             ),
             patch(
-                "cb_mcp.utils.connection_string.os.path.exists",
+                "cb_mcp.utils.operational.connection_string.os.path.exists",
                 return_value=False,
             ),
         ):
@@ -177,11 +177,11 @@ class TestDetermineSSLVerificationCapella:
 
         with (
             patch(
-                "cb_mcp.utils.connection_string._get_capella_root_ca_path",
+                "cb_mcp.utils.operational.connection_string._get_capella_root_ca_path",
                 return_value="/fake/capella_root_ca.pem",
             ),
             patch(
-                "cb_mcp.utils.connection_string.os.path.exists",
+                "cb_mcp.utils.operational.connection_string.os.path.exists",
                 return_value=True,
             ),
         ):
@@ -200,7 +200,7 @@ class TestGetCapellaRootCAPath:
             "/site-packages/cb_mcp/certs/capella_root_ca.pem"
         )
 
-        with patch("cb_mcp.utils.connection_string.files") as mock_files:
+        with patch("cb_mcp.utils.operational.connection_string.files") as mock_files:
             mock_files.return_value.joinpath.return_value = fake_path
             result = _get_capella_root_ca_path()
 
@@ -213,11 +213,11 @@ class TestGetCapellaRootCAPath:
         when the file exists."""
         with (
             patch(
-                "cb_mcp.utils.connection_string.files",
+                "cb_mcp.utils.operational.connection_string.files",
                 side_effect=FileNotFoundError("no resource"),
             ),
             patch(
-                "cb_mcp.utils.connection_string.os.path.exists",
+                "cb_mcp.utils.operational.connection_string.os.path.exists",
                 return_value=True,
             ),
         ):
@@ -231,11 +231,11 @@ class TestGetCapellaRootCAPath:
         the fallback path is still returned (with a warning logged)."""
         with (
             patch(
-                "cb_mcp.utils.connection_string.files",
+                "cb_mcp.utils.operational.connection_string.files",
                 side_effect=ImportError("no module"),
             ),
             patch(
-                "cb_mcp.utils.connection_string.os.path.exists",
+                "cb_mcp.utils.operational.connection_string.os.path.exists",
                 return_value=False,
             ),
         ):

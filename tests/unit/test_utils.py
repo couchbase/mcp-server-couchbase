@@ -22,7 +22,7 @@ from cb_mcp.tools.operational.index import (
     list_indexes,
 )
 from cb_mcp.utils.config import get_settings
-from cb_mcp.utils.connection_string import validate_connection_settings
+from cb_mcp.utils.operational.connection_string import validate_connection_settings
 from cb_mcp.utils.constants import (
     ALLOWED_TRANSPORTS,
     DEFAULT_READ_ONLY_MODE,

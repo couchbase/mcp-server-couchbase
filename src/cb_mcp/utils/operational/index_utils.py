@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
-from ...utils.connection_string import (
+from .connection_string import (
     determine_ssl_verification,
     extract_hosts_from_connection_string,
 )

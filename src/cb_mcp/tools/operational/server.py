@@ -15,7 +15,7 @@ from fastmcp import Context
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.config import get_settings
-from ...utils.connection_string import (
+from ...utils.operational.connection_string import (
     determine_ssl_verification,
     extract_hosts_from_connection_string,
     is_capella_connection,

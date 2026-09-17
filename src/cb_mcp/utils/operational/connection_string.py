@@ -7,7 +7,7 @@ from importlib.resources import files
 from typing import Any
 from urllib.parse import urlparse
 
-from .constants import LOGGER_NAMESPACE
+from ..constants import LOGGER_NAMESPACE
 
 logger = logging.getLogger(f"{LOGGER_NAMESPACE}.utils.connection_string")
 
@@ -60,10 +60,10 @@ def _get_capella_root_ca_path() -> str:
         # Convert to string path - this works for both installed packages and dev mode
         return str(cert_file)
     except (ImportError, FileNotFoundError, TypeError):
-        # Fallback for development: certs/ sits under utils/operational/.
-        utils_dir = os.path.dirname(os.path.abspath(__file__))
+        # Fallback for development: certs/ is a sibling of this file under utils/operational/.
+        operational_dir = os.path.dirname(os.path.abspath(__file__))
         fallback_path = os.path.join(
-            utils_dir, "operational", "certs", "capella_root_ca.pem"
+            operational_dir, "certs", "capella_root_ca.pem"
         )
 
         if os.path.exists(fallback_path):

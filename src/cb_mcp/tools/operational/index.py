@@ -15,7 +15,7 @@ from ...servers.operational.constants import (
     QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION,
 )
 from ...utils.config import get_settings
-from ...utils.connection_string import validate_connection_settings
+from ...utils.operational.connection_string import validate_connection_settings
 from ...utils.context import get_cluster_connection
 from ...utils.operational.connection import connect_to_bucket, format_keyspace
 from ...utils.operational.index_utils import (
