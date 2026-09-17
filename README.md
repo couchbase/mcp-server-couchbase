@@ -192,6 +192,7 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_THREAD_POOL_SIZE` | `--thread-pool-size` | Maximum tool calls executed concurrently per worker process (see [Tuning Tool-Call Concurrency](#tuning-tool-call-concurrency)). Raises the concurrency ceiling, not CPU-bound throughput | `40` |
 | `CB_MCP_STATELESS_HTTP` | `--stateless-http` | Handle each HTTP request with a fresh MCP transport instead of keeping per-session state in the server. Only honored with `--transport=http`. Unrecognised values fall back to the default with an error log entry; a value that cannot work with the rest of the configuration is overridden with a warning | `true` when `--workers` > 1, otherwise `false` |
 | `CB_MCP_DISABLE_STRUCTURED_OUTPUT` | `--disable-structured-output` | Register every tool without an output schema, so tool results are returned as text content only instead of also carrying structured content (see [Disabling Structured Output](#disabling-structured-output)). Applies to all tools | `false` |
+| `CB_MCP_JSON_RESPONSE` | `--json-response` | Return each tool result as a plain JSON response body instead of a single-event SSE stream (see [Choosing the HTTP Response Framing](#choosing-the-http-response-framing)). Only honored with `--transport=http` | `false` |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Elicitation/Confirmation Required Tools](#elicitationconfirmation-for-tool-calls)) | None |
 | `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
@@ -333,6 +334,22 @@ uvx couchbase-mcp-server --disable-structured-output true
 ```
 
 This is an all-or-nothing setting — it cannot be applied to individual tools. The tools themselves are unchanged; only the response shape the client receives differs. The effective value is reported by the `get_server_configuration_status` tool.
+
+### Choosing the HTTP Response Framing
+
+Streamable HTTP allows a response to be either an SSE stream or a plain JSON body, and a client is expected to accept both. By default the server replies with an SSE stream carrying a single event, which is the form every MCP client handles today.
+
+`CB_MCP_JSON_RESPONSE` / `--json-response` switches to `application/json`, so the same JSON-RPC response is returned as an ordinary response body with no stream framing around it:
+
+```bash
+# Environment variable
+CB_MCP_JSON_RESPONSE=true
+
+# Command line
+uvx couchbase-mcp-server --transport http --json-response true
+```
+
+This changes the HTTP framing only. The JSON-RPC response inside is identical, so it is independent of [Disabling Structured Output](#disabling-structured-output), which changes what a tool result contains. Leave it off if any client needs the event-stream form, and note that it does not apply to the `sse` transport. The effective value is reported by the `get_server_configuration_status` tool.
 
 ### Elicitation/Confirmation for Tool Calls
 

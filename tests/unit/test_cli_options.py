@@ -298,6 +298,95 @@ class TestStructuredOutputOption:
         assert all(isinstance(tool, TextOnlyFunctionTool) for tool in tools)
 
 
+class TestJsonResponseOption:
+    """``--json-response`` selects the streamable-HTTP response framing.
+
+    The option only reaches FastMCP, which owns the framing, so these assert
+    on the value handed to ``run``/``http_app`` rather than on wire bytes.
+    ``test_stdio_run_kwargs_omit_network_options`` above is the guard that it
+    never leaks into the stdio kwargs, where it would raise.
+    """
+
+    def _run_kwargs(self, args: list[str], env: dict[str, str] | None = None):
+        fake_mcp = MagicMock()
+        runner = CliRunner()
+        with (
+            patch("mcp_server.FastMCP", return_value=fake_mcp),
+            patch("mcp_server.run_workers"),
+        ):
+            result = runner.invoke(
+                mcp_server.main,
+                ["--transport", "http", *args],
+                env=env or os.environ.copy(),
+                catch_exceptions=False,
+            )
+        assert result.exit_code == 0, result.output
+        return fake_mcp.run.call_args.kwargs
+
+    def test_defaults_to_sse_framing(self):
+        """Existing clients must keep the event-stream form unless asked."""
+        assert self._run_kwargs([])["json_response"] is False
+
+    def test_flag_selects_json_framing(self):
+        assert self._run_kwargs(["--json-response", "true"])["json_response"] is True
+
+    def test_env_var_honored(self):
+        env = {**os.environ, "CB_MCP_JSON_RESPONSE": "true"}
+        assert self._run_kwargs([], env=env)["json_response"] is True
+
+    def test_multi_worker_replays_the_value_to_workers(self):
+        """Workers rebuild their own app, so the resolved value has to travel
+        in the published config rather than being re-derived."""
+        fake_mcp = MagicMock()
+        runner = CliRunner()
+        with (
+            patch("mcp_server.FastMCP", return_value=fake_mcp),
+            patch("mcp_server.run_workers") as run_workers,
+        ):
+            result = runner.invoke(
+                mcp_server.main,
+                ["--transport", "http", "--workers", "2", "--json-response", "true"],
+                env=os.environ.copy(),
+                catch_exceptions=False,
+            )
+        assert result.exit_code == 0, result.output
+        assert run_workers.call_args.args[0]["json_response"] is True
+
+    def test_worker_app_uses_the_published_value(self):
+        """``create_app`` runs in the worker, after the parent has exited, so
+        it reads the value back from the published config."""
+        fake_mcp = MagicMock()
+        params = {
+            "workers": 2,
+            "log_file": None,
+            "json_response": True,
+        }
+        with (
+            patch("mcp_server.load_worker_config", return_value=params),
+            patch("mcp_server.configure_logging_from_params"),
+            patch("mcp_server.build_mcp_server", return_value=fake_mcp),
+        ):
+            mcp_server.create_app()
+        assert fake_mcp.http_app.call_args.kwargs["json_response"] is True
+        # Multi-worker is always stateless, regardless of this option.
+        assert fake_mcp.http_app.call_args.kwargs["stateless_http"] is True
+
+    def test_worker_app_defaults_when_the_key_is_absent(self):
+        """A worker started from a config published by an older parent must
+        still boot, on the default framing."""
+        fake_mcp = MagicMock()
+        with (
+            patch(
+                "mcp_server.load_worker_config",
+                return_value={"workers": 2, "log_file": None},
+            ),
+            patch("mcp_server.configure_logging_from_params"),
+            patch("mcp_server.build_mcp_server", return_value=fake_mcp),
+        ):
+            mcp_server.create_app()
+        assert fake_mcp.http_app.call_args.kwargs["json_response"] is False
+
+
 def _resolve_oauth_kwargs(**overrides):
     """Minimal OAuth-enabled kwargs for ``resolve_oauth`` (http + all JWT
     fields present), so only the scope-label behavior under test varies."""
