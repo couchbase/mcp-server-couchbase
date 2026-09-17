@@ -36,6 +36,14 @@ NETWORK_TRANSPORTS_SDK_MAPPING = {
 # network transport but is explicitly out of scope for OAuth in this build.
 STREAMABLE_HTTP_TRANSPORT = "http"
 
+# Couchbase Server REST API ports. TLS/plaintext port pairs differ per service —
+# these are used to build request URLs once TLS-vs-plaintext is decided from the
+# connection string's scheme.
+MANAGEMENT_REST_PORT_TLS = 18091
+MANAGEMENT_REST_PORT_PLAIN = 8091
+INDEX_REST_PORT_TLS = 19102
+INDEX_REST_PORT_PLAIN = 9102
+
 # Logging Configuration
 # Change this to DEBUG, WARNING, ERROR as needed
 DEFAULT_LOG_LEVEL = "INFO"
@@ -86,3 +94,4 @@ ALLOWED_OAUTH_ALGORITHMS = [
     "PS512",
 ]
 DEFAULT_OAUTH_ALGORITHM = "RS256"
+

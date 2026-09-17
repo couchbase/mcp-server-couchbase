@@ -117,6 +117,72 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[ResultCase]:
         )
     )
 
+    cases.append(
+        ResultCase(
+            test_id="cluster_metrics_faithful",
+            prompt=(
+                "Over the last hour, what has the CPU utilization looked like on "
+                "my Couchbase cluster?"
+            ),
+            expectation=(
+                "Faithfulness check. The answer must reflect the stats-range tool "
+                "output (whether the requested metric was found, its trend/values, "
+                "or any per-metric error the tool reported). FAIL if it invents "
+                "numeric values not present in the tool output, or if the tool "
+                "reported an error (e.g. connection or metric-not-found) but the "
+                "answer claims a successful trend anyway."
+            ),
+        )
+    )
+
+    # discover_tool_input_values: the bundled reference dataset is static, so unlike the tools
+    # above, the correct metric name is an anchored fact, not just a faithfulness check.
+    cases.append(
+        ResultCase(
+            test_id="discover_disk_queue_metric_name",
+            prompt=(
+                "What is the exact Couchbase metric name for the number of items "
+                "enqueued on the disk write queue? Just tell me the metric name."
+            ),
+            expectation=(
+                "The answer must give the exact metric name 'kv_ep_diskqueue_fill' as "
+                "returned by the tool. FAIL if it gives a different or invented metric "
+                "name, or fabricates a name instead of using the tool's lookup result."
+            ),
+        )
+    )
+
+    cases.append(
+        ResultCase(
+            test_id="discover_index_resident_ratio_metric_name",
+            prompt=(
+                "I need the exact metric name that reports the Index service's "
+                "resident ratio. Don't fetch any data, I just want the name."
+            ),
+            expectation=(
+                "The answer must give the exact metric name "
+                "'index_storage_resident_ratio' as returned by the tool. FAIL if it "
+                "gives a different or invented metric name, such as one from another "
+                "service (e.g. a Data Service resident-ratio metric)."
+            ),
+        )
+    )
+
+    cases.append(
+        ResultCase(
+            test_id="discover_dropped_audit_events_metric_name",
+            prompt=(
+                "Which Couchbase metric counts audit events that were dropped? "
+                "Name the metric."
+            ),
+            expectation=(
+                "The answer must give the exact metric name "
+                "'kv_audit_dropped_events' as returned by the tool. FAIL if it gives "
+                "a different or invented metric name."
+            ),
+        )
+    )
+
     return cases
 
 
@@ -133,6 +199,10 @@ SERVER_RESULT_CASE_IDS = [
     "health_faithful",
     "config_faithful",
     "connection_faithful",
+    "cluster_metrics_faithful",
+    "discover_disk_queue_metric_name",
+    "discover_index_resident_ratio_metric_name",
+    "discover_dropped_audit_events_metric_name",
 ]
 
 

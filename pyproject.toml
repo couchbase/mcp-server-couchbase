@@ -1,6 +1,6 @@
 [project]
 name = "couchbase-mcp-server"
-version = "1.0.2rc1"
+version = "1.0.2rc4"
 description = "Couchbase MCP Server - Enable AI agents to connect to and interact with Couchbase clusters."
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
@@ -20,6 +20,9 @@ dependencies = [
     "lark-sqlpp>=0.2.1",
     "fastmcp>=3.2.0,<4.0.0",
     "reo-census>=0.1.3,<0.2.0",
+    # Fuzzy matching for discover_tool_input_values. Upper bound is deliberate: rapidfuzz 3.14.6
+    # raised requires-python to >=3.11, which would silently break this project's 3.10 support.
+    "rapidfuzz>=3.13.0,<3.14.6",
 ]
 
 [project.urls]
@@ -164,6 +167,7 @@ markers = [
     "integration: Integration tests against a live Couchbase cluster via the MCP server.",
     "accuracy: AI-in-the-loop accuracy tests. Require OPENAI_API_KEY and a Couchbase cluster.",
     "result_eval: LLM-as-judge answer-correctness evals. Require OPENAI_API_KEY and a Couchbase cluster.",
+    "perf: In-process performance tests. Opt-in via CB_MCP_PERF=1; not run in CI.",
 ]
 
 # Build system configuration
