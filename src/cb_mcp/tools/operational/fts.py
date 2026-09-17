@@ -200,7 +200,10 @@ def run_fts_query(
     Confirm the index's exact name/location first with list_fts_indexes. Don't guess which
     fields a query body can target — if you don't already know what the index maps and how
     those fields are analyzed, call get_fts_index_definition first; a field-scoped query
-    against an unmapped field matches nothing rather than erroring.
+    against an unmapped field matches nothing rather than erroring. Note this only works for
+    indexes with explicit static field mappings — a dynamically mapped index (dynamic: true)
+    has no fixed field list to inspect, since it indexes whatever fields appear in each
+    document; for those, look at actual document contents instead to know what's queryable.
 
     explain: if True, fetches the execution plan instead of normal results. The Search
     service exposes the query plan per matched document, not as a separate plan-only/
