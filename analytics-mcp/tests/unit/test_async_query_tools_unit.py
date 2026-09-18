@@ -6,13 +6,19 @@ cluster, including the error branches -- which are returned as
 {"success": False, "error": ...}, never raised.
 """
 
+from __future__ import annotations
+
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 import pytest
 
 from ea_mcp.handle_registry import HandleRegistry, UnknownHandleError
+from ea_mcp.result_config import ResultConfig
+from ea_mcp.result_store import HandleEntry, ResultStore, UnknownResultError
 from ea_mcp.tools.query import (
     cancel_async_query,
     discard_async_query_results,
@@ -21,17 +27,29 @@ from ea_mcp.tools.query import (
 )
 
 
-def _make_ctx() -> tuple[SimpleNamespace, MagicMock, HandleRegistry]:
+def _make_ctx(
+    result_config: ResultConfig | None = None,
+    result_store: ResultStore | None = None,
+) -> tuple[SimpleNamespace, MagicMock, HandleRegistry]:
     """Build a ctx carrying a mock cluster and a real (isolated) registry.
 
     The registry is real rather than mocked so the tests exercise the actual
     token minting/eviction the tools depend on.
+
+    Large-result handling defaults to off (no store, saving disabled), which
+    is also the server default, so tests that do not care about it see whole
+    results.
     """
     cluster = MagicMock()
     registry = HandleRegistry()
     ctx = SimpleNamespace(
         request_context=SimpleNamespace(
-            lifespan_context=SimpleNamespace(cluster=cluster, handle_registry=registry)
+            lifespan_context=SimpleNamespace(
+                cluster=cluster,
+                handle_registry=registry,
+                result_config=result_config or ResultConfig(),
+                result_store=result_store,
+            )
         )
     )
     return ctx, cluster, registry
@@ -396,3 +414,123 @@ class TestHandleRegistry:
         registry.remove(token)
 
         assert registry.count() == 0
+
+
+class TestAsyncLargeResults:
+    """Async results are not copied to disk: EA still holds them, so the store
+    records only that the query_handle is readable as a resource."""
+
+    ROWS: ClassVar[list[dict]] = [
+        {"i": i, "pad": "x" * 50} for i in range(100)
+    ]  # ~7 KB
+
+    def _fetch(self, *, save_flag: bool, opt_in: bool, limit: int, store=None):
+        config = ResultConfig(save_large_results=save_flag, truncate_bytes=limit)
+        ctx, cluster, _ = _make_ctx(config, store)
+        token, handle = _start(ctx, cluster)
+        status = handle.fetch_status.return_value
+        status.results_ready.return_value = True
+        status.result_handle.return_value.fetch_results.return_value = _make_result(
+            self.ROWS
+        )
+        result = get_async_query_results(ctx, token, save_result_if_large=opt_in)
+        return ctx, token, result, store
+
+    def test_defaults_to_not_saving(self, tmp_path: Path) -> None:
+        store = ResultStore(tmp_path, 10 * 1024 * 1024)
+        config = ResultConfig(save_large_results=True, truncate_bytes=1_000)
+        ctx, cluster, _ = _make_ctx(config, store)
+        token, handle = _start(ctx, cluster)
+        status = handle.fetch_status.return_value
+        status.results_ready.return_value = True
+        status.result_handle.return_value.fetch_results.return_value = _make_result(
+            self.ROWS
+        )
+
+        result = get_async_query_results(ctx, token)  # opt-in omitted
+
+        assert result["truncated"] is True
+        assert "result_id" not in result
+        assert store.stats()["entries"] == 0
+
+    def test_truncates_without_saving_when_the_server_switch_is_off(self) -> None:
+        _, _, result, _ = self._fetch(save_flag=False, opt_in=True, limit=1_000)
+
+        assert result["ready"] is True
+        assert result["truncated"] is True
+        assert result["total_row_count"] == 100
+        assert "result_id" not in result
+
+    def test_result_id_is_the_query_handle(self, tmp_path: Path) -> None:
+        """One id for both the query and its resource, so the model has only
+        one thing to remember."""
+        store = ResultStore(tmp_path, 10 * 1024 * 1024)
+
+        _, token, result, _ = self._fetch(
+            save_flag=True, opt_in=True, limit=1_000, store=store
+        )
+
+        assert result["result_id"] == token
+        assert result["query_handle"] == token
+        assert result["resource_uri"] == f"ea://results/{token}"
+
+    def test_saving_writes_no_files(self, tmp_path: Path) -> None:
+        store = ResultStore(tmp_path, 10 * 1024 * 1024)
+
+        _, token, _, _ = self._fetch(
+            save_flag=True, opt_in=True, limit=1_000, store=store
+        )
+
+        assert isinstance(store.get(token), HandleEntry)
+        assert list(tmp_path.iterdir()) == []
+
+    def test_metadata_survives_alongside_the_truncated_payload(
+        self, tmp_path: Path
+    ) -> None:
+        store = ResultStore(tmp_path, 10 * 1024 * 1024)
+
+        _, _, result, _ = self._fetch(
+            save_flag=True, opt_in=True, limit=1_000, store=store
+        )
+
+        assert result["metadata"]["metrics"]["result_count"] == 1
+
+    def test_discard_drops_the_saved_result_entry(self, tmp_path: Path) -> None:
+        """The resource reads through the live handle, so discarding kills it;
+        leaving the entry would advertise a URI that always fails."""
+        store = ResultStore(tmp_path, 10 * 1024 * 1024)
+        ctx, token, _, _ = self._fetch(
+            save_flag=True, opt_in=True, limit=1_000, store=store
+        )
+        assert store.get(token)
+
+        discard_async_query_results(ctx, token)
+
+        with pytest.raises(UnknownResultError):
+            store.get(token)
+
+    def test_cancel_drops_the_saved_result_entry(self, tmp_path: Path) -> None:
+        store = ResultStore(tmp_path, 10 * 1024 * 1024)
+        config = ResultConfig(save_large_results=True, truncate_bytes=1_000)
+        ctx, cluster, _ = _make_ctx(config, store)
+        token, handle = _start(ctx, cluster)
+        store.save_handle(token, "SELECT 1")
+        handle.fetch_status.return_value.results_ready.return_value = False
+
+        cancel_async_query(ctx, token)
+
+        with pytest.raises(UnknownResultError):
+            store.get(token)
+
+    def test_cleanup_is_safe_when_saving_is_disabled(self) -> None:
+        """No store configured must not turn a successful discard into an
+        error."""
+        ctx, cluster, _ = _make_ctx()  # result_store defaults to None
+        token, handle = _start(ctx, cluster)
+        status = handle.fetch_status.return_value
+        status.results_ready.return_value = True
+
+        result = discard_async_query_results(ctx, token)
+
+        assert result["success"] is True
+        assert result["discarded"] is True

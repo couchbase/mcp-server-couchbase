@@ -18,11 +18,11 @@ from .metadata import (
 from .query import (
     cancel_async_query,
     discard_async_query_results,
+    explain_query,
     get_async_query_results,
     run_query_async,
     run_query_sync,
 )
-from .query import explain_query, run_query_sync
 
 TOOLS: list[Callable] = [
     get_databases_in_cluster,
@@ -67,15 +67,15 @@ __all__ = [
     "TOOLS",
     "TOOL_ANNOTATIONS",
     "cancel_async_query",
-    "discard_async_query_results",
-    "get_async_query_results",
     "create_index",
+    "discard_async_query_results",
     "explain_query",
+    "get_async_query_results",
     "get_collections_in_scope",
     "get_databases_in_cluster",
     "get_schema_for_collection",
     "get_scopes_in_database",
-    "run_query_async",
     "list_indexes",
+    "run_query_async",
     "run_query_sync",
 ]

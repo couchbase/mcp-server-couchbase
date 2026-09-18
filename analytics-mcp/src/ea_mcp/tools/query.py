@@ -35,20 +35,44 @@ from typing import Any
 
 from fastmcp import Context
 
-from ..connection import get_cluster_connection, get_handle_registry
+from ..connection import (
+    get_cluster_connection,
+    get_handle_registry,
+    get_result_config,
+    get_result_store,
+)
 from ..responses import tool_error, tool_success
+from ..result_handling import build_result_payload
 
 logger = logging.getLogger("ea-mcp-server.tools.query")
 
 
-def run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
+def run_query_sync(
+    ctx: Context, statement: str, save_result_if_large: bool = False
+) -> dict[str, Any]:
     """Run a SQL++ statement and buffer all result rows in memory.
 
     Can carry SELECT, DML, or DDL statements. Buffers the entire result set
     in client memory before returning.
 
-    Returns {"success": True, "rows": [...], "row_count": N} on success, or
-    {"success": False, "error": "..."} on failure.
+    Results larger than the server's size limit come back truncated, with
+    truncated: true and total_row_count telling you how many rows there were.
+    Set save_result_if_large to true when you expect a big result and want all
+    of it: the full result is then kept on the server and the response carries
+    a resource_uri you can read to get the rest. That only applies to oversized
+    results — anything within the limit is returned whole either way.
+
+    Args:
+        statement: The SQL++ statement to execute.
+        save_result_if_large: Keep the full result for retrieval if it is too
+            large to return inline. Requires the server to have large-result
+            saving enabled.
+
+    Returns:
+        {"success": True, "rows": [...], "row_count": N, "truncated": false};
+        or with truncated: true plus total_row_count, result_size_bytes, and —
+        when saved — result_id and resource_uri; or {"success": False,
+        "error": "..."} on failure.
     """
     cluster = get_cluster_connection(ctx)
     try:
@@ -56,10 +80,32 @@ def run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
         result = cluster.execute_query(statement)
         rows = result.get_all_rows()
         logger.info(f"Query returned {len(rows)} row(s)")
-        return tool_success(rows=rows, row_count=len(rows))
+        payload = build_result_payload(
+            rows,
+            config=get_result_config(ctx),
+            store=get_result_store(ctx),
+            save_if_large=save_result_if_large,
+            statement=statement,
+        )
+        return tool_success(**payload)
     except Exception as e:
         logger.error(f"Error running query: {e}", exc_info=True)
         return tool_error(e, statement=statement)
+
+
+def _forget_saved_result(ctx: Context, result_id: str) -> None:
+    """Drop a saved-result entry, if one was ever created for this id.
+
+    Cleanup only, so it never raises: failing to tidy the index must not turn
+    a successful discard or cancel into a reported error.
+    """
+    store = get_result_store(ctx)
+    if store is None:
+        return
+    try:
+        store.remove(result_id)
+    except Exception as e:
+        logger.debug(f"Could not drop saved result {result_id}: {e}")
 
 
 def _extract_metadata(result: Any, query_handle: str) -> dict[str, Any]:
@@ -151,7 +197,9 @@ def run_query_async(ctx: Context, statement: str) -> dict[str, Any]:
         return tool_error(e, statement=statement)
 
 
-def get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
+def get_async_query_results(
+    ctx: Context, query_handle: str, save_result_if_large: bool = False
+) -> dict[str, Any]:
     """Check the status of an async query and get its results once it has finished.
 
     This both reports progress and returns results. If the query is still
@@ -167,16 +215,27 @@ def get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
     results. When you no longer need them, call discard_async_query_results
     to free them on the server.
 
+    Results larger than the server's size limit come back truncated, with
+    truncated: true and total_row_count telling you how many rows there were.
+    Set save_result_if_large to true to get a resource_uri for reading the
+    whole result — it uses the same id as query_handle, so there is no second
+    id to track. That resource reads from the server on demand, so it stops
+    working once you discard or cancel the query.
+
     Args:
         query_handle: The query_handle returned by run_query_async.
+        save_result_if_large: Expose the full result as a readable resource if
+            it is too large to return inline. Requires the server to have
+            large-result saving enabled.
 
     Returns:
         {"success": True, "ready": true, "rows": [...], "row_count": N,
-        "metadata": {"warnings": [...], "metrics":
+        "truncated": false, "metadata": {"warnings": [...], "metrics":
         {"elapsed_time_ms", "execution_time_ms", "result_count",
-        "result_size", "processed_objects"}}}; or {"success": True,
-        "ready": false} if not finished; or {"success": False,
-        "error": "..."} on failure.
+        "result_size", "processed_objects"}}}; or with truncated: true plus
+        total_row_count and — when saved — result_id and resource_uri; or
+        {"success": True, "ready": false} if not finished; or
+        {"success": False, "error": "..."} on failure.
     """
     registry = get_handle_registry(ctx)
     try:
@@ -201,12 +260,23 @@ def get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
         logger.info(
             f"Fetched {len(rows)} row(s) for async query (token={query_handle})"
         )
+        # result_id is the query_handle: nothing is written to disk for async
+        # results (EA still holds them), and reusing the token leaves the
+        # model with a single id for both the query and its resource.
+        payload = build_result_payload(
+            rows,
+            config=get_result_config(ctx),
+            store=get_result_store(ctx),
+            save_if_large=save_result_if_large,
+            statement=entry.statement,
+            metadata=metadata,
+            result_id=query_handle,
+        )
         return tool_success(
             query_handle=query_handle,
             ready=True,
-            rows=rows,
-            row_count=len(rows),
             metadata=metadata,
+            **payload,
         )
     except Exception as e:
         logger.error(f"Error fetching async query results: {e}", exc_info=True)
@@ -224,6 +294,10 @@ def discard_async_query_results(ctx: Context, query_handle: str) -> dict[str, An
     If the query is still running there is nothing to discard: this returns
     discarded: false and the query_handle stays usable, so use
     cancel_async_query to stop it instead.
+
+    If get_async_query_results gave you a resource_uri for a large result,
+    that resource reads from the server on demand — so discarding also makes
+    it unreadable. Finish reading it before calling this.
 
     Args:
         query_handle: The query_handle returned by run_query_async.
@@ -250,6 +324,10 @@ def discard_async_query_results(ctx: Context, query_handle: str) -> dict[str, An
 
         status.result_handle().discard_results()
         registry.remove(query_handle)
+        # The saved-result resource for an async query reads through the live
+        # handle, so it dies with it. Drop the entry rather than leave a URI
+        # that looks valid and always fails.
+        _forget_saved_result(ctx, query_handle)
         logger.info(f"Discarded results for async query (token={query_handle})")
         return tool_success(query_handle=query_handle, discarded=True)
     except Exception as e:
@@ -300,6 +378,8 @@ def cancel_async_query(ctx: Context, query_handle: str) -> dict[str, Any]:
 
         entry.handle.cancel()
         registry.remove(query_handle)
+        # Same reasoning as discard: the resource reads through the handle.
+        _forget_saved_result(ctx, query_handle)
         logger.info(f"Cancelled async query (token={query_handle})")
         return tool_success(query_handle=query_handle, cancelled=True)
     except Exception as e:
