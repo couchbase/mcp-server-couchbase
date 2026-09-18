@@ -15,6 +15,10 @@ DEFAULT_WORKERS = 1
 # schema from each tool's return annotation and sends the result as structured
 # content, which is the richer, spec-preferred behaviour.
 DEFAULT_DISABLE_STRUCTURED_OUTPUT = False
+# Streamable HTTP allows a response to be either a plain JSON body or an SSE
+# stream. The default stays SSE so existing clients are unaffected; a
+# deployment whose clients do not need the event-stream form can opt in.
+DEFAULT_JSON_RESPONSE = False
 
 # Allowed Transport Types
 ALLOWED_TRANSPORTS = ["stdio", "http", "sse"]
