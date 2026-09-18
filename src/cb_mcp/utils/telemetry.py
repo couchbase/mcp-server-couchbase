@@ -21,6 +21,7 @@ from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError, version
 
 from .constants import MCP_SERVER_NAME
+from .telemetry_dispatch import EventDispatcher, dispatch_enabled
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.telemetry")
 
@@ -42,6 +43,90 @@ except Exception:
     logger.debug("reo-census unavailable; telemetry disabled", exc_info=True)
     telemetry_logger = None
 
+# Delivery of tool-call events. reo-census starts one thread and one
+# connection per event, which is sized for an occasional install ping rather
+# than for one event per tool call; the dispatcher keeps the same events and
+# the same sender, and only moves the send onto a long-lived thread. See
+# telemetry_dispatch for the env vars, including CB_MCP_TELEMETRY_MODE=legacy
+# to restore the original path.
+_dispatcher: EventDispatcher | None = None
+
+
+def _get_dispatcher() -> EventDispatcher | None:
+    """Build the dispatcher on first use, or None when it is not wanted."""
+    global _dispatcher  # noqa: PLW0603 - one dispatcher per process, built lazily
+    if telemetry_logger is None or not dispatch_enabled():
+        return None
+    if _dispatcher is None:
+        try:
+            # blocking=True keeps reo-census's endpoint resolution, opt-out
+            # check and payload handling, and only stops it spawning a thread.
+            _dispatcher = EventDispatcher(
+                send_one=lambda event: telemetry_logger.log_event(event, blocking=True),
+            )
+        except Exception:
+            logger.debug("telemetry dispatcher unavailable", exc_info=True)
+            return None
+    return _dispatcher
+
+
+def flush_telemetry(timeout: float = 2.0) -> bool:
+    """Wait for queued tool-call events to be handed to a sender.
+
+    Delivery is asynchronous, so anything that needs to observe an event
+    (tests, or a clean shutdown) has to wait for the queue to drain.
+    """
+    dispatcher = _dispatcher
+    return dispatcher.flush(timeout) if dispatcher is not None else True
+
+
+def telemetry_status() -> dict:
+    """What telemetry is doing right now, for the diagnostics tool.
+
+    Delivery is best-effort and events can be dropped, so an operator needs a
+    way to see whether that is happening rather than only a one-time log line.
+    Returns ``enabled: False`` when no logger is configured, which is also what
+    an opt-out looks like.
+    """
+    if telemetry_logger is None:
+        return {"enabled": False, "delivery": "disabled"}
+    dispatcher = _dispatcher
+    if dispatcher is None:
+        return {
+            "enabled": True,
+            "delivery": "dispatch" if dispatch_enabled() else "legacy",
+            "counters": None,
+        }
+    stats = dict(dispatcher.stats)
+    # The counters are there so an operator can see loss, so do the division
+    # for them: "delivered 11% of what the tools produced" is the number that
+    # tells you the sender count is wrong for this collector's distance, and
+    # it is not obvious from four raw counters.
+    produced = stats["enqueued"] + stats["dropped_queue_full"] + stats["sampled_out"]
+    return {
+        "enabled": True,
+        "delivery": "dispatch",
+        "senders": len(dispatcher._threads),
+        "queue_max": dispatcher._queue.maxsize,
+        "queue_depth": dispatcher._queue.qsize(),
+        "counters": stats,
+        "delivered_pct": (
+            round(stats["delivered"] / produced * 100, 1) if produced else None
+        ),
+    }
+
+
+def reset_telemetry_dispatcher() -> None:
+    """Drop the dispatcher so the next event rebuilds it.
+
+    Needed when ``telemetry_logger`` is replaced after the dispatcher was
+    built, which is what tests do when they swap in a recording logger.
+    """
+    global _dispatcher
+    dispatcher, _dispatcher = _dispatcher, None
+    if dispatcher is not None:
+        dispatcher.close()
+
 
 def send_install_ping(transport: str) -> None:
     """Fire a best-effort startup event recording the transport mode."""
@@ -55,18 +140,22 @@ def send_install_ping(transport: str) -> None:
 
 
 def _send_tool_call_event(tool_name: str, success: bool, duration_ms: float) -> None:
-    if telemetry_logger:
-        try:
-            telemetry_logger.log_event(
-                {
-                    "activity_type": "tool_call",
-                    "tool_name": tool_name,
-                    "success": "true" if success else "false",
-                    "duration_ms": f"{duration_ms:.1f}",
-                }
-            )
-        except Exception:
-            logger.debug("Failed to send tool-call telemetry ping", exc_info=True)
+    if not telemetry_logger:
+        return
+    event = {
+        "activity_type": "tool_call",
+        "tool_name": tool_name,
+        "success": "true" if success else "false",
+        "duration_ms": f"{duration_ms:.1f}",
+    }
+    try:
+        dispatcher = _get_dispatcher()
+        if dispatcher is not None:
+            dispatcher.submit(event)
+        else:
+            telemetry_logger.log_event(event)
+    except Exception:
+        logger.debug("Failed to send tool-call telemetry ping", exc_info=True)
 
 
 def wrap_with_telemetry(fn: Callable) -> Callable:
