@@ -149,6 +149,27 @@ class TestIsCopyToStatement:
         """ "COPY" must be its own leading token, not a prefix of a longer one."""
         assert not _is_copy_to_statement("COPYRIGHT_YEAR = 1")
 
+    def test_matches_after_a_leading_line_comment(self) -> None:
+        """A ``--`` comment before the keyword must not hide it from the check."""
+        assert _is_copy_to_statement("-- export\nCOPY ds TO 's3://bucket/path'")
+
+    def test_matches_after_a_leading_block_comment(self) -> None:
+        assert _is_copy_to_statement("/* export */ COPY ds TO 's3://bucket/path'")
+
+    def test_matches_after_mixed_leading_comments_and_whitespace(self) -> None:
+        assert _is_copy_to_statement(
+            "  /* a */\n-- b\n  /* c */ COPY ds TO 's3://bucket/path'"
+        )
+
+    def test_matches_after_a_multiline_block_comment(self) -> None:
+        assert _is_copy_to_statement("/* line one\nline two */\nCOPY ds TO 's3://x'")
+
+    def test_line_comment_does_not_swallow_the_next_line(self) -> None:
+        """A ``--`` comment ends at its newline; it must not also hide COPY
+        on the following line if COPY is not actually what follows the
+        newline in this construction."""
+        assert not _is_copy_to_statement("-- COPY ds TO 's3://bucket/path'")
+
 
 class TestRunQuerySyncBlocksCopyToUnderReadOnly:
     def test_blocked_under_read_only_mode(self) -> None:

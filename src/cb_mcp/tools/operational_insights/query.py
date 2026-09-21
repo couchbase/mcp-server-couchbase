@@ -49,14 +49,39 @@ from ...utils.responses import tool_error, tool_success
 logger = logging.getLogger(f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.tools.query")
 
 
+_LEADING_WHITESPACE_OR_COMMENT = re.compile(r"\s+|--[^\n]*\n?|/\*.*?\*/", re.DOTALL)
+
+
+def _strip_leading_comments(statement: str) -> str:
+    """Strip leading whitespace and SQL++ comments (``--`` and ``/* */``).
+
+    Comments and whitespace can be freely mixed and repeated before the
+    first real token (e.g. ``/* a */ -- b\nCOPY ...``), so this loops rather
+    than matching once. A single regex with a repeated group would also
+    match this, but Python's backtracking lets a greedy ``--[^\n]*`` shrink
+    so a trailing "COPY " gets read as living *outside* the comment (e.g.
+    ``-- COPY ds TO ...`` with no newline) -- this loop advances a match
+    position instead of backtracking, so each comment is consumed in full.
+    """
+    pos = 0
+    while True:
+        match = _LEADING_WHITESPACE_OR_COMMENT.match(statement, pos)
+        if match is None:
+            return statement[pos:]
+        pos = match.end()
+
+
 def _is_copy_to_statement(statement: str) -> bool:
     """True for a ``COPY ... TO`` statement.
 
     Covers both forms — export to external object storage and export to a
     KV collection — since both share the same leading keyword; there is no
-    need to parse the rest of the grammar to tell them apart here.
+    need to parse the rest of the grammar to tell them apart here. Leading
+    comments are stripped first, since a comment before the keyword (e.g.
+    ``-- export\nCOPY ds TO ...``) would otherwise let the statement dodge
+    this check while still executing as COPY ... TO.
     """
-    normalized = statement.lstrip().upper()
+    normalized = _strip_leading_comments(statement).upper()
     return re.match(r"^COPY\s", normalized) is not None
 
 
