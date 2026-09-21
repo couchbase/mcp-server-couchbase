@@ -6,7 +6,7 @@ from couchbase_operational_insights.credential import Credential
 from ...servers.operational_insights.constants import (
     OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE,
 )
-from .sdk_logging import quiesce_sdk_root_logging
+from .sdk_logging import quiesce_new_root_handlers
 
 logger = logging.getLogger(f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.utils.connection")
 
@@ -47,7 +47,15 @@ def connect_to_operational_insights_cluster(
     try:
         logger.info("Connecting to Operational Insights cluster...")
         credential = Credential.from_username_and_password(username, password)
-        cluster = Cluster.create_instance(connection_string, credential)
+        # The SDK's own import-time logging setup (protocol/__init__.py's
+        # configure_logger()) turns out to actually fire here, on the first
+        # real connection, not at module-import time — this call is what
+        # triggers `couchbase_operational_insights.protocol` to be imported.
+        # Scoped tightly around just this call (not the whole function) so
+        # only a handler that appears during this exact call is treated as
+        # the SDK's, regardless of whether the connection succeeds.
+        with quiesce_new_root_handlers():
+            cluster = Cluster.create_instance(connection_string, credential)
         logger.info("Successfully connected to Operational Insights cluster")
         return cluster
     except Exception as e:
@@ -59,11 +67,3 @@ def connect_to_operational_insights_cluster(
             exc_info=True,
         )
         raise
-    finally:
-        # The SDK's own import-time logging setup (protocol/__init__.py's
-        # configure_logger()) turns out to actually fire here, on the first
-        # real connection, not at module-import time — Cluster.create_instance
-        # is what triggers `couchbase_operational_insights.protocol` to be
-        # imported. Clean up its stray stdlib-root handler regardless of
-        # whether the connection succeeded.
-        quiesce_sdk_root_logging()

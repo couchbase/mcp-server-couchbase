@@ -13,18 +13,16 @@ happen at import time of the top-level package (verified empirically): the
 ``protocol`` submodule, and therefore this side effect, is only pulled in
 the first time ``Cluster.create_instance(...)`` actually runs — i.e. at
 connection time, which for the standalone host is on the *first tool call*
-(``OperationalInsightsClusterProvider`` connects lazily). So this module's
-cleanup function is called from two places: the ``sdk_log_hook`` (for the
-common case where nothing has connected yet) and
-``connection.connect_to_operational_insights_cluster`` itself, in a
-``finally`` block, so a stray handler installed by the *first* connection
-attempt is still cleaned up even though it necessarily happens after that
-hook already ran once at startup.
+(``OperationalInsightsClusterProvider`` connects lazily). So the one place
+that needs to clean up after it is ``connection.connect_to_operational_insights_cluster``,
+wrapping that specific call with ``quiesce_new_root_handlers`` below.
 
 This module does not import the SDK itself.
 """
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 #: Name the SDK logs under. Not this repo's ``couchbase`` tree at all.
 SDK_LOGGER_NAME = "couchbase_operational_insights"
@@ -35,32 +33,33 @@ SDK_LOGGER_NAME = "couchbase_operational_insights"
 #: module does not read it.
 SDK_LOG_LEVEL_ENV_VAR = "PYCBOI_LOG_LEVEL"
 
-# Snapshot taken at import time of *this module* — as early as this package
-# can arrange, since cb_mcp.utils.operational_insights imports this module
-# first, before any sibling submodule that imports the SDK. In practice the
-# SDK's side effect fires later still (at connection time, not import time —
-# see the module docstring), but taking the snapshot this early costs
-# nothing and guards against a future SDK version moving the side effect
-# earlier.
-_ROOT_HANDLERS_AT_IMPORT: tuple[logging.Handler, ...] = tuple(
-    logging.getLogger().handlers
-)
 
+@contextmanager
+def quiesce_new_root_handlers() -> Iterator[None]:
+    """Undo any handler the wrapped code installs on the bare stdlib root logger.
 
-def quiesce_sdk_root_logging() -> None:
-    """Remove any handler the SDK's ``configure_logger()`` added to the root.
+    Snapshots the root logger's handlers on entry, then on exit removes
+    whatever handler is present that was not there on entry — regardless of
+    whether the wrapped code raised. Nothing present *before* entry is ever
+    touched, so a host application's own root handler is safe even if it was
+    attached after this package was imported: what matters is only what
+    changed during this specific call, not what existed at some earlier,
+    unrelated point in time (e.g. this module's own import).
 
-    Only removes handlers that were not present when this module was first
-    imported — anything a host application deliberately attached to the
-    bare root logger before importing this package is left alone. Safe to
-    call more than once; call it again after connecting, since that is when
-    the SDK's side effect actually happens (see the module docstring).
+    Use this around the exact call that can trigger the SDK's side effect
+    (``Cluster.create_instance(...)``), not around unrelated code — a wider
+    window risks catching a handler something else added for its own
+    reasons during the same window.
     """
     root = logging.getLogger()
-    for handler in list(root.handlers):
-        if handler not in _ROOT_HANDLERS_AT_IMPORT:
-            root.removeHandler(handler)
-            handler.close()
+    before = set(root.handlers)
+    try:
+        yield
+    finally:
+        for handler in list(root.handlers):
+            if handler not in before:
+                root.removeHandler(handler)
+                handler.close()
 
 
 class _ForwardingHandler(logging.Handler):
@@ -104,17 +103,16 @@ def bridge_sdk_logging(logger_root: str, level: int) -> None:
     everything else — parity with what the operational server gets from
     ``couchbase.configure_logging``.
 
-    Also cleans up any stray handler the SDK's own ``logging.basicConfig()``
-    side effect may already have left on the bare root logger from an
-    earlier connection (see the module docstring).
+    Does not itself touch the bare stdlib root logger — the SDK's
+    ``logging.basicConfig()`` side effect only happens at connection time,
+    not here (see the module docstring), so that cleanup lives at the one
+    call site that actually triggers it: ``connect_to_operational_insights_cluster``.
 
     Records forwarded this way keep ``%(name)s`` as
     ``couchbase_operational_insights.*``, not this server's own namespace —
     that is deliberate, matching how the operational SDK's own records
     appear under their own name rather than being relabelled.
     """
-    quiesce_sdk_root_logging()
-
     sdk_logger = logging.getLogger(SDK_LOGGER_NAME)
     for handler in list(sdk_logger.handlers):
         sdk_logger.removeHandler(handler)
