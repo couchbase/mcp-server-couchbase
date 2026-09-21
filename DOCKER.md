@@ -94,14 +94,24 @@ below).
 | `get_scopes_in_database` | List all scopes in a database. |
 | `get_collections_in_scope` | List all collections (datasets) in a scope. Shares its name with the operational server's tool of the same name — see the note below. |
 | `get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. Shares its name with the operational server's tool of the same name — see the note below. |
+| `list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog. Shares its name with the operational server's tool of the same name — see the note below. |
 | `run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return all result rows. Enforces read-only mode server-side; there is no client-side SQL++ parser. |
 | `explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
 | `create_index` | Create a secondary index via `CREATE INDEX`. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** Shares its name with the operational server's tool of the same name — see the note below. |
+| `run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Same read-only enforcement as `run_query_sync`. |
+| `get_async_query_results` | Check whether an async query has finished and, if so, return its rows. |
+| `discard_async_query_results` | Free a finished async query's result buffers on the server. |
+| `cancel_async_query` | Stop an async query that is still running. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 
-> **Note:** `get_collections_in_scope`, `get_schema_for_collection` and
-> `create_index` exist, with different behavior, on both servers — each runs
-> as a separate container/process, so this only matters if one MCP client
-> registers both simultaneously.
+The Server Async Request API tools form a start → poll → discard-or-cancel
+flow: `run_query_async` returns a `query_handle`, `get_async_query_results` is
+polled until ready, then `discard_async_query_results` frees the results or
+`cancel_async_query` stops a still-running query.
+
+> **Note:** `get_collections_in_scope`, `get_schema_for_collection`,
+> `create_index` and `list_indexes` exist, with different behavior, on both
+> servers — each runs as a separate container/process, so this only matters
+> if one MCP client registers both simultaneously.
 
 ## Usage
 

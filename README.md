@@ -146,14 +146,25 @@ default `operational` one.
 | `get_scopes_in_database` | List all scopes in a database. |
 | `get_collections_in_scope` | List all collections (datasets) in a scope. Shares its name with the operational server's tool of the same name — see the note below. |
 | `get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. Shares its name with the operational server's tool of the same name — see the note below. |
+| `list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog (the SDK has no index manager). Shares its name with the operational server's tool of the same name — see the note below. |
 | `run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return all result rows. Enforces read-only mode server-side via `QueryOptions(readonly=True)` — there is no client-side SQL++ parser here. |
 | `explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
 | `create_index` | Create a secondary index via `CREATE INDEX` (the SDK has no index manager). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** Shares its name with the operational server's tool of the same name — see the note below. |
+| `run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Same read-only enforcement as `run_query_sync`. |
+| `get_async_query_results` | Check whether an async query has finished and, if so, return its rows. Doubles as the status check — call again later if not yet ready. |
+| `discard_async_query_results` | Free a finished async query's result buffers on the server. Normal cleanup step after `get_async_query_results`. |
+| `cancel_async_query` | Stop an async query that is still running. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** A finished query cannot be cancelled — discard its results instead. |
 
-> **Note:** `get_collections_in_scope`, `get_schema_for_collection` and
-> `create_index` exist, with different behavior, on both servers. Each
-> server is a separate process, so this is only a concern if a single MCP
-> client registers both `operational` and `operational-insights`
+The Server Async Request API tools form a start → poll → discard-or-cancel
+flow for long-running queries: `run_query_async` returns a `query_handle`,
+`get_async_query_results` is polled until it reports readiness (and returns
+the rows), then either `discard_async_query_results` frees the results or,
+for a query still running, `cancel_async_query` stops it.
+
+> **Note:** `get_collections_in_scope`, `get_schema_for_collection`,
+> `create_index` and `list_indexes` exist, with different behavior, on both
+> servers. Each server is a separate process, so this is only a concern if a
+> single MCP client registers both `operational` and `operational-insights`
 > simultaneously — in that case, disambiguate at the client configuration
 > layer (e.g. by giving the two server entries distinct names in the
 > client's own config).

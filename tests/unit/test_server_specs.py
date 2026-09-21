@@ -23,6 +23,7 @@ KNOWN_DUPLICATE_TOOL_NAMES = frozenset(
         "get_collections_in_scope",
         "get_schema_for_collection",
         "create_index",
+        "list_indexes",
     }
 )
 

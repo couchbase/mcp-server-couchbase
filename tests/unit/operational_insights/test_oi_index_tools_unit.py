@@ -11,9 +11,10 @@ bad input either raises out of the formatter into the error envelope, or is
 forwarded to the server to reject.
 """
 
+import pytest
 from _oi_fakes import make_oi_ctx
 
-from cb_mcp.tools.operational_insights.index import create_index
+from cb_mcp.tools.operational_insights.index import create_index, list_indexes
 from cb_mcp.utils.operational_insights.sqlpp import safe_field_path
 
 
@@ -339,3 +340,108 @@ class TestCreateArrayIndex:
         )
 
         assert "UNKNOWN KEY" not in result["statement"]
+
+
+class TestListIndexes:
+    def test_returns_rows_on_success(self) -> None:
+        ctx, cluster = make_oi_ctx()
+        cluster.execute_query.return_value.get_all_rows.return_value = [
+            {
+                "DatabaseName": "travel-sample",
+                "ScopeName": "inventory",
+                "CollectionName": "airline",
+                "IndexName": "name_idx",
+                "IndexStructure": "BTREE",
+                "SearchKey": [["name"]],
+                "ExcludeUnknownKey": False,
+            }
+        ]
+
+        result = list_indexes(ctx)
+
+        assert result[0]["IndexName"] == "name_idx"
+        # Field paths are returned as the catalog stores them: an array of
+        # path components per indexed field.
+        assert result[0]["SearchKey"] == [["name"]]
+
+    def test_raises_on_sdk_error(self) -> None:
+        """A read tool raises rather than returning the write-tool error envelope."""
+        ctx, cluster = make_oi_ctx()
+        cluster.execute_query.side_effect = Exception("boom")
+
+        with pytest.raises(Exception, match="boom"):
+            list_indexes(ctx)
+
+    def test_excludes_system_primary_and_sample_indexes(self) -> None:
+        ctx, cluster = make_oi_ctx()
+        cluster.execute_query.return_value.get_all_rows.return_value = []
+
+        list_indexes(ctx)
+
+        query = cluster.execute_query.call_args[0][0]
+        # A primary index is the collection itself, and SAMPLE rows are
+        # optimizer statistics -- neither is a secondary index.
+        assert 'i.DatabaseName <> "System"' in query
+        assert "i.IsPrimary = false" in query
+        assert 'i.IndexStructure <> "SAMPLE"' in query
+
+    def test_filters_are_bound_as_named_parameters(self) -> None:
+        ctx, cluster = make_oi_ctx()
+        cluster.execute_query.return_value.get_all_rows.return_value = []
+
+        list_indexes(ctx, "travel-sample", "inventory", "airline")
+
+        query = cluster.execute_query.call_args[0][0]
+        query_options = cluster.execute_query.call_args[0][1]
+        # Filter values are bind parameters, never interpolated into the SQL++.
+        assert query_options["named_parameters"] == {
+            "DatabaseName": "travel-sample",
+            "DataverseName": "inventory",
+            "DatasetName": "airline",
+        }
+        assert "i.DatabaseName = $DatabaseName" in query
+        assert "travel-sample" not in query
+
+    def test_partial_filter_binds_only_supplied_values(self) -> None:
+        ctx, cluster = make_oi_ctx()
+        cluster.execute_query.return_value.get_all_rows.return_value = []
+
+        list_indexes(ctx, database_name="travel-sample")
+
+        query = cluster.execute_query.call_args[0][0]
+        query_options = cluster.execute_query.call_args[0][1]
+        assert query_options["named_parameters"] == {"DatabaseName": "travel-sample"}
+        assert "$DataverseName" not in query
+        assert "$DatasetName" not in query
+
+    def test_returns_array_index_rows_unchanged(self) -> None:
+        """Array indexes leave SearchKey empty and populate SearchKeyElements.
+
+        Both fields are passed through exactly as the catalog stores them.
+        """
+        ctx, cluster = make_oi_ctx()
+        elements = [{"UnnestList": [["schedule"]], "ProjectList": [["day"]]}]
+        cluster.execute_query.return_value.get_all_rows.return_value = [
+            {
+                "IndexName": "arr_idx",
+                "IndexStructure": "ARRAY",
+                "SearchKey": [],
+                "SearchKeyElements": elements,
+            }
+        ]
+
+        result = list_indexes(ctx)
+
+        assert result[0]["SearchKey"] == []
+        assert result[0]["SearchKeyElements"] == elements
+
+    def test_selects_both_search_key_encodings(self) -> None:
+        ctx, cluster = make_oi_ctx()
+        cluster.execute_query.return_value.get_all_rows.return_value = []
+
+        list_indexes(ctx)
+
+        query = cluster.execute_query.call_args[0][0]
+        # Selecting only SearchKey would report array indexes as fieldless.
+        assert "i.SearchKey," in query
+        assert "i.SearchKeyElements," in query

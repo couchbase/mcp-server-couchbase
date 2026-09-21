@@ -353,7 +353,7 @@ globally unique across all servers — a client connected to two servers sees on
 flat namespace, so a duplicate name is ambiguous to it. Prefer a unique name.
 If a name genuinely must be shared (e.g. porting an existing tool set whose
 names predate this rule, as `operational-insights`'s `get_collections_in_scope`,
-`get_schema_for_collection` and `create_index` do), add it to
+`get_schema_for_collection`, `create_index` and `list_indexes` do), add it to
 `KNOWN_DUPLICATE_TOOL_NAMES` in `tests/unit/test_server_specs.py` with a
 one-line reason — the test still fails on any *new*, undocumented collision.
 

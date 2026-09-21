@@ -20,9 +20,14 @@ OI_EXPECTED_TOOLS = {
     "get_scopes_in_database",
     "get_collections_in_scope",
     "get_schema_for_collection",
+    "list_indexes",
     "explain_query",
     "run_query_sync",
+    "run_query_async",
+    "get_async_query_results",
+    "discard_async_query_results",
     "create_index",
+    "cancel_async_query",
 }
 
 
