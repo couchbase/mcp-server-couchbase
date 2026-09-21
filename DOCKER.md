@@ -81,6 +81,28 @@ Requires Couchbase Server 7.6+ and the Search service. Vector search is not supp
 | `get_queries_not_using_covering_index` | Get queries that don't use a covering index |
 | `get_queries_not_selective` | Get queries that are not selective (index scans return many more documents than final result) |
 
+### Operational Insights tools
+
+This image also runs a second server, for Operational Insights clusters —
+append `operational-insights` to the container's command to select it
+instead of the default `operational` server (see [Configuration](#configuration)
+below).
+
+| Tool Name | Description |
+| --------- | ----------- |
+| `get_databases_in_cluster` | List all databases in the Operational Insights cluster. |
+| `get_scopes_in_database` | List all scopes in a database. |
+| `get_collections_in_scope` | List all collections (datasets) in a scope. Shares its name with the operational server's tool of the same name — see the note below. |
+| `get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. Shares its name with the operational server's tool of the same name — see the note below. |
+| `run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return all result rows. Enforces read-only mode server-side; there is no client-side SQL++ parser. |
+| `explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
+| `create_index` | Create a secondary index via `CREATE INDEX`. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** Shares its name with the operational server's tool of the same name — see the note below. |
+
+> **Note:** `get_collections_in_scope`, `get_schema_for_collection` and
+> `create_index` exist, with different behavior, on both servers — each runs
+> as a separate container/process, so this only matters if one MCP client
+> registers both simultaneously.
+
 ## Usage
 
 The Docker images can be used in the supported MCP clients such as Claude Desktop, Cursor, Windsurf, etc in combination with Docker.
@@ -117,6 +139,19 @@ Add the configuration specified below to the MCP configuration in your MCP clien
 }
 ```
 
+To run the [Operational Insights server](#operational-insights-tools)
+instead, append `operational-insights` to `args` and use its own env vars
+(`CB_OI_CONNECTION_STRING`/`CB_OI_USERNAME`/`CB_OI_PASSWORD`, see below) —
+with no trailing argument the container runs the default operational server:
+
+```bash
+docker run --rm -i \
+  -e CB_OI_CONNECTION_STRING=http://localhost:8095 \
+  -e CB_OI_USERNAME=Administrator \
+  -e CB_OI_PASSWORD=password \
+  docker.io/couchbase/mcp-server:latest operational-insights
+```
+
 ### Environment Variables
 
 The detailed explanation for the environment variables can be found on the [GitHub Repo](https://github.com/couchbase/mcp-server-couchbase?tab=readme-ov-file#additional-configuration-for-mcp-server).
@@ -129,10 +164,13 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_CLIENT_CERT_PATH`                | Path to the client certificate file for mTLS authentication                                                                                              | **Required if using mTLS (or Username and Password required)** |
 | `CB_CLIENT_KEY_PATH`                 | Path to the client key file for mTLS authentication                                                                                                      | **Required if using mTLS (or Username and Password required)** |
 | `CB_CA_CERT_PATH`                    | Path to server root certificate for TLS if server is configured with a self-signed/untrusted certificate.                                                |                                                                |
+| `CB_OI_CONNECTION_STRING`            | [Operational Insights server](#operational-insights-tools) endpoint URL (HTTP/HTTPS, not `couchbase://`). Ignored by the default `operational` server.  | **Required for `operational-insights`**                       |
+| `CB_OI_USERNAME`                     | Operational Insights username. Ignored by the default `operational` server.                                                                              | **Required for `operational-insights`**                       |
+| `CB_OI_PASSWORD`                     | Operational Insights password. Ignored by the default `operational` server.                                                                              | **Required for `operational-insights`**                       |
 | `CB_MCP_READ_ONLY_MODE`              | Prevent all data modifications (KV, Query, and index management). When `true`, write tools are not loaded.                                                               | `true`                                                         |
 | `CB_MCP_TRANSPORT`                   | Transport mode (stdio/http/sse)                                                                                                                          | `stdio`                                                        |
 | `CB_MCP_HOST`                        | Server host (HTTP/SSE modes)                                                                                                                             | `127.0.0.1`                                                    |
-| `CB_MCP_PORT`                        | Server port (HTTP/SSE modes)                                                                                                                             | `8000`                                                         |
+| `CB_MCP_PORT`                        | Server port (HTTP/SSE modes). Defaults to each server's own port when unset (`operational`: `8000`, `operational-insights`: `8001`) — set explicitly only to override. | `8000` (`operational`) / `8001` (`operational-insights`) |
 | `CB_MCP_DISABLED_TOOLS`              | Tools to disable (see [Disabling Tools](#disabling-tools))                                                                                               | None                                                           |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | Tools that require explicit user confirmation before execution (see [Elicitation/Confirmation for Tool Calls](#elicitationconfirmation-for-tool-calls))  | None                                                           |
 | `CB_MCP_LOG_LEVEL`                   | Logging level for the server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging))                                                        | `info`                                                         |

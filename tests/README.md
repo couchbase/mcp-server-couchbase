@@ -1,6 +1,6 @@
 # Tests
 
-The suite is split into three tiers by how much infrastructure each tier
+The suite is split into four tiers by how much infrastructure each tier
 needs. Each tier lives in its own directory so a glance at the layout tells
 you what a file depends on, and so CI can opt into / out of each tier
 independently.
@@ -8,9 +8,14 @@ independently.
 ```
 tests/
 ├── _test_env.py         # shared env helpers (cluster creds, default bucket)
-├── conftest.py          # top-level fixtures + helpers used by integration tests
+├── _all_specs.py        # test-only ALL_SPECS registry, for cross-server invariant tests
 ├── unit/                # pure Python, no Couchbase, no LLM
+│   └── operational_insights/ # unit tests exclusive to the OI server; no separate
+│                              #   conftest — grouped here for now, same tier
 ├── integration/         # needs a live Couchbase cluster
+│   ├── conftest.py           # fixtures + helpers used by (operational) integration tests
+│   └── operational_insights/ # needs a live Operational Insights cluster instead; env-gated
+├── perf/                # in-process performance tests, opt-in via CB_MCP_PERF=1
 └── accuracy/            # AI-in-the-loop — needs Couchbase + an OpenAI key
     ├── conftest.py
     ├── sdk/                  # the eval engine (agent, judge, scorer, matcher, ...)
@@ -23,7 +28,10 @@ tests/
 | Tier | Directory | Marker | Live cluster? | LLM cost? |
 | --- | --- | --- | --- | --- |
 | Unit | `tests/unit/` | — | No | No |
-| Integration | `tests/integration/` | `integration` | Yes | No |
+| └ Unit (Operational Insights) | `tests/unit/operational_insights/` | — | No | No |
+| Integration (operational) | `tests/integration/` | `integration` | Yes (Couchbase) | No |
+| Integration (Operational Insights) | `tests/integration/operational_insights/` | `integration` + `operational_insights` | Yes (Operational Insights) | No |
+| Perf | `tests/perf/` | `perf` | Optional (`test_live_cluster.py` only) | No |
 | Accuracy | `tests/accuracy/` | `accuracy` | Yes | Yes |
 | └ Result validation | `tests/accuracy/result_validation/` | `accuracy` + `result_eval` | Yes | Yes |
 
@@ -33,12 +41,37 @@ tests under `result_validation/` (markers `accuracy` **and** `result_eval`). Mar
 applied automatically by directory — test files carry no `@pytest.mark.accuracy` decorators.
 
 - **Unit** — call functions in `cb_mcp.*` directly, with fakes / `SimpleNamespace`.
-  Fast, deterministic, runnable anywhere.
-- **Integration** — spawn the real MCP server over stdio (`create_mcp_session`)
-  and talk to a running Couchbase cluster. Requires `CB_CONNECTION_STRING`,
-  `CB_USERNAME`, `CB_PASSWORD`, plus `CB_MCP_TEST_BUCKET` for tests that
-  need a bucket. Missing env vars cause `pytest.skip(...)` rather than a
-  failure.
+  Fast, deterministic, runnable anywhere. Includes cross-server invariant checks
+  (`test_server_specs.py`) driven by `tests/_all_specs.py::ALL_SPECS` — extend that
+  registry, not this doc, when a third server is added.
+- **Integration (operational)** — spawn the real MCP server over stdio
+  (`create_mcp_session`) and talk to a running Couchbase cluster. Requires
+  `CB_CONNECTION_STRING`, `CB_USERNAME`, `CB_PASSWORD`, plus `CB_MCP_TEST_BUCKET`
+  for tests that need a bucket. Missing env vars cause `pytest.skip(...)`
+  rather than a failure.
+- **Integration (Operational Insights)** — spawn `mcp_server operational-insights`
+  over stdio (`create_oi_mcp_session`, defined in that directory's own
+  `conftest.py`) and talk to a running Operational Insights cluster. Requires
+  `CB_OI_CONNECTION_STRING`, `CB_OI_USERNAME`, `CB_OI_PASSWORD` (see
+  `tests/_test_env.py`). The whole directory is
+  skipped at collection time, not per-test, when those are unset — see its
+  `conftest.py`. Local setup (per
+  https://docs.couchbase.com/enterprise-analytics/current/intro/do-a-quick-install.html):
+  ```bash
+  docker network create oi
+  docker run -d --name s3mock --network oi adobe/s3mock
+  docker run -d --name oi --network oi -p 8091:8091 -p 8095:8095 \
+    couchbase/enterprise-analytics:2.2.1
+  # then POST /settings/analytics (S3Mock config) and POST /clusterInit
+  # (Administrator/password, memoryQuota=100) against http://localhost:8091 —
+  # see the Operational Insights quick-install docs linked above for the
+  # exact request bodies.
+  export CB_OI_CONNECTION_STRING=http://localhost:8095
+  export CB_OI_USERNAME=Administrator
+  export CB_OI_PASSWORD=password
+  uv run --extra dev pytest tests/integration/operational_insights -v
+  ```
+- **Perf** — in-process performance tests, opt-in via `CB_MCP_PERF=1`; not run in CI.
 - **Accuracy** — drive an OpenAI tool-calling agent against the live MCP
   server and score the resulting tool calls. See [Accuracy tier
   details](#accuracy-tier-details) below.
@@ -115,12 +148,24 @@ any laptop.
 ## Shared helpers
 
 - [`_test_env.py`](_test_env.py) — env builders (`_build_env`,
-  `require_test_bucket`, `get_test_scope`, `get_test_collection`).
-  Imported by both the integration and accuracy conftests.
-- [`conftest.py`](conftest.py) — re-exports the helpers and adds
-  integration-only utilities (`create_mcp_session`, `extract_payload`,
-  `ensure_list`, the `EXPECTED_TOOLS` / `TOOLS_BY_CATEGORY` /
-  `TOOL_REQUIRED_PARAMS` tables).
+  `require_test_bucket`, `get_test_scope`, `get_test_collection`, and their
+  `oi_env_available` / `build_oi_env` / `get_oi_test_*` equivalents for the
+  Operational Insights tier). Imported by the integration and accuracy
+  conftests.
+- [`_all_specs.py`](_all_specs.py) — test-only `ALL_SPECS` registry (every
+  `ServerSpec` this distribution ships). `src/` deliberately has no such
+  registry (each process loads only its own SDK); this exists purely so
+  `tests/unit/test_server_specs.py` can check cross-server invariants.
+- [`integration/conftest.py`](integration/conftest.py) — the operational
+  integration tier's fixtures and helpers (`create_mcp_session`,
+  `extract_payload`, `ensure_list`, the `EXPECTED_TOOLS` / `TOOLS_BY_CATEGORY` /
+  `TOOL_REQUIRED_PARAMS` tables — all operational-only) plus
+  `create_session_for_subcommand`, a small public wrapper a second server's
+  integration tests can reuse to spawn `mcp_server <subcommand>`.
+- [`integration/operational_insights/conftest.py`](integration/operational_insights/conftest.py) —
+  the Operational Insights tier's own session helper (`create_oi_mcp_session`,
+  built on `create_session_for_subcommand` above) and its directory-based
+  auto-marking + env-gated skip.
 - [`accuracy/conftest.py`](accuracy/conftest.py) — accuracy-only
   fixtures (`accuracy_client`, `openai_agent`, `judge`, `result_storage`,
   etc.) and the directory-based auto-marking.

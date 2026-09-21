@@ -24,17 +24,20 @@ class ClusterProvider(Protocol):
     Secrets Manager, etc.) and how clusters are cached (one per server,
     one per principal, etc.).
 
-    Note for a future second backing service (e.g. Enterprise Analytics,
-    reached through the unrelated ``couchbase_analytics`` SDK): only
-    ``get_cluster`` is Couchbase-specific. The shared machinery calls just
-    ``close`` (lifespan teardown) and ``get_configuration`` / ``is_connected``
-    (status reporting), so those three can be lifted into a common base
-    protocol at that point, leaving each service its own ``get_cluster``
-    return type. Doing so keeps teardown polymorphic — the operational client
-    ends with ``close()`` and the analytics client with ``shutdown()``, and
-    each provider should encapsulate that rather than the lifespan
-    type-switching on the client. Deliberately not split yet: the right base
-    is only knowable against a real second implementation.
+    A second backing service now exists — Operational Insights, reached
+    through the unrelated ``couchbase_operational_insights`` SDK (see
+    ``providers.operational_insights.OperationalInsightsClusterProvider``).
+    Only ``get_cluster`` is Couchbase-specific; the shared machinery calls
+    just ``close`` (lifespan teardown) and ``get_configuration`` /
+    ``is_connected`` (status reporting), so those three could be lifted into
+    a common base protocol, leaving each service its own ``get_cluster``
+    return type. Doing so keeps teardown polymorphic — the operational
+    client ends with ``close()`` and the Operational Insights client with
+    ``shutdown()``, and each provider encapsulates that rather than the
+    lifespan type-switching on the client. Deliberately not split yet: this
+    is a shared contract other implementations depend on, so the split
+    itself belongs in its own change, not bundled into adding the second
+    provider.
 
     Beware when that happens: ``runtime_checkable`` verifies method *names*
     only, never signatures or types, so unrelated providers sharing these

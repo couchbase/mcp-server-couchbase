@@ -45,6 +45,16 @@ jobs:
   # ============================================
   # Integration Tests - All Transport Modes
   # ============================================
+  # NOTE: this job only provisions a Couchbase Server container and only
+  # exercises the operational server. The Operational Insights server's
+  # integration tests (tests/integration/operational_insights/) are env-gated
+  # (see that directory's conftest.py) and report skipped, not failed, when
+  # CB_OI_CONNECTION_STRING/CB_OI_USERNAME/CB_OI_PASSWORD are unset here — as
+  # they are. Operational Insights connects to a different product than a
+  # Couchbase Server cluster and needs its own two-container setup (see
+  # tests/README.md for the local Docker recipe), so it isn't provisioned in
+  # this job. Run that tier locally against a live Operational Insights
+  # cluster before releasing a change to it.
   integration-tests:
     name: Integration (${{ matrix.transport }} / cb-${{ matrix.cb_version }} / ${{ matrix.server_binary }})
     runs-on: ubuntu-latest

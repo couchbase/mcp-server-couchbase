@@ -39,8 +39,11 @@ def _invoke(args: list[str], env: dict[str, str] | None = None):
     """Run the CLI with the server assembled but never started."""
     captured: dict = {}
 
-    def capture(*_args, **kwargs):
+    def capture(*fastmcp_args, **kwargs):
         captured["lifespan"] = kwargs.get("lifespan")
+        # First positional arg to FastMCP(...) is spec.fastmcp_name — the
+        # cheapest way to tell which server actually got assembled.
+        captured["fastmcp_name"] = fastmcp_args[0] if fastmcp_args else None
         return MagicMock()
 
     with (
@@ -52,7 +55,7 @@ def _invoke(args: list[str], env: dict[str, str] | None = None):
         result = CliRunner().invoke(
             mcp_server.main, args, env=env, catch_exceptions=False
         )
-    return result, captured.get("lifespan"), run
+    return result, captured.get("lifespan"), run, captured.get("fastmcp_name")
 
 
 def _settings_from(lifespan) -> dict:
@@ -77,19 +80,21 @@ class TestBareInvocationStillWorks:
         server with environment variables only, so a non-zero exit here breaks
         all published containers at once.
         """
-        result, lifespan, run = _invoke([])
+        result, lifespan, run, fastmcp_name = _invoke([])
         assert result.exit_code == 0, result.output
         assert lifespan is not None, "the server was never assembled"
         run.assert_called_once()
+        # "bare = operational" must not silently flip to some other server.
+        assert fastmcp_name == "couchbase-operational"
 
     def test_options_without_a_subcommand(self):
         """Options with no subcommand must reach the operational server."""
-        result, lifespan, _ = _invoke(["--transport", "http"])
+        result, lifespan, _, _ = _invoke(["--transport", "http"])
         assert result.exit_code == 0, result.output
         assert _settings_from(lifespan)["transport"] == "http"
 
     def test_env_vars_only(self):
-        result, lifespan, _ = _invoke(
+        result, lifespan, _, _ = _invoke(
             [], env={"CB_CONNECTION_STRING": "couchbase://from-env"}
         )
         assert result.exit_code == 0, result.output
@@ -101,16 +106,34 @@ class TestBareInvocationStillWorks:
         Injection keys off the first token, which is the option itself, so the
         value is consumed by the subcommand's parser as normal.
         """
-        result, lifespan, _ = _invoke(["--log-file", "operational"])
+        result, lifespan, _, _ = _invoke(["--log-file", "operational"])
+        assert result.exit_code == 0, result.output
+        assert _settings_from(lifespan) is not None
+
+    def test_option_value_equal_to_the_second_subcommand_name(self):
+        """``--log-file operational-insights`` is also just a value.
+
+        Sibling of the test above, now that there are two subcommand names a
+        flag value could collide with.
+        """
+        result, lifespan, _, _ = _invoke(["--log-file", "operational-insights"])
         assert result.exit_code == 0, result.output
         assert _settings_from(lifespan) is not None
 
 
 class TestExplicitSubcommand:
     def test_explicit_operational(self):
-        result, lifespan, _ = _invoke(["operational", "--transport", "http"])
+        result, lifespan, _, _ = _invoke(["operational", "--transport", "http"])
         assert result.exit_code == 0, result.output
         assert _settings_from(lifespan)["transport"] == "http"
+
+    def test_explicit_operational_insights(self):
+        result, lifespan, _, fastmcp_name = _invoke(
+            ["operational-insights", "--transport", "http"]
+        )
+        assert result.exit_code == 0, result.output
+        assert _settings_from(lifespan)["transport"] == "http"
+        assert fastmcp_name == "couchbase-operational-insights"
 
     def test_version_on_group_and_subcommand(self):
         """--version works at both levels, and names the distribution.
@@ -128,6 +151,10 @@ class TestExplicitSubcommand:
         cases = (
             (["--version"], "couchbase-mcp-server"),
             (["operational", "--version"], "couchbase-mcp-server operational"),
+            (
+                ["operational-insights", "--version"],
+                "couchbase-mcp-server operational-insights",
+            ),
         )
         for args, expected_prog in cases:
             result = CliRunner().invoke(mcp_server.main, args)
@@ -153,24 +180,35 @@ class TestFailsLoudlyRatherThanSilently:
     def test_unknown_subcommand_is_rejected_by_name(self):
         """A mistyped or not-yet-shipped server must say so.
 
-        Injecting the default here would rewrite ``analytics`` into
-        ``operational analytics`` and report an extra-argument error naming a
-        server the user never typed.
+        Injecting the default here would rewrite ``not-a-server`` into
+        ``operational not-a-server`` and report an extra-argument error
+        naming a server the user never typed.
         """
-        result = CliRunner().invoke(mcp_server.main, ["analytics"])
+        result = CliRunner().invoke(mcp_server.main, ["not-a-server"])
         assert result.exit_code == 2
-        assert "no such command 'analytics'" in result.output.lower()
+        assert "no such command 'not-a-server'" in result.output.lower()
 
     def test_unknown_subcommand_is_not_masked_by_a_trailing_eager_option(self):
-        """The silent-success case: ``analytics --version`` used to exit 0.
+        """The silent-success case: ``not-a-server --version`` used to exit 0.
 
         ``--version`` is eager, so once the stray word had been demoted to an
         argument of the default subcommand it printed and exited before the
         argument was ever validated — the run looked like it worked.
         """
-        result = CliRunner().invoke(mcp_server.main, ["analytics", "--version"])
+        result = CliRunner().invoke(mcp_server.main, ["not-a-server", "--version"])
         assert result.exit_code == 2, result.output
-        assert "no such command 'analytics'" in result.output.lower()
+        assert "no such command 'not-a-server'" in result.output.lower()
+
+    def test_near_miss_subcommand_name_is_rejected(self):
+        """A truncated/singular near-miss of a real subcommand still errors.
+
+        Now that two subcommand names share the prefix "operational", a typo
+        like the singular "operational-insight" must not be treated as a
+        match for either.
+        """
+        result = CliRunner().invoke(mcp_server.main, ["operational-insight"])
+        assert result.exit_code == 2
+        assert "no such command 'operational-insight'" in result.output.lower()
 
     def test_unknown_option_still_errors(self):
         result = CliRunner().invoke(mcp_server.main, ["--definitely-not-an-option"])

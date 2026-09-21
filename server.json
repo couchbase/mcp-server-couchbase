@@ -46,6 +46,27 @@
           "isSecret": false
         },
         {
+          "name": "CB_OI_CONNECTION_STRING",
+          "description": "Operational Insights (Enterprise Analytics) endpoint URL, e.g. http://localhost:8095. Only used by the operational-insights subcommand; an HTTP(S) URL, not a couchbase:// connection string.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_OI_USERNAME",
+          "description": "Operational Insights username. Only used by the operational-insights subcommand.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_OI_PASSWORD",
+          "description": "Operational Insights password. Only used by the operational-insights subcommand.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
           "name": "CB_CLIENT_CERT_PATH",
           "description": "Couchbase client certificate path. Required for mTLS authentication.",
           "isRequired": false,
@@ -550,6 +571,27 @@
           "isRequired": false,
           "format": "string",
           "isSecret": false
+        },
+        {
+          "name": "CB_OI_CONNECTION_STRING",
+          "description": "Operational Insights (Enterprise Analytics) endpoint URL, e.g. http://localhost:8095. Only used by the operational-insights subcommand; an HTTP(S) URL, not a couchbase:// connection string.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_OI_USERNAME",
+          "description": "Operational Insights username. Only used by the operational-insights subcommand.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_OI_PASSWORD",
+          "description": "Operational Insights password. Only used by the operational-insights subcommand.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
         },
         {
           "name": "CB_CLIENT_CERT_PATH",

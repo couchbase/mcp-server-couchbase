@@ -36,6 +36,7 @@ __all__ = [
     "_build_env",
     "create_logging_test_session",
     "create_mcp_session",
+    "create_session_for_subcommand",
     "ensure_list",
     "extract_payload",
     "get_test_bucket",
@@ -45,6 +46,14 @@ __all__ = [
     "require_test_bucket",
 ]
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+# EXPECTED_TOOLS / TOOLS_BY_CATEGORY / TOOL_REQUIRED_PARAMS below describe the
+# *operational* server only. The Operational Insights server has its own,
+# much smaller census in tests/integration/operational_insights/conftest.py —
+# kept separate rather than merged in here, since merging would make every
+# operational-only census test (test_no_unexpected_tools, etc.) fail against
+# a session connected to the operational server, which never registers the
+# OI tools at all.
 
 # Tools we expect to be registered by the server
 EXPECTED_TOOLS = {
@@ -253,14 +262,29 @@ def _build_stdio_subprocess_env() -> dict[str, str]:
 @asynccontextmanager
 async def _stdio_session(
     extra_env: dict[str, str] | None,
+    *,
+    subcommand: str | None = None,
+    base_env: dict[str, str] | None = None,
 ) -> AsyncIterator[ClientSession]:
-    """Spawn a fresh ``mcp_server`` subprocess and yield a session to it."""
-    env = _build_stdio_subprocess_env()
+    """Spawn a fresh ``mcp_server`` subprocess and yield a session to it.
+
+    ``subcommand`` (e.g. ``"operational-insights"``) is appended to the
+    module's argv when given. ``base_env`` overrides the default
+    (operational-credential-requiring) env entirely, rather than layering on
+    top of it — a second server's integration tests build their own base env
+    (different credential vars, e.g. ``build_oi_env()``) and must not be
+    forced through this server's ``REQUIRED_ENV_VARS`` check to get there.
+    See ``tests/integration/operational_insights/conftest.py``.
+    """
+    env = dict(base_env) if base_env is not None else _build_stdio_subprocess_env()
     if extra_env:
         env.update(extra_env)
+    args = ["-m", "mcp_server"]
+    if subcommand:
+        args.append(subcommand)
     params = StdioServerParameters(
         command=sys.executable,
-        args=["-m", "mcp_server"],
+        args=args,
         env=env,
     )
     async with asyncio.timeout(DEFAULT_TIMEOUT):
@@ -268,6 +292,20 @@ async def _stdio_session(
             async with ClientSession(read_stream, write_stream) as session:
                 await session.initialize()
                 yield session
+
+
+@asynccontextmanager
+async def create_session_for_subcommand(
+    subcommand: str, env: dict[str, str]
+) -> AsyncIterator[ClientSession]:
+    """Public wrapper of ``_stdio_session`` for a non-operational subcommand.
+
+    ``env`` is used as-is (see ``base_env`` above) — the caller is
+    responsible for building a complete environment (credentials, transport,
+    read-only mode) for its own server.
+    """
+    async with _stdio_session(None, subcommand=subcommand, base_env=env) as session:
+        yield session
 
 
 @asynccontextmanager
