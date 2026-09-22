@@ -669,6 +669,11 @@ See [Operational Insights tools](#operational-insights-tools) above for the
 tool list, and the note there about the three tool names shared with the
 operational server.
 
+This server has its own [MCP Registry](https://registry.modelcontextprotocol.io)
+listing, published from `operational_insights_server.json` — separate from
+the operational server's `server.json` — so it's independently discoverable
+in the registry rather than buried inside the operational server's entry.
+
 ## Streamable HTTP Transport Mode
 
 The MCP Server can be run in [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http) transport mode which allows multiple clients to connect to the same server instance via HTTP.

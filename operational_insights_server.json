@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.couchbase/mcp-server-couchbase",
-  "description": "Couchbase MCP Server - Enable AI agents to connect to and interact with Couchbase clusters.",
+  "name": "io.github.couchbase/mcp-server-couchbase-operational-insights",
+  "description": "Couchbase Operational Insights MCP Server - Enable AI agents to connect to and interact with Couchbase Operational Insights (Enterprise Analytics) clusters.",
   "repository": {
     "url": "https://github.com/couchbase/mcp-server-couchbase",
     "source": "github"
@@ -18,50 +18,29 @@
       },
       "environmentVariables": [
         {
-          "name": "CB_CONNECTION_STRING",
-          "description": "Couchbase connection string. Required for connecting to the cluster.",
+          "name": "CB_OI_CONNECTION_STRING",
+          "description": "Operational Insights (Enterprise Analytics) endpoint URL, e.g. http://localhost:8095. An HTTP(S) URL, not a couchbase:// connection string.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
         },
         {
-          "name": "CB_USERNAME",
-          "description": "Couchbase database username. Required for basic authentication.",
+          "name": "CB_OI_USERNAME",
+          "description": "Operational Insights username.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
         },
         {
-          "name": "CB_PASSWORD",
-          "description": "Couchbase database password. Required for basic authentication.",
+          "name": "CB_OI_PASSWORD",
+          "description": "Operational Insights password.",
           "isRequired": false,
           "format": "string",
           "isSecret": true
         },
         {
-          "name": "CB_CA_CERT_PATH",
-          "description": "Couchbase CA certificate path. Required for TLS authentication in non Capella clusters.",
-          "isRequired": false,
-          "format": "string",
-          "isSecret": false
-        },
-        {
-          "name": "CB_CLIENT_CERT_PATH",
-          "description": "Couchbase client certificate path. Required for mTLS authentication.",
-          "isRequired": false,
-          "format": "string",
-          "isSecret": false
-        },
-        {
-          "name": "CB_CLIENT_KEY_PATH",
-          "description": "Couchbase client key path. Required for mTLS authentication.",
-          "isRequired": false,
-          "format": "string",
-          "isSecret": false
-        },
-        {
           "name": "CB_MCP_READ_ONLY_MODE",
-          "description": "Couchbase read only mode. Set to true to allow disable write operations across both KV and query. KV write tools are not loaded and SQL++ queries that modify data are blocked. Set to false to allow data modification queries and tools.",
+          "description": "Operational Insights read only mode. Set to true to disable write operations (index/query management). Set to false to allow data modification queries and tools.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
@@ -251,9 +230,15 @@
       ],
       "packageArguments": [
         {
+          "type": "positional",
+          "valueHint": "subcommand",
+          "value": "operational-insights",
+          "description": "Selects the Operational Insights server subcommand. Fixed; not user-configurable."
+        },
+        {
           "type": "named",
           "name": "--connection-string",
-          "description": "Couchbase connection string. Required for connecting to the cluster.",
+          "description": "Operational Insights (Enterprise Analytics) endpoint URL, e.g. http://localhost:8095. An HTTP(S) URL, not a couchbase:// connection string.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -261,7 +246,7 @@
         {
           "type": "named",
           "name": "--username",
-          "description": "Couchbase database username. Required for basic authentication.",
+          "description": "Operational Insights username.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -269,39 +254,15 @@
         {
           "type": "named",
           "name": "--password",
-          "description": "Couchbase database password. Required for basic authentication.",
+          "description": "Operational Insights password.",
           "isRequired": false,
           "format": "string",
           "isSecret": true
         },
         {
           "type": "named",
-          "name": "--ca-cert-path",
-          "description": "Couchbase CA certificate path. Required for TLS authentication in non Capella clusters.",
-          "isRequired": false,
-          "format": "string",
-          "isSecret": false
-        },
-        {
-          "type": "named",
-          "name": "--client-cert-path",
-          "description": "Couchbase client certificate path. Required for mTLS authentication.",
-          "isRequired": false,
-          "format": "string",
-          "isSecret": false
-        },
-        {
-          "type": "named",
-          "name": "--client-key-path",
-          "description": "Couchbase client key path. Required for mTLS authentication.",
-          "isRequired": false,
-          "format": "string",
-          "isSecret": false
-        },
-        {
-          "type": "named",
           "name": "--read-only-mode",
-          "description": "Couchbase read only mode. Set to true to disable write operations across both KV and query. KV write tools are not loaded and SQL++ queries that modify data are blocked. Set to false to allow data modification queries and tools.",
+          "description": "Operational Insights read only mode. Set to true to disable write operations (index/query management). Set to false to allow data modification queries and tools.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
@@ -524,50 +485,29 @@
       },
       "environmentVariables": [
         {
-          "name": "CB_CONNECTION_STRING",
-          "description": "Couchbase connection string. Required for connecting to the cluster.",
+          "name": "CB_OI_CONNECTION_STRING",
+          "description": "Operational Insights (Enterprise Analytics) endpoint URL, e.g. http://localhost:8095. An HTTP(S) URL, not a couchbase:// connection string.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
         },
         {
-          "name": "CB_USERNAME",
-          "description": "Couchbase database username. Required for basic authentication.",
+          "name": "CB_OI_USERNAME",
+          "description": "Operational Insights username.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
         },
         {
-          "name": "CB_PASSWORD",
-          "description": "Couchbase database password. Required for basic authentication.",
+          "name": "CB_OI_PASSWORD",
+          "description": "Operational Insights password.",
           "isRequired": false,
           "format": "string",
           "isSecret": true
         },
         {
-          "name": "CB_CA_CERT_PATH",
-          "description": "Couchbase CA certificate path. Required for TLS authentication in non Capella clusters.",
-          "isRequired": false,
-          "format": "string",
-          "isSecret": false
-        },
-        {
-          "name": "CB_CLIENT_CERT_PATH",
-          "description": "Couchbase client certificate path. Required for mTLS authentication.",
-          "isRequired": false,
-          "format": "string",
-          "isSecret": false
-        },
-        {
-          "name": "CB_CLIENT_KEY_PATH",
-          "description": "Couchbase client key path. Required for mTLS authentication.",
-          "isRequired": false,
-          "format": "string",
-          "isSecret": false
-        },
-        {
           "name": "CB_MCP_READ_ONLY_MODE",
-          "description": "Couchbase read only mode. Set to true to disable write operations across both KV and query. KV write tools are not loaded and SQL++ queries that modify data are blocked. Set to false to allow data modification queries and tools.",
+          "description": "Operational Insights read only mode. Set to true to disable write operations (index/query management). Set to false to allow data modification queries and tools.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
@@ -753,6 +693,14 @@
           "isRequired": false,
           "format": "string",
           "isSecret": false
+        }
+      ],
+      "packageArguments": [
+        {
+          "type": "positional",
+          "valueHint": "subcommand",
+          "value": "operational-insights",
+          "description": "Selects the Operational Insights server subcommand. Fixed; not user-configurable."
         }
       ]
     }
