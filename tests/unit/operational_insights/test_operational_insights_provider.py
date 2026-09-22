@@ -38,7 +38,9 @@ def test_get_cluster_connects_lazily_and_caches():
         first = provider.get_cluster(ctx=MagicMock())
         second = provider.get_cluster(ctx=MagicMock())
 
-    connect.assert_called_once_with("http://localhost:8095", "Administrator", "hunter2")
+    connect.assert_called_once_with(
+        "http://localhost:8095", "Administrator", "hunter2", None, None, None, None
+    )
     assert first is cluster
     assert second is cluster
 

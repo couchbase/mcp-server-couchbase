@@ -632,6 +632,10 @@ common misconfiguration when pointing this server at a cluster.
 | `--connection-string` | `CB_OI_CONNECTION_STRING` | Operational Insights endpoint URL (HTTP/HTTPS, not `couchbase://`) | None |
 | `--username` | `CB_OI_USERNAME` | Operational Insights username | None |
 | `--password` | `CB_OI_PASSWORD` | Operational Insights password | None |
+| `--ca-cert-path` | `CB_OI_CA_CERT_PATH` | Path to server root certificate (PEM), for verifying a self-signed/untrusted server certificate | None |
+| `--client-cert-path` | `CB_OI_CLIENT_CERT_PATH` | Path to the client certificate for mTLS authentication — a PEM cert (paired with `--client-key-path`) or a PKCS#12 bundle (`.p12`/`.pfx`, `--client-key-path` left unset). Requires an `https://` `--connection-string`; overrides `--username`/`--password` when set | None |
+| `--client-key-path` | `CB_OI_CLIENT_KEY_PATH` | Path to the client certificate's private key (PEM). Leave unset when `--client-cert-path` is a PKCS#12 bundle | None |
+| `--client-cert-password` | `CB_OI_CLIENT_CERT_PASSWORD` | Decryption password for an encrypted client key or PKCS#12 bundle | None |
 
 Every other flag (`--read-only-mode`, `--transport`, `--host`, `--port`,
 `--disabled-tools`, `--confirmation-required-tools`, `--log-*`,

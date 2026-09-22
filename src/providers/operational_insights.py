@@ -57,6 +57,10 @@ class OperationalInsightsClusterProvider:
             self._settings.get("connection_string"),  # type: ignore[arg-type]
             self._settings.get("username"),  # type: ignore[arg-type]
             self._settings.get("password"),  # type: ignore[arg-type]
+            self._settings.get("ca_cert_path"),  # type: ignore[arg-type]
+            self._settings.get("client_cert_path"),  # type: ignore[arg-type]
+            self._settings.get("client_key_path"),  # type: ignore[arg-type]
+            self._settings.get("client_cert_password"),  # type: ignore[arg-type]
         )
 
     def close(self) -> None:
@@ -88,6 +92,10 @@ class OperationalInsightsClusterProvider:
             "connection_string": s.get("connection_string", "Not set"),
             "username": s.get("username", "Not set"),
             "password_configured": bool(s.get("password")),
+            "ca_cert_path_configured": bool(s.get("ca_cert_path")),
+            "client_cert_path_configured": bool(s.get("client_cert_path")),
+            "client_key_path_configured": bool(s.get("client_key_path")),
+            "client_cert_password_configured": bool(s.get("client_cert_password")),
         }
 
     def is_connected(

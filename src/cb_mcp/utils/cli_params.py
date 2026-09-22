@@ -107,13 +107,25 @@ CLUSTER_CREDENTIALS = CredentialProfile(
     ),
 )
 
-#: Three keys, not six: Operational Insights speaks HTTP(S) and has no mTLS
-#: client material. The difference is not cosmetic — ``ServerSpec`` for this
-#: server classifies no extra secret keys, so emitting ``client_cert_path``
-#: here would be an unclassified settings key (test_settings_classification).
+#: Operational Insights speaks HTTP(S) rather than ``couchbase://``, but
+#: supports the same mTLS client-certificate material as the operational
+#: cluster (plus a password for encrypted keys/PKCS#12 bundles, which the
+#: operational SDK's ``CertificateAuthenticator`` has no equivalent of).
+#: ``ServerSpec.secret_settings_keys`` for this server classifies
+#: ``client_cert_path``/``client_key_path``/``client_cert_password``, so
+#: adding a key here without also adding it there would be an unclassified
+#: settings key (test_settings_classification).
 INSIGHTS_CREDENTIALS = CredentialProfile(
     options=oi_credential_options,
-    settings_keys=("connection_string", "username", "password"),
+    settings_keys=(
+        "connection_string",
+        "username",
+        "password",
+        "ca_cert_path",
+        "client_cert_path",
+        "client_key_path",
+        "client_cert_password",
+    ),
 )
 
 

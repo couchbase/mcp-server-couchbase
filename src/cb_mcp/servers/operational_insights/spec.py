@@ -39,12 +39,19 @@ SPEC = ServerSpec(
     # This server owns the couchbase_operational_insights SDK's logging.
     sdk_log_hook=bridge_sdk_logging,
     reported_dependencies=("couchbase-operational-insights",),
-    # Every settings key this server's CLI produces (connection_string,
-    # username, password, plus the server-agnostic block: read_only_mode,
-    # transport, host, port, disabled_tools, confirmation_required_tools,
-    # oauth_*) is already covered by the shared allow-lists in
-    # utils/environment.py. Declaring any of them here would trip
+    # connection_string, username, password, ca_cert_path and the
+    # server-agnostic block (read_only_mode, transport, host, port,
+    # disabled_tools, confirmation_required_tools, oauth_*) are already
+    # covered by the shared allow-lists in utils/environment.py. Declaring any
+    # of them here would trip
     # test_spec_contributions_do_not_duplicate_the_shared_lists.
+    # client_cert_path/client_key_path/client_cert_password are this server's
+    # mTLS client-certificate material and have no shared-list equivalent
+    # (the operational server declares its own two-key subset the same way).
     safe_settings_keys=(),
-    secret_settings_keys=(),
+    secret_settings_keys=(
+        "client_cert_path",
+        "client_key_path",
+        "client_cert_password",
+    ),
 )

@@ -45,4 +45,35 @@ oi_credential_options = compose(
         envvar="CB_OI_PASSWORD",
         help="Operational Insights password",
     ),
+    click.option(
+        "--ca-cert-path",
+        "ca_cert_path",
+        envvar="CB_OI_CA_CERT_PATH",
+        help="Path to the server trust store (CA certificate) file. The certificate at this path is used to verify the server certificate during the authentication process.",
+    ),
+    click.option(
+        "--client-cert-path",
+        "client_cert_path",
+        envvar="CB_OI_CLIENT_CERT_PATH",
+        help="Path to the client certificate used for mTLS authentication. "
+        "Either a PEM certificate (paired with --client-key-path) or a "
+        "PKCS#12 bundle (.p12/.pfx, --client-key-path left unset). Requires "
+        "an https:// --connection-string. When set, --username/--password "
+        "are ignored.",
+    ),
+    click.option(
+        "--client-key-path",
+        "client_key_path",
+        envvar="CB_OI_CLIENT_KEY_PATH",
+        help="Path to the client certificate's private key file (PEM). Leave "
+        "unset when --client-cert-path is a PKCS#12 bundle that already "
+        "contains the key.",
+    ),
+    click.option(
+        "--client-cert-password",
+        "client_cert_password",
+        envvar="CB_OI_CLIENT_CERT_PASSWORD",
+        help="Decryption password for the client key/PKCS#12 bundle, if it "
+        "is encrypted. Omit if the file is unencrypted.",
+    ),
 )
