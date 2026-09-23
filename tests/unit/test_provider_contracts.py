@@ -27,8 +27,8 @@ import pytest
 
 from cb_mcp.core.contracts import ClusterProvider, ProviderLifecycle
 from cb_mcp.utils.operational_insights.contracts import OperationalInsightsProvider
+from providers.operational import OperationalClusterProvider
 from providers.operational_insights import OperationalInsightsClusterProvider
-from providers.static import StaticClusterProvider
 
 #: Settings are never read at construction time — every provider connects
 #: lazily on the first ``get_cluster`` — so an empty mapping is enough to
@@ -74,7 +74,7 @@ def test_lifecycle_protocol_declares_exactly_what_shared_code_calls():
 @pytest.mark.parametrize(
     ("provider_cls", "protocol"),
     [
-        pytest.param(StaticClusterProvider, ClusterProvider, id="operational"),
+        pytest.param(OperationalClusterProvider, ClusterProvider, id="operational"),
         pytest.param(
             OperationalInsightsClusterProvider,
             OperationalInsightsProvider,
@@ -100,7 +100,7 @@ def test_provider_implements_its_protocol(provider_cls, protocol):
 @pytest.mark.parametrize(
     "provider_cls",
     [
-        pytest.param(StaticClusterProvider, id="operational"),
+        pytest.param(OperationalClusterProvider, id="operational"),
         pytest.param(OperationalInsightsClusterProvider, id="operational-insights"),
     ],
 )

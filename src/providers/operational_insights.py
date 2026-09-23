@@ -22,7 +22,7 @@ logger = logging.getLogger(
 class OperationalInsightsClusterProvider:
     """Cluster provider for the standalone host, Operational Insights server.
 
-    Same shape as ``StaticClusterProvider``: one cluster for the life of the
+    Same shape as ``OperationalClusterProvider``: one cluster for the life of the
     server, created lazily on first request under a ``threading.Lock``
     (tool handlers run in FastMCP's thread pool, so concurrent first calls
     coalesce on a threading — not asyncio — lock). Satisfies
@@ -32,7 +32,7 @@ class OperationalInsightsClusterProvider:
     returning an OI ``Cluster``, and ``handle_registry``) are what this
     server's own tools reach for.
 
-    Two differences from ``StaticClusterProvider`` make this a separate
+    Two differences from ``OperationalClusterProvider`` make this a separate
     class rather than a parameterization of it: teardown (``shutdown()``,
     not ``close()``) and the handle registry.
     """

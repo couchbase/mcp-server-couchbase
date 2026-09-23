@@ -16,7 +16,6 @@ from fastmcp import Context
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.config import get_settings
 from ...utils.context import (
-    get_cluster_connection,
     get_cluster_provider,
     get_logging_config,
     get_server_id,
@@ -33,6 +32,7 @@ from ...utils.operational.constants import (
     MANAGEMENT_REST_PORT_PLAIN,
     MANAGEMENT_REST_PORT_TLS,
 )
+from ...utils.operational.context import get_cluster_connection
 from .query import run_cluster_query
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.server")

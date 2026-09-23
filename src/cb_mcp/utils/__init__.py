@@ -48,7 +48,6 @@ from .constants import (
 # Context utilities
 from .context import (
     AppContext,
-    get_cluster_connection,
     get_cluster_provider,
     get_logging_config,
 )
@@ -85,7 +84,6 @@ __all__ = [
     # Connection
     # Context
     "AppContext",
-    "get_cluster_connection",
     "get_cluster_provider",
     "get_logging_config",
     # Constants

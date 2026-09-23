@@ -152,13 +152,13 @@ def operational(**params: Any) -> None:
     # Deliberately lazy: a process must only load the SDK of the server it
     # is actually running (see CONTRIBUTING.md's "Adding a new MCP server").
     from cb_mcp.servers.operational.spec import SPEC  # noqa: PLC0415
-    from providers.static import StaticClusterProvider  # noqa: PLC0415
+    from providers.operational import OperationalClusterProvider  # noqa: PLC0415
 
     _start_server(
         SPEC,
         params,
         credentials=CLUSTER_CREDENTIALS,
-        provider_factory=lambda settings: StaticClusterProvider(settings=settings),
+        provider_factory=lambda settings: OperationalClusterProvider(settings=settings),
     )
 
 

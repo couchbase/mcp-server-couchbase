@@ -46,7 +46,8 @@ def _provider(ctx: Context) -> OperationalInsightsProvider:
 def get_oi_cluster(ctx: Context) -> Cluster:
     """Return the Operational Insights cluster for this request via the provider.
 
-    Same role as ``cb_mcp.utils.context.get_cluster_connection``, with the
+    Same role as ``cb_mcp.utils.operational.context.get_cluster_connection``,
+    its exact mirror on the other server, with the
     Operational Insights ``Cluster`` — an unrelated SDK's type that happens
     to share the name.
     """

@@ -27,13 +27,9 @@ from ...servers.operational_insights.constants import (
     OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE,
 )
 from ...utils.operational_insights.context import get_oi_cluster
-from ...utils.operational_insights.sqlpp import (
-    keyspace,
-    quote_literal,
-    safe_field_path,
-    safe_ident,
-)
+from ...utils.operational_insights.sqlpp import keyspace
 from ...utils.responses import tool_error, tool_success
+from ...utils.sqlpp import quote_literal, safe_field_path, safe_ident
 
 logger = logging.getLogger(f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.tools.index")
 

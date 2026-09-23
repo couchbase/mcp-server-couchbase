@@ -15,7 +15,7 @@ import pytest
 from _oi_fakes import make_oi_ctx
 
 from cb_mcp.tools.operational_insights.index import create_index, list_indexes
-from cb_mcp.utils.operational_insights.sqlpp import safe_field_path
+from cb_mcp.utils.sqlpp import safe_field_path
 
 
 class TestSafeFieldPath:

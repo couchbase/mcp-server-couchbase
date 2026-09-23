@@ -29,15 +29,13 @@ from cb_mcp.utils.constants import (
     LOGGER_ROOT,
     NETWORK_TRANSPORTS,
 )
-from cb_mcp.utils.context import (
-    AppContext,
-    get_cluster_connection,
-)
+from cb_mcp.utils.context import AppContext
 from cb_mcp.utils.operational.connection import (
     connect_to_bucket,
     connect_to_couchbase_cluster,
 )
 from cb_mcp.utils.operational.connection_string import validate_connection_settings
+from cb_mcp.utils.operational.context import get_cluster_connection
 from cb_mcp.utils.operational.index_utils import (
     _build_query_params,
     clean_index_definition,
@@ -48,7 +46,7 @@ from cb_mcp.utils.operational.index_utils import (
     resolve_cluster_major_version,
     validate_filter_params,
 )
-from providers.static import StaticClusterProvider
+from providers.operational import OperationalClusterProvider
 
 
 class TestIndexUtilsFunctions:
@@ -892,7 +890,7 @@ class TestContextModule:
             get_cluster_connection(mock_ctx)
 
     def test_static_cluster_provider_connects_lazily(self) -> None:
-        """StaticClusterProvider defers connection until first get_cluster call."""
+        """OperationalClusterProvider defers connection until first get_cluster call."""
         mock_cluster = MagicMock()
         mock_settings = {
             "connection_string": "couchbase://localhost",
@@ -901,10 +899,10 @@ class TestContextModule:
         }
 
         with patch(
-            "providers.static.connect_to_couchbase_cluster",
+            "providers.operational.connect_to_couchbase_cluster",
             return_value=mock_cluster,
         ) as mock_connect:
-            provider = StaticClusterProvider(settings=mock_settings)
+            provider = OperationalClusterProvider(settings=mock_settings)
             # Constructor alone must not open a connection.
             mock_connect.assert_not_called()
 
@@ -922,10 +920,10 @@ class TestContextModule:
         }
 
         with patch(
-            "providers.static.connect_to_couchbase_cluster",
+            "providers.operational.connect_to_couchbase_cluster",
             return_value=mock_cluster,
         ) as mock_connect:
-            provider = StaticClusterProvider(settings=mock_settings)
+            provider = OperationalClusterProvider(settings=mock_settings)
             first = provider.get_cluster(MagicMock())
             second = provider.get_cluster(MagicMock())
 
@@ -941,10 +939,10 @@ class TestContextModule:
         }
 
         with patch(
-            "providers.static.connect_to_couchbase_cluster",
+            "providers.operational.connect_to_couchbase_cluster",
             side_effect=Exception("Auth failed"),
         ):
-            provider = StaticClusterProvider(settings=mock_settings)
+            provider = OperationalClusterProvider(settings=mock_settings)
             with pytest.raises(Exception, match="Auth failed"):
                 provider.get_cluster(MagicMock())
 
@@ -952,7 +950,7 @@ class TestContextModule:
         assert provider._cluster is None
 
     def test_static_cluster_provider_coalesces_concurrent_first_calls(self) -> None:
-        """The threading.Lock in StaticClusterProvider must coalesce concurrent
+        """The threading.Lock in OperationalClusterProvider must coalesce concurrent
         first-call attempts so we don't open multiple cluster connections when
         several tool handlers race to be the first caller.
         """
@@ -976,10 +974,10 @@ class TestContextModule:
             return mock_cluster
 
         with patch(
-            "providers.static.connect_to_couchbase_cluster",
+            "providers.operational.connect_to_couchbase_cluster",
             side_effect=slow_connect,
         ) as mock_connect:
-            provider = StaticClusterProvider(settings=mock_settings)
+            provider = OperationalClusterProvider(settings=mock_settings)
 
             results: list = []
             results_lock = threading.Lock()
@@ -1019,10 +1017,10 @@ class TestContextModule:
         }
 
         with patch(
-            "providers.static.connect_to_couchbase_cluster",
+            "providers.operational.connect_to_couchbase_cluster",
             return_value=mock_cluster,
         ):
-            provider = StaticClusterProvider(settings=mock_settings)
+            provider = OperationalClusterProvider(settings=mock_settings)
             provider.get_cluster(MagicMock())
             provider.close()
 

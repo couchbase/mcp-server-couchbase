@@ -1,25 +1,28 @@
-"""Lifespan-scoped context and the accessors tools read it through.
+"""Lifespan-scoped context and the server-agnostic accessors over it.
 
-The ``couchbase`` import is under ``TYPE_CHECKING`` for the same reason as
-``cb_mcp.core.contracts``': it annotates ``get_cluster_connection`` and
-nothing more. At runtime it pulled the whole Couchbase SDK into every
-process that imported anything from ``cb_mcp.utils`` — this package's
-``__init__`` re-exports from here — including the Operational Insights
-server. See ``tests/unit/test_sdk_isolation.py``.
+Everything here works for any server: the provider, the settings snapshot,
+the server identity, the logging snapshot. Anything that resolves a *cluster*
+lives with its own server's helpers instead —
+``cb_mcp.utils.operational.context.get_cluster_connection`` and
+``cb_mcp.utils.operational_insights.context.get_oi_cluster`` — since each
+names a different SDK's type.
+
+That split is why this module no longer imports either SDK, even under
+``TYPE_CHECKING``: ``cb_mcp.utils.__init__`` re-exports from here, so a
+runtime import here reached every process that touched ``cb_mcp.utils``,
+including the Operational Insights server's. See
+``tests/unit/test_sdk_isolation.py``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastmcp import Context
 
 from ..core.contracts import ProviderLifecycle
-
-if TYPE_CHECKING:
-    from couchbase.cluster import Cluster
 
 
 @dataclass
@@ -35,7 +38,7 @@ class AppContext:
             (``get_cluster_connection`` here,
             ``cb_mcp.utils.operational_insights.context.get_oi_cluster``
             there), which narrows to that service's provider protocol.
-            The standalone MCP server populates this with ``StaticClusterProvider``
+            The standalone MCP server populates this with ``OperationalClusterProvider``
             during lifespan startup; other implementations supply their own.
         settings: Snapshot of CLI/environment-resolved configuration
             captured once at lifespan startup. Tools should read values
@@ -94,14 +97,3 @@ def get_logging_config(ctx: Context) -> Mapping[str, Any] | None:
     context type doesn't carry a ``logging_config`` attribute at all.
     """
     return getattr(ctx.request_context.lifespan_context, "logging_config", None)  # type: ignore
-
-
-def get_cluster_connection(ctx: Context) -> Cluster:
-    """Return the Couchbase cluster for this request via the provider."""
-    provider = get_cluster_provider(ctx)
-    if provider is None:
-        raise RuntimeError(
-            "Cluster provider not initialized. "
-            "The lifespan must populate AppContext.cluster_provider before tools run."
-        )
-    return provider.get_cluster(ctx)

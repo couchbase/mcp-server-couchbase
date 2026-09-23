@@ -121,7 +121,7 @@ def test_operational_server_does_not_load_the_insights_sdk() -> None:
     """Importing the operational server's spec + provider loads only ``couchbase``."""
     loaded = _sdks_loaded_by(
         "from cb_mcp.servers.operational.spec import SPEC\n"
-        "from providers.static import StaticClusterProvider\n"
+        "from providers.operational import OperationalClusterProvider\n"
     )
     assert COUCHBASE_SDK in loaded, (
         "the operational server is expected to load its own SDK eagerly"
