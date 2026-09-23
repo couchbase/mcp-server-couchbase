@@ -23,6 +23,15 @@ on:
   pull_request:
     branches: [main, multi_package]
 
+# One in-flight run per branch. Each run stands up four Operational Insights
+# clusters (one per job) plus an S3Mock sidecar each, and the docker job also
+# builds the image — so a superseded run is expensive to leave going.
+# Pull-request only, so an unconditional cancel is correct here; test.yml
+# guards its `main` pushes instead.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # ============================================
   # Source - stdio, straight from checkout (the original, pre-matrix behavior)

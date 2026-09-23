@@ -7,7 +7,29 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # TEMPORARY: `multi_package` is the integration branch for the
+    # multi-MCP-server work. Until it merges to `main`, PRs targeting it get
+    # no operational coverage at all — this workflow was `main`-only, so the
+    # unit job, the full transport x cb-version x server-binary integration
+    # matrix, and the summary gate all skipped. Everything landing on that
+    # branch touches shared code the operational server depends on, so it is
+    # exactly the work that most needs these tests.
+    #
+    # Remove `multi_package` from this list once it has merged to `main`;
+    # leaving it costs a full matrix run per PR against a branch that no
+    # longer exists.
+    branches: [main, multi_package]
+
+# One in-flight run per branch. Each run provisions eight Couchbase
+# containers (transport x cb-version x server-binary), so a push to a PR that
+# is already building otherwise doubles that until the first run finishes.
+#
+# Cancelling is scoped to pull requests deliberately: a superseded PR run
+# tells you nothing, but every commit on `main` should keep its own complete
+# result rather than being cancelled by the next push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Default test credentials for Couchbase
