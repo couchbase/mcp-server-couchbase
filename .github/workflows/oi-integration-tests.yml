@@ -1,4 +1,4 @@
-name: OI Integration Tests
+name: Operational Insights Integration Tests
 
 # Runs tests/integration/operational_insights against a live Operational
 # Insights cluster (steps 2-5 of the quick-install guide:
@@ -71,7 +71,7 @@ env:
 
 jobs:
   oi-integration-tests:
-    name: OI integration tests (${{ matrix.transport }} / ${{ matrix.server_binary }})
+    name: 'Integration: operational-insights (${{ matrix.transport }} / ${{ matrix.server_binary }})'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
