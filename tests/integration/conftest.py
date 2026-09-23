@@ -34,6 +34,7 @@ __all__ = [
     "TOOLS_BY_CATEGORY",
     "TOOL_REQUIRED_PARAMS",
     "_build_env",
+    "_streamable_http_session",
     "create_logging_test_session",
     "create_mcp_session",
     "create_session_for_subcommand",

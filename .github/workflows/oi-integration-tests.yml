@@ -6,13 +6,29 @@ name: OI Integration Tests
 # Steps 2-3 (booting the containers) happen in "Start OI containers" below;
 # steps 4-5 (blob storage config + clusterInit) are
 # scripts/oi_ci_cluster/configure_cluster.sh.
+#
+# Split into three independent jobs — one per server binary, mirroring
+# test.yml's server_binary axis — rather than a single matrix job, so each
+# shows up as its own check and a failure in one doesn't hide behind
+# `if:` conditionals in a shared job:
+#   - source: no build step; runs both stdio and http straight from checkout.
+#   - docker: builds the Docker image, runs the server as a container, http only.
+#   - pypi:   builds the wheel, installs it into a venv, runs the installed
+#             console script, http only.
+# (docker/pypi are http-only because there is nothing distinct to build for
+# stdio — it always runs from source, same as test.yml's exclude rule.)
+# There is no cb_version axis here (unlike test.yml) — only one Operational
+# Insights image is pinned.
 on:
   pull_request:
     branches: [main, multi_package]
 
 jobs:
-  oi-integration-tests:
-    name: OI integration tests
+  # ============================================
+  # Source - stdio and http, straight from checkout
+  # ============================================
+  oi-integration-tests-source:
+    name: OI integration tests (source)
     runs-on: ubuntu-latest
     env:
       # docker-compose.yml's ${VAR} references (steps 2-3).
@@ -56,14 +72,312 @@ jobs:
       - name: Configure OI cluster
         run: ./scripts/oi_ci_cluster/configure_cluster.sh
 
-      - name: Run OI integration tests
+      - name: Run STDIO OI integration tests
         env:
           CB_OI_CONNECTION_STRING: http://127.0.0.1:8095
           CB_OI_USERNAME: ${{ env.CLUSTER_USERNAME }}
           CB_OI_PASSWORD: ${{ env.CLUSTER_PASSWORD }}
+          CB_MCP_TRANSPORT: stdio
           PYTHONPATH: src
-        run: uv run pytest tests/integration/operational_insights -v --tb=short
+        run: |
+          echo "Running OI tests with STDIO transport..."
+          uv run pytest tests/integration/operational_insights -v --tb=short
+
+      - name: Start MCP server (HTTP, source)
+        env:
+          CB_OI_CONNECTION_STRING: http://127.0.0.1:8095
+          CB_OI_USERNAME: ${{ env.CLUSTER_USERNAME }}
+          CB_OI_PASSWORD: ${{ env.CLUSTER_PASSWORD }}
+          CB_MCP_PORT: 8001
+          CB_MCP_READ_ONLY_MODE: "false"
+          PYTHONPATH: src
+        run: |
+          echo "Starting Operational Insights MCP server (source) with HTTP transport..."
+          CB_OI_CONNECTION_STRING=$CB_OI_CONNECTION_STRING \
+          CB_OI_USERNAME=$CB_OI_USERNAME \
+          CB_OI_PASSWORD=$CB_OI_PASSWORD \
+          CB_MCP_TRANSPORT=http \
+          CB_MCP_HOST=127.0.0.1 \
+          CB_MCP_PORT=$CB_MCP_PORT \
+          CB_MCP_READ_ONLY_MODE=$CB_MCP_READ_ONLY_MODE \
+          PYTHONPATH=$PYTHONPATH \
+            uv run python -m mcp_server operational-insights &
+          echo "SERVER_PID=$!" >> $GITHUB_ENV
+
+          echo "Waiting for HTTP server to be ready..."
+          for i in {1..30}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8001/mcp 2>/dev/null || echo "000")
+            if [[ -n "$code" && "$code" != "000" ]]; then
+              echo "HTTP server is ready (HTTP $code after ${i}s)"
+              break
+            fi
+            echo "Waiting for HTTP server... ($i/30)"
+            sleep 1
+          done
+          # Uvicorn can accept connections before FastMCP's session manager
+          # finishes initializing — give it a moment to fully settle.
+          sleep 3
+
+      - name: Run HTTP OI integration tests
+        env:
+          CB_OI_CONNECTION_STRING: http://127.0.0.1:8095
+          CB_OI_USERNAME: ${{ env.CLUSTER_USERNAME }}
+          CB_OI_PASSWORD: ${{ env.CLUSTER_PASSWORD }}
+          CB_MCP_TRANSPORT: http
+          MCP_SERVER_URL: http://127.0.0.1:8001/mcp
+          PYTHONPATH: src
+        run: |
+          echo "Running OI tests with HTTP transport (source)..."
+          uv run pytest tests/integration/operational_insights -v --tb=short
+
+      - name: Stop HTTP server
+        if: always()
+        run: |
+          if [ -n "${SERVER_PID:-}" ]; then
+            kill $SERVER_PID 2>/dev/null || true
+          fi
 
       - name: Tear down OI containers
         if: always()
         run: docker compose -f scripts/oi_ci_cluster/docker-compose.yml down -v
+
+  # ============================================
+  # Docker - build the image, run it as a container, http only
+  # ============================================
+  oi-integration-tests-docker:
+    name: OI integration tests (docker)
+    runs-on: ubuntu-latest
+    env:
+      OI_IMAGE: couchbase/enterprise-analytics:2.2.1
+      S3MOCK_IMAGE: adobe/s3mock:5.2.3
+      S3MOCK_BUCKET: cloud-storage-container
+      S3MOCK_STORE_ROOT: fs
+      S3MOCK_RETAIN_FILES_ON_EXIT: "true"
+      OI_ADMIN_PORT: 8091
+      OI_ANALYTICS_PORT: 8095
+      BLOB_STORAGE_SCHEME: s3
+      BLOB_STORAGE_REGION: us-east-1
+      BLOB_STORAGE_ENDPOINT: http://s3mock:9090
+      BLOB_STORAGE_ANONYMOUS_AUTH: "true"
+      BLOB_STORAGE_PATH_STYLE_ADDRESSING: "true"
+      NUM_STORAGE_PARTITIONS: 16
+      CLUSTER_USERNAME: Administrator
+      CLUSTER_PASSWORD: password
+      CLUSTER_MEMORY_QUOTA: 100
+      CLUSTER_NAME: OI CI Cluster
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: "latest"
+
+      - name: Set up Python (latest)
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Start OI containers
+        run: docker compose -f scripts/oi_ci_cluster/docker-compose.yml up -d --wait
+
+      - name: Configure OI cluster
+        run: ./scripts/oi_ci_cluster/configure_cluster.sh
+
+      - name: Build Docker image
+        run: docker build -t mcp-server-test:latest .
+
+      - name: Start MCP server (HTTP, docker)
+        env:
+          CB_OI_CONNECTION_STRING: http://127.0.0.1:8095
+          CB_OI_USERNAME: ${{ env.CLUSTER_USERNAME }}
+          CB_OI_PASSWORD: ${{ env.CLUSTER_PASSWORD }}
+          CB_MCP_PORT: 8001
+          CB_MCP_READ_ONLY_MODE: "false"
+        run: |
+          echo "Starting Operational Insights MCP server (docker) with HTTP transport..."
+          docker run -d --network host \
+            --name mcp-server-oi-http \
+            -e CB_OI_CONNECTION_STRING=$CB_OI_CONNECTION_STRING \
+            -e CB_OI_USERNAME=$CB_OI_USERNAME \
+            -e CB_OI_PASSWORD=$CB_OI_PASSWORD \
+            -e CB_MCP_TRANSPORT=http \
+            -e CB_MCP_HOST=0.0.0.0 \
+            -e CB_MCP_PORT=$CB_MCP_PORT \
+            -e CB_MCP_READ_ONLY_MODE=$CB_MCP_READ_ONLY_MODE \
+            mcp-server-test:latest operational-insights
+
+          echo "Waiting for HTTP server to be ready..."
+          for i in {1..30}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8001/mcp 2>/dev/null || echo "000")
+            if [[ -n "$code" && "$code" != "000" ]]; then
+              echo "HTTP server is ready (HTTP $code after ${i}s)"
+              break
+            fi
+            echo "Waiting for HTTP server... ($i/30)"
+            sleep 1
+          done
+          sleep 3
+
+      - name: Run HTTP OI integration tests
+        env:
+          CB_OI_CONNECTION_STRING: http://127.0.0.1:8095
+          CB_OI_USERNAME: ${{ env.CLUSTER_USERNAME }}
+          CB_OI_PASSWORD: ${{ env.CLUSTER_PASSWORD }}
+          CB_MCP_TRANSPORT: http
+          MCP_SERVER_URL: http://127.0.0.1:8001/mcp
+          PYTHONPATH: src
+        run: |
+          echo "Running OI tests with HTTP transport (docker)..."
+          uv run pytest tests/integration/operational_insights -v --tb=short
+
+      - name: Stop HTTP server
+        if: always()
+        run: docker rm -f mcp-server-oi-http 2>/dev/null || true
+
+      - name: Tear down OI containers
+        if: always()
+        run: docker compose -f scripts/oi_ci_cluster/docker-compose.yml down -v
+
+  # ============================================
+  # PyPI - build the wheel, install it, run the installed console script, http only
+  # ============================================
+  oi-integration-tests-pypi:
+    name: OI integration tests (pypi)
+    runs-on: ubuntu-latest
+    env:
+      OI_IMAGE: couchbase/enterprise-analytics:2.2.1
+      S3MOCK_IMAGE: adobe/s3mock:5.2.3
+      S3MOCK_BUCKET: cloud-storage-container
+      S3MOCK_STORE_ROOT: fs
+      S3MOCK_RETAIN_FILES_ON_EXIT: "true"
+      OI_ADMIN_PORT: 8091
+      OI_ANALYTICS_PORT: 8095
+      BLOB_STORAGE_SCHEME: s3
+      BLOB_STORAGE_REGION: us-east-1
+      BLOB_STORAGE_ENDPOINT: http://s3mock:9090
+      BLOB_STORAGE_ANONYMOUS_AUTH: "true"
+      BLOB_STORAGE_PATH_STYLE_ADDRESSING: "true"
+      NUM_STORAGE_PARTITIONS: 16
+      CLUSTER_USERNAME: Administrator
+      CLUSTER_PASSWORD: password
+      CLUSTER_MEMORY_QUOTA: 100
+      CLUSTER_NAME: OI CI Cluster
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: "latest"
+
+      - name: Set up Python (latest)
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Start OI containers
+        run: docker compose -f scripts/oi_ci_cluster/docker-compose.yml up -d --wait
+
+      - name: Configure OI cluster
+        run: ./scripts/oi_ci_cluster/configure_cluster.sh
+
+      - name: Build and install PyPI wheel
+        run: |
+          uv build
+          python3 -m venv /tmp/pypi-test-venv
+          /tmp/pypi-test-venv/bin/pip install --quiet dist/couchbase_mcp_server-*.whl
+
+      - name: Start MCP server (HTTP, pypi)
+        env:
+          CB_OI_CONNECTION_STRING: http://127.0.0.1:8095
+          CB_OI_USERNAME: ${{ env.CLUSTER_USERNAME }}
+          CB_OI_PASSWORD: ${{ env.CLUSTER_PASSWORD }}
+          CB_MCP_PORT: 8001
+          CB_MCP_READ_ONLY_MODE: "false"
+        run: |
+          echo "Starting Operational Insights MCP server (pypi) with HTTP transport..."
+          CB_OI_CONNECTION_STRING=$CB_OI_CONNECTION_STRING \
+          CB_OI_USERNAME=$CB_OI_USERNAME \
+          CB_OI_PASSWORD=$CB_OI_PASSWORD \
+          CB_MCP_TRANSPORT=http \
+          CB_MCP_HOST=127.0.0.1 \
+          CB_MCP_PORT=$CB_MCP_PORT \
+          CB_MCP_READ_ONLY_MODE=$CB_MCP_READ_ONLY_MODE \
+            /tmp/pypi-test-venv/bin/couchbase-mcp-server operational-insights &
+          echo "SERVER_PID=$!" >> $GITHUB_ENV
+
+          echo "Waiting for HTTP server to be ready..."
+          for i in {1..30}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8001/mcp 2>/dev/null || echo "000")
+            if [[ -n "$code" && "$code" != "000" ]]; then
+              echo "HTTP server is ready (HTTP $code after ${i}s)"
+              break
+            fi
+            echo "Waiting for HTTP server... ($i/30)"
+            sleep 1
+          done
+          sleep 3
+
+      - name: Run HTTP OI integration tests
+        env:
+          CB_OI_CONNECTION_STRING: http://127.0.0.1:8095
+          CB_OI_USERNAME: ${{ env.CLUSTER_USERNAME }}
+          CB_OI_PASSWORD: ${{ env.CLUSTER_PASSWORD }}
+          CB_MCP_TRANSPORT: http
+          MCP_SERVER_URL: http://127.0.0.1:8001/mcp
+          PYTHONPATH: src
+        run: |
+          echo "Running OI tests with HTTP transport (pypi)..."
+          uv run pytest tests/integration/operational_insights -v --tb=short
+
+      - name: Stop HTTP server
+        if: always()
+        run: |
+          if [ -n "${SERVER_PID:-}" ]; then
+            kill $SERVER_PID 2>/dev/null || true
+          fi
+
+      - name: Tear down OI containers
+        if: always()
+        run: docker compose -f scripts/oi_ci_cluster/docker-compose.yml down -v
+
+  # ============================================
+  # Test Summary
+  # ============================================
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs:
+      [
+        oi-integration-tests-source,
+        oi-integration-tests-docker,
+        oi-integration-tests-pypi,
+      ]
+    if: always()
+    steps:
+      - name: Check test results
+        run: |
+          echo "=== OI Test Results Summary ==="
+          echo "Source: ${{ needs.oi-integration-tests-source.result }}"
+          echo "Docker: ${{ needs.oi-integration-tests-docker.result }}"
+          echo "PyPI:   ${{ needs.oi-integration-tests-pypi.result }}"
+          echo ""
+
+          if [ "${{ needs.oi-integration-tests-source.result }}" == "failure" ] || \
+             [ "${{ needs.oi-integration-tests-docker.result }}" == "failure" ] || \
+             [ "${{ needs.oi-integration-tests-pypi.result }}" == "failure" ]; then
+            echo "❌ Some tests failed"
+            exit 1
+          elif [ "${{ needs.oi-integration-tests-source.result }}" == "cancelled" ] || \
+               [ "${{ needs.oi-integration-tests-docker.result }}" == "cancelled" ] || \
+               [ "${{ needs.oi-integration-tests-pypi.result }}" == "cancelled" ]; then
+            echo "⚠️ Tests were cancelled"
+            exit 1
+          else
+            echo "✅ All tests passed!"
+          fi

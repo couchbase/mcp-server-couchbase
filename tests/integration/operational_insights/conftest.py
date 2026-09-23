@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 
 import pytest
 from _test_env import build_oi_env, oi_env_available
-from conftest import create_session_for_subcommand
+from conftest import _streamable_http_session, create_session_for_subcommand
 from mcp import ClientSession
 
 
@@ -45,7 +45,29 @@ def pytest_collection_modifyitems(config, items):
 
 @asynccontextmanager
 async def create_oi_mcp_session() -> AsyncIterator[ClientSession]:
-    """Spawn a fresh ``mcp_server operational-insights`` subprocess."""
+    """Create a fresh Operational Insights MCP client session.
+
+    Transport selection mirrors ``tests/integration/conftest.py``'s
+    ``create_mcp_session`` (driven by ``CB_MCP_TRANSPORT``, default
+    ``stdio``):
+
+    - ``stdio``: spawn a fresh ``mcp_server operational-insights``
+      subprocess per test. ``build_oi_env()`` supplies OI credentials and
+      forces the subprocess's own transport to stdio.
+    - ``http`` / ``streamable-http``: connect to an already-running server
+      at ``MCP_SERVER_URL``, started outside pytest (by CI or
+      ``scripts/run_oi_matrix_local.sh``) with ``operational-insights`` as
+      its subcommand. Reuses ``_streamable_http_session`` unmodified — it
+      is already fully generic (reads only ``MCP_SERVER_URL``), so there is
+      no operational-only logic to fork.
+    """
+    transport = os.getenv("CB_MCP_TRANSPORT", "stdio").lower()
+
+    if transport in ("http", "streamable-http"):
+        async with _streamable_http_session() as session:
+            yield session
+        return
+
     env = build_oi_env()
     async with create_session_for_subcommand(
         "operational-insights", env

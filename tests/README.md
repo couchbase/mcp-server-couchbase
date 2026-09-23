@@ -50,8 +50,11 @@ applied automatically by directory — test files carry no `@pytest.mark.accurac
   for tests that need a bucket. Missing env vars cause `pytest.skip(...)`
   rather than a failure.
 - **Integration (Operational Insights)** — spawn `mcp_server operational-insights`
-  over stdio (`create_oi_mcp_session`, defined in that directory's own
-  `conftest.py`) and talk to a running Operational Insights cluster. Requires
+  (stdio, the default), or connect to an already-running instance over HTTP
+  when `CB_MCP_TRANSPORT=http`/`MCP_SERVER_URL` are set
+  (`create_oi_mcp_session`, defined in that directory's own `conftest.py`,
+  mirrors the operational tier's `create_mcp_session` transport branching)
+  — and talk to a running Operational Insights cluster. Requires
   `CB_OI_CONNECTION_STRING`, `CB_OI_USERNAME`, `CB_OI_PASSWORD` (see
   `tests/_test_env.py`). The whole directory is
   skipped at collection time, not per-test, when those are unset — see its
@@ -92,6 +95,10 @@ applied automatically by directory — test files carry no `@pytest.mark.accurac
 
   docker compose -f scripts/oi_ci_cluster/docker-compose.yml down -v
   ```
+  To exercise every transport x server-binary combination (mirroring
+  `scripts/run_matrix_local.sh` for the operational server), use
+  `scripts/run_oi_matrix_local.sh` instead, which manages this same
+  container lifecycle itself.
 - **Perf** — in-process performance tests, opt-in via `CB_MCP_PERF=1`; not run in CI.
 - **Accuracy** — drive an OpenAI tool-calling agent against the live MCP
   server and score the resulting tool calls. See [Accuracy tier
@@ -185,8 +192,9 @@ any laptop.
   integration tests can reuse to spawn `mcp_server <subcommand>`.
 - [`integration/operational_insights/conftest.py`](integration/operational_insights/conftest.py) —
   the Operational Insights tier's own session helper (`create_oi_mcp_session`,
-  built on `create_session_for_subcommand` above) and its directory-based
-  auto-marking + env-gated skip.
+  built on `create_session_for_subcommand` for stdio and on
+  `integration/conftest.py`'s `_streamable_http_session` for http) and its
+  directory-based auto-marking + env-gated skip.
 - [`accuracy/conftest.py`](accuracy/conftest.py) — accuracy-only
   fixtures (`accuracy_client`, `openai_agent`, `judge`, `result_storage`,
   etc.) and the directory-based auto-marking.
