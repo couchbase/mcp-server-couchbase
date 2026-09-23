@@ -7,16 +7,16 @@ name: OI Integration Tests
 # steps 4-5 (blob storage config + clusterInit) are
 # scripts/oi_ci_cluster/configure_cluster.sh.
 #
-# Split into three independent jobs — one per server binary, mirroring
-# test.yml's server_binary axis — rather than a single matrix job, so each
-# shows up as its own check and a failure in one doesn't hide behind
-# `if:` conditionals in a shared job:
-#   - source: no build step; runs both stdio and http straight from checkout.
-#   - docker: builds the Docker image, runs the server as a container, http only.
-#   - pypi:   builds the wheel, installs it into a venv, runs the installed
-#             console script, http only.
+# Split into four independent jobs — one per transport x server-binary
+# combination that's actually distinct — so each shows up as its own check:
+#   - source-stdio: no build step; spawns the server over stdio from checkout.
+#   - source-http:  no build step; runs the server as a background http
+#                   process from checkout.
+#   - docker:       builds the Docker image, runs the server as a container, http only.
+#   - pypi:         builds the wheel, installs it into a venv, runs the
+#                   installed console script, http only.
 # (docker/pypi are http-only because there is nothing distinct to build for
-# stdio — it always runs from source, same as test.yml's exclude rule.)
+# stdio — it always runs from source.)
 # There is no cb_version axis here (unlike test.yml) — only one Operational
 # Insights image is pinned.
 on:
@@ -25,10 +25,10 @@ on:
 
 jobs:
   # ============================================
-  # Source - stdio and http, straight from checkout
+  # Source - stdio, straight from checkout (the original, pre-matrix behavior)
   # ============================================
-  oi-integration-tests-source:
-    name: OI integration tests (source)
+  oi-integration-tests-source-stdio:
+    name: OI integration tests (source, stdio)
     runs-on: ubuntu-latest
     env:
       # docker-compose.yml's ${VAR} references (steps 2-3).
@@ -82,6 +82,55 @@ jobs:
         run: |
           echo "Running OI tests with STDIO transport..."
           uv run pytest tests/integration/operational_insights -v --tb=short
+
+      - name: Tear down OI containers
+        if: always()
+        run: docker compose -f scripts/oi_ci_cluster/docker-compose.yml down -v
+
+  # ============================================
+  # Source - http, straight from checkout, own cluster (no build step)
+  # ============================================
+  oi-integration-tests-source-http:
+    name: OI integration tests (source, http)
+    runs-on: ubuntu-latest
+    env:
+      OI_IMAGE: couchbase/enterprise-analytics:2.2.1
+      S3MOCK_IMAGE: adobe/s3mock:5.2.3
+      S3MOCK_BUCKET: cloud-storage-container
+      S3MOCK_STORE_ROOT: fs
+      S3MOCK_RETAIN_FILES_ON_EXIT: "true"
+      OI_ADMIN_PORT: 8091
+      OI_ANALYTICS_PORT: 8095
+      BLOB_STORAGE_SCHEME: s3
+      BLOB_STORAGE_REGION: us-east-1
+      BLOB_STORAGE_ENDPOINT: http://s3mock:9090
+      BLOB_STORAGE_ANONYMOUS_AUTH: "true"
+      BLOB_STORAGE_PATH_STYLE_ADDRESSING: "true"
+      NUM_STORAGE_PARTITIONS: 16
+      CLUSTER_USERNAME: Administrator
+      CLUSTER_PASSWORD: password
+      CLUSTER_MEMORY_QUOTA: 100
+      CLUSTER_NAME: OI CI Cluster
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: "latest"
+
+      - name: Set up Python (latest)
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Start OI containers
+        run: docker compose -f scripts/oi_ci_cluster/docker-compose.yml up -d --wait
+
+      - name: Configure OI cluster
+        run: ./scripts/oi_ci_cluster/configure_cluster.sh
 
       - name: Start MCP server (HTTP, source)
         env:
@@ -345,39 +394,3 @@ jobs:
       - name: Tear down OI containers
         if: always()
         run: docker compose -f scripts/oi_ci_cluster/docker-compose.yml down -v
-
-  # ============================================
-  # Test Summary
-  # ============================================
-  test-summary:
-    name: Test Summary
-    runs-on: ubuntu-latest
-    needs:
-      [
-        oi-integration-tests-source,
-        oi-integration-tests-docker,
-        oi-integration-tests-pypi,
-      ]
-    if: always()
-    steps:
-      - name: Check test results
-        run: |
-          echo "=== OI Test Results Summary ==="
-          echo "Source: ${{ needs.oi-integration-tests-source.result }}"
-          echo "Docker: ${{ needs.oi-integration-tests-docker.result }}"
-          echo "PyPI:   ${{ needs.oi-integration-tests-pypi.result }}"
-          echo ""
-
-          if [ "${{ needs.oi-integration-tests-source.result }}" == "failure" ] || \
-             [ "${{ needs.oi-integration-tests-docker.result }}" == "failure" ] || \
-             [ "${{ needs.oi-integration-tests-pypi.result }}" == "failure" ]; then
-            echo "❌ Some tests failed"
-            exit 1
-          elif [ "${{ needs.oi-integration-tests-source.result }}" == "cancelled" ] || \
-               [ "${{ needs.oi-integration-tests-docker.result }}" == "cancelled" ] || \
-               [ "${{ needs.oi-integration-tests-pypi.result }}" == "cancelled" ]; then
-            echo "⚠️ Tests were cancelled"
-            exit 1
-          else
-            echo "✅ All tests passed!"
-          fi
