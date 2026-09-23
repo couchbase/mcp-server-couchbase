@@ -417,6 +417,9 @@ the server it is actually running.
 - add a `(argv, spec)` case to `tests/unit/test_settings_classification.py`'s
   `SERVERS`;
 - add explicit-subcommand cases to `tests/unit/test_default_group.py`;
+- add a case to `tests/unit/test_sdk_isolation.py` asserting your server's
+  spec + provider load *your* SDK and no other server's — this is what keeps
+  the lazy-import rule in step 5 true rather than aspirational;
 - if the server needs a live cluster to test against, add an env-gated
   integration subdirectory that auto-skips when its credentials are unset —
   see `tests/integration/operational_insights/conftest.py` for the pattern.

@@ -7,13 +7,25 @@ both hosts reach a Couchbase cluster through the same
 ``ClusterProvider`` shape so that the rest of the machinery
 (lifespans, middleware, shared helpers) can be written against a single
 interface.
+
+The ``couchbase`` import below is deliberately under ``TYPE_CHECKING``: it
+is needed only to annotate ``get_cluster``. Importing it at runtime pulled
+~120 ``couchbase.*`` modules into every process that touched this module —
+including the Operational Insights server, which defeated the "a process
+loads only the SDK of the server it is actually running" rule that
+``src/mcp_server.py``'s lazy subcommand imports exist to uphold.
+``tests/unit/test_sdk_isolation.py`` guards this.
 """
 
-from collections.abc import Mapping
-from typing import Any, Protocol, runtime_checkable
+from __future__ import annotations
 
-from couchbase.cluster import Cluster
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
 from fastmcp import Context
+
+if TYPE_CHECKING:
+    from couchbase.cluster import Cluster
 
 
 @runtime_checkable

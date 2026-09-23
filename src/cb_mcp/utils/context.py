@@ -1,11 +1,25 @@
+"""Lifespan-scoped context and the accessors tools read it through.
+
+The ``couchbase`` import is under ``TYPE_CHECKING`` for the same reason as
+``cb_mcp.core.contracts``': it annotates ``get_cluster_connection`` and
+nothing more. At runtime it pulled the whole Couchbase SDK into every
+process that imported anything from ``cb_mcp.utils`` — this package's
+``__init__`` re-exports from here — including the Operational Insights
+server. See ``tests/unit/test_sdk_isolation.py``.
+"""
+
+from __future__ import annotations
+
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from couchbase.cluster import Cluster
 from fastmcp import Context
 
 from ..core.contracts import ClusterProvider
+
+if TYPE_CHECKING:
+    from couchbase.cluster import Cluster
 
 
 @dataclass
