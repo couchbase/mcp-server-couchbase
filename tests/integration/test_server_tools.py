@@ -245,7 +245,9 @@ async def test_get_cluster_metrics() -> None:
             )
             return
 
-        assert payload.get("status") == "success", f"Expected a status envelope: {payload}"
+        assert payload.get("status") == "success", (
+            f"Expected a status envelope: {payload}"
+        )
         assert isinstance(payload.get("data"), list), (
             "Expected 'data' to be a list of per-metric-spec results"
         )

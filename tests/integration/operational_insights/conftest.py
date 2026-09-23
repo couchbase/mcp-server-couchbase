@@ -69,7 +69,5 @@ async def create_oi_mcp_session() -> AsyncIterator[ClientSession]:
         return
 
     env = build_oi_env()
-    async with create_session_for_subcommand(
-        "operational-insights", env
-    ) as session:
+    async with create_session_for_subcommand("operational-insights", env) as session:
         yield session

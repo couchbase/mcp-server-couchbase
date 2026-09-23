@@ -77,7 +77,9 @@ def connect_to_operational_insights_cluster(
         credential = Credential.from_username_and_password(username, password)
 
     options = (
-        ClusterOptions(security_options=SecurityOptions(trust_only_pem_file=ca_cert_path))
+        ClusterOptions(
+            security_options=SecurityOptions(trust_only_pem_file=ca_cert_path)
+        )
         if ca_cert_path
         else None
     )

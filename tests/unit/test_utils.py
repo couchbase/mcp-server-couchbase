@@ -22,7 +22,6 @@ from cb_mcp.tools.operational.index import (
     list_indexes,
 )
 from cb_mcp.utils.config import get_settings
-from cb_mcp.utils.operational.connection_string import validate_connection_settings
 from cb_mcp.utils.constants import (
     ALLOWED_TRANSPORTS,
     DEFAULT_READ_ONLY_MODE,
@@ -38,6 +37,7 @@ from cb_mcp.utils.operational.connection import (
     connect_to_bucket,
     connect_to_couchbase_cluster,
 )
+from cb_mcp.utils.operational.connection_string import validate_connection_settings
 from cb_mcp.utils.operational.index_utils import (
     _build_query_params,
     clean_index_definition,

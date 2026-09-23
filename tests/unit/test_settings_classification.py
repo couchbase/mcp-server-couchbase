@@ -139,9 +139,7 @@ def test_secret_values_never_appear_verbatim(argv, spec):
     """
     settings = dict(_host_settings(argv))
     secret_payload = {"password": "hunter2"}
-    secret_payload.update(
-        {key: f"/etc/ssl/{key}" for key in spec.secret_settings_keys}
-    )
+    secret_payload.update({key: f"/etc/ssl/{key}" for key in spec.secret_settings_keys})
     settings.update(secret_payload)
     out = _redacted_settings(settings, spec)
     rendered = repr(out)
