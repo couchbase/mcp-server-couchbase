@@ -1,0 +1,39 @@
+# Boots the two containers Operational Insights integration tests need (see
+# tests/README.md's "Integration (Operational Insights)" section) on a shared
+# network, for run_smoke_test.sh to prove reachable before any real test
+# suite is built on top of this. Compose creates one implicit network for
+# this project and lets services reach each other by service name — no
+# explicit `docker network create` needed. Both images are used as-is (no
+# Dockerfile/build step): confirmed by inspection that each already ships
+# what run_smoke_test.sh's connectivity check needs.
+services:
+  oi:
+    # Pinned rather than :latest — see run_smoke_test.sh for why. curl and
+    # wget already ship in this image (confirmed by inspection: curl lives
+    # on PATH at /opt/enterprise-analytics/bin, image runs as root), so
+    # nothing needs to be installed on top of it.
+    image: couchbase/enterprise-analytics:2.2.1
+    ports:
+      - "8091:8091"
+      - "8095:8095"
+    healthcheck:
+      # / pools responds before clusterInit too — this only proves the node
+      # is up and taking HTTP requests, not that a cluster has been formed.
+      test: ["CMD", "curl", "-sf", "http://localhost:8091/pools"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  s3mock:
+    # Pinned rather than :latest, which this tag matches at time of writing
+    # (same digest). This image has no package manager (BellSoft
+    # hardened/Alpine-like base, non-root) and no curl, but already ships
+    # BusyBox wget, which the connectivity check uses from this side.
+    image: adobe/s3mock:5.2.3
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: cloud-storage-container
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090"]
+      interval: 5s
+      timeout: 3s
+      retries: 30

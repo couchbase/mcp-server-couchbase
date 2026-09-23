@@ -1,0 +1,20 @@
+name: OI CI Smoke Test
+
+# Proves the Operational Insights CI plumbing itself works — two containers
+# (see scripts/oi_ci_smoke/) built and connected over a shared network, with
+# a print-only connectivity check each way. Not yet a real Operational
+# Insights integration test; that comes later, built on top of this.
+on:
+  pull_request:
+    branches: [main, multi_package]
+
+jobs:
+  oi-network-smoke-test:
+    name: OI containers + network smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Run OI CI smoke test
+        run: ./scripts/oi_ci_smoke/run_smoke_test.sh
