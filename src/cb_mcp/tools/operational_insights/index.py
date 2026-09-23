@@ -58,12 +58,36 @@ def _format_cast_default(formats: dict[str, str] | None) -> str:
     return f" CAST (DEFAULT NULL{spec})"
 
 
+#: The type grammar this tool's docstring documents (bigint, int, double,
+#: string, date, time, datetime). Every "type" value below is interpolated
+#: as raw SQL++, not a quoted literal or a backtick-quoted identifier — the
+#: sqlpp helpers have nothing that escapes it — so it must be checked
+#: against this closed set before interpolation instead.
+_VALID_INDEX_TYPES = frozenset(
+    {"bigint", "int", "double", "string", "date", "time", "datetime"}
+)
+
+
+def _safe_type(field_type: str) -> str:
+    """Validate a field's declared type against the documented grammar.
+
+    Raises ValueError, which create_index's caller catches and turns into a
+    clean tool_error — same as any other malformed-input failure here.
+    """
+    if field_type not in _VALID_INDEX_TYPES:
+        raise ValueError(
+            f"Invalid index type {field_type!r}; must be one of "
+            f"{sorted(_VALID_INDEX_TYPES)}"
+        )
+    return field_type
+
+
 def _format_element(field: dict[str, Any]) -> str:
     """Render one IndexElement: "UNNEST ..." if it has 'unnest', else "path: type"."""
     if "unnest" not in field:
         name = safe_field_path(field["name"])
         field_type = field.get("type")
-        return f"{name}: {field_type}" if field_type else name
+        return f"{name}: {_safe_type(field_type)}" if field_type else name
 
     unnest = field["unnest"]
     paths = [unnest] if isinstance(unnest, str) else unnest
@@ -71,9 +95,9 @@ def _format_element(field: dict[str, Any]) -> str:
 
     select = field.get("select")
     if select is None:
-        return f"{clause}: {field['type']}"
+        return f"{clause}: {_safe_type(field['type'])}"
     return f"{clause} SELECT " + ", ".join(
-        f"{safe_field_path(s['name'])}: {s['type']}" for s in select
+        f"{safe_field_path(s['name'])}: {_safe_type(s['type'])}" for s in select
     )
 
 

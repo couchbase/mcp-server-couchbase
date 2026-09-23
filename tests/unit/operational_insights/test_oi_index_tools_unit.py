@@ -155,13 +155,49 @@ class TestCreateIndex:
         assert "index already exists" in result["error"]
         assert result["index_name"] == "song_title_idx"
 
-    def test_forwards_unrecognised_type_to_server(self) -> None:
-        """An unknown type is a SQL++ syntax error, so the server reports it, not us."""
+    def test_rejects_unrecognised_type_without_querying_the_server(self) -> None:
+        """An unknown type is a client-side validation error, never reaches the server.
+
+        "type" is interpolated as raw SQL++, unlike names (safe_field_path)
+        and format strings (quote_literal) — nothing escapes it, so it must
+        be checked against the documented grammar instead of forwarded.
+        """
         ctx, cluster = make_oi_ctx()
 
-        _create(ctx, cluster, fields=[{"name": "title", "type": "float"}])
+        result = _create(ctx, cluster, fields=[{"name": "title", "type": "float"}])
 
-        assert "`title`: float" in cluster.execute_query.call_args[0][0]
+        assert result["success"] is False
+        assert "float" in result["error"]
+        cluster.execute_query.assert_not_called()
+
+    def test_rejects_unrecognised_type_on_unnest_field(self) -> None:
+        ctx, cluster = make_oi_ctx()
+
+        result = _create(
+            ctx, cluster, fields=[{"unnest": "public_likes", "type": "float"}]
+        )
+
+        assert result["success"] is False
+        assert "float" in result["error"]
+        cluster.execute_query.assert_not_called()
+
+    def test_rejects_unrecognised_type_on_select_subfield(self) -> None:
+        ctx, cluster = make_oi_ctx()
+
+        result = _create(
+            ctx,
+            cluster,
+            fields=[
+                {
+                    "unnest": "reviews",
+                    "select": [{"name": "ratings.Lyrics", "type": "float"}],
+                }
+            ],
+        )
+
+        assert result["success"] is False
+        assert "float" in result["error"]
+        cluster.execute_query.assert_not_called()
 
 
 class TestCastDefault:
