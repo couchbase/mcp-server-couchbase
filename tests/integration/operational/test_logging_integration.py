@@ -26,6 +26,15 @@ from conftest import create_logging_test_session, extract_payload
 
 from cb_mcp.utils.constants import BYTES_PER_MB
 
+#: Repo root, for the two tests that spawn ``python -m mcp_server`` in a
+#: subprocess and must point its ``PYTHONPATH`` at ``src/``. Named rather
+#: than spelled ``parents[N]`` inline twice: the count is a function of this
+#: file's depth, so it silently became wrong when this module moved from
+#: ``tests/integration/`` into ``tests/integration/operational/`` — and the
+#: symptom was not an obvious path error but a stale *installed* copy of
+#: ``mcp_server`` being imported from site-packages instead.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 @pytest.mark.asyncio
 async def test_default_file_sinks_create_per_level_files(tmp_path) -> None:
@@ -303,7 +312,7 @@ def test_empty_log_file_rejected_at_startup() -> None:
     rejection happened cleanly at the Click validator boundary.
     """
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2] / "src")
+    env["PYTHONPATH"] = str(REPO_ROOT / "src")
     result = subprocess.run(
         [sys.executable, "-m", "mcp_server", "--log-file", ""],
         capture_output=True,
@@ -330,7 +339,7 @@ def test_help_renders_without_crashing() -> None:
     still wired — the bracket format would disappear if it ever regressed.
     """
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2] / "src")
+    env["PYTHONPATH"] = str(REPO_ROOT / "src")
     result = subprocess.run(
         [sys.executable, "-m", "mcp_server", "--help"],
         capture_output=True,

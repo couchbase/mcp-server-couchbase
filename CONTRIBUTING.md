@@ -275,7 +275,7 @@ mcp-server-couchbase/
 ├── src/
 │   ├── mcp_server.py            # CLI entry point: a click group, one subcommand per server
 │   ├── providers/               # Standalone-host provider implementations
-│   │   ├── static.py            # StaticClusterProvider (CLI/env config)
+│   │   ├── operational.py       # OperationalClusterProvider (CLI/env config)
 │   │   └── operational_insights.py  # OperationalInsightsClusterProvider
 │   └── cb_mcp/                  # Reusable package shared with managed MCP implementations
 │       ├── core/                # Server-agnostic machinery
@@ -296,7 +296,10 @@ mcp-server-couchbase/
 ├── scripts/                     # Lint, test-data setup, version bump scripts
 ├── tests/
 │   ├── unit/                    # Pure Python tests (no cluster)
-│   ├── integration/             # Tests against a live Couchbase cluster
+│   │   ├── operational/           # Operational-server-only unit tests
+│   │   └── operational_insights/  # OI-only unit tests
+│   ├── integration/             # Shared session plumbing; tests live per server
+│   │   ├── operational/           # Tests against a live Couchbase cluster
 │   │   └── operational_insights/  # Tests against a live OI cluster, env-gated
 │   ├── perf/                    # In-process performance tests, opt-in via CB_MCP_PERF=1
 │   ├── accuracy/                # AI-in-the-loop accuracy tests (see tests/README.md)
@@ -428,8 +431,11 @@ the server it is actually running.
 - add a case to `tests/unit/test_sdk_isolation.py` asserting your server's
   spec + provider load *your* SDK and no other server's — this is what keeps
   the lazy-import rule in step 5 true rather than aspirational;
-- if the server needs a live cluster to test against, add an env-gated
-  integration subdirectory that auto-skips when its credentials are unset —
+- put your server's own unit tests in `tests/unit/<id>/` and its integration
+  tests in `tests/integration/<id>/`, mirroring `src/`. Only tests covering
+  shared machinery or asserting over every spec belong at the tier root;
+- if the server needs a live cluster to test against, make that integration
+  subdirectory env-gated so it auto-skips when its credentials are unset —
   see `tests/integration/operational_insights/conftest.py` for the pattern.
 
 #### Constraints that are easy to miss
