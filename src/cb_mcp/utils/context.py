@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastmcp import Context
 
-from ..core.contracts import ClusterProvider
+from ..core.contracts import ProviderLifecycle
 
 if TYPE_CHECKING:
     from couchbase.cluster import Cluster
@@ -27,7 +27,14 @@ class AppContext:
     """Lifespan-scoped context for the MCP server.
 
     Attributes:
-        cluster_provider: The host's ``ClusterProvider`` implementation.
+        cluster_provider: The host's provider implementation. Typed as
+            ``ProviderLifecycle`` — the service-agnostic half of the contract
+            — because this field is shared by every server and nothing
+            reached through it here is service-specific. A tool that needs
+            the cluster itself goes through its own server's accessor
+            (``get_cluster_connection`` here,
+            ``cb_mcp.utils.operational_insights.context.get_oi_cluster``
+            there), which narrows to that service's provider protocol.
             The standalone MCP server populates this with ``StaticClusterProvider``
             during lifespan startup; other implementations supply their own.
         settings: Snapshot of CLI/environment-resolved configuration
@@ -45,7 +52,7 @@ class AppContext:
             context itself may leave it unset.
     """
 
-    cluster_provider: ClusterProvider | None = None
+    cluster_provider: ProviderLifecycle | None = None
     settings: Mapping[str, Any] = field(default_factory=dict)
     read_only_mode: bool = True
     logging_config: Mapping[str, Any] | None = None
@@ -53,9 +60,15 @@ class AppContext:
     server_name: str | None = None
 
 
-def get_cluster_provider(ctx: Context):
-    """Return the ClusterProvider for this request."""
-    return ctx.request_context.lifespan_context.cluster_provider  # type: ignore
+def get_cluster_provider(ctx: Context) -> ProviderLifecycle | None:
+    """Return this request's provider, as the service-agnostic contract.
+
+    Callers needing a service-specific member (``get_cluster``, or the
+    Operational Insights server's ``handle_registry``) narrow via their own
+    server's accessor rather than widening this return type — that is what
+    keeps this module from naming either SDK.
+    """
+    return ctx.request_context.lifespan_context.cluster_provider  # type: ignore[no-any-return]
 
 
 def get_server_id(ctx: Context) -> str | None:

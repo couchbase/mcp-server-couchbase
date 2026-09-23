@@ -28,7 +28,10 @@ in is a parameter:
      process must load only the SDK of the server it is actually running.
   3. ``_start_server`` does everything else, identically for both.
 
-To add a third server: write its ``ServerSpec`` and its ``ClusterProvider``,
+To add a third server: write its ``ServerSpec`` and a provider satisfying
+``cb_mcp.core.contracts.ProviderLifecycle`` (plus whatever service-specific
+members its own tools need — see ``ClusterProvider`` and
+``OperationalInsightsProvider`` for the two shapes that exist),
 add a ``CredentialProfile`` next to the others in ``cb_mcp.utils.cli_params`` if
 its credentials differ from the cluster ones, then copy either subcommand
 below and change the five per-server facts — command name, credentials,
@@ -44,7 +47,7 @@ import click
 
 from cb_mcp.core.app import build_app, run_app
 from cb_mcp.core.cli import DefaultGroup
-from cb_mcp.core.contracts import ClusterProvider
+from cb_mcp.core.contracts import ProviderLifecycle
 from cb_mcp.core.spec import ServerSpec
 from cb_mcp.servers.operational_insights.constants import (
     DEFAULT_OI_LOG_FILE,
@@ -71,7 +74,7 @@ def _start_server(
     params: Mapping[str, Any],
     *,
     credentials: CredentialProfile,
-    provider_factory: Callable[[Mapping[str, Any]], ClusterProvider],
+    provider_factory: Callable[[Mapping[str, Any]], ProviderLifecycle],
 ) -> None:
     """Run one server, from parsed flags to a listening process.
 

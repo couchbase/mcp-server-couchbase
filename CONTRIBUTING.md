@@ -106,7 +106,7 @@ The `cb_mcp` package is reused by managed MCP server implementations, not just t
 - **Tools must obtain the cluster through the request context / `ClusterProvider`** (`src/cb_mcp/core/contracts.py`) — never from global state, CLI arguments, or environment variables read inside `cb_mcp`.
 - **Don't read CLI/env configuration inside `cb_mcp`.** Configuration parsing belongs to the host (`src/mcp_server.py` and `src/providers/`).
   - **Named exception:** `src/cb_mcp/utils/cli_params.py` is host-configuration code (it turns parsed Click params into settings) that lives inside `cb_mcp` anyway, grouped with the other CLI/config helpers in `utils/` rather than with `src/providers/`'s `ClusterProvider` implementations. It is imported only by `src/mcp_server.py`. Nothing else under `cb_mcp` may import it, and it must never be re-exported from `cb_mcp/utils/__init__.py` — that would make every `cb_mcp` consumer inherit a dependency on Click.
-- **Don't change the `ClusterProvider` protocol** (or other contracts in `core/`) without prior discussion — managed implementations depend on it.
+- **Don't change the `ProviderLifecycle` / `ClusterProvider` protocols** (or other contracts in `core/`) without prior discussion — managed implementations depend on them. `ProviderLifecycle` is the service-agnostic half (`close`, `get_configuration`, `is_connected`) that the shared machinery calls; `ClusterProvider` adds `get_cluster` for the operational server. A server backed by a different service declares its own provider protocol next to that service's helpers (see `cb_mcp/utils/operational_insights/contracts.py`) rather than widening these.
 - Provider configuration returned for status reporting must never include secrets (return `_configured` booleans instead).
 
 ### Tool design
@@ -279,7 +279,7 @@ mcp-server-couchbase/
 │   │   └── operational_insights.py  # OperationalInsightsClusterProvider
 │   └── cb_mcp/                  # Reusable package shared with managed MCP implementations
 │       ├── core/                # Server-agnostic machinery
-│       │   ├── contracts.py     # Host-agnostic contracts (ClusterProvider, ...)
+│       │   ├── contracts.py     # Host-agnostic contracts (ProviderLifecycle, ClusterProvider)
 │       │   ├── spec.py          # ServerSpec / ToolSet / ScopeSpec — a server, as data
 │       │   ├── app.py           # build_app(spec, ...) -> FastMCP, and run_app
 │       │   └── cli/             # DefaultGroup + reusable Click option stacks
@@ -383,10 +383,18 @@ imported the spec (which imports the tools, which import the server's
 constants) you get a circular import. `tests/unit/test_logger_names.py`
 imports each package first in a clean subprocess to catch this.
 
-**4. Write the provider** in `src/providers/<id>.py`. It must satisfy the
-`ClusterProvider` shape in `core/contracts.py`, and `close()` should encapsulate
-whatever teardown its client needs — the shared lifespan just calls `close()`
-and should never type-switch on the client.
+**4. Write the provider** in `src/providers/<id>.py`. It must satisfy
+`ProviderLifecycle` in `core/contracts.py` — that is all the shared machinery
+calls — and `close()` should encapsulate whatever teardown its client needs;
+the shared lifespan just calls `close()` and should never type-switch on the
+client. If your tools need more from the provider than those three methods
+(a `get_cluster` of your SDK's type, or extra state like the Operational
+Insights server's `handle_registry`), declare a protocol extending
+`ProviderLifecycle` next to your service's helpers, not in `core/` — `core`
+must stay free of every SDK. Add both to
+`tests/unit/test_provider_contracts.py`, which is what replaced the
+misleading `runtime_checkable`/`isinstance` check these protocols used to
+carry.
 
 **5. Add the subcommand** in `src/mcp_server.py`. Reuse the shared option stacks
 and supply only what differs:
