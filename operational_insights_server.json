@@ -61,7 +61,7 @@
         },
         {
           "name": "CB_MCP_PORT",
-          "description": "Port to run the MCP server on (default: 8000). Used only for HTTP and SSE transport modes.",
+          "description": "Port to run the MCP server on (default: 8001). Used only for HTTP and SSE transport modes.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
@@ -286,7 +286,7 @@
         {
           "type": "named",
           "name": "--port",
-          "description": "Port to run the MCP server on (default: 8000). Used only for HTTP and SSE transport modes.",
+          "description": "Port to run the MCP server on (default: 8001). Used only for HTTP and SSE transport modes.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
@@ -528,7 +528,7 @@
         },
         {
           "name": "CB_MCP_PORT",
-          "description": "Port to run the MCP server on (default: 8000). Used only for HTTP and SSE transport modes.",
+          "description": "Port to run the MCP server on (default: 8001). Used only for HTTP and SSE transport modes.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
