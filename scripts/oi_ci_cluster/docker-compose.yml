@@ -5,9 +5,8 @@
 # create` needed. Both images are used as-is (no Dockerfile/build step):
 # confirmed by inspection that each already ships curl/wget, which is all
 # the healthchecks below need. Image tags, ports, and the S3Mock bucket name
-# are constants defined at the top of setup.sh, not here — Compose
-# substitutes the ${VAR} references from the shell environment setup.sh
-# exports them into.
+# are ${VAR} references, not literals — the caller (oi-integration-tests.yml's
+# job-level `env:`, or your own shell for local runs) is expected to set them.
 services:
   oi:
     image: ${OI_IMAGE}

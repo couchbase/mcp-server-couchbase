@@ -1,0 +1,69 @@
+name: OI Integration Tests
+
+# Runs tests/integration/operational_insights against a live Operational
+# Insights cluster (steps 2-5 of the quick-install guide:
+# https://docs.couchbase.com/enterprise-analytics/current/intro/do-a-quick-install.html).
+# Steps 2-3 (booting the containers) happen in "Start OI containers" below;
+# steps 4-5 (blob storage config + clusterInit) are
+# scripts/oi_ci_cluster/configure_cluster.sh.
+on:
+  pull_request:
+    branches: [main, multi_package]
+
+jobs:
+  oi-integration-tests:
+    name: OI integration tests
+    runs-on: ubuntu-latest
+    env:
+      # docker-compose.yml's ${VAR} references (steps 2-3).
+      OI_IMAGE: couchbase/enterprise-analytics:2.2.1
+      S3MOCK_IMAGE: adobe/s3mock:5.2.3
+      S3MOCK_BUCKET: cloud-storage-container
+      S3MOCK_STORE_ROOT: fs
+      S3MOCK_RETAIN_FILES_ON_EXIT: "true"
+      OI_ADMIN_PORT: 8091
+      OI_ANALYTICS_PORT: 8095
+      # configure_cluster.sh's blob storage settings (step 4).
+      BLOB_STORAGE_SCHEME: s3
+      BLOB_STORAGE_REGION: us-east-1
+      BLOB_STORAGE_ENDPOINT: http://s3mock:9090
+      BLOB_STORAGE_ANONYMOUS_AUTH: "true"
+      BLOB_STORAGE_PATH_STYLE_ADDRESSING: "true"
+      NUM_STORAGE_PARTITIONS: 16
+      # configure_cluster.sh's clusterInit settings (step 5).
+      CLUSTER_USERNAME: Administrator
+      CLUSTER_PASSWORD: password
+      CLUSTER_MEMORY_QUOTA: 100
+      CLUSTER_NAME: OI CI Cluster
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: "latest"
+
+      - name: Set up Python (latest)
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Start OI containers
+        run: docker compose -f scripts/oi_ci_cluster/docker-compose.yml up -d --wait
+
+      - name: Configure OI cluster
+        run: ./scripts/oi_ci_cluster/configure_cluster.sh
+
+      - name: Run OI integration tests
+        env:
+          CB_OI_CONNECTION_STRING: http://localhost:8095
+          CB_OI_USERNAME: ${{ env.CLUSTER_USERNAME }}
+          CB_OI_PASSWORD: ${{ env.CLUSTER_PASSWORD }}
+          PYTHONPATH: src
+        run: uv run pytest tests/integration/operational_insights -v --tb=short
+
+      - name: Tear down OI containers
+        if: always()
+        run: docker compose -f scripts/oi_ci_cluster/docker-compose.yml down -v
