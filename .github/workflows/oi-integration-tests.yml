@@ -58,7 +58,7 @@ jobs:
 
       - name: Run OI integration tests
         env:
-          CB_OI_CONNECTION_STRING: http://localhost:8095
+          CB_OI_CONNECTION_STRING: http://127.0.0.1:8095
           CB_OI_USERNAME: ${{ env.CLUSTER_USERNAME }}
           CB_OI_PASSWORD: ${{ env.CLUSTER_PASSWORD }}
           PYTHONPATH: src

@@ -55,21 +55,42 @@ applied automatically by directory — test files carry no `@pytest.mark.accurac
   `CB_OI_CONNECTION_STRING`, `CB_OI_USERNAME`, `CB_OI_PASSWORD` (see
   `tests/_test_env.py`). The whole directory is
   skipped at collection time, not per-test, when those are unset — see its
-  `conftest.py`. Local setup (per
+  `conftest.py`. Local setup uses the same containers and config CI does
+  (`scripts/oi_ci_cluster/` — steps 2-5 of
   https://docs.couchbase.com/enterprise-analytics/current/intro/do-a-quick-install.html):
   ```bash
-  docker network create oi
-  docker run -d --name s3mock --network oi adobe/s3mock
-  docker run -d --name oi --network oi -p 8091:8091 -p 8095:8095 \
-    couchbase/enterprise-analytics:2.2.1
-  # then POST /settings/analytics (S3Mock config) and POST /clusterInit
-  # (Administrator/password, memoryQuota=100) against http://localhost:8091 —
-  # see the Operational Insights quick-install docs linked above for the
-  # exact request bodies.
-  export CB_OI_CONNECTION_STRING=http://localhost:8095
-  export CB_OI_USERNAME=Administrator
-  export CB_OI_PASSWORD=password
+  export OI_IMAGE=couchbase/enterprise-analytics:2.2.1
+  export S3MOCK_IMAGE=adobe/s3mock:5.2.3
+  export S3MOCK_BUCKET=cloud-storage-container
+  export S3MOCK_STORE_ROOT=fs
+  export S3MOCK_RETAIN_FILES_ON_EXIT=true
+  export OI_ADMIN_PORT=8091      # already in use? pick a free port (e.g. 9091) —
+  export OI_ANALYTICS_PORT=8095  # a local Couchbase Server install claims these
+  export BLOB_STORAGE_SCHEME=s3
+  export BLOB_STORAGE_REGION=us-east-1
+  export BLOB_STORAGE_ENDPOINT=http://s3mock:9090
+  export BLOB_STORAGE_ANONYMOUS_AUTH=true
+  export BLOB_STORAGE_PATH_STYLE_ADDRESSING=true
+  export NUM_STORAGE_PARTITIONS=16
+  export CLUSTER_USERNAME=Administrator
+  export CLUSTER_PASSWORD=password
+  export CLUSTER_MEMORY_QUOTA=100
+  export CLUSTER_NAME="OI Local Cluster"
+
+  docker compose -f scripts/oi_ci_cluster/docker-compose.yml up -d --wait
+  ./scripts/oi_ci_cluster/configure_cluster.sh
+
+  # 127.0.0.1, not localhost: the couchbase_operational_insights SDK picks
+  # a random address when a hostname resolves to more than one (localhost
+  # -> 127.0.0.1 and ::1), and about half the time that's an ::1 this
+  # container's port publishing doesn't forward, causing an immediate
+  # connection reset. A literal IP isn't looked up, so it can't happen.
+  export CB_OI_CONNECTION_STRING=http://127.0.0.1:${OI_ANALYTICS_PORT}
+  export CB_OI_USERNAME=$CLUSTER_USERNAME
+  export CB_OI_PASSWORD=$CLUSTER_PASSWORD
   uv run --extra dev pytest tests/integration/operational_insights -v
+
+  docker compose -f scripts/oi_ci_cluster/docker-compose.yml down -v
   ```
 - **Perf** — in-process performance tests, opt-in via `CB_MCP_PERF=1`; not run in CI.
 - **Accuracy** — drive an OpenAI tool-calling agent against the live MCP
