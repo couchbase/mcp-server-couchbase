@@ -16,5 +16,5 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Run OI CI smoke test
-        run: ./scripts/oi_ci_smoke/run_smoke_test.sh
+      - name: Set up OI containers
+        run: ./scripts/oi_ci_smoke/setup.sh
