@@ -16,6 +16,9 @@ from conftest import ensure_list
 from .conftest import create_oi_mcp_session
 
 OI_EXPECTED_TOOLS = {
+    # Shared with every other server — the same function object, not an OI
+    # reimplementation. See cb_mcp/tools/status.py.
+    "get_server_configuration_status",
     "get_databases_in_cluster",
     "get_scopes_in_database",
     "get_collections_in_scope",

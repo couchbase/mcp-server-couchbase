@@ -15,6 +15,10 @@ from mcp.types import ToolAnnotations
 from ...core.spec import ToolSet
 from ...utils.constants import SCOPE_READ, SCOPE_WRITE
 
+# Shared with every other server, and registered by them too — the same
+# function object, not a per-server reimplementation. See cb_mcp/tools/status.py.
+from ..status import get_server_configuration_status
+
 # Scope/collection management tools
 from .collection_management import (
     create_collection,
@@ -78,7 +82,6 @@ from .server import (
     get_collections_in_scope,
     get_scopes_and_collections_in_bucket,
     get_scopes_in_bucket,
-    get_server_configuration_status,
     test_cluster_connection,
 )
 

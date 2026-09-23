@@ -8,10 +8,15 @@ Tool Categories:
 - WRITE_TOOLS: Tools that modify data (disabled when read_only_mode is True)
 
 Four of these tool names — get_collections_in_scope, get_schema_for_collection,
-create_index and list_indexes — also exist on the operational server. Both
-servers run as independent processes, so this only matters to a client that
-registers both simultaneously; see CONTRIBUTING.md's tool-naming section for
-why these were kept as-is rather than renamed.
+create_index and list_indexes — also exist on the operational server, with a
+different implementation behind each. Both servers run as independent
+processes, so this only matters to a client that registers both
+simultaneously; see CONTRIBUTING.md's tool-naming section for why these were
+kept as-is rather than renamed.
+
+get_server_configuration_status also appears on both, but is not one of those:
+it is a single shared function (cb_mcp.tools.status) that every server
+registers, so a client sees one tool with one behaviour.
 
 Import order below matters and is deliberately alphabetical (".index" before
 ".metadata" before ".query"): .index imports
@@ -28,6 +33,7 @@ from mcp.types import ToolAnnotations
 
 from ...core.spec import ToolSet
 from ...utils.constants import SCOPE_READ, SCOPE_WRITE
+from ..status import get_server_configuration_status
 from .index import create_index, list_indexes
 from .metadata import (
     get_collections_in_scope,
@@ -48,6 +54,9 @@ from .query import (
 # truth for it.
 TOOL_SET = ToolSet(
     read_only=(
+        # Shared across every server — same function object as the
+        # operational server registers. See cb_mcp/tools/status.py.
+        get_server_configuration_status,
         get_databases_in_cluster,
         get_scopes_in_database,
         get_collections_in_scope,
@@ -81,6 +90,7 @@ ALL_TOOLS = TOOL_SET.all_tools
 
 # Tool annotations for MCP clients (readOnlyHint, destructiveHint, etc.)
 TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
+    "get_server_configuration_status": ToolAnnotations(readOnlyHint=True),
     "get_databases_in_cluster": ToolAnnotations(readOnlyHint=True),
     "get_scopes_in_database": ToolAnnotations(readOnlyHint=True),
     "get_collections_in_scope": ToolAnnotations(readOnlyHint=True),
@@ -140,6 +150,7 @@ __all__ = [
     "get_async_query_results",
     "get_collections_in_scope",
     "get_databases_in_cluster",
+    "get_server_configuration_status",
     "get_schema_for_collection",
     "get_scopes_in_database",
     "get_tools",
