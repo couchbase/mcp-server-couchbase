@@ -354,11 +354,24 @@ avoids the problem entirely.
 `TOOL_ANNOTATIONS` mapping from the package `__init__`. Tool *names* should be
 globally unique across all servers — a client connected to two servers sees one
 flat namespace, so a duplicate name is ambiguous to it. Prefer a unique name.
-If a name genuinely must be shared (e.g. porting an existing tool set whose
-names predate this rule, as `operational-insights`'s `get_collections_in_scope`,
-`get_schema_for_collection`, `create_index` and `list_indexes` do), add it to
+If a name genuinely must be duplicated — each server having its *own*
+implementation behind it (e.g. porting an existing tool set whose names
+predate this rule, as `operational-insights`'s `get_collections_in_scope`,
+`get_schema_for_collection`, `create_index` and `list_indexes` do) — add it to
 `KNOWN_DUPLICATE_TOOL_NAMES` in `tests/unit/test_server_specs.py` with a
-one-line reason — the test still fails on any *new*, undocumented collision.
+one-line reason. The test still fails on any *new*, undocumented collision.
+
+A name on two servers because they register the **same function object** is a
+different thing, and goes in `SHARED_TOOL_NAMES` instead: that is not a
+collision — a client connected to both gets identical behaviour whichever it
+reaches. Today that is `get_server_configuration_status`
+(`src/cb_mcp/tools/status.py`), which every server must expose so an operator
+can always ask what read-only mode, disabled tools, OAuth and logging resolved
+to without a cluster. The tests enforce the distinction rather than trusting
+the list: a "shared" name whose servers register *different* functions fails,
+as does a shared name some server forgot to register. Put a genuinely
+server-agnostic tool in `src/cb_mcp/tools/` next to `status.py`, not inside a
+server's subpackage — if its body needs an SDK, it is not shared.
 
 **3. Declare the spec** in `src/cb_mcp/servers/<id>/spec.py`:
 
