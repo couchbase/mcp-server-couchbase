@@ -13,6 +13,7 @@ from collections.abc import Callable
 from mcp.types import ToolAnnotations
 
 from ...core.spec import ToolSet
+from ...utils.constants import SCOPE_READ, SCOPE_WRITE
 
 # Scope/collection management tools
 from .collection_management import (
@@ -200,6 +201,22 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "drop_index": ToolAnnotations(destructiveHint=True),
 }
 
+# Per-tool explanations appended to a scope-denial error, reaching the
+# enforcement layer via ``ServerSpec.scope_hints``. Use these where the
+# literal "missing X" line under-explains *why* a tool needs the scope it
+# does; tools not listed here get the generic message.
+#
+# Kept beside the tools rather than in ``cb_mcp.utils.scope_enforcement``,
+# where they used to live: that module is shared by every server, and a
+# hard-coded ``run_sql_plus_plus_query`` there made it quietly specific to
+# this one. The Operational Insights server already declares its hints this
+# way.
+TOOL_SCOPE_HINTS: dict[str, str] = {
+    "run_sql_plus_plus_query": (
+        f"A '{SCOPE_WRITE}'-only token cannot invoke SQL++; '{SCOPE_READ}' is required."
+    ),
+}
+
 
 def get_tools(read_only_mode: bool = True) -> list[Callable]:
     """Get the list of tools based on the mode settings.
@@ -258,6 +275,7 @@ __all__ = [
     "WRITE_TOOLS",
     # Tool annotations
     "TOOL_ANNOTATIONS",
+    "TOOL_SCOPE_HINTS",
     # Convenience
     "ALL_TOOLS",
     "get_tools",

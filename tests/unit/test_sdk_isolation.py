@@ -98,6 +98,25 @@ def test_shared_modules_import_no_sdk(module: str) -> None:
     )
 
 
+def test_importing_the_cli_loads_no_sdk() -> None:
+    """``mcp_server`` itself must stay SDK-free — the lazy rule's whole point.
+
+    It imports *both* servers' constants modules at module scope (for the
+    ``transport_options`` / ``logging_options`` factories, which need each
+    default port and log file to appear in ``--help``). Those modules are
+    SDK-free by design, and each server's ``__init__`` is deliberately inert,
+    so neither SDK loads until a subcommand body runs. Nothing else checks
+    that: the per-module cases above would all still pass if this file grew a
+    top-level ``from cb_mcp.servers.operational.spec import SPEC``.
+    """
+    loaded = _sdks_loaded_by("import mcp_server")
+    assert not loaded, (
+        f"importing mcp_server loaded {sorted(loaded)}. Every server's spec and "
+        "provider must be imported inside its subcommand body, and the "
+        "constants modules imported at module scope must stay SDK-free."
+    )
+
+
 def test_operational_server_does_not_load_the_insights_sdk() -> None:
     """Importing the operational server's spec + provider loads only ``couchbase``."""
     loaded = _sdks_loaded_by(

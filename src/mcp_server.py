@@ -49,6 +49,10 @@ from cb_mcp.core.app import build_app, run_app
 from cb_mcp.core.cli import DefaultGroup
 from cb_mcp.core.contracts import ProviderLifecycle
 from cb_mcp.core.spec import ServerSpec
+from cb_mcp.servers.operational.constants import (
+    DEFAULT_OPERATIONAL_LOG_FILE,
+    DEFAULT_OPERATIONAL_PORT,
+)
 from cb_mcp.servers.operational_insights.constants import (
     DEFAULT_OI_LOG_FILE,
     DEFAULT_OI_PORT,
@@ -63,8 +67,6 @@ from cb_mcp.utils.cli_params import (
     resolved_logging_snapshot,
     server_options,
 )
-from cb_mcp.utils.constants import DEFAULT_LOG_FILE as OPERATIONAL_DEFAULT_LOG_FILE
-from cb_mcp.utils.constants import DEFAULT_PORT as OPERATIONAL_DEFAULT_PORT
 
 # --- Starting a server -------------------------------------------------------
 
@@ -137,8 +139,8 @@ def main() -> None:
 @main.command("operational", short_help="Operational cluster server (default).")
 @server_options(
     credentials=CLUSTER_CREDENTIALS,
-    default_port=OPERATIONAL_DEFAULT_PORT,
-    default_log_file=OPERATIONAL_DEFAULT_LOG_FILE,
+    default_port=DEFAULT_OPERATIONAL_PORT,
+    default_log_file=DEFAULT_OPERATIONAL_LOG_FILE,
 )
 # Also on the subcommand so `couchbase-mcp-server operational --version` works.
 @click.version_option(

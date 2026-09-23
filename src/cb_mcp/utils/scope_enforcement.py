@@ -23,31 +23,25 @@ from collections.abc import Callable
 from fastmcp.server.dependencies import get_access_token
 
 from ..core.spec import ScopeSpec
-from .constants import LOGGER_NAMESPACE, SCOPE_READ, SCOPE_WRITE
+from .constants import LOGGER_NAMESPACE
 
 logger = logging.getLogger(f"{LOGGER_NAMESPACE}.utils.scope_enforcement")
 
-# The scope labels used when a caller does not supply a server's own. These are
-# the operational server's canonical labels, kept as the default so existing
-# callers keep their behaviour unchanged.
-DEFAULT_SCOPES = ScopeSpec(read=SCOPE_READ, write=SCOPE_WRITE)
-
-# Per-tool hints appended to the PermissionError message when a token is
-# missing required scopes. Use these to explain *why* a tool requires a
-# particular scope when the literal "missing X" line under-explains the
-# situation. Tools not listed here fall back to the generic message.
-TOOL_SCOPE_HINTS: dict[str, str] = {
-    "run_sql_plus_plus_query": (
-        f"A '{SCOPE_WRITE}'-only token cannot invoke SQL++; '{SCOPE_READ}' is required."
-    ),
-}
+# Deliberately no TOOL_SCOPE_HINTS and no DEFAULT_SCOPES here. Both used to
+# live in this module and both named the operational server specifically —
+# one hard-coded ``run_sql_plus_plus_query``, the other defaulted to that
+# server's scope labels — which made a module every server routes through
+# quietly about one of them. Hints now live beside the tools they describe
+# (``tools/<server>/__init__.py``, reaching the enforcement layer via
+# ``ServerSpec.scope_hints``), and ``scopes`` below is required rather than
+# defaulted, so a new server cannot silently inherit another's labels.
 
 
 def required_scopes_for_tool(
     tool_name: str,
     *,
     write_tool_names: set[str] | frozenset[str],
-    scopes: ScopeSpec | None = None,
+    scopes: ScopeSpec,
 ) -> set[str]:
     """Return the set of scopes a token must hold to invoke ``tool_name``.
 
@@ -61,11 +55,12 @@ def required_scopes_for_tool(
     A token holding only ``SCOPE_WRITE`` therefore cannot reach SQL++ or any
     read tool. Full access requires both scopes.
 
-    ``scopes`` supplies the server's canonical scope labels; it defaults to the
-    operational server's pair. These are the canonical values a token's scopes
-    are normalized to, not the operator-facing labels an IdP emits.
+    ``scopes`` supplies the server's canonical scope labels — required, not
+    defaulted: silently falling back to some other server's labels would gate
+    tools against scopes the token was never issued for. These are the
+    canonical values a token's scopes are normalized to, not the
+    operator-facing labels an IdP emits.
     """
-    scopes = scopes or DEFAULT_SCOPES
     if tool_name in write_tool_names:
         return {scopes.write}
     return {scopes.read}
