@@ -105,7 +105,8 @@ The `cb_mcp` package is reused by managed MCP server implementations, not just t
 
 - **Tools must obtain the cluster through the request context / `ClusterProvider`** (`src/cb_mcp/core/contracts.py`) — never from global state, CLI arguments, or environment variables read inside `cb_mcp`.
 - **Don't read CLI/env configuration inside `cb_mcp`.** Configuration parsing belongs to the host (`src/mcp_server.py` and `src/providers/`).
-- **Don't change the `ClusterProvider` protocol** (or other contracts in `core/`) without prior discussion — managed implementations depend on it.
+  - **Named exception:** `src/cb_mcp/utils/cli_params.py` is host-configuration code (it turns parsed Click params into settings) that lives inside `cb_mcp` anyway, grouped with the other CLI/config helpers in `utils/` rather than with `src/providers/`'s `ClusterProvider` implementations. It is imported only by `src/mcp_server.py`. Nothing else under `cb_mcp` may import it, and it must never be re-exported from `cb_mcp/utils/__init__.py` — that would make every `cb_mcp` consumer inherit a dependency on Click.
+- **Don't change the `ProviderLifecycle` / `ClusterProvider` protocols** (or other contracts in `core/`) without prior discussion — managed implementations depend on them. `ProviderLifecycle` is the service-agnostic half (`close`, `get_configuration`, `is_connected`) that the shared machinery calls; `ClusterProvider` adds `get_cluster` for the operational server. A server backed by a different service declares its own provider protocol next to that service's helpers (see `cb_mcp/utils/operational_insights/contracts.py`) rather than widening these.
 - Provider configuration returned for status reporting must never include secrets (return `_configured` booleans instead).
 
 ### Tool design
@@ -274,25 +275,35 @@ mcp-server-couchbase/
 ├── src/
 │   ├── mcp_server.py            # CLI entry point: a click group, one subcommand per server
 │   ├── providers/               # Standalone-host provider implementations
-│   │   └── static.py            # StaticClusterProvider (CLI/env config)
+│   │   ├── operational.py       # OperationalClusterProvider (CLI/env config)
+│   │   └── operational_insights.py  # OperationalInsightsClusterProvider
 │   └── cb_mcp/                  # Reusable package shared with managed MCP implementations
 │       ├── core/                # Server-agnostic machinery
-│       │   ├── contracts.py     # Host-agnostic contracts (ClusterProvider, ...)
+│       │   ├── contracts.py     # Host-agnostic contracts (ProviderLifecycle, ClusterProvider)
 │       │   ├── spec.py          # ServerSpec / ToolSet / ScopeSpec — a server, as data
 │       │   ├── app.py           # build_app(spec, ...) -> FastMCP, and run_app
 │       │   └── cli/             # DefaultGroup + reusable Click option stacks
 │       ├── servers/             # One package per server
-│       │   └── operational/     # Identity constants and the SPEC itself
+│       │   ├── operational/     # Identity constants and the SPEC itself
+│       │   └── operational_insights/  # Same, plus its own credential stack (cli.py)
 │       ├── tools/               # Tool implementations, one subpackage per server
-│       │   └── operational/     # server.py, kv.py, query.py, index.py, ...
+│       │   ├── operational/     # server.py, kv.py, query.py, index.py, ...
+│       │   └── operational_insights/  # metadata.py, query.py, index.py
 │       ├── utils/               # Shared helpers (config, context, logging, telemetry)
-│       │   └── operational/     # Couchbase-SDK-specific helpers + bundled CA certs
+│       │   ├── operational/     # Couchbase-SDK-specific helpers + bundled CA certs
+│       │   └── operational_insights/  # couchbase_operational_insights-specific helpers
 │       └── tool_registration.py # Gating and wrapping: disabled, confirmation, scopes
 ├── scripts/                     # Lint, test-data setup, version bump scripts
 ├── tests/
 │   ├── unit/                    # Pure Python tests (no cluster)
-│   ├── integration/             # Tests against a live Couchbase cluster
-│   └── accuracy/                # AI-in-the-loop accuracy tests (see tests/README.md)
+│   │   ├── operational/           # Operational-server-only unit tests
+│   │   └── operational_insights/  # OI-only unit tests
+│   ├── integration/             # Shared session plumbing; tests live per server
+│   │   ├── operational/           # Tests against a live Couchbase cluster
+│   │   └── operational_insights/  # Tests against a live OI cluster, env-gated
+│   ├── perf/                    # In-process performance tests, opt-in via CB_MCP_PERF=1
+│   ├── accuracy/                # AI-in-the-loop accuracy tests (see tests/README.md)
+│   └── _all_specs.py            # Test-only ALL_SPECS registry (see its docstring)
 ├── pyproject.toml               # Dependencies, Ruff and pytest config
 ├── Dockerfile / DOCKER.md       # Container build and usage
 ├── RELEASE.md                   # Release process
@@ -316,6 +327,10 @@ compatibility contracts:
 | `spec.fastmcp_name` | `couchbase-operational` | wire-visible; clients see it as `serverInfo.name` |
 | `spec.logger_namespace` | `couchbase.mcp.operational` | operator-facing; appears in every log line |
 
+A second server, `operational-insights` / `couchbase-operational-insights` /
+`couchbase.mcp.operational-insights`, exists as a concrete example — see
+`src/cb_mcp/servers/operational_insights/`.
+
 ### Adding a new MCP server
 
 A server is a spec plus a provider plus a subcommand. The shared machinery in
@@ -336,9 +351,27 @@ it cannot be used as a logger namespace. Nesting under `couchbase.mcp.<id>`
 avoids the problem entirely.
 
 **2. Declare the tools** in `src/cb_mcp/tools/<id>/`, exporting a `ToolSet` and a
-`TOOL_ANNOTATIONS` mapping from the package `__init__`. Tool *names* must be
+`TOOL_ANNOTATIONS` mapping from the package `__init__`. Tool *names* should be
 globally unique across all servers — a client connected to two servers sees one
-flat namespace.
+flat namespace, so a duplicate name is ambiguous to it. Prefer a unique name.
+If a name genuinely must be duplicated — each server having its *own*
+implementation behind it (e.g. porting an existing tool set whose names
+predate this rule, as `operational-insights`'s `get_collections_in_scope`,
+`get_schema_for_collection`, `create_index` and `list_indexes` do) — add it to
+`KNOWN_DUPLICATE_TOOL_NAMES` in `tests/unit/test_server_specs.py` with a
+one-line reason. The test still fails on any *new*, undocumented collision.
+
+A name on two servers because they register the **same function object** is a
+different thing, and goes in `SHARED_TOOL_NAMES` instead: that is not a
+collision — a client connected to both gets identical behaviour whichever it
+reaches. Today that is `get_server_configuration_status`
+(`src/cb_mcp/tools/status.py`), which every server must expose so an operator
+can always ask what read-only mode, disabled tools, OAuth and logging resolved
+to without a cluster. The tests enforce the distinction rather than trusting
+the list: a "shared" name whose servers register *different* functions fails,
+as does a shared name some server forgot to register. Put a genuinely
+server-agnostic tool in `src/cb_mcp/tools/` next to `status.py`, not inside a
+server's subpackage — if its body needs an SDK, it is not shared.
 
 **3. Declare the spec** in `src/cb_mcp/servers/<id>/spec.py`:
 
@@ -366,10 +399,18 @@ imported the spec (which imports the tools, which import the server's
 constants) you get a circular import. `tests/unit/test_logger_names.py`
 imports each package first in a clean subprocess to catch this.
 
-**4. Write the provider** in `src/providers/<id>.py`. It must satisfy the
-`ClusterProvider` shape in `core/contracts.py`, and `close()` should encapsulate
-whatever teardown its client needs — the shared lifespan just calls `close()`
-and should never type-switch on the client.
+**4. Write the provider** in `src/providers/<id>.py`. It must satisfy
+`ProviderLifecycle` in `core/contracts.py` — that is all the shared machinery
+calls — and `close()` should encapsulate whatever teardown its client needs;
+the shared lifespan just calls `close()` and should never type-switch on the
+client. If your tools need more from the provider than those three methods
+(a `get_cluster` of your SDK's type, or extra state like the Operational
+Insights server's `handle_registry`), declare a protocol extending
+`ProviderLifecycle` next to your service's helpers, not in `core/` — `core`
+must stay free of every SDK. Add both to
+`tests/unit/test_provider_contracts.py`, which is what replaced the
+misleading `runtime_checkable`/`isinstance` check these protocols used to
+carry.
 
 **5. Add the subcommand** in `src/mcp_server.py`. Reuse the shared option stacks
 and supply only what differs:
@@ -389,9 +430,26 @@ def your_server(...):
 Import the spec lazily inside the subcommand so a process only loads the SDK of
 the server it is actually running.
 
-**6. Add tests.** Beyond the tool tests, extend the cross-server checks: tool
-names unique across specs, annotations covering every tool, and the logger
-snapshot in `tests/unit/test_logger_names.py`.
+**6. Add tests.** Beyond the tool tests:
+- add the new spec to `tests/_all_specs.py`'s `ALL_SPECS` — that alone feeds
+  most of the cross-server invariants in `tests/unit/test_server_specs.py`
+  (unique ports/log files/namespaces, every tool annotated, tool-name
+  collisions against the allow-list);
+- add every logger-bearing module to `EXPECTED_LOGGER_NAMES` in
+  `tests/unit/test_logger_names.py`, and its packages to
+  `test_packages_import_in_any_order`;
+- add a `(argv, spec)` case to `tests/unit/test_settings_classification.py`'s
+  `SERVERS`;
+- add explicit-subcommand cases to `tests/unit/test_default_group.py`;
+- add a case to `tests/unit/test_sdk_isolation.py` asserting your server's
+  spec + provider load *your* SDK and no other server's — this is what keeps
+  the lazy-import rule in step 5 true rather than aspirational;
+- put your server's own unit tests in `tests/unit/<id>/` and its integration
+  tests in `tests/integration/<id>/`, mirroring `src/`. Only tests covering
+  shared machinery or asserting over every spec belong at the tier root;
+- if the server needs a live cluster to test against, make that integration
+  subdirectory env-gated so it auto-skips when its credentials are unset —
+  see `tests/integration/operational_insights/conftest.py` for the pattern.
 
 #### Constraints that are easy to miss
 
@@ -413,6 +471,10 @@ snapshot in `tests/unit/test_logger_names.py`.
 - **One distribution, one version.** All servers ship together, so a fix in one
   bumps the version for every user of the others. Release notes need
   per-server sections.
+- **The Docker image's `ENV CB_MCP_PORT` would override every server's
+  `default_port`**, since an env var always beats a Click default — this is
+  why the runtime stage does not hard-set it. Don't reintroduce a bare
+  `CB_MCP_PORT` default in the Dockerfile without namespacing it per server.
 
 ## 💡 Tips for Contributors
 

@@ -22,11 +22,11 @@ from typing import Any
 from fastmcp import Client, Context, FastMCP
 from fastmcp.tools import FunctionTool
 
+from cb_mcp.servers.operational.constants import FASTMCP_SERVER_NAME
+from cb_mcp.servers.operational.spec import SPEC as OPERATIONAL_SPEC
 from cb_mcp.tool_registration import prepare_tools_for_registration
 from cb_mcp.tools.operational import TOOL_ANNOTATIONS
 from cb_mcp.utils import AppContext
-from cb_mcp.servers.operational.constants import FASTMCP_SERVER_NAME
-from cb_mcp.servers.operational.spec import SPEC as OPERATIONAL_SPEC
 
 ITERATIONS = int(os.getenv("CB_MCP_PERF_ITERATIONS", "100"))
 ASSERT_ENABLED = os.getenv("CB_MCP_PERF_ASSERT") == "1"
@@ -102,8 +102,9 @@ class StubClusterProvider:
 def build_perf_server(provider: Any, *, read_only_mode: bool = False) -> FastMCP:
     """Mirror mcp_server.main's registration, minus logging/telemetry ping.
 
-    Kept in sync by hand with ``src/mcp_server.py``; if registration there
-    changes shape, update here too.
+    Kept in sync by hand with the tool-gating and settings-assembly shape in
+    ``src/cb_mcp/utils/cli_params.py`` (``gate_tools``/``build_settings``),
+    which ``src/mcp_server.py`` calls; if that shape changes, update here too.
     """
     final_tools, confirmation_names, disabled_names = prepare_tools_for_registration(
         OPERATIONAL_SPEC,

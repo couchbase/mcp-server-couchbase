@@ -29,6 +29,12 @@ from cb_mcp.servers.operational.constants import (
     FASTMCP_SERVER_NAME,
     OPERATIONAL_LOGGER_NAMESPACE,
 )
+from cb_mcp.servers.operational_insights.constants import (
+    FASTMCP_SERVER_NAME as OI_FASTMCP_SERVER_NAME,
+)
+from cb_mcp.servers.operational_insights.constants import (
+    OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE,
+)
 from cb_mcp.utils.constants import (
     LOGGER_NAMESPACE,
     LOGGER_ROOT,
@@ -63,7 +69,13 @@ EXPECTED_LOGGER_NAMES = {
     "cb_mcp.utils.operational.connection_string": "couchbase.mcp.utils.connection_string",
     "cb_mcp.utils.operational.index_utils": "couchbase.mcp.operational.utils.index_utils",
     "cb_mcp.utils.operational.reference_data": "couchbase.mcp.operational.utils.reference_data",
-    "providers.static": "couchbase.mcp.operational.providers.static",
+    "providers.operational": "couchbase.mcp.operational.providers.operational",
+    # operational-insights server
+    "cb_mcp.tools.operational_insights.index": "couchbase.mcp.operational-insights.tools.index",
+    "cb_mcp.tools.operational_insights.metadata": "couchbase.mcp.operational-insights.tools.metadata",
+    "cb_mcp.tools.operational_insights.query": "couchbase.mcp.operational-insights.tools.query",
+    "cb_mcp.utils.operational_insights.connection": "couchbase.mcp.operational-insights.utils.connection",
+    "providers.operational_insights": "couchbase.mcp.operational-insights.providers.operational_insights",
 }
 
 # The root the handlers attach to. Everything above must be a descendant.
@@ -105,13 +117,25 @@ def test_ambiguous_alias_is_gone():
 
 
 def test_namespaces_nest_correctly():
-    """Package namespace under the root; the server's under the package.
+    """Package namespace under the root; each server's under the package.
 
     The nesting is what lets handlers attach once at the root while keeping
     each server's records distinguishable in a merged stream.
     """
     assert LOGGER_NAMESPACE.startswith(f"{LOGGER_ROOT}.")
     assert OPERATIONAL_LOGGER_NAMESPACE.startswith(f"{LOGGER_NAMESPACE}.")
+    assert OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE.startswith(f"{LOGGER_NAMESPACE}.")
+    # The two servers' namespaces must be siblings, not one nesting under the
+    # other — "operational-insights" starting with "operational" as a string
+    # would be a false positive for a startswith() check, but the "." after
+    # the shared prefix means neither is an ancestor of the other in the
+    # logging hierarchy.
+    assert not OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE.startswith(
+        f"{OPERATIONAL_LOGGER_NAMESPACE}."
+    )
+    assert not OPERATIONAL_LOGGER_NAMESPACE.startswith(
+        f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}."
+    )
 
 
 def test_nothing_logs_on_the_bare_sdk_root():
@@ -132,6 +156,16 @@ def test_nothing_logs_on_the_bare_sdk_root():
 def test_fastmcp_name_is_wire_visible():
     """serverInfo.name. Changing it is breaking for every connected client."""
     assert FASTMCP_SERVER_NAME == "couchbase-operational"
+
+
+def test_oi_fastmcp_name_is_wire_visible():
+    """serverInfo.name for the OI server. Breaking for every connected client.
+
+    Deliberately a separate, literal-asserting test rather than folding into
+    the one above via parametrization — reading the value back from the
+    constant it's asserting against would test nothing.
+    """
+    assert OI_FASTMCP_SERVER_NAME == "couchbase-operational-insights"
 
 
 def test_configure_logging_attaches_to_the_root():
@@ -196,6 +230,10 @@ def test_packages_import_in_any_order():
         "cb_mcp.core.spec",
         "cb_mcp.utils",
         "cb_mcp.tools.operational",
+        "cb_mcp.tools.operational_insights",
+        "cb_mcp.servers.operational_insights",
+        "cb_mcp.servers.operational_insights.spec",
+        "cb_mcp.utils.operational_insights",
     ):
         result = subprocess.run(
             [sys.executable, "-c", f"import {module}"],

@@ -12,15 +12,11 @@ behaviour, it does not change it.
 import couchbase
 
 from ...core.spec import ScopeSpec, ServerSpec
-from ...tools.operational import TOOL_ANNOTATIONS, TOOL_SET
-from ...utils.constants import (
-    DEFAULT_LOG_FILE,
-    DEFAULT_PORT,
-    SCOPE_READ,
-    SCOPE_WRITE,
-)
-from ...utils.scope_enforcement import TOOL_SCOPE_HINTS
+from ...tools.operational import TOOL_ANNOTATIONS, TOOL_SCOPE_HINTS, TOOL_SET
+from ...utils.constants import SCOPE_READ, SCOPE_WRITE
 from .constants import (
+    DEFAULT_OPERATIONAL_LOG_FILE,
+    DEFAULT_OPERATIONAL_PORT,
     FASTMCP_SERVER_NAME,
     OPERATIONAL_LOGGER_NAMESPACE,
     SERVER_ID,
@@ -48,8 +44,8 @@ SPEC = ServerSpec(
     # The long-standing values: this server keeps them so existing
     # deployments, compose files and log tooling are unaffected. A second
     # server must pick different ones.
-    default_port=DEFAULT_PORT,
-    default_log_file=DEFAULT_LOG_FILE,
+    default_port=DEFAULT_OPERATIONAL_PORT,
+    default_log_file=DEFAULT_OPERATIONAL_LOG_FILE,
     scopes=ScopeSpec(read=SCOPE_READ, write=SCOPE_WRITE),
     annotations=TOOL_ANNOTATIONS,
     scope_hints=TOOL_SCOPE_HINTS,

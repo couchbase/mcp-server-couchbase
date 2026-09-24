@@ -14,8 +14,8 @@ from typing import Any
 from fastmcp import Context
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
-from ...utils.context import get_cluster_connection
 from ...utils.operational.connection import connect_to_bucket
+from ...utils.operational.context import get_cluster_connection
 from ...utils.responses import tool_error, tool_success
 
 logger = logging.getLogger(

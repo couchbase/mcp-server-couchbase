@@ -9,10 +9,10 @@ from fastmcp import Context
 from cb_mcp.servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from cb_mcp.utils.operational.connection import connect_to_couchbase_cluster
 
-logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.providers.static")
+logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.providers.operational")
 
 
-class StaticClusterProvider:
+class OperationalClusterProvider:
     """Cluster provider for the standalone host
 
     Opens a single cluster for the life of the server using the

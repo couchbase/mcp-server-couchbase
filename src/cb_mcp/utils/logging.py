@@ -23,11 +23,11 @@ from .constants import (
     ALLOWED_LOG_SINKS,
     BYTES_PER_MB,
     DEFAULT_LOG_DATEFMT,
-    DEFAULT_LOG_FILE,
     DEFAULT_LOG_FORMAT,
     DEFAULT_LOG_LEVEL,
     DEFAULT_LOG_MAX_BYTES,
     DEFAULT_LOG_SINKS,
+    FALLBACK_LOG_FILE,
     LOGGER_NAMESPACE,
     LOGGER_ROOT,
 )
@@ -296,9 +296,9 @@ def _attach_per_level_file_handlers(
     if not log_file:
         errors.append(
             "File logging enabled but no --log-file/CB_MCP_LOG_FILE configured; "
-            f"falling back to default '{DEFAULT_LOG_FILE}'."
+            f"falling back to default '{FALLBACK_LOG_FILE}'."
         )
-        log_file = DEFAULT_LOG_FILE
+        log_file = FALLBACK_LOG_FILE
 
     attached: dict[str, str] = {}
     backup_counts: dict[str, int] = {}
@@ -499,7 +499,7 @@ def configure_logging(
     # derived from the base path (mcp_server.log -> mcp_server_config.log.json).
     # Only when the file sink is active; ``log_environment_info`` writes it later.
     server_config_file = (
-        "{}_config{}.json".format(*os.path.splitext(log_file or DEFAULT_LOG_FILE))
+        "{}_config{}.json".format(*os.path.splitext(log_file or FALLBACK_LOG_FILE))
         if file_sink_active
         else None
     )

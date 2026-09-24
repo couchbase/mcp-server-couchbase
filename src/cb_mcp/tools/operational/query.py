@@ -14,19 +14,15 @@ from lark_sqlpp import modifies_data, modifies_structure, parse_sqlpp
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.constants import SCOPE_WRITE
-from ...utils.context import get_cluster_connection
 from ...utils.operational.connection import connect_to_bucket, format_keyspace
+from ...utils.operational.context import get_cluster_connection
 from ...utils.operational.query_utils import (
     evaluate_query_plan,
     extract_plan_from_explain_results,
 )
+from ...utils.sqlpp import safe_ident
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.query")
-
-
-def safe_ident(name: str) -> str:
-    """Backtick-quote a SQL++ identifier, doubling embedded backticks."""
-    return "`" + name.replace("`", "``") + "`"
 
 
 def get_schema_for_collection(

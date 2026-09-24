@@ -29,7 +29,7 @@ from ..utils.constants import (
 from ..utils.context import AppContext
 from ..utils.environment import log_environment_info
 from ..utils.telemetry import send_install_ping
-from .contracts import ClusterProvider
+from .contracts import ProviderLifecycle
 from .spec import ServerSpec
 
 logger = logging.getLogger(f"{LOGGER_NAMESPACE}.core.app")
@@ -40,7 +40,7 @@ def build_app(
     *,
     tools: Sequence[Callable],
     settings: Mapping[str, Any],
-    provider_factory: Callable[[], ClusterProvider],
+    provider_factory: Callable[[], ProviderLifecycle],
     auth: AuthProvider | None = None,
     read_only_mode: bool = True,
     logging_config: Mapping[str, Any] | None = None,

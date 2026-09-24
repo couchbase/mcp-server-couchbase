@@ -62,9 +62,7 @@ def _get_capella_root_ca_path() -> str:
     except (ImportError, FileNotFoundError, TypeError):
         # Fallback for development: certs/ is a sibling of this file under utils/operational/.
         operational_dir = os.path.dirname(os.path.abspath(__file__))
-        fallback_path = os.path.join(
-            operational_dir, "certs", "capella_root_ca.pem"
-        )
+        fallback_path = os.path.join(operational_dir, "certs", "capella_root_ca.pem")
 
         if os.path.exists(fallback_path):
             logger.info(f"Using fallback certificate path: {fallback_path}")

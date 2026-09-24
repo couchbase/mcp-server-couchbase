@@ -28,15 +28,14 @@ from .constants import (
     ALLOWED_TRANSPORTS,
     DEFAULT_HOST,
     DEFAULT_LOG_BACKUP_COUNT,
-    DEFAULT_LOG_FILE,
     DEFAULT_LOG_FORMAT,
     DEFAULT_LOG_LEVEL,
     DEFAULT_LOG_MAX_BYTES,
     DEFAULT_LOG_SINKS,
     DEFAULT_OAUTH_ALGORITHM,
-    DEFAULT_PORT,
     DEFAULT_READ_ONLY_MODE,
     DEFAULT_TRANSPORT,
+    FALLBACK_LOG_FILE,
     LOGGER_NAMESPACE,
     LOGGER_ROOT,
     NETWORK_TRANSPORTS,
@@ -49,7 +48,6 @@ from .constants import (
 # Context utilities
 from .context import (
     AppContext,
-    get_cluster_connection,
     get_cluster_provider,
     get_logging_config,
 )
@@ -86,7 +84,6 @@ __all__ = [
     # Connection
     # Context
     "AppContext",
-    "get_cluster_connection",
     "get_cluster_provider",
     "get_logging_config",
     # Constants
@@ -99,11 +96,10 @@ __all__ = [
     "DEFAULT_LOG_BACKUP_COUNT",
     "DEFAULT_LOG_FORMAT",
     "DEFAULT_LOG_SINKS",
-    "DEFAULT_LOG_FILE",
+    "FALLBACK_LOG_FILE",
     "ALLOWED_LOG_LEVELS",
     "ALLOWED_LOG_SINKS",
     "DEFAULT_HOST",
-    "DEFAULT_PORT",
     "ALLOWED_TRANSPORTS",
     "NETWORK_TRANSPORTS",
     "NETWORK_TRANSPORTS_SDK_MAPPING",

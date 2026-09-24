@@ -19,12 +19,17 @@ from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 from cb_mcp.auth import CouchbaseJWTVerifier, build_oauth
+from cb_mcp.core.spec import ScopeSpec
 from cb_mcp.tools.operational.query import run_sql_plus_plus_query
 from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
 from cb_mcp.utils.scope_enforcement import (
     required_scopes_for_tool,
     wrap_with_scope_check,
 )
+
+#: The operational server's canonical pair, spelled out here because
+#: ``required_scopes_for_tool`` no longer defaults to it.
+OPERATIONAL_SCOPES = ScopeSpec(read=SCOPE_READ, write=SCOPE_WRITE)
 
 JWKS = "https://idp.example.com/.well-known/jwks.json"
 ISSUER = "https://idp.example.com"
@@ -186,12 +191,19 @@ class TestCustomScopeNames:
 
 
 class TestRequiredScopesForTool:
-    """KV write tools require SCOPE_WRITE; everything else requires SCOPE_READ."""
+    """KV write tools require SCOPE_WRITE; everything else requires SCOPE_READ.
+
+    ``scopes`` is passed explicitly in every case: it is a required argument,
+    not a defaulted one, so that a server can never silently inherit another
+    server's canonical labels. These cases use the operational server's pair,
+    which is what the old implicit default supplied.
+    """
 
     def test_kv_write_tool_requires_write_only(self):
         assert required_scopes_for_tool(
             "upsert_document_by_id",
             write_tool_names={"upsert_document_by_id", "delete_document_by_id"},
+            scopes=OPERATIONAL_SCOPES,
         ) == {SCOPE_WRITE}
 
     def test_read_tool_requires_read_only(self):
@@ -199,13 +211,30 @@ class TestRequiredScopesForTool:
         assert required_scopes_for_tool(
             "run_sql_plus_plus_query",
             write_tool_names={"upsert_document_by_id"},
+            scopes=OPERATIONAL_SCOPES,
         ) == {SCOPE_READ}
 
     def test_unknown_tool_defaults_to_read(self):
         # Anything not in the write set falls into the read bucket.
-        assert required_scopes_for_tool("some_future_tool", write_tool_names=set()) == {
-            SCOPE_READ
-        }
+        assert required_scopes_for_tool(
+            "some_future_tool", write_tool_names=set(), scopes=OPERATIONAL_SCOPES
+        ) == {SCOPE_READ}
+
+    def test_a_servers_own_labels_are_honoured(self):
+        """The reason ``scopes`` is required rather than defaulted.
+
+        A server with non-canonical labels must gate against *its* pair; the
+        old default silently returned the operational server's.
+        """
+        custom = ScopeSpec(read="other:read", write="other:write")
+        assert required_scopes_for_tool(
+            "upsert_document_by_id",
+            write_tool_names={"upsert_document_by_id"},
+            scopes=custom,
+        ) == {"other:write"}
+        assert required_scopes_for_tool(
+            "some_read_tool", write_tool_names=set(), scopes=custom
+        ) == {"other:read"}
 
 
 @contextmanager
