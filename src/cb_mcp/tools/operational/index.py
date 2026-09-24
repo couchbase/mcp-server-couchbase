@@ -15,11 +15,13 @@ from ...servers.operational.constants import (
     QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION,
 )
 from ...utils.config import get_settings
-from ...utils.operational.connection_string import validate_connection_settings
 from ...utils.context import get_cluster_connection
 from ...utils.operational.connection import connect_to_bucket, format_keyspace
+from ...utils.operational.connection_string import validate_connection_settings
 from ...utils.operational.index_utils import (
+    fetch_index_stats_from_rest_api,
     fetch_indexes_from_rest_api,
+    parse_index_stats_key,
     process_index_data_from_query,
     process_index_data_from_rest_api,
     resolve_cluster_major_version,
@@ -251,6 +253,107 @@ def list_indexes(
     except Exception as e:
         logger.error(f"Error listing indexes: {e}", exc_info=True)
         raise
+
+
+def get_index_stats(
+    ctx: Context,
+    bucket_name: str | None = None,
+    scope_name: str | None = None,
+    collection_name: str | None = None,
+    index_name: str | None = None,
+    skip_empty: bool = False,
+) -> dict[str, Any]:
+    """Get per-index statistics (size, fragmentation, scan traffic) from the Index Service.
+
+    Names which index is responsible for disk or memory pressure — use it after
+    get_cluster_metrics shows a node's index disk climbing.
+
+    Filters are hierarchical: scope requires bucket, collection requires both,
+    index requires all three. No filters returns every index in the cluster.
+
+    Returns ``nodes`` (keyed by node, each with an ``indexer`` block and an
+    ``indexes`` list of bucket/scope/collection/name + ``stats``),
+    ``nodes_without_index`` (nodes that answered but do not hold the requested
+    index — expected, since an index lives only where it was placed) and
+    ``nodes_failed`` (nodes that could not be reached, so a partial answer is
+    visible as one). ``indexer`` is None for filtered calls.
+
+    Numbers are per node. A partitioned index appears under several nodes, each
+    reporting only its own share: sum ``items_count``/``data_size``/``disk_size``
+    across nodes, but not ``num_requests``, which every hosting node counts in
+    full.
+
+    Reading the stats: ``disk_size`` far above ``data_size`` (see
+    ``frag_percent``) means space reclaimable by compaction; ``num_requests``
+    with ``last_known_scan_time`` (Unix ns, 0 = never) identifies unused
+    indexes; ``num_docs_pending`` is indexing lag. Counters reset when the
+    indexer restarts, so a low count alone does not prove an index is unused.
+
+    ``skip_empty=True`` drops zero-valued fields (~two thirds on an idle
+    cluster) — leave it False when hunting unused indexes, since it also removes
+    ``num_requests: 0``.
+    """
+    try:
+        validate_filter_params(bucket_name, scope_name, collection_name, index_name)
+
+        settings = get_settings(ctx)
+        validate_connection_settings(settings)
+
+        logger.info(
+            f"Fetching index stats for bucket={bucket_name}, scope={scope_name}, "
+            f"collection={collection_name}, index={index_name}"
+        )
+        per_node, not_hosted, failures = fetch_index_stats_from_rest_api(
+            get_cluster_connection(ctx),
+            settings["connection_string"],
+            settings["username"],
+            settings["password"],
+            bucket_name=bucket_name,
+            scope_name=scope_name,
+            collection_name=collection_name,
+            index_name=index_name,
+            skip_empty=skip_empty,
+            ca_cert_path=settings.get("ca_cert_path"),
+        )
+
+        nodes = {
+            node: _shape_node_stats(raw_stats) for node, raw_stats in per_node.items()
+        }
+        total = sum(len(n["indexes"]) for n in nodes.values())
+        logger.info(
+            f"Found {total} index entry(s) across {len(nodes)} node(s); "
+            f"{len(not_hosted)} node(s) without it, {len(failures)} unreachable"
+        )
+        return {
+            "nodes": nodes,
+            "nodes_without_index": not_hosted,
+            "nodes_failed": failures,
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting index stats: {e}", exc_info=True)
+        raise
+
+
+def _shape_node_stats(raw_stats: dict[str, Any]) -> dict[str, Any]:
+    """Split one node's raw ``/api/v1/stats`` body into indexer and index parts.
+
+    Kept separate from :func:`get_index_stats` so the response layout can change
+    without touching how the statistics are collected.
+    """
+    # "indexer" holds the node-level aggregates and sits alongside the per-index
+    # entries, so it has to come out before the rest can be treated as indexes.
+    # It is only sent for the unfiltered endpoint, so its absence is normal.
+    stats = dict(raw_stats)
+    indexer = stats.pop("indexer", None)
+
+    return {
+        "indexer": indexer,
+        "indexes": [
+            {**parse_index_stats_key(key), "stats": index_stats}
+            for key, index_stats in stats.items()
+        ],
+    }
 
 
 def create_index(
