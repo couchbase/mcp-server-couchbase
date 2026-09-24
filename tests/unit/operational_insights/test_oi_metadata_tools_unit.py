@@ -17,7 +17,7 @@ from cb_mcp.tools.operational_insights.metadata import (
     get_schema_for_collection,
     get_scopes_in_database,
 )
-from cb_mcp.utils.operational_insights.sqlpp import safe_ident
+from cb_mcp.utils.sqlpp import safe_ident
 
 
 class TestGetDatabasesInCluster:

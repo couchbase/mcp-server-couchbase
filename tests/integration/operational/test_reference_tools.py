@@ -37,7 +37,9 @@ async def test_default_call_reports_record_count_and_a_sample() -> None:
         assert payload["record_count"] > 1000, (
             f"Expected the full metrics dataset, got {payload['record_count']}"
         )
-        assert "records" not in payload, "every dataset is currently too large to list in full"
+        assert "records" not in payload, (
+            "every dataset is currently too large to list in full"
+        )
         assert payload.get("sample_records"), "a sample should still be offered"
         assert "results" not in payload, "The default call must not run a search"
 

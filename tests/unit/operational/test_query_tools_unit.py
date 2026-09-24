@@ -26,8 +26,8 @@ from cb_mcp.tools.operational.query import (
     get_schema_for_collection,
     run_cluster_query,
     run_sql_plus_plus_query,
-    safe_ident,
 )
+from cb_mcp.utils.sqlpp import safe_ident
 
 
 def _make_ctx(*, read_only_mode: bool = True):

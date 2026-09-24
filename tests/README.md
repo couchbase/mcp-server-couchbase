@@ -10,11 +10,14 @@ tests/
 ├── _test_env.py         # shared env helpers (cluster creds, default bucket)
 ├── _all_specs.py        # test-only ALL_SPECS registry, for cross-server invariant tests
 ├── unit/                # pure Python, no Couchbase, no LLM
-│   └── operational_insights/ # unit tests exclusive to the OI server; no separate
-│                              #   conftest — grouped here for now, same tier
-├── integration/         # needs a live Couchbase cluster
-│   ├── conftest.py           # fixtures + helpers used by (operational) integration tests
-│   └── operational_insights/ # needs a live Operational Insights cluster instead; env-gated
+│   ├── <cross-server>        # shared machinery + invariants over every spec
+│   ├── operational/          # unit tests exclusive to the operational server
+│   └── operational_insights/ # unit tests exclusive to the OI server
+├── integration/         # needs a live cluster
+│   ├── conftest.py           # server-agnostic session plumbing + response helpers
+│   ├── operational/          # needs a live Couchbase cluster
+│   │   └── _census.py        #   what the operational server must register
+│   └── operational_insights/ # needs a live Operational Insights cluster; env-gated
 ├── perf/                # in-process performance tests, opt-in via CB_MCP_PERF=1
 └── accuracy/            # AI-in-the-loop — needs Couchbase + an OpenAI key
     ├── conftest.py
@@ -27,9 +30,10 @@ tests/
 
 | Tier | Directory | Marker | Live cluster? | LLM cost? |
 | --- | --- | --- | --- | --- |
-| Unit | `tests/unit/` | — | No | No |
+| Unit (cross-server) | `tests/unit/` | — | No | No |
+| └ Unit (operational) | `tests/unit/operational/` | — | No | No |
 | └ Unit (Operational Insights) | `tests/unit/operational_insights/` | — | No | No |
-| Integration (operational) | `tests/integration/` | `integration` | Yes (Couchbase) | No |
+| Integration (operational) | `tests/integration/operational/` | `integration` | Yes (Couchbase) | No |
 | Integration (Operational Insights) | `tests/integration/operational_insights/` | `integration` + `operational_insights` | Yes (Operational Insights) | No |
 | Perf | `tests/perf/` | `perf` | Optional (`test_live_cluster.py` only) | No |
 | Accuracy | `tests/accuracy/` | `accuracy` | Yes | Yes |
@@ -184,16 +188,21 @@ any laptop.
   `ServerSpec` this distribution ships). `src/` deliberately has no such
   registry (each process loads only its own SDK); this exists purely so
   `tests/unit/test_server_specs.py` can check cross-server invariants.
-- [`integration/conftest.py`](integration/conftest.py) — the operational
-  integration tier's fixtures and helpers (`create_mcp_session`,
-  `extract_payload`, `ensure_list`, the `EXPECTED_TOOLS` / `TOOLS_BY_CATEGORY` /
-  `TOOL_REQUIRED_PARAMS` tables — all operational-only) plus
+- [`integration/conftest.py`](integration/conftest.py) — session plumbing and
+  response helpers shared by every integration tier (`create_mcp_session`,
+  `streamable_http_session`, `extract_payload`, `ensure_list`), plus
   `create_session_for_subcommand`, a small public wrapper a second server's
-  integration tests can reuse to spawn `mcp_server <subcommand>`.
+  integration tests can reuse to spawn `mcp_server <subcommand>`. Nothing
+  here describes a particular server's tools.
+- [`integration/operational/_census.py`](integration/operational/_census.py) —
+  the `EXPECTED_TOOLS` / `TOOLS_BY_CATEGORY` / `TOOL_REQUIRED_PARAMS` tables
+  for the operational server. Beside the tests that assert on them rather
+  than in the shared conftest, so the Operational Insights tier no longer
+  imports ~170 lines describing a tool set its server does not register.
 - [`integration/operational_insights/conftest.py`](integration/operational_insights/conftest.py) —
   the Operational Insights tier's own session helper (`create_oi_mcp_session`,
   built on `create_session_for_subcommand` for stdio and on
-  `integration/conftest.py`'s `_streamable_http_session` for http) and its
+  `integration/conftest.py`'s `streamable_http_session` for http) and its
   directory-based auto-marking + env-gated skip.
 - [`accuracy/conftest.py`](accuracy/conftest.py) — accuracy-only
   fixtures (`accuracy_client`, `openai_agent`, `judge`, `result_storage`,

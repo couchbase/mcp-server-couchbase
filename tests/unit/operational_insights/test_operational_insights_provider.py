@@ -1,6 +1,6 @@
 """Unit tests for OperationalInsightsClusterProvider.
 
-Covers the two things that differ from ``StaticClusterProvider``: teardown
+Covers the two things that differ from ``OperationalClusterProvider``: teardown
 calls ``shutdown()`` (not ``close()``), and ``get_configuration()`` never
 returns a secret or one of the server-owned reserved keys.
 """

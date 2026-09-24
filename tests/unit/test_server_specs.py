@@ -11,13 +11,24 @@ from _all_specs import ALL_SPECS
 
 from cb_mcp.utils.constants import LOGGER_NAMESPACE
 
-# Tool names deliberately shared between servers, and why. Per
-# CONTRIBUTING.md's tool-naming section: the operational and Operational
-# Insights servers each run as an independent process, so a name collision
-# only matters to a client that registers both simultaneously. Renaming was
-# considered and declined — these are the ported prototype's original names,
-# and one process runs one server. This allow-list exists so that a *new*,
-# unintended collision still fails the build; it does not silence this one.
+# A name appearing on two servers means one of two very different things,
+# and the tests below keep them apart rather than lumping both into one
+# allow-list.
+#
+# SHARED: one function object, registered by every server. Not a collision
+# at all — a client connected to both sees one tool that behaves identically
+# whichever it reaches, which is the point. Enforced, not just declared:
+# test_shared_tools_are_literally_the_same_function fails if two servers
+# ever grow separate implementations under a shared name.
+SHARED_TOOL_NAMES = frozenset({"get_server_configuration_status"})
+
+# KNOWN_DUPLICATE: same name, *different* implementations per server. A real
+# collision, grandfathered. Per CONTRIBUTING.md's tool-naming section: each
+# server runs as an independent process, so this only matters to a client
+# that registers both simultaneously. Renaming was considered and declined —
+# these are the ported prototype's original names. This allow-list exists so
+# a *new*, unintended collision still fails the build; it does not silence
+# these.
 KNOWN_DUPLICATE_TOOL_NAMES = frozenset(
     {
         "get_collections_in_scope",
@@ -26,6 +37,10 @@ KNOWN_DUPLICATE_TOOL_NAMES = frozenset(
         "list_indexes",
     }
 )
+
+#: Both kinds are permitted to appear on more than one server; only the
+#: reason differs.
+_EXPECTED_MULTI_SERVER_NAMES = SHARED_TOOL_NAMES | KNOWN_DUPLICATE_TOOL_NAMES
 
 
 def test_ids_are_unique():
@@ -85,40 +100,90 @@ def test_default_log_files_differ():
     )
 
 
-def test_tool_names_are_globally_unique_except_the_known_duplicates():
-    """A client connected to two servers sees one flat tool namespace.
-
-    Any collision not already named in KNOWN_DUPLICATE_TOOL_NAMES is new and
-    unintended, and must fail here rather than surface as ambiguous tool
-    dispatch in a multi-server client.
-    """
-    seen: dict[str, str] = {}
-    unexpected_duplicates: set[str] = set()
-    for spec in ALL_SPECS:
-        for name in spec.tools.all_tool_names:
-            if (
-                name in seen
-                and seen[name] != spec.id
-                and name not in KNOWN_DUPLICATE_TOOL_NAMES
-            ):
-                unexpected_duplicates.add(name)
-            seen[name] = spec.id
-    assert not unexpected_duplicates, (
-        f"tool name(s) {sorted(unexpected_duplicates)} collide across servers "
-        "and are not in KNOWN_DUPLICATE_TOOL_NAMES — either rename, or add "
-        "them there with a reason."
-    )
-
-    # The allow-list itself must not silently grow stale: every name in it
-    # should still actually collide, and still actually exist.
+def _name_counts() -> dict[str, int]:
+    """How many servers expose each tool name."""
     counts: dict[str, int] = {}
     for spec in ALL_SPECS:
         for name in spec.tools.all_tool_names:
             counts[name] = counts.get(name, 0) + 1
-    for name in KNOWN_DUPLICATE_TOOL_NAMES:
+    return counts
+
+
+def test_tool_names_are_globally_unique_except_the_known_duplicates():
+    """A client connected to two servers sees one flat tool namespace.
+
+    Any name on more than one server that is neither deliberately shared nor
+    a grandfathered duplicate is new and unintended, and must fail here
+    rather than surface as ambiguous tool dispatch in a multi-server client.
+    """
+    unexpected = {
+        name
+        for name, count in _name_counts().items()
+        if count > 1 and name not in _EXPECTED_MULTI_SERVER_NAMES
+    }
+    assert not unexpected, (
+        f"tool name(s) {sorted(unexpected)} appear on more than one server and "
+        "are in neither SHARED_TOOL_NAMES nor KNOWN_DUPLICATE_TOOL_NAMES. If "
+        "every server registers the same function, add it to the former; if "
+        "each has its own implementation, rename, or add it to the latter "
+        "with a reason."
+    )
+
+
+def test_neither_allow_list_goes_stale():
+    """A name that no longer appears twice must not stay listed.
+
+    Without this, removing a server or renaming a tool leaves an entry that
+    silences a *future* collision on that same name.
+    """
+    counts = _name_counts()
+    for name in _EXPECTED_MULTI_SERVER_NAMES:
         assert counts.get(name, 0) >= 2, (
-            f"{name!r} is listed in KNOWN_DUPLICATE_TOOL_NAMES but no longer "
-            "collides — remove it from the allow-list"
+            f"{name!r} is allow-listed as appearing on multiple servers but "
+            f"now appears on {counts.get(name, 0)} — remove it from "
+            "SHARED_TOOL_NAMES / KNOWN_DUPLICATE_TOOL_NAMES."
+        )
+
+
+def test_shared_tools_are_literally_the_same_function():
+    """SHARED means one implementation, not two that agree today.
+
+    This is what separates a shared tool from a duplicate name. If a server
+    ever registers its own ``get_server_configuration_status``, a client
+    connected to both would get different behaviour from the same tool name —
+    so that belongs in KNOWN_DUPLICATE_TOOL_NAMES, and this fails until it is
+    moved there.
+    """
+    for name in SHARED_TOOL_NAMES:
+        implementations = {
+            spec.id: fn
+            for spec in ALL_SPECS
+            for fn in spec.tools.all_tools
+            if fn.__name__ == name
+        }
+        distinct = {id(fn) for fn in implementations.values()}
+        assert len(distinct) == 1, (
+            f"{name!r} is in SHARED_TOOL_NAMES but "
+            f"{sorted(implementations)} register different function objects. "
+            "Either import the one shared implementation, or move the name to "
+            "KNOWN_DUPLICATE_TOOL_NAMES."
+        )
+
+
+def test_shared_tools_are_registered_by_every_server():
+    """A 'shared' tool missing from a server is a gap, not a choice.
+
+    The reason this tool is shared at all is that every server needs to be
+    able to report its own configuration without a cluster; a server that
+    skips it silently loses first-line support.
+    """
+    for name in SHARED_TOOL_NAMES:
+        missing = [
+            spec.id for spec in ALL_SPECS if name not in spec.tools.all_tool_names
+        ]
+        assert not missing, (
+            f"{name!r} is in SHARED_TOOL_NAMES but {missing} do not register "
+            "it. Add it to that server's ToolSet, or stop calling it shared."
         )
 
 

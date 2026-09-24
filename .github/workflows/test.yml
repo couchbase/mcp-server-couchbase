@@ -7,7 +7,29 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+    # TEMPORARY: `multi_package` is the integration branch for the
+    # multi-MCP-server work. Until it merges to `main`, PRs targeting it get
+    # no operational coverage at all — this workflow was `main`-only, so the
+    # unit job, the full transport x cb-version x server-binary integration
+    # matrix, and the summary gate all skipped. Everything landing on that
+    # branch touches shared code the operational server depends on, so it is
+    # exactly the work that most needs these tests.
+    #
+    # Remove `multi_package` from this list once it has merged to `main`;
+    # leaving it costs a full matrix run per PR against a branch that no
+    # longer exists.
+    branches: [main, multi_package]
+
+# One in-flight run per branch. Each run provisions eight Couchbase
+# containers (transport x cb-version x server-binary), so a push to a PR that
+# is already building otherwise doubles that until the first run finishes.
+#
+# Cancelling is scoped to pull requests deliberately: a superseded PR run
+# tells you nothing, but every commit on `main` should keep its own complete
+# result rather than being cancelled by the next push.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Default test credentials for Couchbase
@@ -20,7 +42,7 @@ jobs:
   # Unit Tests - Fast, no Couchbase, no transport matrix
   # ============================================
   unit-tests:
-    name: Unit tests
+    name: Unit tests (all servers)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -45,18 +67,12 @@ jobs:
   # ============================================
   # Integration Tests - All Transport Modes
   # ============================================
-  # NOTE: this job only provisions a Couchbase Server container and only
-  # exercises the operational server. The Operational Insights server's
-  # integration tests (tests/integration/operational_insights/) are env-gated
-  # (see that directory's conftest.py) and report skipped, not failed, when
-  # CB_OI_CONNECTION_STRING/CB_OI_USERNAME/CB_OI_PASSWORD are unset here — as
-  # they are. Operational Insights connects to a different product than a
-  # Couchbase Server cluster and needs its own two-container setup (see
-  # tests/README.md for the local Docker recipe), so it isn't provisioned in
-  # this job. Run that tier locally against a live Operational Insights
-  # cluster before releasing a change to it.
+  # Operational server only: this job provisions a Couchbase Server container
+  # and runs tests/integration/operational. The Operational Insights tier
+  # needs a different product and its own two-container setup, so it has its
+  # own workflow (oi-integration-tests.yml).
   integration-tests:
-    name: Integration (${{ matrix.transport }} / cb-${{ matrix.cb_version }} / ${{ matrix.server_binary }})
+    name: 'Integration: operational (${{ matrix.transport }} / cb-${{ matrix.cb_version }} / ${{ matrix.server_binary }})'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -211,7 +227,7 @@ jobs:
           PYTHONPATH: src
         run: |
           echo "Running tests with STDIO transport..."
-          uv run pytest tests/integration -v --tb=short
+          uv run pytest tests/integration/operational -v --tb=short
 
       # ============================================
       # HTTP Transport Tests - Binary build steps
@@ -296,7 +312,7 @@ jobs:
           PYTHONPATH: src
         run: |
           echo "Running tests with HTTP transport (${{ matrix.server_binary }})..."
-          uv run pytest tests/integration -v --tb=short
+          uv run pytest tests/integration/operational -v --tb=short
 
       - name: Stop HTTP server
         if: matrix.transport == 'http' && always()
@@ -311,7 +327,7 @@ jobs:
   # Test Summary
   # ============================================
   test-summary:
-    name: Test Summary
+    name: Test Summary (operational)
     permissions: {}
     runs-on: ubuntu-latest
     needs: [unit-tests, integration-tests]

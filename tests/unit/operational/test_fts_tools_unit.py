@@ -79,7 +79,9 @@ class TestListFtsIndexes:
             _make_index(name="legacy1")
         ]
 
-        with patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster
+        ):
             result = list_fts_indexes(ctx)
 
         assert result == [
@@ -114,8 +116,13 @@ class TestListFtsIndexes:
         bucket.scope.side_effect = _scope_side_effect
 
         with (
-            patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
-            patch("cb_mcp.tools.operational.fts.connect_to_bucket", return_value=bucket),
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
+            patch(
+                "cb_mcp.tools.operational.fts.connect_to_bucket", return_value=bucket
+            ),
         ):
             result = list_fts_indexes(ctx, bucket_name="b")
 
@@ -135,8 +142,13 @@ class TestListFtsIndexes:
         bucket.scope.return_value = scope_mgr
 
         with (
-            patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
-            patch("cb_mcp.tools.operational.fts.connect_to_bucket", return_value=bucket),
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
+            patch(
+                "cb_mcp.tools.operational.fts.connect_to_bucket", return_value=bucket
+            ),
         ):
             result = list_fts_indexes(ctx, bucket_name="b", scope_name="s")
 
@@ -172,7 +184,9 @@ class TestListFtsIndexes:
             "search unavailable"
         )
 
-        with patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster
+        ):
             result = list_fts_indexes(ctx)
 
         assert result == [{"success": False, "error": "search unavailable"}]
@@ -200,7 +214,9 @@ class TestGetFtsIndexDefinition:
             name="idx1", params={"mapping": {}}
         )
 
-        with patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster
+        ):
             result = get_fts_index_definition(ctx, "idx1")
 
         cluster_index_manager.get_index.assert_called_once_with("idx1")
@@ -218,8 +234,13 @@ class TestGetFtsIndexDefinition:
         bucket.scope.return_value = scope_mgr
 
         with (
-            patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
-            patch("cb_mcp.tools.operational.fts.connect_to_bucket", return_value=bucket),
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
+            patch(
+                "cb_mcp.tools.operational.fts.connect_to_bucket", return_value=bucket
+            ),
         ):
             result = get_fts_index_definition(
                 ctx, "idx1", bucket_name="b", scope_name="s"
@@ -243,7 +264,9 @@ class TestGetFtsIndexDefinition:
         ctx, cluster, cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
         cluster_index_manager.get_index.side_effect = Exception("index not found")
 
-        with patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster):
+        with patch(
+            "cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster
+        ):
             result = get_fts_index_definition(ctx, "idx1")
 
         assert result == {
@@ -302,7 +325,10 @@ class TestRunFtsQuery:
         cluster.search.return_value = search_result
 
         with (
-            patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
             patch("cb_mcp.tools.operational.fts.SearchOptions") as mock_options,
             patch("cb_mcp.tools.operational.fts.MatchNoneQuery") as mock_match_none,
             patch("cb_mcp.tools.operational.fts.SearchRequest") as mock_search_request,
@@ -347,7 +373,10 @@ class TestRunFtsQuery:
         cluster.search.return_value = _make_search_result()
 
         with (
-            patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
             patch("cb_mcp.tools.operational.fts.SearchOptions") as mock_options,
             patch("cb_mcp.tools.operational.fts.MatchNoneQuery"),
             patch("cb_mcp.tools.operational.fts.SearchRequest"),
@@ -364,8 +393,13 @@ class TestRunFtsQuery:
         bucket.scope.return_value = scope_obj
 
         with (
-            patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
-            patch("cb_mcp.tools.operational.fts.connect_to_bucket", return_value=bucket),
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
+            patch(
+                "cb_mcp.tools.operational.fts.connect_to_bucket", return_value=bucket
+            ),
             patch("cb_mcp.tools.operational.fts.SearchOptions"),
             patch("cb_mcp.tools.operational.fts.MatchNoneQuery"),
             patch("cb_mcp.tools.operational.fts.SearchRequest"),
@@ -390,7 +424,10 @@ class TestRunFtsQuery:
         cluster.search.side_effect = Exception("query failed")
 
         with (
-            patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
             patch("cb_mcp.tools.operational.fts.SearchOptions"),
             patch("cb_mcp.tools.operational.fts.MatchNoneQuery"),
             patch("cb_mcp.tools.operational.fts.SearchRequest"),
@@ -427,7 +464,10 @@ class TestRunFtsQueryExplain:
         )
 
         with (
-            patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
             patch("cb_mcp.tools.operational.fts.SearchOptions") as mock_options,
             patch("cb_mcp.tools.operational.fts.MatchNoneQuery"),
             patch("cb_mcp.tools.operational.fts.SearchRequest"),
@@ -448,7 +488,10 @@ class TestRunFtsQueryExplain:
         cluster.search.return_value = _make_search_result()
 
         with (
-            patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
             patch("cb_mcp.tools.operational.fts.SearchOptions") as mock_options,
             patch("cb_mcp.tools.operational.fts.MatchNoneQuery"),
             patch("cb_mcp.tools.operational.fts.SearchRequest"),
@@ -464,7 +507,10 @@ class TestRunFtsQueryExplain:
         cluster.search.side_effect = Exception("explain failed")
 
         with (
-            patch("cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster),
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
             patch("cb_mcp.tools.operational.fts.SearchOptions"),
             patch("cb_mcp.tools.operational.fts.MatchNoneQuery"),
             patch("cb_mcp.tools.operational.fts.SearchRequest"),

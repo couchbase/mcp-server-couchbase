@@ -14,7 +14,7 @@ from .connection_string import (
     determine_ssl_verification,
     extract_hosts_from_connection_string,
 )
-from ...utils.constants import INDEX_REST_PORT_PLAIN, INDEX_REST_PORT_TLS
+from .constants import INDEX_REST_PORT_PLAIN, INDEX_REST_PORT_TLS
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.utils.index_utils")
 

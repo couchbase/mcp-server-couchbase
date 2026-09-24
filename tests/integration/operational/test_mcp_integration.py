@@ -8,9 +8,6 @@ from __future__ import annotations
 
 import pytest
 from conftest import (
-    EXPECTED_TOOLS,
-    TOOL_REQUIRED_PARAMS,
-    TOOLS_BY_CATEGORY,
     create_mcp_session,
     extract_payload,
     is_error_response,
@@ -18,6 +15,8 @@ from conftest import (
 )
 
 from cb_mcp.servers.operational.constants import FASTMCP_SERVER_NAME
+
+from ._census import EXPECTED_TOOLS, TOOL_REQUIRED_PARAMS, TOOLS_BY_CATEGORY
 
 
 @pytest.mark.asyncio

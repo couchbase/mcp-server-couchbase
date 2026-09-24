@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 
 import pytest
 from _test_env import build_oi_env, oi_env_available
-from conftest import _streamable_http_session, create_session_for_subcommand
+from conftest import create_session_for_subcommand, streamable_http_session
 from mcp import ClientSession
 
 
@@ -57,19 +57,17 @@ async def create_oi_mcp_session() -> AsyncIterator[ClientSession]:
     - ``http`` / ``streamable-http``: connect to an already-running server
       at ``MCP_SERVER_URL``, started outside pytest (by CI or
       ``scripts/run_oi_matrix_local.sh``) with ``operational-insights`` as
-      its subcommand. Reuses ``_streamable_http_session`` unmodified — it
+      its subcommand. Reuses ``streamable_http_session`` unmodified — it
       is already fully generic (reads only ``MCP_SERVER_URL``), so there is
       no operational-only logic to fork.
     """
     transport = os.getenv("CB_MCP_TRANSPORT", "stdio").lower()
 
     if transport in ("http", "streamable-http"):
-        async with _streamable_http_session() as session:
+        async with streamable_http_session() as session:
             yield session
         return
 
     env = build_oi_env()
-    async with create_session_for_subcommand(
-        "operational-insights", env
-    ) as session:
+    async with create_session_for_subcommand("operational-insights", env) as session:
         yield session

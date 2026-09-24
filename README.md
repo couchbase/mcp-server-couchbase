@@ -142,6 +142,7 @@ default `operational` one.
 
 | Tool Name | Description |
 | --------- | ----------- |
+| `get_server_configuration_status` | Get this server's status and configuration without connecting to a cluster — read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration. Shared with the operational server: the same tool, registered by both. |
 | `get_databases_in_cluster` | List all databases in the Operational Insights cluster. |
 | `get_scopes_in_database` | List all scopes in a database. |
 | `get_collections_in_scope` | List all collections (datasets) in a scope. Shares its name with the operational server's tool of the same name — see the note below. |
@@ -163,7 +164,9 @@ for a query still running, `cancel_async_query` stops it.
 
 > **Note:** `get_collections_in_scope`, `get_schema_for_collection`,
 > `create_index` and `list_indexes` exist, with different behavior, on both
-> servers. Each server is a separate process, so this is only a concern if a
+> servers. (`get_server_configuration_status` also appears on both, but it is
+> deliberately *one* shared tool — same implementation, same result shape —
+> so it needs no disambiguation.) Each server is a separate process, so this is only a concern if a
 > single MCP client registers both `operational` and `operational-insights`
 > simultaneously — in that case, disambiguate at the client configuration
 > layer (e.g. by giving the two server entries distinct names in the

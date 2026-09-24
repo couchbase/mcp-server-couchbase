@@ -22,7 +22,7 @@ from _test_env import (
     require_test_bucket,
 )
 
-from providers.static import StaticClusterProvider
+from providers.operational import OperationalClusterProvider
 
 from ._harness import build_perf_server, format_table, run_load
 
@@ -56,7 +56,7 @@ def mcp():
         "client_cert_path": os.getenv("CB_CLIENT_CERT_PATH"),
         "client_key_path": os.getenv("CB_CLIENT_KEY_PATH"),
     }
-    return build_perf_server(StaticClusterProvider(settings=settings))
+    return build_perf_server(OperationalClusterProvider(settings=settings))
 
 
 @pytest.mark.asyncio

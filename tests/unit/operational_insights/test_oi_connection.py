@@ -38,9 +38,7 @@ class TestOiConnectionModule:
                 "Administrator", "hunter2"
             )
             mock_credential.from_certificate.assert_not_called()
-            mock_create.assert_called_once_with(
-                "http://localhost:8095", "cred", None
-            )
+            mock_create.assert_called_once_with("http://localhost:8095", "cred", None)
             assert result is mock_cluster
 
     def test_connect_with_client_certificate(self) -> None:
@@ -70,9 +68,7 @@ class TestOiConnectionModule:
                 "/path/client.pem", "/path/client.key", password="secret"
             )
             mock_credential.from_username_and_password.assert_not_called()
-            mock_create.assert_called_once_with(
-                "https://host:18095", "cert-cred", None
-            )
+            mock_create.assert_called_once_with("https://host:18095", "cert-cred", None)
             assert result is mock_cluster
 
     def test_connect_with_pkcs12_bundle_needs_no_key_path(self) -> None:
@@ -144,6 +140,4 @@ class TestOiConnectionModule:
 
     def test_missing_username_and_password_raises(self) -> None:
         with pytest.raises(ValueError, match="username, password"):
-            connect_to_operational_insights_cluster(
-                "http://localhost:8095", None, None
-            )
+            connect_to_operational_insights_cluster("http://localhost:8095", None, None)

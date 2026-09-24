@@ -69,7 +69,7 @@ EXPECTED_LOGGER_NAMES = {
     "cb_mcp.utils.operational.connection_string": "couchbase.mcp.utils.connection_string",
     "cb_mcp.utils.operational.index_utils": "couchbase.mcp.operational.utils.index_utils",
     "cb_mcp.utils.operational.reference_data": "couchbase.mcp.operational.utils.reference_data",
-    "providers.static": "couchbase.mcp.operational.providers.static",
+    "providers.operational": "couchbase.mcp.operational.providers.operational",
     # operational-insights server
     "cb_mcp.tools.operational_insights.index": "couchbase.mcp.operational-insights.tools.index",
     "cb_mcp.tools.operational_insights.metadata": "couchbase.mcp.operational-insights.tools.metadata",

@@ -22,11 +22,11 @@ from typing import Any
 from fastmcp import Client, Context, FastMCP
 from fastmcp.tools import FunctionTool
 
+from cb_mcp.servers.operational.constants import FASTMCP_SERVER_NAME
+from cb_mcp.servers.operational.spec import SPEC as OPERATIONAL_SPEC
 from cb_mcp.tool_registration import prepare_tools_for_registration
 from cb_mcp.tools.operational import TOOL_ANNOTATIONS
 from cb_mcp.utils import AppContext
-from cb_mcp.servers.operational.constants import FASTMCP_SERVER_NAME
-from cb_mcp.servers.operational.spec import SPEC as OPERATIONAL_SPEC
 
 ITERATIONS = int(os.getenv("CB_MCP_PERF_ITERATIONS", "100"))
 ASSERT_ENABLED = os.getenv("CB_MCP_PERF_ASSERT") == "1"

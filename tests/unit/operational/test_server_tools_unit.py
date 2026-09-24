@@ -396,7 +396,10 @@ class TestGetClusterMetrics:
         mock_client_cm.__enter__.return_value = mock_client
         mock_client_cm.__exit__.return_value = False
         return (
-            patch("cb_mcp.tools.operational.server.httpx.Client", return_value=mock_client_cm),
+            patch(
+                "cb_mcp.tools.operational.server.httpx.Client",
+                return_value=mock_client_cm,
+            ),
             mock_client,
         )
 

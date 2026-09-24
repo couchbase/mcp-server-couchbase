@@ -90,6 +90,7 @@ below).
 
 | Tool Name | Description |
 | --------- | ----------- |
+| `get_server_configuration_status` | Get this server's status and configuration without connecting to a cluster — read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration. Shared with the operational server: the same tool, registered by both. |
 | `get_databases_in_cluster` | List all databases in the Operational Insights cluster. |
 | `get_scopes_in_database` | List all scopes in a database. |
 | `get_collections_in_scope` | List all collections (datasets) in a scope. Shares its name with the operational server's tool of the same name — see the note below. |
@@ -112,6 +113,9 @@ polled until ready, then `discard_async_query_results` frees the results or
 > `create_index` and `list_indexes` exist, with different behavior, on both
 > servers — each runs as a separate container/process, so this only matters
 > if one MCP client registers both simultaneously.
+> (`get_server_configuration_status` also appears on both, but it is
+> deliberately *one* shared tool — same implementation, same result shape —
+> so it needs no disambiguation.)
 
 ## Usage
 

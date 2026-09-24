@@ -90,7 +90,9 @@ class TestBrowseMode:
         assert result["record_count"] > 1000, (
             f"expected the full metrics dataset, got {result['record_count']} records"
         )
-        assert "records" not in result, "every dataset is currently too large to list in full"
+        assert "records" not in result, (
+            "every dataset is currently too large to list in full"
+        )
         assert result["sample_records"], "a sample should still be offered"
         assert "next_step" in result
 
@@ -153,7 +155,10 @@ class TestBrowseMode:
             },
             [{"name": f"metric_{i}", "description": filler} for i in range(2000)],
         )
-        assert reference_data.dataset_size_bytes(path) > reference_data.MAX_LIST_RESPONSE_BYTES
+        assert (
+            reference_data.dataset_size_bytes(path)
+            > reference_data.MAX_LIST_RESPONSE_BYTES
+        )
         _point_registry_at(monkeypatch, path, "big_tool")
 
         result = discover_tool_input_values("big_tool")

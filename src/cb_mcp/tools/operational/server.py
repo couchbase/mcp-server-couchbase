@@ -1,7 +1,12 @@
 """
-Tools for server operations.
+Tools for Couchbase cluster operations.
 
-This module contains tools for getting the server status, testing the connection, and getting the buckets in the cluster, the scopes and collections in the bucket.
+This module contains tools for testing the connection, and getting the buckets in the cluster, the scopes and collections in the bucket.
+
+``get_server_configuration_status`` used to live here too. It moved to
+``cb_mcp.tools.status``: its body names no SDK, and leaving it here meant a
+second server could not report its own configuration. Everything remaining
+in this module needs a Couchbase ``Cluster``.
 """
 
 import json
@@ -15,80 +20,21 @@ from fastmcp import Context
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.config import get_settings
+from ...utils.operational.connection import connect_to_bucket
 from ...utils.operational.connection_string import (
     determine_ssl_verification,
     extract_hosts_from_connection_string,
     is_capella_connection,
     validate_connection_settings,
 )
-from ...utils.constants import (
+from ...utils.operational.constants import (
     MANAGEMENT_REST_PORT_PLAIN,
     MANAGEMENT_REST_PORT_TLS,
 )
-from ...utils.context import (
-    get_cluster_connection,
-    get_cluster_provider,
-    get_logging_config,
-    get_server_id,
-    get_server_name,
-)
-from ...utils.operational.connection import connect_to_bucket
+from ...utils.operational.context import get_cluster_connection
 from .query import run_cluster_query
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.server")
-
-
-def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
-    """Get the server status and configuration without establishing connection.
-    This tool can be used to verify if the server is running and check the configuration.
-    """
-    settings = get_settings(ctx)
-    provider = get_cluster_provider(ctx)
-
-    provider_config = provider.get_configuration(ctx) if provider is not None else {}
-
-    # Server-level keys are spread last so they always reflect what the server
-    # actually enforces, even if a provider returns overlapping keys.
-    configuration = {
-        **provider_config,
-        "read_only_mode": settings.get("read_only_mode", True),
-        "disabled_tools": sorted(settings.get("disabled_tools", set())),
-        "confirmation_required_tools": sorted(
-            settings.get("confirmation_required_tools", set())
-        ),
-        # OAuth resource-server config (non-secret IdP coordinates). Mirrors
-        # the env-info diagnostic record so the log file and this tool agree on
-        # which OAuth state is exposed. ``oauth_enabled`` reflects whether OAuth
-        # is actually active, not merely configured.
-        "oauth_enabled": settings.get("oauth_enabled", False),
-        "oauth_jwks_uri": settings.get("oauth_jwks_uri"),
-        "oauth_issuer": settings.get("oauth_issuer"),
-        "oauth_audience": settings.get("oauth_audience"),
-        "oauth_algorithm": settings.get("oauth_algorithm"),
-        "oauth_mcp_base_url": settings.get("oauth_mcp_base_url"),
-        "oauth_scope_read_label": settings.get("oauth_scope_read_label"),
-        "oauth_scope_write_label": settings.get("oauth_scope_write_label"),
-    }
-
-    connection_status = {
-        "cluster_connected": (
-            provider.is_connected(ctx) if provider is not None else False
-        ),
-    }
-
-    # Surface the active logging configuration as provided by the server
-    # entrypoint via the lifespan context. Falls back to ``None`` for
-    # implementations that don't populate it.
-    logging_status = get_logging_config(ctx)
-
-    return {
-        "server_name": get_server_name(ctx),
-        "server_id": get_server_id(ctx),
-        "status": "running",
-        "configuration": configuration,
-        "logging": logging_status,
-        "connections": connection_status,
-    }
 
 
 def test_cluster_connection(

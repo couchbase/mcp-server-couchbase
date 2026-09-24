@@ -28,7 +28,10 @@ in is a parameter:
      process must load only the SDK of the server it is actually running.
   3. ``_start_server`` does everything else, identically for both.
 
-To add a third server: write its ``ServerSpec`` and its ``ClusterProvider``,
+To add a third server: write its ``ServerSpec`` and a provider satisfying
+``cb_mcp.core.contracts.ProviderLifecycle`` (plus whatever service-specific
+members its own tools need — see ``ClusterProvider`` and
+``OperationalInsightsProvider`` for the two shapes that exist),
 add a ``CredentialProfile`` next to the others in ``cb_mcp.utils.cli_params`` if
 its credentials differ from the cluster ones, then copy either subcommand
 below and change the five per-server facts — command name, credentials,
@@ -44,8 +47,12 @@ import click
 
 from cb_mcp.core.app import build_app, run_app
 from cb_mcp.core.cli import DefaultGroup
-from cb_mcp.core.contracts import ClusterProvider
+from cb_mcp.core.contracts import ProviderLifecycle
 from cb_mcp.core.spec import ServerSpec
+from cb_mcp.servers.operational.constants import (
+    DEFAULT_OPERATIONAL_LOG_FILE,
+    DEFAULT_OPERATIONAL_PORT,
+)
 from cb_mcp.servers.operational_insights.constants import (
     DEFAULT_OI_LOG_FILE,
     DEFAULT_OI_PORT,
@@ -60,8 +67,6 @@ from cb_mcp.utils.cli_params import (
     resolved_logging_snapshot,
     server_options,
 )
-from cb_mcp.utils.constants import DEFAULT_LOG_FILE as OPERATIONAL_DEFAULT_LOG_FILE
-from cb_mcp.utils.constants import DEFAULT_PORT as OPERATIONAL_DEFAULT_PORT
 
 # --- Starting a server -------------------------------------------------------
 
@@ -71,7 +76,7 @@ def _start_server(
     params: Mapping[str, Any],
     *,
     credentials: CredentialProfile,
-    provider_factory: Callable[[Mapping[str, Any]], ClusterProvider],
+    provider_factory: Callable[[Mapping[str, Any]], ProviderLifecycle],
 ) -> None:
     """Run one server, from parsed flags to a listening process.
 
@@ -134,8 +139,8 @@ def main() -> None:
 @main.command("operational", short_help="Operational cluster server (default).")
 @server_options(
     credentials=CLUSTER_CREDENTIALS,
-    default_port=OPERATIONAL_DEFAULT_PORT,
-    default_log_file=OPERATIONAL_DEFAULT_LOG_FILE,
+    default_port=DEFAULT_OPERATIONAL_PORT,
+    default_log_file=DEFAULT_OPERATIONAL_LOG_FILE,
 )
 # Also on the subcommand so `couchbase-mcp-server operational --version` works.
 @click.version_option(
@@ -147,13 +152,13 @@ def operational(**params: Any) -> None:
     # Deliberately lazy: a process must only load the SDK of the server it
     # is actually running (see CONTRIBUTING.md's "Adding a new MCP server").
     from cb_mcp.servers.operational.spec import SPEC  # noqa: PLC0415
-    from providers.static import StaticClusterProvider  # noqa: PLC0415
+    from providers.operational import OperationalClusterProvider  # noqa: PLC0415
 
     _start_server(
         SPEC,
         params,
         credentials=CLUSTER_CREDENTIALS,
-        provider_factory=lambda settings: StaticClusterProvider(settings=settings),
+        provider_factory=lambda settings: OperationalClusterProvider(settings=settings),
     )
 
 
