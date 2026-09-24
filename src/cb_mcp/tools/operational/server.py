@@ -15,12 +15,6 @@ from fastmcp import Context
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.config import get_settings
-from ...utils.operational.connection_string import (
-    determine_ssl_verification,
-    extract_hosts_from_connection_string,
-    is_capella_connection,
-    validate_connection_settings,
-)
 from ...utils.constants import (
     MANAGEMENT_REST_PORT_PLAIN,
     MANAGEMENT_REST_PORT_TLS,
@@ -33,6 +27,12 @@ from ...utils.context import (
     get_server_name,
 )
 from ...utils.operational.connection import connect_to_bucket
+from ...utils.operational.connection_string import (
+    determine_ssl_verification,
+    extract_hosts_from_connection_string,
+    is_capella_connection,
+    validate_connection_settings,
+)
 from .query import run_cluster_query
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.server")
