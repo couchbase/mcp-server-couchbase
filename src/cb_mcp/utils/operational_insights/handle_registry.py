@@ -66,7 +66,7 @@ class HandleEntry:
     statement: str
 
 
-class HandleRegistry:
+class QueryResultsRegistry:
     """Thread-safe map of opaque token -> live async query handle.
 
     Tool handlers run in FastMCP's thread pool, so access is guarded by a

@@ -29,7 +29,7 @@ from cb_mcp.tools.operational_insights.query import (
 )
 from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
 from cb_mcp.utils.operational_insights.handle_registry import (
-    HandleRegistry,
+    QueryResultsRegistry,
     UnknownHandleError,
 )
 
@@ -471,9 +471,9 @@ class TestCancelAsyncQuery:
         assert "nope" in result["error"]
 
 
-class TestHandleRegistry:
+class TestQueryResultsRegistry:
     def test_tokens_are_unique_per_registration(self) -> None:
-        registry = HandleRegistry()
+        registry = QueryResultsRegistry()
 
         first = registry.register(MagicMock(), "SELECT 1")
         second = registry.register(MagicMock(), "SELECT 2")
@@ -482,13 +482,13 @@ class TestHandleRegistry:
         assert registry.count() == 2
 
     def test_get_raises_for_unknown_token(self) -> None:
-        registry = HandleRegistry()
+        registry = QueryResultsRegistry()
 
         with pytest.raises(UnknownHandleError):
             registry.get("missing")
 
     def test_remove_is_idempotent(self) -> None:
-        registry = HandleRegistry()
+        registry = QueryResultsRegistry()
         token = registry.register(MagicMock(), "SELECT 1")
 
         registry.remove(token)

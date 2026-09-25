@@ -20,7 +20,7 @@ from .contracts import OperationalInsightsProvider
 if TYPE_CHECKING:
     from couchbase_operational_insights.cluster import Cluster
 
-    from .handle_registry import HandleRegistry
+    from .handle_registry import QueryResultsRegistry
 
 _PROVIDER_MISSING = (
     "Cluster provider not initialized. "
@@ -54,7 +54,7 @@ def get_oi_cluster(ctx: Context) -> Cluster:
     return _provider(ctx).get_cluster(ctx)
 
 
-def get_oi_handle_registry(ctx: Context) -> HandleRegistry:
+def get_oi_handle_registry(ctx: Context) -> QueryResultsRegistry:
     """Return the Operational Insights async-query handle registry.
 
     The registry lives on the provider, not the shared ``AppContext`` (see

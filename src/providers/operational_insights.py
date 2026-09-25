@@ -12,7 +12,7 @@ from cb_mcp.servers.operational_insights.constants import (
 from cb_mcp.utils.operational_insights.connection import (
     connect_to_operational_insights_cluster,
 )
-from cb_mcp.utils.operational_insights.handle_registry import HandleRegistry
+from cb_mcp.utils.operational_insights.handle_registry import QueryResultsRegistry
 
 logger = logging.getLogger(
     f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.providers.operational_insights"
@@ -44,7 +44,7 @@ class OperationalInsightsClusterProvider:
         # One registry per provider instance — same lifetime as the cluster
         # connection. See handle_registry.py for why it lives here rather
         # than on the shared AppContext.
-        self.handle_registry = HandleRegistry()
+        self.handle_registry = QueryResultsRegistry()
 
     def get_cluster(
         self, ctx: Context

@@ -19,7 +19,7 @@ tool descriptions and are deliberately short):
 
 * The live SDK handle objects hold an HTTP client and a thread pool, so they
   cannot be serialized to the client. They stay in a server-side
-  ``HandleRegistry``, referenced by an opaque ``query_handle`` token. See
+  ``QueryResultsRegistry``, referenced by an opaque ``query_handle`` token. See
   ``utils/operational_insights/handle_registry.py`` for the design and its
   single-process caveat.
 * Fetching results does NOT free them: the server serves the same buffers on
