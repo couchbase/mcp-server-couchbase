@@ -124,15 +124,22 @@ def get_schema_for_collection(
     scope_name: str,
     collection_name: str,
     sample_size: int = 1000,
+    num_sample_values: int = 0,
 ) -> list[dict[str, Any]]:
     """Infer the JSON schema of a collection using Analytics' built-in
     ARRAY_INFER_SCHEMA function, sampling up to sample_size documents.
 
     ARRAY_INFER_SCHEMA detects distinct structural "flavors" across the
     sample and returns one JSON-Schema-shaped object per flavor (with
-    per-property type/percentage/sample-value stats) — this is the same
-    function the Capella UI uses for schema inference. sample_size must be
-    positive and is capped at 10_000.
+    per-property type/percentage stats) — this is the same function the
+    Capella UI uses for schema inference. sample_size must be positive and
+    is capped at 10_000.
+
+    num_sample_values caps how many example values ARRAY_INFER_SCHEMA
+    includes per property. It defaults to 0 here so
+    this tool reports structure only, without pulling actual document
+    content into results — pass a higher value to get samples. Must be
+    non-negative.
 
     Returns a list of JSON-Schema-shaped objects, one per detected flavor.
 
@@ -145,16 +152,27 @@ def get_schema_for_collection(
         raise ValueError(f"sample_size must be positive, got {sample_size}")
     sample_size = min(sample_size, MAX_SCHEMA_SAMPLE_SIZE)
 
+    if num_sample_values < 0:
+        raise ValueError(
+            f"num_sample_values must be non-negative, got {num_sample_values}"
+        )
+
     ks = keyspace(database_name, scope_name, collection_name)
     # ks is built entirely from safe_ident()-quoted (backtick-escaped)
-    # identifiers, and sample_size is a bound $-parameter below, not
-    # interpolated — not an injection vector despite the f-string.
-    query = f"SELECT VALUE ARRAY_INFER_SCHEMA((SELECT VALUE d FROM {ks} AS d LIMIT $sample_size));"  # noqa: S608
+    # identifiers, and sample_size/infer_params are bound $-parameters
+    # below, not interpolated — not an injection vector despite the f-string.
+    query = f"SELECT VALUE ARRAY_INFER_SCHEMA((SELECT VALUE d FROM {ks} AS d LIMIT $sample_size), $infer_params);"  # noqa: S608
     try:
         logger.debug(f"Inferring schema for {ks}")
         cluster = get_oi_cluster(ctx)
         result = cluster.execute_query(
-            query, QueryOptions(named_parameters={"sample_size": sample_size})
+            query,
+            QueryOptions(
+                named_parameters={
+                    "sample_size": sample_size,
+                    "infer_params": {"num_sample_values": num_sample_values},
+                }
+            ),
         )
         # SELECT VALUE over a bare array_infer_schema() call returns exactly
         # one row whose value is the array of flavor objects itself — unwrap

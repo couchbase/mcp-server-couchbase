@@ -139,6 +139,40 @@ class TestGetSchemaForCollection:
         # close the identifier early.
         assert "`db``.``evil`.`s`.`c`" in query
 
+    def test_defaults_to_no_sample_values(self) -> None:
+        ctx, cluster = make_oi_ctx()
+        cluster.execute_query.return_value.get_all_rows.return_value = []
+
+        get_schema_for_collection(ctx, "Default", "Default", "oitest_coll")
+
+        query_options = cluster.execute_query.call_args[0][1]
+        assert query_options["named_parameters"]["infer_params"] == {
+            "num_sample_values": 0
+        }
+
+    def test_passes_through_requested_num_sample_values(self) -> None:
+        ctx, cluster = make_oi_ctx()
+        cluster.execute_query.return_value.get_all_rows.return_value = []
+
+        get_schema_for_collection(
+            ctx, "Default", "Default", "oitest_coll", num_sample_values=5
+        )
+
+        query_options = cluster.execute_query.call_args[0][1]
+        assert query_options["named_parameters"]["infer_params"] == {
+            "num_sample_values": 5
+        }
+
+    def test_rejects_negative_num_sample_values(self) -> None:
+        ctx, cluster = make_oi_ctx()
+
+        with pytest.raises(ValueError, match="num_sample_values must be non-negative"):
+            get_schema_for_collection(
+                ctx, "Default", "Default", "oitest_coll", num_sample_values=-1
+            )
+
+        cluster.execute_query.assert_not_called()
+
 
 class TestSafeIdent:
     def test_passes_through_plain_identifier(self) -> None:
