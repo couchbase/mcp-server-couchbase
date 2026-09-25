@@ -1,11 +1,30 @@
 # MCP Server Constants
-MCP_SERVER_NAME = "couchbase"
+#
+# These two were historically one name doing three jobs. They are split because
+# the jobs have different compatibility contracts:
+#
+# LOGGER_ROOT is the single logger the per-level rotating handlers attach to
+# (see configure_logging). Every module's logger must be this or a descendant,
+# or it receives no handlers. It is operator-facing — it appears as %(name)s in
+# every log line and in support runbooks — and additional servers should nest
+# *under* it rather than start a second tree, so one --log-file scheme keeps
+# working.
+LOGGER_ROOT = "couchbase"
 
-# Default Configuration Values
+# Namespace for this package's own loggers, a child of LOGGER_ROOT so the
+# handlers attached at the root still see them. Shared modules log directly
+# under it; a server's own modules nest one level further (see
+# ServerSpec.logger_namespace).
+LOGGER_NAMESPACE = f"{LOGGER_ROOT}.mcp"
+
+# Default Configuration Values shared by every server. Anything that differs
+# per server — the default port and log file — belongs in that server's own
+# constants module (see ServerSpec.default_port / default_log_file), not here:
+# a shared default for either would make a collision between two servers the
+# silent path.
 DEFAULT_READ_ONLY_MODE = True
 DEFAULT_TRANSPORT = "stdio"
 DEFAULT_HOST = "127.0.0.1"
-DEFAULT_PORT = 8000
 
 # Allowed Transport Types
 ALLOWED_TRANSPORTS = ["stdio", "http", "sse"]
@@ -19,21 +38,6 @@ NETWORK_TRANSPORTS_SDK_MAPPING = {
 # so we gate the OAuth wiring strictly on this transport name. SSE is a
 # network transport but is explicitly out of scope for OAuth in this build.
 STREAMABLE_HTTP_TRANSPORT = "http"
-
-# Couchbase Server REST API ports. TLS/plaintext port pairs differ per service —
-# these are used to build request URLs once TLS-vs-plaintext is decided from the
-# connection string's scheme.
-MANAGEMENT_REST_PORT_TLS = 18091
-MANAGEMENT_REST_PORT_PLAIN = 8091
-INDEX_REST_PORT_TLS = 19102
-INDEX_REST_PORT_PLAIN = 9102
-
-# Index Service Configuration
-# Cluster major version at which list_indexes prefers the query service over
-# the Index Service REST API. From this version, system:indexes exposes the
-# original CREATE INDEX statement in metadata.definition, so we query it
-# instead of the /getIndexStatus REST endpoint.
-QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION = 8
 
 # Logging Configuration
 # Change this to DEBUG, WARNING, ERROR as needed
@@ -54,11 +58,17 @@ DEFAULT_LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 DEFAULT_LOG_DATEFMT = "%Y-%m-%dT%H:%M:%S%z"
 ALLOWED_LOG_SINKS = ("stderr", "file")
 DEFAULT_LOG_SINKS = "stderr"
-# Base filename used when file logging is active and the caller omits
-# --log-file. The per-level files derive from it by inserting the level name
-# (mcp_server.log -> mcp_server.info.log, mcp_server.error.log, ...). The CLI
-# layer (mcp_server.py) wires this as the --log-file Click default.
-DEFAULT_LOG_FILE = "mcp_server.log"
+# Last-resort filename when file logging is active but no path reached
+# configure_logging at all. The per-level files derive from it by inserting
+# the level name (mcp_server.log -> mcp_server.info.log, ...).
+#
+# This is NOT any server's default. Each server declares its own via
+# ServerSpec.default_log_file, and the CLI wires that as the --log-file
+# Click default, so this value is only reached by a host that calls
+# configure_logging directly without one. Named for that role rather than
+# "DEFAULT_" so it cannot be mistaken for the operational server's default
+# again — it shares that value by history, not by contract.
+FALLBACK_LOG_FILE = "mcp_server.log"
 
 # OAuth Scopes
 # Tokens carrying SCOPE_READ may call read-only tools (including SQL++ query,
@@ -85,4 +95,3 @@ ALLOWED_OAUTH_ALGORITHMS = [
     "PS512",
 ]
 DEFAULT_OAUTH_ALGORITHM = "RS256"
-

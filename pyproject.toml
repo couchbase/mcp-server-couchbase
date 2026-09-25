@@ -23,6 +23,11 @@ dependencies = [
     # Fuzzy matching for discover_tool_input_values. Upper bound is deliberate: rapidfuzz 3.14.6
     # raised requires-python to >=3.11, which would silently break this project's 3.10 support.
     "rapidfuzz>=3.13.0,<3.14.6",
+    # TODO(release): couchbase-operational-insights is expected on PyPI within
+    # 1-2 weeks. Once released, replace this git reference with a version
+    # specifier (e.g. "couchbase-operational-insights>=1.0.0,<2.0.0") and
+    # remove [tool.hatch.metadata] allow-direct-references below.
+    "couchbase-operational-insights @ git+https://github.com/couchbaselabs/operational-insights-python-client.git",
 ]
 
 [project.urls]
@@ -164,10 +169,11 @@ asyncio_default_fixture_loop_scope = "function"
 # from any subdirectory (tests/unit, tests/integration, tests/accuracy).
 pythonpath = ["tests"]
 markers = [
-    "integration: Integration tests against a live Couchbase cluster via the MCP server.",
+    "integration: Integration tests against a live Couchbase cluster via the MCP server. Auto-applied by directory (tests/integration).",
     "accuracy: AI-in-the-loop accuracy tests. Require OPENAI_API_KEY and a Couchbase cluster.",
     "result_eval: LLM-as-judge answer-correctness evals. Require OPENAI_API_KEY and a Couchbase cluster.",
     "perf: In-process performance tests. Opt-in via CB_MCP_PERF=1; not run in CI.",
+    "operational_insights: Tests that need a live Couchbase Operational Insights cluster. Auto-applied by directory; skipped unless CB_OI_CONNECTION_STRING is set.",
 ]
 
 # Build system configuration
@@ -183,6 +189,11 @@ packages = ["src/cb_mcp", "src/providers"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "src/mcp_server.py" = "mcp_server.py"
+
+# Required for the direct git reference on couchbase-operational-insights above.
+# TODO(release): remove this once that dependency is a version specifier.
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.uv]
 package = true

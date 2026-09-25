@@ -142,9 +142,7 @@ class LLMJudge:
         self.model = model
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         # Reasoning models (gpt-5*, o-series) reject a custom temperature.
-        self._temperature = (
-            temperature if supports_custom_temperature(model) else None
-        )
+        self._temperature = temperature if supports_custom_temperature(model) else None
 
     async def evaluate(
         self,

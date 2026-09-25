@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import pytest
 from fastmcp import Context
 
-from cb_mcp.tools import TOOL_ANNOTATIONS, get_tools
+from cb_mcp.tools.operational import TOOL_ANNOTATIONS, get_tools
 from cb_mcp.utils.config import parse_tool_names
 from cb_mcp.utils.elicitation import (
     ConfirmationResult,

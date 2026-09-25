@@ -1,8 +1,9 @@
 """Tests for configure_logging end-to-end behaviour.
 
 The Couchbase SDK's ``configure_logging`` is one-shot per process (it raises
-``InvalidArgumentException`` on a second call), so we patch
-:func:`cb_mcp.utils.logging.couchbase.configure_logging` for every test. Each
+``InvalidArgumentException`` on a second call). ``configure_logging`` no longer
+imports it — the host injects a hook — so we patch the module's default hook,
+:data:`cb_mcp.utils.logging.NO_SDK_LOG_HOOK`, for every test. Each
 test also restores the ``couchbase`` logger and the module-level snapshot
 afterwards via an autouse fixture, so tests don't bleed state into one another.
 """
@@ -20,7 +21,7 @@ import cb_mcp.utils.logging as logmod
 from cb_mcp.utils.constants import (
     BYTES_PER_MB,
     DEFAULT_LOG_MAX_BYTES,
-    MCP_SERVER_NAME,
+    LOGGER_ROOT,
 )
 from cb_mcp.utils.logging import (
     LEVEL_OFF,
@@ -34,7 +35,7 @@ from cb_mcp.utils.logging import (
 def reset_logging_state():
     """Restore the couchbase logger and the resolved-config singleton."""
     yield
-    logger = logging.getLogger(MCP_SERVER_NAME)
+    logger = logging.getLogger(LOGGER_ROOT)
     for h in list(logger.handlers):
         logger.removeHandler(h)
     logger.propagate = True
@@ -44,13 +45,16 @@ def reset_logging_state():
 
 @pytest.fixture(autouse=True)
 def mock_sdk_configure_logging():
-    """Couchbase SDK ``configure_logging`` is one-shot per process; mock it.
+    """Capture the SDK log hook ``configure_logging`` forwards to.
 
-    The patch target is the ``couchbase`` symbol *as imported into our logging
-    module* — patching ``couchbase.configure_logging`` directly wouldn't catch
-    references already resolved at module load time.
+    ``configure_logging`` no longer imports any SDK; the host injects one via
+    ``sdk_log_hook``, and when nothing is injected it falls back to the
+    module-level ``NO_SDK_LOG_HOOK``. That fallback is resolved as a global at
+    call time, so patching it here substitutes a mock for every call these
+    tests make — and keeps the real Couchbase ``configure_logging``, which is
+    one-shot per process, out of the test run entirely.
     """
-    with patch.object(logmod.couchbase, "configure_logging") as mock:
+    with patch.object(logmod, "NO_SDK_LOG_HOOK") as mock:
         yield mock
 
 
@@ -76,18 +80,18 @@ class TestStderrSinkHandlerAttachment:
 
     def test_attaches_single_stream_handler(self):
         _call(sinks={"stderr"})
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         assert len(logger.handlers) == 1
         assert isinstance(logger.handlers[0], logging.StreamHandler)
 
     def test_propagate_false_to_avoid_root_double_emit(self):
         _call(sinks={"stderr"})
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         assert logger.propagate is False
 
     def test_level_set_on_logger(self):
         _call(level="DEBUG", sinks={"stderr"})
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         assert logger.level == logging.DEBUG
 
 
@@ -98,14 +102,14 @@ class TestPerLevelFileSink:
         # At INFO threshold the active level files are INFO/WARNING/ERROR
         # (CRITICAL shares the ERROR file, so it gets no file of its own).
         _call(level="INFO", sinks={"file"}, log_file=str(tmp_path / "main.log"))
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
         assert len(rotating) == 3
 
     def test_attaches_one_file_per_active_level_at_debug(self, tmp_path):
         # At DEBUG threshold the active level files are DEBUG/INFO/WARNING/ERROR.
         _call(level="DEBUG", sinks={"file"}, log_file=str(tmp_path / "main.log"))
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
         assert len(rotating) == 4
 
@@ -113,7 +117,7 @@ class TestPerLevelFileSink:
         # TRACE has no file of its own: at TRACE the same four files attach as at
         # DEBUG, and TRACE records land in the DEBUG file.
         _call(level="TRACE", sinks={"file"}, log_file=str(tmp_path / "main.log"))
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         assert logger.level == logmod.LEVEL_TRACE
         rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
         assert len(rotating) == 4
@@ -131,7 +135,7 @@ class TestPerLevelFileSink:
     def test_levels_below_threshold_get_no_file(self, tmp_path):
         # At WARNING threshold, DEBUG/INFO files must not be created.
         _call(level="WARNING", sinks={"file"}, log_file=str(tmp_path / "main.log"))
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
         assert len(rotating) == 2  # WARNING/ERROR (CRITICAL folds into ERROR)
         snap = get_resolved_logging_config()
@@ -147,16 +151,16 @@ class TestPerLevelFileSink:
         assert snap is not None
         assert "CRITICAL" not in (snap.log_files or {})
 
-        log = logging.getLogger(f"{MCP_SERVER_NAME}.test")
+        log = logging.getLogger(f"{LOGGER_ROOT}.test")
         log.critical("a-critical")
-        for h in logging.getLogger(MCP_SERVER_NAME).handlers:
+        for h in logging.getLogger(LOGGER_ROOT).handlers:
             h.flush()
         assert "a-critical" in (tmp_path / "main.error.log").read_text()
         assert not (tmp_path / "main.critical.log").exists()
 
     def test_each_handler_filters_to_exactly_its_level(self, tmp_path):
         _call(level="DEBUG", sinks={"file"}, log_file=str(tmp_path / "main.log"))
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
         info_rec = logging.LogRecord("x", logging.INFO, "f", 1, "i", None, None)
         warn_rec = logging.LogRecord("x", logging.WARNING, "f", 1, "w", None, None)
@@ -185,12 +189,12 @@ class TestPerLevelFileSink:
     def test_records_routed_to_their_own_level_file(self, tmp_path):
         """End-to-end: each level's record lands only in its own file."""
         _call(level="DEBUG", sinks={"file"}, log_file=str(tmp_path / "mcp_server.log"))
-        log = logging.getLogger(f"{MCP_SERVER_NAME}.test")
+        log = logging.getLogger(f"{LOGGER_ROOT}.test")
         log.info("an-info")
         log.warning("a-warning")
         log.error("an-error")
 
-        for h in logging.getLogger(MCP_SERVER_NAME).handlers:
+        for h in logging.getLogger(LOGGER_ROOT).handlers:
             h.flush()
 
         info_text = (tmp_path / "mcp_server.info.log").read_text()
@@ -212,7 +216,7 @@ class TestStderrAndFileTogether:
             sinks={"stderr", "file"},
             log_file=str(tmp_path / "m.log"),
         )
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         assert len(logger.handlers) == 4
 
 
@@ -274,18 +278,18 @@ class TestOffMode:
 
     def test_no_handlers_attached(self):
         _call(level="OFF", sinks={"stderr", "file"})
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         assert logger.handlers == []
 
     def test_logger_level_set_to_sentinel(self):
         _call(level="OFF")
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         assert logger.level == LEVEL_OFF
 
     def test_sdk_called_with_sentinel(self, mock_sdk_configure_logging):
         _call(level="OFF")
         # SDK is told OFF too — drops records at the C++ boundary.
-        mock_sdk_configure_logging.assert_called_with(MCP_SERVER_NAME, LEVEL_OFF)
+        mock_sdk_configure_logging.assert_called_with(LOGGER_ROOT, LEVEL_OFF)
 
     def test_snapshot_reflects_inactive_state(self):
         _call(level="OFF", sinks={"stderr", "file"})
@@ -307,27 +311,25 @@ class TestSdkLevelPropagation:
 
     def test_sdk_configured_with_matching_debug_level(self, mock_sdk_configure_logging):
         _call(level="DEBUG", sinks={"stderr"})
-        mock_sdk_configure_logging.assert_called_with(MCP_SERVER_NAME, logging.DEBUG)
+        mock_sdk_configure_logging.assert_called_with(LOGGER_ROOT, logging.DEBUG)
 
     def test_sdk_configured_with_trace_level(self, mock_sdk_configure_logging):
         # The whole point of trace: the SDK's C++ core level is set to 5 so its
         # logs surface through the MCP server.
         _call(level="TRACE", sinks={"stderr"})
-        mock_sdk_configure_logging.assert_called_with(
-            MCP_SERVER_NAME, logmod.LEVEL_TRACE
-        )
+        mock_sdk_configure_logging.assert_called_with(LOGGER_ROOT, logmod.LEVEL_TRACE)
 
     def test_sdk_configured_with_matching_warning_level(
         self, mock_sdk_configure_logging
     ):
         _call(level="WARNING", sinks={"stderr"})
-        mock_sdk_configure_logging.assert_called_with(MCP_SERVER_NAME, logging.WARNING)
+        mock_sdk_configure_logging.assert_called_with(LOGGER_ROOT, logging.WARNING)
 
     def test_sdk_level_tracks_invalid_level_fallback(self, mock_sdk_configure_logging):
         """An invalid level falls back to INFO for the MCP logger; the SDK must
         be told the same resolved level, not the rejected input."""
         _call(level="NONSENSE", sinks={"stderr"})
-        mock_sdk_configure_logging.assert_called_with(MCP_SERVER_NAME, logging.INFO)
+        mock_sdk_configure_logging.assert_called_with(LOGGER_ROOT, logging.INFO)
 
 
 class TestTimestampFormat:
@@ -344,11 +346,11 @@ class TestTimestampFormat:
 
     def test_stderr_handler_timestamp_includes_timezone_offset(self):
         _call(level="INFO", sinks={"stderr"})
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         formatter = logger.handlers[0].formatter
         assert formatter is not None
         record = logging.LogRecord(
-            MCP_SERVER_NAME, logging.INFO, "f", 1, "hello", None, None
+            LOGGER_ROOT, logging.INFO, "f", 1, "hello", None, None
         )
         formatted = formatter.format(record)
         assert self._TS_WITH_TZ.search(formatted), (
@@ -357,9 +359,9 @@ class TestTimestampFormat:
 
     def test_file_handler_timestamp_includes_timezone_offset(self, tmp_path):
         _call(level="INFO", sinks={"file"}, log_file=str(tmp_path / "m.log"))
-        log = logging.getLogger(f"{MCP_SERVER_NAME}.test")
+        log = logging.getLogger(f"{LOGGER_ROOT}.test")
         log.info("an-info")
-        for h in logging.getLogger(MCP_SERVER_NAME).handlers:
+        for h in logging.getLogger(LOGGER_ROOT).handlers:
             h.flush()
         info_line = (tmp_path / "m.info.log").read_text()
         assert self._TS_WITH_TZ.search(info_line), (
@@ -466,9 +468,9 @@ class TestIdempotency:
 
     def test_handlers_not_duplicated_on_second_call(self):
         _call(sinks={"stderr"})
-        first_count = len(logging.getLogger(MCP_SERVER_NAME).handlers)
+        first_count = len(logging.getLogger(LOGGER_ROOT).handlers)
         _call(sinks={"stderr"})
-        second_count = len(logging.getLogger(MCP_SERVER_NAME).handlers)
+        second_count = len(logging.getLogger(LOGGER_ROOT).handlers)
         assert first_count == second_count == 1
 
 
@@ -549,7 +551,7 @@ class TestPerLevelMaxBytes:
             log_rotation_max_size_mb=1,  # 1 MB global
             log_rotation_size_overrides={"ERROR": 3},  # 3 MB
         )
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         by_path = {
             h.baseFilename: h.maxBytes
             for h in logger.handlers
@@ -583,7 +585,7 @@ class TestPerLevelMaxBytes:
             log_file=str(tmp_path / "m.log"),
             log_rotation_max_size_mb=0.5,
         )
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
         assert rotating and all(h.maxBytes == 524288 for h in rotating)
         snap = get_resolved_logging_config()
@@ -600,7 +602,7 @@ class TestPerLevelMaxBytes:
             log_file=str(tmp_path / "m.log"),
             log_max_bytes=4096,
         )
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
         assert rotating and all(h.maxBytes == 4096 for h in rotating)
 
@@ -669,7 +671,7 @@ class TestPerLevelBackupCounts:
             log_file=str(tmp_path / "m.log"),
             log_backup_count=0,
         )
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         rotating = [h for h in logger.handlers if isinstance(h, RotatingFileHandler)]
         assert rotating
         assert all(h.backupCount == 0 for h in rotating)
@@ -684,7 +686,7 @@ class TestPerLevelBackupCounts:
             log_backup_count=2,
             log_backup_count_overrides={"ERROR": 6},
         )
-        logger = logging.getLogger(MCP_SERVER_NAME)
+        logger = logging.getLogger(LOGGER_ROOT)
         by_path = {
             h.baseFilename: h.backupCount
             for h in logger.handlers
@@ -709,8 +711,8 @@ class TestPerLevelBackupCounts:
             log_max_bytes=2000,
             log_backup_count=0,
         )
-        log = logging.getLogger(f"{MCP_SERVER_NAME}.test")
-        handlers = logging.getLogger(MCP_SERVER_NAME).handlers
+        log = logging.getLogger(f"{LOGGER_ROOT}.test")
+        handlers = logging.getLogger(LOGGER_ROOT).handlers
         max_seen = 0
         for i in range(500):
             log.error("x" * 80 + f" {i}")

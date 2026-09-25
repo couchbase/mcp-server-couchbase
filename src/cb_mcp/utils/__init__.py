@@ -1,7 +1,9 @@
 """
 Couchbase MCP Utilities
 
-This module contains utility functions for configuration, connection, and context management.
+Shared utilities: configuration, context, logging, telemetry and tool wrappers.
+Helpers tied to a specific backing SDK live under that server's namespace
+(e.g. :mod:`cb_mcp.utils.operational`), not here.
 """
 
 # CLI adapters
@@ -18,12 +20,6 @@ from .config import (
     parse_tool_names,
 )
 
-# Connection utilities
-from .connection import (
-    connect_to_bucket,
-    connect_to_couchbase_cluster,
-)
-
 # Constants
 from .constants import (
     ALLOWED_LOG_LEVELS,
@@ -32,16 +28,16 @@ from .constants import (
     ALLOWED_TRANSPORTS,
     DEFAULT_HOST,
     DEFAULT_LOG_BACKUP_COUNT,
-    DEFAULT_LOG_FILE,
     DEFAULT_LOG_FORMAT,
     DEFAULT_LOG_LEVEL,
     DEFAULT_LOG_MAX_BYTES,
     DEFAULT_LOG_SINKS,
     DEFAULT_OAUTH_ALGORITHM,
-    DEFAULT_PORT,
     DEFAULT_READ_ONLY_MODE,
     DEFAULT_TRANSPORT,
-    MCP_SERVER_NAME,
+    FALLBACK_LOG_FILE,
+    LOGGER_NAMESPACE,
+    LOGGER_ROOT,
     NETWORK_TRANSPORTS,
     NETWORK_TRANSPORTS_SDK_MAPPING,
     SCOPE_READ,
@@ -52,7 +48,6 @@ from .constants import (
 # Context utilities
 from .context import (
     AppContext,
-    get_cluster_connection,
     get_cluster_provider,
     get_logging_config,
 )
@@ -63,13 +58,9 @@ from .elicitation import wrap_with_confirmation
 # Environment diagnostics
 from .environment import log_environment_info
 
-# Index utilities
-from .index_utils import (
-    fetch_indexes_from_rest_api,
-)
-
 # Logging
 from .logging import (
+    NO_SDK_LOG_HOOK,
     ResolvedLoggingConfig,
     configure_logging,
     get_resolved_logging_config,
@@ -84,24 +75,20 @@ from .scope_enforcement import required_scopes_for_tool, wrap_with_scope_check
 from .telemetry import send_install_ping, wrap_with_telemetry
 
 # Note: Individual modules create their own hierarchical loggers using:
-# logger = logging.getLogger(f"{MCP_SERVER_NAME}.module.name")
+# logger = logging.getLogger(f"{LOGGER_NAMESPACE}.module.name")
 
 __all__ = [
     # Config
     "get_settings",
     "parse_tool_names",
     # Connection
-    "connect_to_couchbase_cluster",
-    "connect_to_bucket",
     # Context
     "AppContext",
-    "get_cluster_connection",
     "get_cluster_provider",
     "get_logging_config",
-    # Index utilities
-    "fetch_indexes_from_rest_api",
     # Constants
-    "MCP_SERVER_NAME",
+    "LOGGER_NAMESPACE",
+    "LOGGER_ROOT",
     "DEFAULT_READ_ONLY_MODE",
     "DEFAULT_TRANSPORT",
     "DEFAULT_LOG_LEVEL",
@@ -109,15 +96,15 @@ __all__ = [
     "DEFAULT_LOG_BACKUP_COUNT",
     "DEFAULT_LOG_FORMAT",
     "DEFAULT_LOG_SINKS",
-    "DEFAULT_LOG_FILE",
+    "FALLBACK_LOG_FILE",
     "ALLOWED_LOG_LEVELS",
     "ALLOWED_LOG_SINKS",
     "DEFAULT_HOST",
-    "DEFAULT_PORT",
     "ALLOWED_TRANSPORTS",
     "NETWORK_TRANSPORTS",
     "NETWORK_TRANSPORTS_SDK_MAPPING",
     # Logging
+    "NO_SDK_LOG_HOOK",
     "ResolvedLoggingConfig",
     "configure_logging",
     "get_resolved_logging_config",

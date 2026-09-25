@@ -5,21 +5,21 @@ Tool registration orchestration shared across MCP implementations.
 import logging
 from collections.abc import Callable
 
-from .tools import WRITE_TOOLS, get_tools
+from .core.spec import ServerSpec
 from .utils import wrap_with_telemetry
 from .utils.config import parse_tool_names
-from .utils.constants import MCP_SERVER_NAME
+from .utils.constants import LOGGER_NAMESPACE
 from .utils.elicitation import wrap_with_confirmation
 from .utils.scope_enforcement import (
-    TOOL_SCOPE_HINTS,
     required_scopes_for_tool,
     wrap_with_scope_check,
 )
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.tool_registration")
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.tool_registration")
 
 
 def prepare_tools_for_registration(
+    spec: ServerSpec,
     read_only_mode: bool,
     disabled_tools: str | None,
     confirmation_required_tools: str | None,
@@ -40,10 +40,20 @@ def prepare_tools_for_registration(
     own execution, excluding confirmation/scope-check overhead. A call
     rejected by the scope check or declined at confirmation never reaches
     the tool, so it never emits a tool-call event.
+
+    ``spec`` says *which* server is being registered. It is taken whole rather
+    than as separate tool-set / scope / hint arguments so those cannot drift
+    apart: pairing one server's tools with another's scope labels would gate
+    them on a scope no token will ever carry, and nothing would report it. A
+    caller wanting a subset of a server's tools should narrow the spec —
+    ``dataclasses.replace(SPEC, tools=...)`` — rather than pass pieces.
+
+    Taking the spec also means this module no longer imports any server, so it
+    stays free of SDK imports at module load.
     """
     # When read_only_mode is True, write tools (KV, collection management, and
     # index management) are not loaded.
-    tools = get_tools(read_only_mode=read_only_mode)
+    tools = spec.tools.tools_for(read_only_mode=read_only_mode)
 
     loaded_tool_names = {tool.__name__ for tool in tools}
     disabled_tool_names = parse_tool_names(disabled_tools, loaded_tool_names)
@@ -80,21 +90,21 @@ def prepare_tools_for_registration(
             f"{sorted(skipped_confirmation_tool_names)}"
         )
 
-    write_tool_names = {fn.__name__ for fn in WRITE_TOOLS}
+    write_tool_names = spec.tools.write_tool_names
 
     final_tools: list[Callable] = []
     for tool in enabled_tools:
-        wrapped = wrap_with_telemetry(tool)
+        wrapped = wrap_with_telemetry(tool, server_id=spec.id)
         if tool.__name__ in active_confirmation_tool_names:
             wrapped = wrap_with_confirmation(wrapped)
         if enforce_scopes:
             required_scopes = required_scopes_for_tool(
-                tool.__name__, write_tool_names=write_tool_names
+                tool.__name__, write_tool_names=write_tool_names, scopes=spec.scopes
             )
             wrapped = wrap_with_scope_check(
                 wrapped,
                 required_scopes,
-                hint=TOOL_SCOPE_HINTS.get(tool.__name__),
+                hint=spec.scope_hints.get(tool.__name__),
             )
         final_tools.append(wrapped)
 

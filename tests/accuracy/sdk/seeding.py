@@ -13,13 +13,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from couchbase.management.search import SearchIndex
+from couchbase.search import MatchAllQuery, SearchRequest
 
-from cb_mcp.utils.connection import connect_to_couchbase_cluster
+from cb_mcp.utils.operational.connection import connect_to_couchbase_cluster
 
 from .client import AccuracyTestingClient
 
@@ -137,6 +139,11 @@ def seed_fts_index(
     directly via the Couchbase SDK, using the same ``CB_CONNECTION_STRING``/
     ``CB_USERNAME``/``CB_PASSWORD`` env vars the MCP server subprocess uses.
     The blocking SDK calls run in a thread so they don't block the event loop.
+
+    Waits for the index to actually answer queries before returning — a
+    just-created index errors with "pindex not available" for a while, and
+    the accuracy cases that use this hook query/explain against the index
+    right after seeding, so without this wait they race the index build.
     """
 
     def _create_index() -> None:
@@ -162,9 +169,31 @@ def seed_fts_index(
                     },
                 },
             )
-            cluster.bucket(bucket).scope(scope).search_indexes().upsert_index(
-                definition
-            )
+            cluster_scope = cluster.bucket(bucket).scope(scope)
+            cluster_scope.search_indexes().upsert_index(definition)
+
+            # No document is seeded here (these cases don't need one — see
+            # the callers), so readiness just means "a query no longer
+            # errors", not "a specific document is indexed".
+            deadline = time.monotonic() + 300
+            last_error: Exception | None = None
+            while time.monotonic() < deadline:
+                try:
+                    list(
+                        cluster_scope.search(
+                            index_name, SearchRequest.create(MatchAllQuery())
+                        ).rows()
+                    )
+                    last_error = None
+                    break
+                except Exception as e:
+                    last_error = e
+                    time.sleep(5)
+            if last_error is not None:
+                raise TimeoutError(
+                    f"Search index {index_name!r} did not become queryable "
+                    f"within 300s: {last_error}"
+                ) from last_error
         finally:
             cluster.close()
 

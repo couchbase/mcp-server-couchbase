@@ -24,6 +24,7 @@ For full documentation, visit [docs.couchbase.com/mcp-server](https://docs.couch
 - [Features/Tools](#featurestools)
 - [Prerequisites](#prerequisites)
 - [Configuration](#configuration)
+- [Operational Insights Server](#operational-insights-server)
 - [Streamable HTTP Transport Mode](#streamable-http-transport-mode)
 - [SSE Transport Mode](#sse-transport-mode)
 - [OAuth 2.1 Authorization](#oauth-21-authorization)
@@ -56,6 +57,12 @@ Once the server is connected, you can talk to your Couchbase cluster in natural 
 
 ## Features/Tools
 
+This distribution ships two servers: the **operational** server (default —
+the tables immediately below) talks to a regular Couchbase cluster via the
+`couchbase` SDK, and the **[Operational Insights](#operational-insights-server)**
+server (its own table further down) talks to Operational Insights clusters via
+the `couchbase-operational-insights` SDK.
+
 ### Cluster setup & health tools
 
 | Tool Name | Description |
@@ -63,7 +70,7 @@ Once the server is connected, you can talk to your Couchbase cluster in natural 
 | `get_server_configuration_status` | Get the server status and configuration without connecting to the cluster — reports read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration |
 | `test_cluster_connection` | Check the cluster credentials by connecting to the cluster |
 | `get_cluster_health_and_services` | Get cluster health status and list of all running services, optionally filtered to specific services via `service_types` |
-| `get_cluster_diagnostics_report` | Get the SDK's cached connection diagnostics — whether connections were already broken and for how long, without any active network probing | main
+| `get_cluster_diagnostics_report` | Get the SDK's cached connection diagnostics — whether connections were already broken and for how long, without any active network probing |
 | `get_cluster_metrics` | Get one or more cluster statistics over a historic time window via the Management REST API's stats-range endpoint. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
 | `discover_tool_input_values` | Look up the exact input values another tool needs, from reference data bundled with the server — currently every Couchbase Server metric name (type, unit, version added, description) for `get_cluster_metrics`. Browse by category or fuzzy-search by keyword. Works offline, without a cluster connection. |
 
@@ -126,6 +133,44 @@ Requires Couchbase Server 7.6+ and the Search service. Vector search is not supp
 | `get_queries_using_primary_index` | Get queries that use a primary index (potential performance concern) |
 | `get_queries_not_using_covering_index` | Get queries that don't use a covering index |
 | `get_queries_not_selective` | Get queries that are not selective (index scans return many more documents than final result) |
+
+### Operational Insights tools
+
+Registered by the separate `operational-insights` server (see
+[Operational Insights Server](#operational-insights-server) below), not the
+default `operational` one.
+
+| Tool Name | Description |
+| --------- | ----------- |
+| `get_server_configuration_status` | Get this server's status and configuration without connecting to a cluster — read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration. Shared with the operational server: the same tool, registered by both. |
+| `get_databases_in_cluster` | List all databases in the Operational Insights cluster. |
+| `get_scopes_in_database` | List all scopes in a database. |
+| `get_collections_in_scope` | List all collections (datasets) in a scope. Shares its name with the operational server's tool of the same name — see the note below. |
+| `get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. Shares its name with the operational server's tool of the same name — see the note below. |
+| `list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog (the SDK has no index manager). Shares its name with the operational server's tool of the same name — see the note below. |
+| `run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return all result rows. Enforces read-only mode server-side via `QueryOptions(readonly=True)` — there is no client-side SQL++ parser here. |
+| `explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
+| `create_index` | Create a secondary index via `CREATE INDEX` (the SDK has no index manager). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** Shares its name with the operational server's tool of the same name — see the note below. |
+| `run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Same read-only enforcement as `run_query_sync`. |
+| `get_async_query_results` | Check whether an async query has finished and, if so, return its rows. Doubles as the status check — call again later if not yet ready. |
+| `discard_async_query_results` | Free a finished async query's result buffers on the server. Normal cleanup step after `get_async_query_results`. |
+| `cancel_async_query` | Stop an async query that is still running. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** A finished query cannot be cancelled — discard its results instead. |
+
+The Server Async Request API tools form a start → poll → discard-or-cancel
+flow for long-running queries: `run_query_async` returns a `query_handle`,
+`get_async_query_results` is polled until it reports readiness (and returns
+the rows), then either `discard_async_query_results` frees the results or,
+for a query still running, `cancel_async_query` stops it.
+
+> **Note:** `get_collections_in_scope`, `get_schema_for_collection`,
+> `create_index` and `list_indexes` exist, with different behavior, on both
+> servers. (`get_server_configuration_status` also appears on both, but it is
+> deliberately *one* shared tool — same implementation, same result shape —
+> so it needs no disambiguation.) Each server is a separate process, so this is only a concern if a
+> single MCP client registers both `operational` and `operational-insights`
+> simultaneously — in that case, disambiguate at the client configuration
+> layer (e.g. by giving the two server entries distinct names in the
+> client's own config).
 
 ## Prerequisites
 
@@ -555,6 +600,83 @@ The log file can be explored at **Help > Show Log in Finder (Explorer) > mcp > c
 
 </details>
 
+## Operational Insights Server
+
+Alongside the default `operational` server (the one every section above
+describes), this distribution ships a second server for
+[Operational Insights](https://docs.couchbase.com/enterprise-analytics/current/intro/intro.html)
+clusters, using the separate
+[`couchbase-operational-insights`](https://github.com/couchbaselabs/operational-insights-python-client)
+SDK. It is a different product from a regular Couchbase cluster and runs as
+an independent process on its own port.
+
+Run it by passing `operational-insights` as the CLI subcommand (or appending
+it as the container's command):
+
+```bash
+uvx couchbase-mcp-server operational-insights
+# or, from source:
+uv run src/mcp_server.py operational-insights
+# or, via Docker:
+docker run --rm -i \
+  -e CB_OI_CONNECTION_STRING=http://localhost:8095 \
+  -e CB_OI_USERNAME=Administrator \
+  -e CB_OI_PASSWORD=password \
+  couchbase/mcp-server:<version> operational-insights
+```
+
+**`--connection-string` is an HTTP(S) URL, not a `couchbase://` connection
+string** — e.g. `http://localhost:8095` for a local Operational Insights
+server, or `https://<host>:18095` for Capella. This is the single most
+common misconfiguration when pointing this server at a cluster.
+
+| CLI Argument | Environment Variable | Description | Default |
+| ------------- | --------------------- | ------------ | ------- |
+| `--connection-string` | `CB_OI_CONNECTION_STRING` | Operational Insights endpoint URL (HTTP/HTTPS, not `couchbase://`) | None |
+| `--username` | `CB_OI_USERNAME` | Operational Insights username | None |
+| `--password` | `CB_OI_PASSWORD` | Operational Insights password | None |
+| `--ca-cert-path` | `CB_OI_CA_CERT_PATH` | Path to server root certificate (PEM), for verifying a self-signed/untrusted server certificate | None |
+| `--client-cert-path` | `CB_OI_CLIENT_CERT_PATH` | Path to the client certificate for mTLS authentication — a PEM cert (paired with `--client-key-path`) or a PKCS#12 bundle (`.p12`/`.pfx`, `--client-key-path` left unset). Requires an `https://` `--connection-string`; overrides `--username`/`--password` when set | None |
+| `--client-key-path` | `CB_OI_CLIENT_KEY_PATH` | Path to the client certificate's private key (PEM). Leave unset when `--client-cert-path` is a PKCS#12 bundle | None |
+| `--client-cert-password` | `CB_OI_CLIENT_CERT_PASSWORD` | Decryption password for an encrypted client key or PKCS#12 bundle | None |
+
+Every other flag (`--read-only-mode`, `--transport`, `--host`, `--port`,
+`--disabled-tools`, `--confirmation-required-tools`, `--log-*`,
+`--oauth-*`) is identical to the operational server's — see
+[Additional Configuration for MCP Server](#additional-configuration-for-mcp-server) —
+except the defaults for **port** (`8001`, not `8000`) and **log file**
+(`mcp_server_operational_insights.log`, not `mcp_server.log`), since two
+servers cannot share either. OAuth uses the same scope labels
+(`couchbase-mcp:read` / `couchbase-mcp:write`) as the operational server, so
+an existing IdP configuration works for both without changes.
+
+Example MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "couchbase-operational-insights": {
+      "command": "uvx",
+      "args": ["couchbase-mcp-server", "operational-insights"],
+      "env": {
+        "CB_OI_CONNECTION_STRING": "http://localhost:8095",
+        "CB_OI_USERNAME": "Administrator",
+        "CB_OI_PASSWORD": "password"
+      }
+    }
+  }
+}
+```
+
+See [Operational Insights tools](#operational-insights-tools) above for the
+tool list, and the note there about the three tool names shared with the
+operational server.
+
+This server has its own [MCP Registry](https://registry.modelcontextprotocol.io)
+listing, published from `operational_insights_server.json` — separate from
+the operational server's `server.json` — so it's independently discoverable
+in the registry rather than buried inside the operational server's entry.
+
 ## Streamable HTTP Transport Mode
 
 The MCP Server can be run in [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http) transport mode which allows multiple clients to connect to the same server instance via HTTP.
@@ -780,10 +902,13 @@ We provide high-level MCP integration tests to verify that the server exposes th
    - `CB_USERNAME`
    - `CB_PASSWORD`
    - Optional: `CB_MCP_TEST_BUCKET` (a bucket to probe during the tests)
+   - Optional, for the [Operational Insights server](#operational-insights-server)'s
+     own tests: `CB_OI_CONNECTION_STRING` / `CB_OI_USERNAME` / `CB_OI_PASSWORD`.
+     Those tests skip automatically (not fail) when unset.
 2. Run the tests:
 
 ```bash
-uv run pytest tests/ -v
+uv run --extra dev pytest tests/integration -v
 ```
 
 ---
