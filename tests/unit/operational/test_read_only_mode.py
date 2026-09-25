@@ -33,6 +33,9 @@ WRITE_TOOL_NAMES = {
     "create_index",
     "build_index",
     "drop_index",
+    # FTS index management write tools
+    "upsert_fts_index",
+    "drop_fts_index",
 }
 
 # Read-only tool names that should always be available (27 tools)
@@ -85,7 +88,7 @@ class TestToolCategories:
 
     def test_write_tools_defined(self):
         """Verify WRITE_TOOLS list is properly defined."""
-        assert len(WRITE_TOOLS) == 12
+        assert len(WRITE_TOOLS) == 14
         tool_names = {tool.__name__ for tool in WRITE_TOOLS}
         assert tool_names == WRITE_TOOL_NAMES
 
@@ -182,12 +185,12 @@ class TestToolCounts:
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (27 read-only + 12 write)
-        assert len(tools) == 39
+        # Expected total count (27 read-only + 14 write)
+        assert len(tools) == 41
 
     def test_write_tools_count(self):
-        """Verify exactly 12 write tools exist."""
-        assert len(WRITE_TOOLS) == 12
+        """Verify exactly 14 write tools exist."""
+        assert len(WRITE_TOOLS) == 14
 
 
 class TestReadOnlyModeToolFiltering:
@@ -258,6 +261,18 @@ class TestReadOnlyModeToolFiltering:
         tools = get_tools(read_only_mode=True)
         tool_names = {tool.__name__ for tool in tools}
         assert "drop_index" not in tool_names
+
+    def test_upsert_fts_index_tool_filtered_in_read_only_mode(self):
+        """Verify upsert_fts_index is filtered in read-only mode."""
+        tools = get_tools(read_only_mode=True)
+        tool_names = {tool.__name__ for tool in tools}
+        assert "upsert_fts_index" not in tool_names
+
+    def test_drop_fts_index_tool_filtered_in_read_only_mode(self):
+        """Verify drop_fts_index is filtered in read-only mode."""
+        tools = get_tools(read_only_mode=True)
+        tool_names = {tool.__name__ for tool in tools}
+        assert "drop_fts_index" not in tool_names
 
     def test_get_document_always_available(self):
         """Verify get_document_by_id is always available (read operation)."""

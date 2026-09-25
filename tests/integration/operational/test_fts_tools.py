@@ -5,12 +5,17 @@ Tests for:
 - list_fts_indexes (cluster-level and scope-level listing)
 - get_fts_index_definition (single-index full definition)
 - run_fts_query (query mode and explain mode via explain=True)
+- upsert_fts_index / drop_fts_index (create/update/drop, cluster- and
+  scope-level, exercised through the MCP tools themselves)
 
-There is no MCP write tool for Search index management (out of scope for this
-tool family), so the fixtures below seed/drop Search indexes directly via the
-Couchbase Python SDK, mirroring how ``test_index.py``'s local
-``_create_index``/``_drop_index`` helpers work but SDK-direct instead of
-going through ``call_tool_silent`` (there's no MCP tool to call).
+The list/get/query fixtures below still seed/drop their Search indexes
+directly via the Couchbase Python SDK rather than through
+upsert_fts_index/drop_fts_index, mirroring how ``test_index.py``'s local
+``_create_index``/``_drop_index`` helpers work: keeping fixture setup on the
+raw SDK keeps those tests' data independent of the write tools under test
+elsewhere in this module. The upsert_fts_index/drop_fts_index tests
+themselves call the MCP tools directly, with SDK-direct cleanup as a
+fallback in case a tool call fails mid-test.
 """
 
 from __future__ import annotations
@@ -537,3 +542,228 @@ async def test_list_fts_indexes_entries_have_expected_keys(
     for entry in payload:
         missing = required_keys - entry.keys()
         assert not missing, f"Search index entry missing keys: {sorted(missing)}"
+
+
+# ---------------------------------------------------------------------------
+# upsert_fts_index / drop_fts_index
+# ---------------------------------------------------------------------------
+
+# A minimal, cheap-to-serve mapping: it deliberately matches zero documents
+# (mirroring seeded_cluster_level_fts_index above), since these tests only
+# check that the index can be created/updated/dropped through the MCP tools,
+# not that it actually indexes data.
+_MINIMAL_FTS_INDEX_PARAMS = {
+    "doc_config": {"mode": "type_field", "type_field": "type"},
+    "mapping": {
+        "default_mapping": {"enabled": False},
+        "types": {
+            "__cb_mcp_no_such_type__": {
+                "enabled": True,
+                "dynamic": False,
+                "properties": {},
+            }
+        },
+        "default_analyzer": "standard",
+    },
+}
+
+
+@pytest.mark.asyncio
+async def test_upsert_and_drop_fts_index_cluster_level_round_trip() -> None:
+    """upsert_fts_index creates a cluster-level index that
+    get_fts_index_definition can then see, and drop_fts_index removes it
+    again — the full write-tool round trip through the MCP server itself."""
+    bucket_name = require_test_bucket()
+    index_name = f"test_fts_upsert_cluster_idx_{uuid.uuid4().hex[:8]}"
+
+    try:
+        async with create_mcp_session() as session:
+            upsert_response = await session.call_tool(
+                "upsert_fts_index",
+                arguments={
+                    "index_name": index_name,
+                    "source_name": bucket_name,
+                    "params": _MINIMAL_FTS_INDEX_PARAMS,
+                },
+            )
+            upsert_payload = extract_payload(upsert_response)
+            assert upsert_payload["success"] is True
+            assert upsert_payload["index_name"] == index_name
+            assert upsert_payload["bucket"] is None
+            assert upsert_payload["scope"] is None
+
+            get_response = await session.call_tool(
+                "get_fts_index_definition", arguments={"index_name": index_name}
+            )
+            get_payload = extract_payload(get_response)
+            assert get_payload["name"] == index_name
+            assert get_payload["source_name"] == bucket_name
+
+            drop_response = await session.call_tool(
+                "drop_fts_index", arguments={"index_name": index_name}
+            )
+            assert extract_payload(drop_response)["success"] is True
+
+            confirm_response = await session.call_tool(
+                "get_fts_index_definition", arguments={"index_name": index_name}
+            )
+            confirm_payload = extract_payload(confirm_response)
+            assert "error" in confirm_payload
+    finally:
+        cluster = _direct_cluster()
+        try:
+            with contextlib.suppress(Exception):
+                cluster.search_indexes().drop_index(index_name)
+        finally:
+            with contextlib.suppress(Exception):
+                cluster.close()
+
+
+@pytest.mark.asyncio
+async def test_upsert_and_drop_fts_index_scope_level_round_trip() -> None:
+    """Same round trip as the cluster-level test, but for a scope-level
+    (scoped) index, addressed via bucket_name + scope_name."""
+    bucket_name = require_test_bucket()
+    scope_name = get_test_scope()
+    index_name = f"test_fts_upsert_scope_idx_{uuid.uuid4().hex[:8]}"
+
+    try:
+        async with create_mcp_session() as session:
+            upsert_response = await session.call_tool(
+                "upsert_fts_index",
+                arguments={
+                    "index_name": index_name,
+                    "source_name": bucket_name,
+                    "bucket_name": bucket_name,
+                    "scope_name": scope_name,
+                    "params": _MINIMAL_FTS_INDEX_PARAMS,
+                },
+            )
+            upsert_payload = extract_payload(upsert_response)
+            assert upsert_payload["success"] is True
+            assert upsert_payload["bucket"] == bucket_name
+            assert upsert_payload["scope"] == scope_name
+
+            get_response = await session.call_tool(
+                "get_fts_index_definition",
+                arguments={
+                    "index_name": index_name,
+                    "bucket_name": bucket_name,
+                    "scope_name": scope_name,
+                },
+            )
+            get_payload = extract_payload(get_response)
+            assert get_payload["name"] == index_name
+
+            drop_response = await session.call_tool(
+                "drop_fts_index",
+                arguments={
+                    "index_name": index_name,
+                    "bucket_name": bucket_name,
+                    "scope_name": scope_name,
+                },
+            )
+            assert extract_payload(drop_response)["success"] is True
+    finally:
+        cluster = _direct_cluster()
+        try:
+            bucket = cluster.bucket(bucket_name)
+            with contextlib.suppress(Exception):
+                bucket.scope(scope_name).search_indexes().drop_index(index_name)
+        finally:
+            with contextlib.suppress(Exception):
+                cluster.close()
+
+
+@pytest.mark.asyncio
+async def test_upsert_fts_index_updates_existing_index() -> None:
+    """Calling upsert_fts_index a second time with the same name updates the
+    existing index (replace semantics) instead of failing as a duplicate
+    create — the defining behavior of an upsert."""
+    bucket_name = require_test_bucket()
+    index_name = f"test_fts_upsert_update_idx_{uuid.uuid4().hex[:8]}"
+
+    try:
+        async with create_mcp_session() as session:
+            first = await session.call_tool(
+                "upsert_fts_index",
+                arguments={
+                    "index_name": index_name,
+                    "source_name": bucket_name,
+                    "params": _MINIMAL_FTS_INDEX_PARAMS,
+                },
+            )
+            assert extract_payload(first)["success"] is True
+
+            get_response = await session.call_tool(
+                "get_fts_index_definition", arguments={"index_name": index_name}
+            )
+            current = extract_payload(get_response)
+
+            second = await session.call_tool(
+                "upsert_fts_index",
+                arguments={
+                    "index_name": index_name,
+                    "source_name": bucket_name,
+                    "params": _MINIMAL_FTS_INDEX_PARAMS,
+                    "uuid": current["uuid"],
+                },
+            )
+            assert extract_payload(second)["success"] is True
+    finally:
+        cluster = _direct_cluster()
+        try:
+            with contextlib.suppress(Exception):
+                cluster.search_indexes().drop_index(index_name)
+        finally:
+            with contextlib.suppress(Exception):
+                cluster.close()
+
+
+@pytest.mark.asyncio
+async def test_upsert_fts_index_partial_pair_returns_error() -> None:
+    """Passing only bucket_name (no scope_name) must return a descriptive
+    error dict, not a raised MCP error."""
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "upsert_fts_index",
+            arguments={
+                "index_name": "whatever",
+                "source_name": "b",
+                "bucket_name": "b",
+            },
+        )
+        payload = extract_payload(response)
+
+    assert isinstance(payload, dict)
+    assert "must be provided together" in payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_drop_fts_index_partial_pair_returns_error() -> None:
+    """Passing only scope_name (no bucket_name) must return a descriptive
+    error dict, not a raised MCP error."""
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "drop_fts_index",
+            arguments={"index_name": "whatever", "scope_name": get_test_scope()},
+        )
+        payload = extract_payload(response)
+
+    assert isinstance(payload, dict)
+    assert "must be provided together" in payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_drop_fts_index_not_found_returns_error() -> None:
+    """Dropping a nonexistent index name must return an error dict rather
+    than raising or returning None."""
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "drop_fts_index",
+            arguments={"index_name": f"does_not_exist_{uuid.uuid4().hex[:8]}"},
+        )
+        payload = extract_payload(response)
+
+    assert isinstance(payload, dict)
+    assert "error" in payload
