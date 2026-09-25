@@ -40,6 +40,7 @@ from .index import (
     create_index,
     drop_index,
     get_index_advisor_recommendations,
+    get_index_stats,
     list_indexes,
 )
 
@@ -111,6 +112,7 @@ TOOL_SET = ToolSet(
         # Index tools
         get_index_advisor_recommendations,
         list_indexes,
+        get_index_stats,
         # FTS tools
         list_fts_indexes,
         get_fts_index_definition,
@@ -173,6 +175,7 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     # Index tools (read-only)
     "get_index_advisor_recommendations": ToolAnnotations(readOnlyHint=True),
     "list_indexes": ToolAnnotations(readOnlyHint=True),
+    "get_index_stats": ToolAnnotations(readOnlyHint=True),
     # FTS tools (read-only)
     "list_fts_indexes": ToolAnnotations(readOnlyHint=True),
     "get_fts_index_definition": ToolAnnotations(readOnlyHint=True),
@@ -254,6 +257,7 @@ __all__ = [
     "explain_sql_plus_plus_query",
     "get_index_advisor_recommendations",
     "list_indexes",
+    "get_index_stats",
     "create_index",
     "build_index",
     "drop_index",
