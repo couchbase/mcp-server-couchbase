@@ -29,9 +29,11 @@ from .collection_management import (
 
 # FTS tools
 from .fts import (
+    drop_fts_index,
     get_fts_index_definition,
     list_fts_indexes,
     run_fts_query,
+    upsert_fts_index,
 )
 
 # Index tools
@@ -143,6 +145,9 @@ TOOL_SET = ToolSet(
         create_index,
         build_index,
         drop_index,
+        # FTS write tools
+        upsert_fts_index,
+        drop_fts_index,
     ),
 )
 
@@ -202,6 +207,9 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "create_index": ToolAnnotations(),
     "build_index": ToolAnnotations(idempotentHint=True),
     "drop_index": ToolAnnotations(destructiveHint=True),
+    # FTS write tools
+    "upsert_fts_index": ToolAnnotations(idempotentHint=True),
+    "drop_fts_index": ToolAnnotations(destructiveHint=True),
 }
 
 # Per-tool explanations appended to a scope-denial error, reaching the
@@ -260,6 +268,8 @@ __all__ = [
     "list_fts_indexes",
     "get_fts_index_definition",
     "run_fts_query",
+    "upsert_fts_index",
+    "drop_fts_index",
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
     "get_cluster_metrics",
