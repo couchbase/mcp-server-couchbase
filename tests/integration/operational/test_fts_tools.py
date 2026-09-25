@@ -548,11 +548,17 @@ async def test_list_fts_indexes_entries_have_expected_keys(
 # upsert_fts_index / drop_fts_index
 # ---------------------------------------------------------------------------
 
-# A minimal, cheap-to-serve mapping: it deliberately matches zero documents
-# (mirroring seeded_cluster_level_fts_index above), since these tests only
-# check that the index can be created/updated/dropped through the MCP tools,
-# not that it actually indexes data.
-_MINIMAL_FTS_INDEX_PARAMS = {
+# Minimal, cheap-to-serve mappings: they deliberately match zero documents
+# (mirroring seeded_cluster_level_fts_index/seeded_fts_index above), since
+# these tests only check that the index can be created/updated/dropped
+# through the MCP tools, not that it actually indexes data.
+#
+# Cluster-level (legacy) and scope-level indexes require different
+# doc_config.mode values — "type_field" alone is legacy-only; a scope-level
+# index needs "scope.collection.type_field" with its "types" map keyed by
+# "<scope>.<collection>" (matching seeded_fts_index's proven-working shape),
+# so the two cannot share one params dict.
+_MINIMAL_CLUSTER_LEVEL_FTS_INDEX_PARAMS = {
     "doc_config": {"mode": "type_field", "type_field": "type"},
     "mapping": {
         "default_mapping": {"enabled": False},
@@ -566,6 +572,29 @@ _MINIMAL_FTS_INDEX_PARAMS = {
         "default_analyzer": "standard",
     },
 }
+
+
+def _minimal_scope_level_fts_index_params(
+    scope_name: str, collection_name: str
+) -> dict:
+    """A cheap-to-serve scope-level index definition matching zero documents
+    (dynamic=False, no properties) on a real collection — a scope-level
+    index's "types" map must key by an actual "<scope>.<collection>", unlike
+    the cluster-level (legacy) shape above."""
+    return {
+        "doc_config": {"mode": "scope.collection.type_field", "type_field": "type"},
+        "mapping": {
+            "default_mapping": {"enabled": False},
+            "types": {
+                f"{scope_name}.{collection_name}": {
+                    "enabled": True,
+                    "dynamic": False,
+                    "properties": {},
+                }
+            },
+            "default_analyzer": "standard",
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -583,11 +612,11 @@ async def test_upsert_and_drop_fts_index_cluster_level_round_trip() -> None:
                 arguments={
                     "index_name": index_name,
                     "source_name": bucket_name,
-                    "params": _MINIMAL_FTS_INDEX_PARAMS,
+                    "params": _MINIMAL_CLUSTER_LEVEL_FTS_INDEX_PARAMS,
                 },
             )
             upsert_payload = extract_payload(upsert_response)
-            assert upsert_payload["success"] is True
+            assert upsert_payload["success"] is True, upsert_payload.get("error")
             assert upsert_payload["index_name"] == index_name
             assert upsert_payload["bucket"] is None
             assert upsert_payload["scope"] is None
@@ -602,7 +631,8 @@ async def test_upsert_and_drop_fts_index_cluster_level_round_trip() -> None:
             drop_response = await session.call_tool(
                 "drop_fts_index", arguments={"index_name": index_name}
             )
-            assert extract_payload(drop_response)["success"] is True
+            drop_payload = extract_payload(drop_response)
+            assert drop_payload["success"] is True, drop_payload.get("error")
 
             confirm_response = await session.call_tool(
                 "get_fts_index_definition", arguments={"index_name": index_name}
@@ -625,6 +655,7 @@ async def test_upsert_and_drop_fts_index_scope_level_round_trip() -> None:
     (scoped) index, addressed via bucket_name + scope_name."""
     bucket_name = require_test_bucket()
     scope_name = get_test_scope()
+    collection_name = get_test_collection()
     index_name = f"test_fts_upsert_scope_idx_{uuid.uuid4().hex[:8]}"
 
     try:
@@ -636,11 +667,13 @@ async def test_upsert_and_drop_fts_index_scope_level_round_trip() -> None:
                     "source_name": bucket_name,
                     "bucket_name": bucket_name,
                     "scope_name": scope_name,
-                    "params": _MINIMAL_FTS_INDEX_PARAMS,
+                    "params": _minimal_scope_level_fts_index_params(
+                        scope_name, collection_name
+                    ),
                 },
             )
             upsert_payload = extract_payload(upsert_response)
-            assert upsert_payload["success"] is True
+            assert upsert_payload["success"] is True, upsert_payload.get("error")
             assert upsert_payload["bucket"] == bucket_name
             assert upsert_payload["scope"] == scope_name
 
@@ -663,7 +696,8 @@ async def test_upsert_and_drop_fts_index_scope_level_round_trip() -> None:
                     "scope_name": scope_name,
                 },
             )
-            assert extract_payload(drop_response)["success"] is True
+            drop_payload = extract_payload(drop_response)
+            assert drop_payload["success"] is True, drop_payload.get("error")
     finally:
         cluster = _direct_cluster()
         try:
@@ -690,10 +724,11 @@ async def test_upsert_fts_index_updates_existing_index() -> None:
                 arguments={
                     "index_name": index_name,
                     "source_name": bucket_name,
-                    "params": _MINIMAL_FTS_INDEX_PARAMS,
+                    "params": _MINIMAL_CLUSTER_LEVEL_FTS_INDEX_PARAMS,
                 },
             )
-            assert extract_payload(first)["success"] is True
+            first_payload = extract_payload(first)
+            assert first_payload["success"] is True, first_payload.get("error")
 
             get_response = await session.call_tool(
                 "get_fts_index_definition", arguments={"index_name": index_name}
@@ -705,11 +740,12 @@ async def test_upsert_fts_index_updates_existing_index() -> None:
                 arguments={
                     "index_name": index_name,
                     "source_name": bucket_name,
-                    "params": _MINIMAL_FTS_INDEX_PARAMS,
+                    "params": _MINIMAL_CLUSTER_LEVEL_FTS_INDEX_PARAMS,
                     "uuid": current["uuid"],
                 },
             )
-            assert extract_payload(second)["success"] is True
+            second_payload = extract_payload(second)
+            assert second_payload["success"] is True, second_payload.get("error")
     finally:
         cluster = _direct_cluster()
         try:
