@@ -4,17 +4,26 @@ Utility functions for index operations.
 This module contains helper functions for working with Couchbase indexes.
 """
 
+import json
 import logging
 from typing import Any
+from urllib.parse import quote
 
 import httpx
+from couchbase.diagnostics import ServiceType
+from couchbase.options import PingOptions
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from .connection_string import (
     determine_ssl_verification,
     extract_hosts_from_connection_string,
 )
-from .constants import INDEX_REST_PORT_PLAIN, INDEX_REST_PORT_TLS
+from .constants import (
+    INDEX_REST_PORT_PLAIN,
+    INDEX_REST_PORT_TLS,
+    MANAGEMENT_REST_PORT_PLAIN,
+    MANAGEMENT_REST_PORT_TLS,
+)
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.utils.index_utils")
 
@@ -363,3 +372,350 @@ def fetch_indexes_from_rest_api(
         error_msg += f". Last error: {last_error}"
     logger.error(error_msg)
     raise RuntimeError(error_msg)
+
+
+def format_stats_keyspace_part(part: str) -> str:
+    """Backtick-quote and URL-encode one keyspace segment for the stats path.
+
+    The result is then percent-encoded so a name containing path characters
+    cannot escape ``/api/v1/stats/``. Without this, a ``bucket_name`` of
+    ``x/../../../stats`` normalises to ``/api/stats`` and reaches a different
+    endpoint than the caller asked for.
+    """
+    quoted = f"`{part}`" if "." in part else part
+    return quote(quoted, safe="`")
+
+
+def build_stats_path(
+    bucket_name: str | None,
+    scope_name: str | None,
+    collection_name: str | None,
+    index_name: str | None,
+) -> str:
+    """Build the ``/api/v1/stats`` path suffix for the requested granularity.
+
+    Returns ``""`` for the node-wide endpoint, ``/<keyspace>`` for a bucket,
+    scope or collection, and ``/<keyspace>/<index>`` for a single index. The
+    keyspace accepts a partial path, so ``bucket.scope`` is valid and narrows
+    to the indexes in that scope. Callers are expected to have run
+    :func:`validate_filter_params` first, so the filters are already known to
+    be hierarchically consistent.
+    """
+    if not bucket_name:
+        return ""
+
+    # Each level is appended only if the one above it is present, so a gap in
+    # the hierarchy truncates the keyspace rather than silently skipping a level.
+    parts = [bucket_name]
+    if scope_name:
+        parts.append(scope_name)
+        if collection_name:
+            parts.append(collection_name)
+    keyspace = ".".join(format_stats_keyspace_part(p) for p in parts)
+
+    if index_name:
+        return f"/{keyspace}/{format_stats_keyspace_part(index_name)}"
+    return f"/{keyspace}"
+
+
+def parse_index_stats_key(key: str) -> dict[str, str]:
+    """Split an index stats response key into its keyspace components.
+
+    Keys are colon-joined and come in two shapes — ``bucket:index`` for the
+    default scope/collection, and ``bucket:scope:collection:index`` for a
+    named keyspace. The index name is always the final segment, so the name is
+    taken from the right rather than by a fixed position. Anything unexpected
+    is reported as-is under ``name`` so no index is silently dropped.
+    """
+    parts = key.split(":")
+    if len(parts) == 4:
+        bucket, scope, collection, name = parts
+    elif len(parts) == 2:
+        bucket, name = parts
+        scope, collection = "_default", "_default"
+    else:
+        # Unrecognised shape (e.g. a name containing a colon). Keep the raw key
+        # rather than guessing at a split that could mislabel the index.
+        return {"name": key}
+
+    return {
+        "bucket": bucket,
+        "scope": scope,
+        "collection": collection,
+        "name": name,
+    }
+
+
+def _bracket_ipv6(host: str) -> str:
+    """Wrap a bare IPv6 literal in brackets so it can be used in a URL."""
+    return f"[{host}]" if ":" in host and not host.startswith("[") else host
+
+
+def resolve_management_endpoints(cluster: Any, connection_string: str) -> list[str]:
+    """List the cluster's management endpoints as ``host:port``.
+
+    The SDK has bootstrapped, fetched the cluster map and applied any
+    alternate-address mapping, so it knows where management is actually
+    reachable — which the connection string does not: the port it carries is a
+    KV port (the SDK bootstraps over KV), and a port-mapped or NAT'd cluster
+    serves management somewhere other than the default. Falls back to the
+    connection string's hosts on the default port when the SDK reports nothing.
+
+    Uses ``ping`` rather than ``diagnostics``: diagnostics only reports sockets
+    the SDK happens to have open, and a freshly opened cluster has connected to
+    nothing but key-value, so it would report no management endpoint at all.
+    The ping is limited to the management service to keep it cheap.
+    """
+    endpoints: list[str] = []
+    try:
+        report = json.loads(
+            cluster.ping(PingOptions(service_types=[ServiceType.Management])).as_json()
+        )
+        for endpoint in report.get("services", {}).get("management", []):
+            remote = endpoint.get("remote")
+            if remote and remote not in endpoints:
+                endpoints.append(remote)
+    except Exception as e:
+        logger.warning(f"Could not ping the management service: {e}")
+
+    if endpoints:
+        return endpoints
+
+    # Nothing to go on — assume the default port, which is right for an
+    # ordinary deployment even though it cannot cover a remapped one.
+    is_tls = connection_string.lower().startswith("couchbases://")
+    port = MANAGEMENT_REST_PORT_TLS if is_tls else MANAGEMENT_REST_PORT_PLAIN
+    return [
+        f"{_bracket_ipv6(host)}:{port}"
+        for host in extract_hosts_from_connection_string(connection_string)
+    ]
+
+
+def _external_addresses(entry: dict[str, Any]) -> dict[str, Any]:
+    """Return a node's ``alternateAddresses.external`` block, or an empty dict."""
+    return (entry.get("alternateAddresses") or {}).get("external") or {}
+
+
+def _parse_index_nodes(
+    payload: dict[str, Any],
+    scheme: str,
+    index_key: str,
+    reached_host: str,
+) -> list[dict[str, Any]]:
+    """Pick the index-service nodes out of a ``nodeServices`` payload.
+
+    ``nodeServices`` reports internal hostnames and carries any externally
+    reachable mapping alongside them, ignoring the ``network`` query parameter,
+    so the client has to choose between them. Having reached this endpoint at
+    *reached_host* is the evidence: if that address is one the cluster
+    advertises externally, external addresses work from here. The other form is
+    kept as a fallback, since a node may advertise only some services
+    externally.
+
+    Nodes with no index service are skipped — they have nothing listening on
+    the index port, so querying them would only manufacture failures that look
+    like outages.
+    """
+    advertised_external = {
+        _external_addresses(entry).get("hostname")
+        for entry in payload.get("nodesExt", [])
+    }
+    prefer_external = reached_host in advertised_external
+
+    nodes: list[dict[str, Any]] = []
+    for entry in payload.get("nodesExt", []):
+        services = entry.get("services", {})
+        external = _external_addresses(entry)
+        external_ports = external.get("ports", {})
+
+        internal_port = services.get(index_key)
+        external_port = external_ports.get(index_key)
+        if not internal_port and not external_port:
+            continue
+
+        # A node that only knows its own address reports no hostname; the host
+        # that answered is the right stand-in, since that is how we reached it.
+        internal_host = _bracket_ipv6(entry.get("hostname") or reached_host)
+        external_host = _bracket_ipv6(external.get("hostname") or "")
+
+        internal_url = (
+            f"{scheme}://{internal_host}:{internal_port}/api/v1/stats"
+            if internal_port
+            else None
+        )
+        external_url = (
+            f"{scheme}://{external_host}:{external_port}/api/v1/stats"
+            if external_port and external_host
+            else None
+        )
+        ordered = (
+            [external_url, internal_url]
+            if prefer_external
+            else [internal_url, external_url]
+        )
+
+        use_external = prefer_external and external_host
+        node_host = external_host if use_external else internal_host
+        mgmt_port = (
+            external_ports.get("mgmt") if use_external else None
+        ) or services.get("mgmt")
+
+        nodes.append(
+            {
+                "node": f"{node_host}:{mgmt_port}",
+                "stats_urls": [url for url in ordered if url],
+            }
+        )
+    return nodes
+
+
+def discover_index_nodes(
+    cluster: Any,
+    connection_string: str,
+    username: str,
+    password: str,
+    ca_cert_path: str | None = None,
+    timeout: int = 30,
+) -> list[dict[str, Any]]:
+    """List the cluster's index-service nodes via ``/pools/default/nodeServices``.
+
+    That endpoint is cluster-wide — any node answers for all of them — and
+    reports each node's real service ports, so the index port is read from the
+    response rather than assumed.
+
+    Returns:
+        One dict per index node with ``node`` (``host:<management port>``, the
+        form ``getIndexStatus`` and the UI use) and ``stats_urls`` (that node's
+        Index Service base URLs, most likely reachable first).
+
+    Raises:
+        RuntimeError: If no management endpoint answers.
+    """
+    endpoints = resolve_management_endpoints(cluster, connection_string)
+    if not endpoints:
+        raise ValueError(f"No hosts found in connection_string: {connection_string!r}")
+
+    is_tls = connection_string.lower().startswith("couchbases://")
+    scheme = "https" if is_tls else "http"
+    index_key = "indexHttps" if is_tls else "indexHttp"
+    verify_ssl = determine_ssl_verification(connection_string, ca_cert_path)
+
+    last_error: Exception | None = None
+    with httpx.Client(verify=verify_ssl, timeout=timeout) as client:
+        for endpoint in endpoints:
+            url = f"{scheme}://{endpoint}/pools/default/nodeServices"
+            try:
+                logger.info(f"Discovering index nodes from: {url}")
+                response = client.get(url, auth=(username, password))
+                response.raise_for_status()
+                # Whichever address answered tells us which network this client
+                # is on, and so which of each node's addresses to try first.
+                reached_host = endpoint.rsplit(":", 1)[0]
+                nodes = _parse_index_nodes(
+                    response.json(), scheme, index_key, reached_host
+                )
+                logger.info(f"Found {len(nodes)} index node(s) via {endpoint}")
+                return nodes
+            except Exception as e:
+                logger.warning(f"Failed to discover index nodes from {endpoint}: {e}")
+                last_error = e
+
+    raise RuntimeError(
+        f"Failed to discover index nodes from all management endpoints: "
+        f"{endpoints}. Last error: {last_error}"
+    )
+
+
+def fetch_index_stats_from_rest_api(
+    cluster: Any,
+    connection_string: str,
+    username: str,
+    password: str,
+    bucket_name: str | None = None,
+    scope_name: str | None = None,
+    collection_name: str | None = None,
+    index_name: str | None = None,
+    skip_empty: bool = False,
+    ca_cert_path: str | None = None,
+    timeout: int = 30,
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, str]]]:
+    """Fetch per-index statistics from every index node in the cluster.
+
+    ``/api/v1/stats`` is served by an individual indexer and reports only the
+    indexes that node holds, so one call never describes the cluster: an index
+    on another node is absent with no error, and a partitioned index reports
+    only the partitions stored locally. Every index node is therefore queried
+    and the results are kept separate, keyed by node.
+
+    Returns:
+        ``(per_node, not_hosted, failures)`` — *per_node* maps each node that
+        answered to its raw stats body, *not_hosted* names the nodes that
+        answered but do not hold the requested keyspace or index, and
+        *failures* holds ``{"node", "error"}`` for nodes that could not be
+        reached. A node is reported rather than raised on so one unreachable
+        indexer does not discard the others' results.
+
+    Raises:
+        RuntimeError: If discovery fails, if no index node could be reached, or
+            if every node reported the keyspace or index as absent.
+    """
+    nodes = discover_index_nodes(
+        cluster, connection_string, username, password, ca_cert_path, timeout
+    )
+    if not nodes:
+        raise RuntimeError(
+            "No index-service nodes found in the cluster — nothing to query for "
+            "index statistics."
+        )
+
+    path = build_stats_path(bucket_name, scope_name, collection_name, index_name)
+    # Booleans must be rendered lowercase for the Go-based index service.
+    params = {"skipEmpty": "true"} if skip_empty else {}
+    verify_ssl = determine_ssl_verification(connection_string, ca_cert_path)
+
+    per_node: dict[str, dict[str, Any]] = {}
+    not_hosted: list[str] = []
+    failures: list[dict[str, str]] = []
+    with httpx.Client(verify=verify_ssl, timeout=timeout) as client:
+        for node in nodes:
+            last_error: Exception | None = None
+            absent = False
+            for base_url in node["stats_urls"]:
+                url = f"{base_url}{path}"
+                try:
+                    logger.info(f"Fetching index stats from: {url}")
+                    response = client.get(url, params=params, auth=(username, password))
+                    if response.status_code == httpx.codes.NOT_FOUND:
+                        # The server answered: it does not hold this keyspace or
+                        # index. That is a definitive reply, not a transport
+                        # fault, so stop here — trying this node's other address
+                        # could only replace it with a connection error.
+                        logger.info(f"Not hosted on {node['node']}: {url}")
+                        absent = True
+                        last_error = None
+                        break
+                    response.raise_for_status()
+                    per_node[node["node"]] = response.json()
+                    last_error = None
+                    break
+                except Exception as e:
+                    logger.warning(f"Failed to fetch index stats from {url}: {e}")
+                    last_error = e
+            if absent:
+                not_hosted.append(node["node"])
+            elif last_error is not None:
+                failures.append({"node": node["node"], "error": str(last_error)})
+
+    if not per_node:
+        if not_hosted and not failures:
+            # Every reachable node denied it, so the name itself is wrong —
+            # distinct from the cluster being unreachable.
+            raise RuntimeError(
+                f"No index node holds {path or 'any index'} — the bucket, scope, "
+                f"collection or index name does not exist. Checked: {not_hosted}"
+            )
+        raise RuntimeError(
+            f"Failed to fetch index stats from every index node: {failures}"
+        )
+
+    return per_node, not_hosted, failures
