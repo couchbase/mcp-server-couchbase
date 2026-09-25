@@ -134,7 +134,7 @@ def get_fts_index_definition(
     name exists at the given location, returns {"success": False, "error": ...} —
     confirm the exact name and location first with list_fts_indexes.
     """
-    if (bucket_name is None) != (scope_name is None):
+    if bool(bucket_name) != bool(scope_name):
         return tool_error(
             "bucket_name and scope_name must be provided together, or omitted together"
         )
@@ -235,7 +235,7 @@ def run_fts_query(
     match set. hits entries are {"id","score","fields","fragments"} when explain=False, or
     {"id","score","explanation"} when explain=True (facets is empty in that case).
     """
-    if (bucket_name is None) != (scope_name is None):
+    if bool(bucket_name) != bool(scope_name):
         return tool_error(
             "bucket_name and scope_name must be provided together, or omitted together"
         )
@@ -366,7 +366,7 @@ def upsert_fts_index(
     {"success": False, "error": ...} on failure — e.g. an invalid mapping or a stale
     uuid on an update.
     """
-    if (bucket_name is None) != (scope_name is None):
+    if bool(bucket_name) != bool(scope_name):
         return tool_error(
             "bucket_name and scope_name must be provided together, or omitted together"
         )
@@ -427,7 +427,7 @@ def drop_fts_index(
     {"success": False, "error": ...} on failure — e.g. no index with this name exists
     at the given location.
     """
-    if (bucket_name is None) != (scope_name is None):
+    if bool(bucket_name) != bool(scope_name):
         return tool_error(
             "bucket_name and scope_name must be provided together, or omitted together"
         )

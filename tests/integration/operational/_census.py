@@ -45,6 +45,8 @@ EXPECTED_TOOLS = {
     "list_fts_indexes",
     "get_fts_index_definition",
     "run_fts_query",
+    "upsert_fts_index",
+    "drop_fts_index",
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
     "get_cluster_metrics",
@@ -98,6 +100,8 @@ TOOLS_BY_CATEGORY = {
         "list_fts_indexes",
         "get_fts_index_definition",
         "run_fts_query",
+        "upsert_fts_index",
+        "drop_fts_index",
     },
     "management": {
         "create_scope",
@@ -178,4 +182,6 @@ TOOL_REQUIRED_PARAMS = {
     "drop_index": ["bucket_name", "scope_name", "collection_name", "index_name"],
     "get_fts_index_definition": ["index_name"],
     "run_fts_query": ["index_name", "query"],
+    "upsert_fts_index": ["index_name", "source_name"],
+    "drop_fts_index": ["index_name"],
 }
