@@ -100,6 +100,17 @@ class QueryResultsRegistry:
         with self._lock:
             self._entries.pop(token, None)
 
+    def clear(self) -> None:
+        """Evict every tracked entry.
+
+        Called on provider teardown: a closed cluster connection tears down
+        the HTTP client/thread pool every tracked handle depends on, so
+        leaving stale tokens registered would let a later ``get()`` hand back
+        a handle that can no longer do anything.
+        """
+        with self._lock:
+            self._entries.clear()
+
     def count(self) -> int:
         """Number of currently tracked queries (diagnostic)."""
         with self._lock:

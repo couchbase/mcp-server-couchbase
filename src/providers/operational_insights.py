@@ -82,6 +82,10 @@ class OperationalInsightsClusterProvider:
         if cluster is not None:
             cluster.shutdown()
             self._cluster = None
+            # Tracked handles reference this connection's HTTP client/thread
+            # pool, which shutdown() just tore down — evict them so a stale
+            # query_handle token can't be looked up after close().
+            self.handle_registry.clear()
 
     def get_configuration(
         self, ctx: Context

@@ -495,3 +495,19 @@ class TestQueryResultsRegistry:
         registry.remove(token)
 
         assert registry.count() == 0
+
+    def test_clear_evicts_every_entry(self) -> None:
+        registry = QueryResultsRegistry()
+        registry.register(MagicMock(), "SELECT 1")
+        registry.register(MagicMock(), "SELECT 2")
+
+        registry.clear()
+
+        assert registry.count() == 0
+
+    def test_clear_on_empty_registry_is_a_no_op(self) -> None:
+        registry = QueryResultsRegistry()
+
+        registry.clear()  # must not raise
+
+        assert registry.count() == 0
