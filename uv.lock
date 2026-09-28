@@ -416,7 +416,7 @@ provides-extras = ["dev"]
 [[package]]
 name = "couchbase-operational-insights"
 version = "1.0.0.dev1"
-source = { git = "https://github.com/couchbaselabs/operational-insights-python-client.git#294b41838b017ffa5fc2cafb1202d6f22ab58637" }
+source = { git = "https://github.com/couchbaselabs/operational-insights-python-client.git#829c5f109706e8652f08ea58763f638586558180" }
 dependencies = [
     { name = "anyio" },
     { name = "cryptography" },
