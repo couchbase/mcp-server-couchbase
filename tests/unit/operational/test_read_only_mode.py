@@ -186,8 +186,8 @@ class TestToolCounts:
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (27 read-only + 14 write)
-        assert len(tools) == 41
+        # Expected total count (28 read-only + 14 write)
+        assert len(tools) == 42
 
     def test_write_tools_count(self):
         """Verify exactly 14 write tools exist."""
