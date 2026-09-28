@@ -57,6 +57,7 @@ READ_ONLY_TOOL_NAMES = {
     # Index tools (2)
     "get_index_advisor_recommendations",
     "list_indexes",
+    "get_index_stats",
     # FTS tools (3)
     "list_fts_indexes",
     "get_fts_index_definition",
@@ -176,14 +177,14 @@ class TestToolCounts:
         """Verify correct number of tools in read-only mode."""
         tools = get_tools(read_only_mode=True)
         assert len(tools) == len(READ_ONLY_TOOLS)
-        assert len(tools) == 27  # Expected count of read-only tools
+        assert len(tools) == 28  # Expected count of read-only tools
 
     def test_all_tools_mode_tool_count(self):
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (27 read-only + 12 write)
-        assert len(tools) == 39
+        # Expected total count (28 read-only + 12 write)
+        assert len(tools) == 40
 
     def test_write_tools_count(self):
         """Verify exactly 12 write tools exist."""
