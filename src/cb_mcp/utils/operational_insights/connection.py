@@ -52,6 +52,7 @@ def connect_to_operational_insights_cluster(
         )
 
     if client_cert_path:
+        logger.debug("Using client certificate authentication")
         if not connection_string.startswith("https://"):
             raise ValueError(
                 "Client certificate (mTLS) authentication requires an "
@@ -62,6 +63,7 @@ def connect_to_operational_insights_cluster(
             client_cert_path, client_key_path, password=client_cert_password
         )
     else:
+        logger.debug("Using username/password authentication")
         missing = [
             name
             for name, value in (("username", username), ("password", password))
