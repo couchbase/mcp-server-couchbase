@@ -118,6 +118,21 @@ def get_collections_in_scope(
         raise
 
 
+def _strip_samples(node: Any) -> Any:
+    """Recursively drop every ``"samples"`` key from an inferred-schema tree.
+
+    ARRAY_INFER_SCHEMA nests ``samples`` at every level (top-level
+    properties, and again inside each nested object/array property's own
+    "properties"/"items"), so a flat pass over just the top-level properties
+    would miss most of them.
+    """
+    if isinstance(node, dict):
+        return {k: _strip_samples(v) for k, v in node.items() if k != "samples"}
+    if isinstance(node, list):
+        return [_strip_samples(item) for item in node]
+    return node
+
+
 def get_schema_for_collection(
     ctx: Context,
     database_name: str,
@@ -136,10 +151,15 @@ def get_schema_for_collection(
     is capped at 10_000.
 
     num_sample_values caps how many example values ARRAY_INFER_SCHEMA
-    includes per property. It defaults to 0 here so
-    this tool reports structure only, without pulling actual document
-    content into results — pass a higher value to get samples. Must be
-    non-negative.
+    includes per property. It defaults to 0 here so this tool reports
+    structure only, without pulling actual document content into results —
+    pass a higher value to get samples. Must be non-negative.
+
+    ARRAY_INFER_SCHEMA's own ``num_sample_values: 0`` does NOT mean "no
+    samples" (verified empirically against a live cluster: 0 behaves the
+    same as 1, still returning one example value per property) — so a
+    ``num_sample_values=0`` result here has every ``samples`` key stripped
+    out in Python afterward, rather than trusting the server to honor 0.
 
     Returns a list of JSON-Schema-shaped objects, one per detected flavor.
 
@@ -159,20 +179,18 @@ def get_schema_for_collection(
 
     ks = keyspace(database_name, scope_name, collection_name)
     # ks is built entirely from safe_ident()-quoted (backtick-escaped)
-    # identifiers, and sample_size/infer_params are bound $-parameters
-    # below, not interpolated — not an injection vector despite the f-string.
-    query = f"SELECT VALUE ARRAY_INFER_SCHEMA((SELECT VALUE d FROM {ks} AS d LIMIT $sample_size), $infer_params);"  # noqa: S608
+    # identifiers, and sample_size is a bound $-parameter below.
+    # num_sample_values is interpolated directly rather than bound: the
+    # server 500s when it's passed as a $-parameter inside
+    # ARRAY_INFER_SCHEMA's options object (verified empirically) — but it's
+    # validated non-negative above and is an int, never a string, so
+    # interpolating it can't inject anything despite the f-string.
+    query = f'SELECT VALUE ARRAY_INFER_SCHEMA((SELECT VALUE d FROM {ks} AS d LIMIT $sample_size), {{"num_sample_values": {num_sample_values}}});'  # noqa: S608
     try:
         logger.debug(f"Inferring schema for {ks}")
         cluster = get_oi_cluster(ctx)
         result = cluster.execute_query(
-            query,
-            QueryOptions(
-                named_parameters={
-                    "sample_size": sample_size,
-                    "infer_params": {"num_sample_values": num_sample_values},
-                }
-            ),
+            query, QueryOptions(named_parameters={"sample_size": sample_size})
         )
         # SELECT VALUE over a bare array_infer_schema() call returns exactly
         # one row whose value is the array of flavor objects itself — unwrap
@@ -180,6 +198,8 @@ def get_schema_for_collection(
         # other list-returning siblings.
         rows = result.get_all_rows()
         flavors = rows[0] if rows else []
+        if num_sample_values == 0:
+            flavors = [_strip_samples(flavor) for flavor in flavors]
         logger.info(f"Inferred schema for {ks} from {sample_size} sampled document(s)")
         return flavors
     except Exception as e:
