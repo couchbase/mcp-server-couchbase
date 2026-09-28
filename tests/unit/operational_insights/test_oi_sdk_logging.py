@@ -7,6 +7,7 @@ imported or connect anywhere.
 
 import io
 import logging
+import os
 import subprocess
 import sys
 
@@ -51,8 +52,9 @@ def test_bridge_sets_propagate_false_on_the_sdk_logger():
 
 def test_importing_the_oi_spec_adds_no_handler_to_the_stdlib_root():
     """Clean-interpreter check: importing the spec (and therefore every OI
-    tool module, and transitively the SDK itself once a cluster connects)
-    must not leave a stray handler on the bare root logger."""
+    tool module) at server startup / tool-discovery time — before anything
+    ever connects to a cluster — must not leave a stray handler on the bare
+    root logger."""
     result = subprocess.run(
         [
             sys.executable,
@@ -65,5 +67,45 @@ def test_importing_the_oi_spec_adds_no_handler_to_the_stdlib_root():
         capture_output=True,
         text=True,
         check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_connecting_triggers_no_handler_on_the_stdlib_root():
+    """Regression test for the bug ``quiesce_new_root_handlers()`` used to
+    clean up after: the SDK's own logging setup
+    (``couchbase_operational_insights.common.logging.configure_logging_from_env``)
+    runs lazily, the first time ``Cluster.create_instance(...)`` actually
+    executes — ``protocol/__init__.py`` (and therefore this side effect) is
+    not imported merely by importing the top-level package or this server's
+    spec. So the "importing the spec" check above proves nothing about the
+    connection-time path; this test drives the real
+    ``connect_to_operational_insights_cluster`` call instead, in a
+    subprocess, so a regression in the SDK's connect-time logging setup
+    would actually be caught.
+
+    ``PYCBOI_LOG_LEVEL`` is set because the *old*, buggy SDK only called
+    ``logging.basicConfig()`` on the bare root logger when that env var was
+    present (or something had already attached a root handler) — leaving it
+    unset would let this test pass against either the old or the fixed SDK,
+    proving nothing. The target host is a loopback address nothing listens
+    on: the SDK's client construction is lazy (no network I/O happens here),
+    so this needs no live cluster and can't hang or flake.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import logging; "
+            "from cb_mcp.utils.operational_insights.connection import "
+            "connect_to_operational_insights_cluster; "
+            "connect_to_operational_insights_cluster('http://127.0.0.1:1', 'u', 'p'); "
+            "assert logging.getLogger().handlers == [], "
+            "logging.getLogger().handlers",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PYCBOI_LOG_LEVEL": "DEBUG"},
     )
     assert result.returncode == 0, result.stderr
