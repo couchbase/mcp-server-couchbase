@@ -638,7 +638,7 @@ def fetch_index_stats_from_rest_api(
     skip_empty: bool = False,
     ca_cert_path: str | None = None,
     timeout: int = 30,
-) -> tuple[dict[str, dict[str, Any]], list[dict[str, str]]]:
+) -> tuple[dict[str, dict[str, Any]], list[str], list[dict[str, str]]]:
     """Fetch per-index statistics from every index node in the cluster.
 
     ``/api/v1/stats`` is served by an individual indexer and reports only the

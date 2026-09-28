@@ -38,6 +38,7 @@ EXPECTED_TOOLS = {
     "explain_sql_plus_plus_query",
     "get_index_advisor_recommendations",
     "list_indexes",
+    "get_index_stats",
     "create_index",
     "build_index",
     "drop_index",
@@ -89,6 +90,7 @@ TOOLS_BY_CATEGORY = {
     },
     "index": {
         "list_indexes",
+        "get_index_stats",
         "get_index_advisor_recommendations",
         "create_index",
         "build_index",
