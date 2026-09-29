@@ -7,8 +7,10 @@ Covers:
   - get_scopes_in_bucket
   - get_collections_in_scope
   - get_scopes_and_collections_in_bucket
-  - get_cluster_health_and_services
+  - get_cluster_health_and_services (including service_types filtering)
   - get_cluster_diagnostics_report
+  - get_cluster_metrics
+  - discover_tool_input_values
 """
 
 from __future__ import annotations
@@ -179,16 +181,34 @@ def _build_cases(bucket: str, scope: str) -> list[AccuracyCase]:
 
     cases.append(
         AccuracyCase(
-            test_id="get_cluster_diagnostics_report",
+            test_id="get_cluster_health_and_services_query_service_only",
             prompt=(
-                "Without actively pinging anything, check the SDK's own connection "
-                "diagnostics: has any connection already been broken, and if so for "
-                "how long has it been in that state?"
+                "Check right now whether just the query service on my Couchbase "
+                "cluster is reachable — don't check any other service."
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="get_cluster_diagnostics_report",
-                    parameters={},
+                    tool_name="get_cluster_health_and_services",
+                    parameters={
+                        "bucket_name": _optional_bucket(),
+                        "service_types": ["query"],
+                    },
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="get_cluster_metrics_disk_write_queue_trend",
+            prompt=(
+                "Over the last hour, show me the trend of the disk write queue "
+                "metric for my Couchbase cluster, sampled every 30 seconds."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_cluster_metrics",
+                    parameters=Matcher.any_value(),
                 ),
             ],
         )
@@ -223,6 +243,40 @@ def _build_cases(bucket: str, scope: str) -> list[AccuracyCase]:
         )
     )
 
+    # discover_tool_input_values: the prompt describes a metric by concept and never names it,
+    # so the model has to look the identifier up instead of calling get_cluster_metrics with a
+    # guess. Each case targets a real record in the bundled dataset (asserted in the
+    # result-validation suite), spread across different services.
+    for test_id, prompt in (
+        (
+            "discover_metric_name_disk_queue",
+            "What is the exact Couchbase metric name for the number of items enqueued "
+            "on the disk write queue? Just tell me the metric name.",
+        ),
+        (
+            "discover_metric_name_index_resident_ratio",
+            "I need the exact metric name that reports the Index service's resident "
+            "ratio. Don't fetch any data, I just want the name.",
+        ),
+        (
+            "discover_metric_name_dropped_audit_events",
+            "Which Couchbase metric counts audit events that were dropped? "
+            "Name the metric.",
+        ),
+    ):
+        cases.append(
+            AccuracyCase(
+                test_id=test_id,
+                prompt=prompt,
+                expected_tools=[
+                    ExpectedToolCall(
+                        tool_name="discover_tool_input_values",
+                        parameters=Matcher.any_value(),
+                    ),
+                ],
+            )
+        )
+
     return cases
 
 
@@ -241,9 +295,13 @@ SERVER_CASE_IDS = [
     "get_scopes_and_collections_in_bucket",
     "get_cluster_health_and_services_no_bucket",
     "get_cluster_health_and_services_with_bucket",
-    "get_cluster_diagnostics_report",
+    "get_cluster_health_and_services_query_service_only",
+    "get_cluster_metrics_disk_write_queue_trend",
     "conversational_what_buckets_do_i_have",
     "conversational_is_everything_healthy",
+    "discover_metric_name_disk_queue",
+    "discover_metric_name_index_resident_ratio",
+    "discover_metric_name_dropped_audit_events",
 ]
 
 

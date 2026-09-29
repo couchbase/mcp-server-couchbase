@@ -1,21 +1,67 @@
 # Couchbase MCP Server
 
-Couchbase MCP Server is a self-hosted MCP Server that allows AI agents to connect to and interact with data in Couchbase clusters, whether hosted on Capella or self-managed. It provides tools across categories including Cluster Health, Data Schema, Key-Value, Query, and Performance — with safety controls via read-only mode and fine-grained tool disabling. It supports both STDIO and Streamable HTTP transports.
+Couchbase MCP Server is a self-hosted [Model Context Protocol (MCP)](https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro) server that connects AI agents and LLM-powered assistants — Claude, Cursor, Windsurf, VS Code Copilot, and other [MCP clients](https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro) — to data in Couchbase clusters, whether hosted on [Capella](https://www.couchbase.com/products/capella/) or self-managed. MCP is an open standard for letting AI assistants call tools and query external data sources; this server implements that standard for Couchbase, so an AI agent can inspect your cluster, run SQL++ queries, read and write documents, and analyze query performance using natural language instead of hand-written code.
 
-Couchbase MCP server is distributed as a Python Package Index (PyPI) package and via Docker.
-Enterprise support for Couchbase MCP Server is available by licensing [Couchbase AI Data Plane](https://www.couchbase.com/downloads/?family=ai-data-plane), which also entitles use and enterprise support of Couchbase Agent Memory and Couchbase Agent Catalog.
+It provides tools across categories including Cluster Health, Data Schema, Key-Value, Query, and Performance — with safety controls via read-only mode (on by default) and fine-grained tool disabling, so you can let an AI agent explore and query your data without risking unintended writes. It supports both STDIO and Streamable HTTP transports.
 
-[![Docs](https://img.shields.io/badge/Docs-1B9E5A?logo=docusaurus&logoColor=white)](https://mcp-server.couchbase.com/) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/) [![PyPI version](https://badge.fury.io/py/couchbase-mcp-server.svg)](https://pypi.org/project/couchbase-mcp-server/) [![Install in Cursor](https://img.shields.io/badge/Cursor-Install_Server-1e1e1e?logo=data:image/svg%2bxml;base64,PHN2ZyBoZWlnaHQ9IjFlbSIgc3R5bGU9ImZsZXg6bm9uZTtsaW5lLWhlaWdodDoxIiB2aWV3Qm94PSIwIDAgMjQgMjQiIHdpZHRoPSIxZW0iCiAgICB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogICAgPHRpdGxlPkN1cnNvcjwvdGl0bGU+CiAgICA8cGF0aCBkPSJNMTEuOTI1IDI0bDEwLjQyNS02LTEwLjQyNS02TDEuNSAxOGwxMC40MjUgNnoiCiAgICAgICAgZmlsbD0idXJsKCNsb2JlLWljb25zLWN1cnNvcnVuZGVmaW5lZC1maWxsLTApIj48L3BhdGg+CiAgICA8cGF0aCBkPSJNMjIuMzUgMThWNkwxMS45MjUgMHYxMmwxMC40MjUgNnoiIGZpbGw9InVybCgjbG9iZS1pY29ucy1jdXJzb3J1bmRlZmluZWQtZmlsbC0xKSI+PC9wYXRoPgogICAgPHBhdGggZD0iTTExLjkyNSAwTDEuNSA2djEybDEwLjQyNS02VjB6IiBmaWxsPSJ1cmwoI2xvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMikiPjwvcGF0aD4KICAgIDxwYXRoIGQ9Ik0yMi4zNSA2TDExLjkyNSAyNFYxMkwyMi4zNSA2eiIgZmlsbD0iIzU1NSI+PC9wYXRoPgogICAgPHBhdGggZD0iTTIyLjM1IDZsLTEwLjQyNSA2TDEuNSA2aDIwLjg1eiIgZmlsbD0iI2ZmZiI+PC9wYXRoPgogICAgPGRlZnM+CiAgICAgICAgPGxpbmVhckdyYWRpZW50IGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiBpZD0ibG9iZS1pY29ucy1jdXJzb3J1bmRlZmluZWQtZmlsbC0wIgogICAgICAgICAgICB4MT0iMTEuOTI1IiB4Mj0iMTEuOTI1IiB5MT0iMTIiIHkyPSIyNCI+CiAgICAgICAgICAgIDxzdG9wIG9mZnNldD0iLjE2IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9Ii4zOSI+PC9zdG9wPgogICAgICAgICAgICA8c3RvcCBvZmZzZXQ9Ii42NTgiIHN0b3AtY29sb3I9IiNmZmYiIHN0b3Atb3BhY2l0eT0iLjgiPjwvc3RvcD4KICAgICAgICA8L2xpbmVhckdyYWRpZW50PgogICAgICAgIDxsaW5lYXJHcmFkaWVudCBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaWQ9ImxvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMSIKICAgICAgICAgICAgeDE9IjIyLjM1IiB4Mj0iMTEuOTI1IiB5MT0iNi4wMzciIHkyPSIxMi4xNSI+CiAgICAgICAgICAgIDxzdG9wIG9mZnNldD0iLjE4MiIgc3RvcC1jb2xvcj0iI2ZmZiIgc3RvcC1vcGFjaXR5PSIuMzEiPjwvc3RvcD4KICAgICAgICAgICAgPHN0b3Agb2Zmc2V0PSIuNzE1IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9IjAiPjwvc3RvcD4KICAgICAgICA8L2xpbmVhckdyYWRpZW50PgogICAgICAgIDxsaW5lYXJHcmFkaWVudCBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaWQ9ImxvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMiIKICAgICAgICAgICAgeDE9IjExLjkyNSIgeDI9IjEuNSIgeTE9IjAiIHkyPSIxOCI+CiAgICAgICAgICAgIDxzdG9wIHN0b3AtY29sb3I9IiNmZmYiIHN0b3Atb3BhY2l0eT0iLjYiPjwvc3RvcD4KICAgICAgICAgICAgPHN0b3Agb2Zmc2V0PSIuNjY3IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9Ii4yMiI+PC9zdG9wPgogICAgICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8L2RlZnM+Cjwvc3ZnPgo=)][cursor-install-basic] [![Verified on MseeP](https://img.shields.io/badge/MseeP-Verified-green)](https://mseep.ai/app/13fce476-0e74-4b1e-ab82-1df2a3204809) [![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/Couchbase-Ecosystem/mcp-server-couchbase)](https://archestra.ai/mcp-catalog/couchbase-ecosystem__mcp-server-couchbase)
+Couchbase MCP server is distributed as a Python Package Index (PyPI) package and via Docker. Enterprise support for Couchbase MCP Server is available by licensing [Couchbase AI Data Plane](https://www.couchbase.com/downloads/?family=agent-memory), which also entitles use and enterprise support of Couchbase Agent Memory and Couchbase Agent Catalog.
 
-For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couchbase.com/).
+For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couchbase.com).
 
-<a href="https://glama.ai/mcp/servers/@Couchbase-Ecosystem/mcp-server-couchbase">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/@Couchbase-Ecosystem/mcp-server-couchbase/badge" alt="Couchbase Server MCP server" />
+[![Docs](https://img.shields.io/badge/Docs-1B9E5A?logo=docusaurus&logoColor=white)](https://docs.couchbase.com/mcp-server/get-started/overview.html) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/) [![PyPI version](https://badge.fury.io/py/couchbase-mcp-server.svg)](https://pypi.org/project/couchbase-mcp-server/) [![Install in Cursor](https://img.shields.io/badge/Cursor-Install_Server-1e1e1e?logo=data:image/svg%2bxml;base64,PHN2ZyBoZWlnaHQ9IjFlbSIgc3R5bGU9ImZsZXg6bm9uZTtsaW5lLWhlaWdodDoxIiB2aWV3Qm94PSIwIDAgMjQgMjQiIHdpZHRoPSIxZW0iCiAgICB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogICAgPHRpdGxlPkN1cnNvcjwvdGl0bGU+CiAgICA8cGF0aCBkPSJNMTEuOTI1IDI0bDEwLjQyNS02LTEwLjQyNS02TDEuNSAxOGwxMC40MjUgNnoiCiAgICAgICAgZmlsbD0idXJsKCNsb2JlLWljb25zLWN1cnNvcnVuZGVmaW5lZC1maWxsLTApIj48L3BhdGg+CiAgICA8cGF0aCBkPSJNMjIuMzUgMThWNkwxMS45MjUgMHYxMmwxMC40MjUgNnoiIGZpbGw9InVybCgjbG9iZS1pY29ucy1jdXJzb3J1bmRlZmluZWQtZmlsbC0xKSI+PC9wYXRoPgogICAgPHBhdGggZD0iTTExLjkyNSAwTDEuNSA2djEybDEwLjQyNS02VjB6IiBmaWxsPSJ1cmwoI2xvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMikiPjwvcGF0aD4KICAgIDxwYXRoIGQ9Ik0yMi4zNSA2TDExLjkyNSAyNFYxMkwyMi4zNSA2eiIgZmlsbD0iIzU1NSI+PC9wYXRoPgogICAgPHBhdGggZD0iTTIyLjM1IDZsLTEwLjQyNSA2TDEuNSA2aDIwLjg1eiIgZmlsbD0iI2ZmZiI+PC9wYXRoPgogICAgPGRlZnM+CiAgICAgICAgPGxpbmVhckdyYWRpZW50IGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiBpZD0ibG9iZS1pY29ucy1jdXJzb3J1bmRlZmluZWQtZmlsbC0wIgogICAgICAgICAgICB4MT0iMTEuOTI1IiB4Mj0iMTEuOTI1IiB5MT0iMTIiIHkyPSIyNCI+CiAgICAgICAgICAgIDxzdG9wIG9mZnNldD0iLjE2IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9Ii4zOSI+PC9zdG9wPgogICAgICAgICAgICA8c3RvcCBvZmZzZXQ9Ii42NTgiIHN0b3AtY29sb3I9IiNmZmYiIHN0b3Atb3BhY2l0eT0iLjgiPjwvc3RvcD4KICAgICAgICA8L2xpbmVhckdyYWRpZW50PgogICAgICAgIDxsaW5lYXJHcmFkaWVudCBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaWQ9ImxvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMSIKICAgICAgICAgICAgeDE9IjIyLjM1IiB4Mj0iMTEuOTI1IiB5MT0iNi4wMzciIHkyPSIxMi4xNSI+CiAgICAgICAgICAgIDxzdG9wIG9mZnNldD0iLjE4MiIgc3RvcC1jb2xvcj0iI2ZmZiIgc3RvcC1vcGFjaXR5PSIuMzEiPjwvc3RvcD4KICAgICAgICAgICAgPHN0b3Agb2Zmc2V0PSIuNzE1IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9IjAiPjwvc3RvcD4KICAgICAgICA8L2xpbmVhckdyYWRpZW50PgogICAgICAgIDxsaW5lYXJHcmFkaWVudCBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaWQ9ImxvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMiIKICAgICAgICAgICAgeDE9IjExLjkyNSIgeDI9IjEuNSIgeTE9IjAiIHkyPSIxOCI+CiAgICAgICAgICAgIDxzdG9wIHN0b3AtY29sb3I9IiNmZmYiIHN0b3Atb3BhY2l0eT0iLjYiPjwvc3RvcD4KICAgICAgICAgICAgPHN0b3Agb2Zmc2V0PSIuNjY3IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9Ii4yMiI+PC9zdG9wPgogICAgICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8L2RlZnM+Cjwvc3ZnPgo=)][cursor-install-basic] [![Verified on MseeP](https://img.shields.io/badge/MseeP-Verified-green)](https://mseep.ai/app/13fce476-0e74-4b1e-ab82-1df2a3204809) [![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/Couchbase-Ecosystem/mcp-server-couchbase)](https://archestra.ai/mcp-catalog/couchbase-ecosystem__mcp-server-couchbase)
+
+For full documentation, visit [docs.couchbase.com/mcp-server](https://docs.couchbase.com/mcp-server/get-started/overview.html).
+
+<a href="https://glama.ai/mcp/servers/@couchbase/mcp-server-couchbase">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@couchbase/mcp-server-couchbase/badge" alt="Couchbase Server MCP server" />
 </a>
 
 <!-- mcp-name: io.github.couchbase/mcp-server-couchbase -->
 
+## Table of Contents
+- [Why Couchbase MCP Server](#why-couchbase-mcp-server)
+- [Example Prompts](#example-prompts)
+- [Features/Tools](#featurestools)
+- [Prerequisites](#prerequisites)
+- [Configuration](#configuration)
+- [Operational Insights Server](#operational-insights-server)
+- [Streamable HTTP Transport Mode](#streamable-http-transport-mode)
+- [SSE Transport Mode](#sse-transport-mode)
+- [OAuth 2.1 Authorization](#oauth-21-authorization)
+- [Docker Image](#docker-image)
+- [Usage Data Collection](#usage-data-collection)
+- [Troubleshooting Tips](#troubleshooting-tips)
+- [Integration Testing](#integration-testing)
+- [FAQ](#faq)
+- [Contributing](#contributing)
+- [Support Policy](#-support-policy)
+
+## Why Couchbase MCP Server
+
+- **Safe by default** — write operations (document upserts/inserts/deletes and data-modifying SQL++ queries) are blocked unless you explicitly set `CB_MCP_READ_ONLY_MODE=false`, and individual tools can be disabled or gated behind user confirmation.
+- **Works with Capella and self-managed clusters** — the same configuration connects to Couchbase Capella (fully managed) or a self-hosted Couchbase Server cluster.
+- **RBAC-aware** — tool disabling is a convenience layer for guiding LLM behavior; the underlying Couchbase user's role-based access control remains the authoritative security boundary.
+- **Production transports** — run over STDIO for local desktop clients, or Streamable HTTP with optional OAuth 2.1 (JWT/JWKS, provider-agnostic — Auth0, Okta, Keycloak, Entra, Cognito, etc.) for shared/remote deployments.
+- **Any MCP client** — tested with Claude Desktop, Cursor, Windsurf, VS Code, and JetBrains AI Assistant/Junie; works with any client implementing the [MCP specification](https://modelcontextprotocol.io/specification/2026-07-28).
+
+## Example Prompts
+
+Once the server is connected, you can talk to your Couchbase cluster in natural language through your AI assistant. For example:
+
+- "What buckets, scopes, and collections do I have in this cluster, and what's the schema of the `orders` collection?"
+- "Run a SQL++ query to find the 10 most recent documents in the `users` collection `where status = 'active'`."
+- "What are the 5 slowest queries on this cluster in the last hour, and are any of them missing a covering index?"
+- "Check whether this cluster is healthy and tell me which services are running."
+- "Insert a new document into the `products` collection with these fields: ..." (requires `CB_MCP_READ_ONLY_MODE=false`)
+
+
 ## Features/Tools
+
+This distribution ships two servers: the **operational** server (default —
+the tables immediately below) talks to a regular Couchbase cluster via the
+`couchbase` SDK, and the **[Operational Insights](#operational-insights-server)**
+server (its own table further down) talks to Operational Insights clusters via
+the `couchbase-operational-insights` SDK.
 
 ### Cluster setup & health tools
 
@@ -23,8 +69,10 @@ For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couc
 | --------- | ----------- |
 | `get_server_configuration_status` | Get the server status and configuration without connecting to the cluster — reports read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration |
 | `test_cluster_connection` | Check the cluster credentials by connecting to the cluster |
-| `get_cluster_health_and_services` | Get cluster health status and list of all running services |
+| `get_cluster_health_and_services` | Get cluster health status and list of all running services, optionally filtered to specific services via `service_types` |
 | `get_cluster_diagnostics_report` | Get the SDK's cached connection diagnostics — whether connections were already broken and for how long, without any active network probing |
+| `get_cluster_metrics` | Get one or more cluster statistics over a historic time window via the Management REST API's stats-range endpoint. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
+| `discover_tool_input_values` | Look up the exact input values another tool needs, from reference data bundled with the server — currently every Couchbase Server metric name (type, unit, version added, description) for `get_cluster_metrics`. Browse by category or fuzzy-search by keyword. Works offline, without a cluster connection. |
 
 ### Data model & schema discovery tools
 
@@ -61,8 +109,18 @@ For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couc
 | `create_index` | Create a scalar (non-vector) GSI secondary index on a collection. Deferred by default — call `build_index` afterward to build it. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `build_index` | Trigger the build of all deferred indexes on a collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `drop_index` | Drop a GSI index (scalar or vector) from a collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
-| `run_sql_plus_plus_query` | Run a [SQL++ query](https://www.couchbase.com/sqlplusplus/) on a specified scope.<br><br>Queries are automatically scoped to the specified bucket and scope, so use collection names directly (e.g., `SELECT * FROM users` instead of `SELECT * FROM bucket.scope.users`).<br><br>`CB_MCP_READ_ONLY_MODE` is `true` by default, which means that **all write operations (KV, Query, scope/collection management, and index management)** are disabled. When enabled, KV, collection management, and index write tools are not loaded and SQL++ queries that modify data are blocked. |
+| `run_sql_plus_plus_query` | Run a [SQL++ query](https://www.couchbase.com/sqlplusplus/) on a specified scope.<br><br>Queries are automatically scoped to the specified bucket and scope, so use collection names directly (e.g., `SELECT * FROM users` instead of `SELECT * FROM bucket.scope.users`).<br><br>`CB_MCP_READ_ONLY_MODE` is `true` by default, which means that **all write operations (KV, Query, scope/collection management, and index management)** are disabled. When enabled (i.e. `CB_MCP_READ_ONLY_MODE=true`), write tools are not loaded and SQL++ queries that modify data are blocked. |
 | `explain_sql_plus_plus_query` | Generate and evaluate an EXPLAIN plan for a SQL++ query. Returns query metadata, extracted plan, and plan evaluation findings. |
+
+### Full-text search (FTS) tools
+
+Requires Couchbase Server 7.6+ and the Search service. Vector search is not supported by these tools (see the separate vector search tooling).
+
+| Tool Name | Description |
+| --------- | ----------- |
+| `list_fts_indexes` | List Search (FTS) indexes. With no filters, lists cluster-level (legacy) indexes; with `bucket_name`, lists scope-level (scoped) indexes across every scope in that bucket; with `bucket_name` and `scope_name`, lists scope-level indexes in that one scope. |
+| `get_fts_index_definition` | Get the full definition of a single Search index (mappings, analyzers, plan params). Pass `bucket_name` and `scope_name` together for a scope-level index, or omit both for a cluster-level (legacy) index. |
+| `run_fts_query` | Run an FTS query against a Search index, or fetch its execution plan. `query` is the raw FTS query JSON body, supporting any non-vector query type (match, match_phrase, term, conjuncts, disjuncts, geo, date/numeric range, query_string, ...). Pass `explain=true` to fetch the execution plan instead of results — this still executes the query (`limit` defaulting to 1) since the Search service only exposes the plan per matched hit, not as a separate dry-run call. |
 
 ### Query performance analysis tools
 
@@ -75,6 +133,44 @@ For full documentation, visit [mcp-server.couchbase.com](https://mcp-server.couc
 | `get_queries_using_primary_index` | Get queries that use a primary index (potential performance concern) |
 | `get_queries_not_using_covering_index` | Get queries that don't use a covering index |
 | `get_queries_not_selective` | Get queries that are not selective (index scans return many more documents than final result) |
+
+### Operational Insights tools
+
+Registered by the separate `operational-insights` server (see
+[Operational Insights Server](#operational-insights-server) below), not the
+default `operational` one.
+
+| Tool Name | Description |
+| --------- | ----------- |
+| `get_server_configuration_status` | Get this server's status and configuration without connecting to a cluster — read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration. Shared with the operational server: the same tool, registered by both. |
+| `get_databases_in_cluster` | List all databases in the Operational Insights cluster. |
+| `get_scopes_in_database` | List all scopes in a database. |
+| `get_collections_in_scope` | List all collections (datasets) in a scope. Shares its name with the operational server's tool of the same name — see the note below. |
+| `get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. Shares its name with the operational server's tool of the same name — see the note below. |
+| `list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog (the SDK has no index manager). Shares its name with the operational server's tool of the same name — see the note below. |
+| `run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return all result rows. Enforces read-only mode server-side via `QueryOptions(readonly=True)` — there is no client-side SQL++ parser here. |
+| `explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
+| `create_index` | Create a secondary index via `CREATE INDEX` (the SDK has no index manager). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** Shares its name with the operational server's tool of the same name — see the note below. |
+| `run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Same read-only enforcement as `run_query_sync`. |
+| `get_async_query_results` | Check whether an async query has finished and, if so, return its rows. Doubles as the status check — call again later if not yet ready. |
+| `discard_async_query_results` | Free a finished async query's result buffers on the server. Normal cleanup step after `get_async_query_results`. |
+| `cancel_async_query` | Stop an async query that is still running. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** A finished query cannot be cancelled — discard its results instead. |
+
+The Server Async Request API tools form a start → poll → discard-or-cancel
+flow for long-running queries: `run_query_async` returns a `query_handle`,
+`get_async_query_results` is polled until it reports readiness (and returns
+the rows), then either `discard_async_query_results` frees the results or,
+for a query still running, `cancel_async_query` stops it.
+
+> **Note:** `get_collections_in_scope`, `get_schema_for_collection`,
+> `create_index` and `list_indexes` exist, with different behavior, on both
+> servers. (`get_server_configuration_status` also appears on both, but it is
+> deliberately *one* shared tool — same implementation, same result shape —
+> so it needs no disambiguation.) Each server is a separate process, so this is only a concern if a
+> single MCP client registers both `operational` and `operational-insights`
+> simultaneously — in that case, disambiguate at the client configuration
+> layer (e.g. by giving the two server entries distinct names in the
+> client's own config).
 
 ## Prerequisites
 
@@ -184,7 +280,7 @@ The server can be configured using environment variables or command line argumen
 | `CB_CLIENT_CERT_PATH` | `--client-cert-path` | Path to the client certificate file for mTLS authentication | **Required if using mTLS (or Username and Password required)** |
 | `CB_CLIENT_KEY_PATH` | `--client-key-path` | Path to the client key file for mTLS authentication | **Required if using mTLS (or Username and Password required)** |
 | `CB_CA_CERT_PATH` | `--ca-cert-path` | Path to server root certificate for TLS if server is configured with a self-signed/untrusted certificate. This will not be required if you are connecting to Capella | |
-| `CB_MCP_READ_ONLY_MODE` | `--read-only-mode` | Prevent all data modifications (KV, Query, scope/collection management, and index management). When enabled, KV, collection management, and index write tools are not loaded. | `true` |
+| `CB_MCP_READ_ONLY_MODE` | `--read-only-mode` | Prevent all data modifications (KV, Query, scope/collection management, and index management). When enabled, write tools are not loaded. | `true` |
 | `CB_MCP_TRANSPORT` | `--transport` | Transport mode: `stdio`, `http`, `sse` | `stdio` |
 | `CB_MCP_HOST` | `--host` | Host for HTTP/SSE transport modes | `127.0.0.1` |
 | `CB_MCP_PORT` | `--port` | Port for HTTP/SSE transport modes | `8000` |
@@ -216,8 +312,8 @@ The server can be configured using environment variables or command line argumen
 
 **`CB_MCP_READ_ONLY_MODE`** is the single switch controlling write operations:
 
-- When `true` (default): All write operations (KV, Query, scope/collection management, and index management) are disabled. KV write tools (upsert, insert, replace, delete, sub-document mutate), scope/collection management write tools (create_scope, create_collection, delete_scope, delete_collection), and index write tools (create_index, build_index, drop_index) are **not loaded** and will not be available to the LLM, and SQL++ queries that modify data or structure are blocked.
-- When `false`: KV, scope/collection management, and index write tools are loaded and SQL++ data/structure modification queries are allowed.
+- When `true` (default): All write operations (KV, Query, scope/collection management, and index management) are disabled. All write tools (KV: upsert, insert, replace, delete, sub-document mutate; scope/collection management: create_scope, create_collection, delete_scope, delete_collection; index management: create_index, build_index, drop_index) are **not loaded** and will not be available to the LLM, and SQL++ queries that modify data or structure are blocked.
+- When `false`: All write tools are loaded and SQL++ data/structure modification queries are allowed.
 
 This is the recommended safe default to prevent inadvertent data modifications by LLMs.
 
@@ -363,7 +459,7 @@ uvx couchbase-mcp-server --log-level=debug --log-sinks=file \
   --log-error-retention-backup-count=30 --log-debug-retention-backup-count=0
 ```
 
-For more details, see the [documentation](https://mcp-server.couchbase.com/configuration/logging).
+For more details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/logging.html).
 
 ### Client Specific Configuration
 
@@ -504,6 +600,83 @@ The log file can be explored at **Help > Show Log in Finder (Explorer) > mcp > c
 
 </details>
 
+## Operational Insights Server
+
+Alongside the default `operational` server (the one every section above
+describes), this distribution ships a second server for
+[Operational Insights](https://docs.couchbase.com/enterprise-analytics/current/intro/intro.html)
+clusters, using the separate
+[`couchbase-operational-insights`](https://github.com/couchbaselabs/operational-insights-python-client)
+SDK. It is a different product from a regular Couchbase cluster and runs as
+an independent process on its own port.
+
+Run it by passing `operational-insights` as the CLI subcommand (or appending
+it as the container's command):
+
+```bash
+uvx couchbase-mcp-server operational-insights
+# or, from source:
+uv run src/mcp_server.py operational-insights
+# or, via Docker:
+docker run --rm -i \
+  -e CB_OI_CONNECTION_STRING=http://localhost:8095 \
+  -e CB_OI_USERNAME=Administrator \
+  -e CB_OI_PASSWORD=password \
+  couchbase/mcp-server:<version> operational-insights
+```
+
+**`--connection-string` is an HTTP(S) URL, not a `couchbase://` connection
+string** — e.g. `http://localhost:8095` for a local Operational Insights
+server, or `https://<host>:18095` for Capella. This is the single most
+common misconfiguration when pointing this server at a cluster.
+
+| CLI Argument | Environment Variable | Description | Default |
+| ------------- | --------------------- | ------------ | ------- |
+| `--connection-string` | `CB_OI_CONNECTION_STRING` | Operational Insights endpoint URL (HTTP/HTTPS, not `couchbase://`) | None |
+| `--username` | `CB_OI_USERNAME` | Operational Insights username | None |
+| `--password` | `CB_OI_PASSWORD` | Operational Insights password | None |
+| `--ca-cert-path` | `CB_OI_CA_CERT_PATH` | Path to server root certificate (PEM), for verifying a self-signed/untrusted server certificate | None |
+| `--client-cert-path` | `CB_OI_CLIENT_CERT_PATH` | Path to the client certificate for mTLS authentication — a PEM cert (paired with `--client-key-path`) or a PKCS#12 bundle (`.p12`/`.pfx`, `--client-key-path` left unset). Requires an `https://` `--connection-string`; overrides `--username`/`--password` when set | None |
+| `--client-key-path` | `CB_OI_CLIENT_KEY_PATH` | Path to the client certificate's private key (PEM). Leave unset when `--client-cert-path` is a PKCS#12 bundle | None |
+| `--client-cert-password` | `CB_OI_CLIENT_CERT_PASSWORD` | Decryption password for an encrypted client key or PKCS#12 bundle | None |
+
+Every other flag (`--read-only-mode`, `--transport`, `--host`, `--port`,
+`--disabled-tools`, `--confirmation-required-tools`, `--log-*`,
+`--oauth-*`) is identical to the operational server's — see
+[Additional Configuration for MCP Server](#additional-configuration-for-mcp-server) —
+except the defaults for **port** (`8001`, not `8000`) and **log file**
+(`mcp_server_operational_insights.log`, not `mcp_server.log`), since two
+servers cannot share either. OAuth uses the same scope labels
+(`couchbase-mcp:read` / `couchbase-mcp:write`) as the operational server, so
+an existing IdP configuration works for both without changes.
+
+Example MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "couchbase-operational-insights": {
+      "command": "uvx",
+      "args": ["couchbase-mcp-server", "operational-insights"],
+      "env": {
+        "CB_OI_CONNECTION_STRING": "http://localhost:8095",
+        "CB_OI_USERNAME": "Administrator",
+        "CB_OI_PASSWORD": "password"
+      }
+    }
+  }
+}
+```
+
+See [Operational Insights tools](#operational-insights-tools) above for the
+tool list, and the note there about the three tool names shared with the
+operational server.
+
+This server has its own [MCP Registry](https://registry.modelcontextprotocol.io)
+listing, published from `operational_insights_server.json` — separate from
+the operational server's `server.json` — so it's independently discoverable
+in the registry rather than buried inside the operational server's entry.
+
 ## Streamable HTTP Transport Mode
 
 The MCP Server can be run in [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http) transport mode which allows multiple clients to connect to the same server instance via HTTP.
@@ -593,7 +766,7 @@ uvx couchbase-mcp-server \
   --oauth-mcp-base-url='<public_base_url_of_this_server>'
 ```
 
-For full details, see the [documentation](https://mcp-server.couchbase.com/configuration/oauth).
+For full details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/oauth-overview.html).
 
 ## Docker Image
 
@@ -729,15 +902,34 @@ We provide high-level MCP integration tests to verify that the server exposes th
    - `CB_USERNAME`
    - `CB_PASSWORD`
    - Optional: `CB_MCP_TEST_BUCKET` (a bucket to probe during the tests)
+   - Optional, for the [Operational Insights server](#operational-insights-server)'s
+     own tests: `CB_OI_CONNECTION_STRING` / `CB_OI_USERNAME` / `CB_OI_PASSWORD`.
+     Those tests skip automatically (not fail) when unset.
 2. Run the tests:
 
 ```bash
-uv run pytest tests/ -v
+uv run --extra dev pytest tests/integration -v
 ```
 
 ---
 
-## 👩‍💻 Contributing
+## FAQ
+
+**What is the Couchbase MCP Server?** It's a self-hosted implementation of the [Model Context Protocol](https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro) that lets AI assistants and agents (Claude, Cursor, Windsurf, VS Code Copilot, JetBrains AI Assistant/Junie, and any other MCP client) query and, optionally, modify data in a Couchbase cluster using natural language.
+
+**How do I connect Claude Desktop to Couchbase?** Install the server with `uvx couchbase-mcp-server` (or run it from source or Docker), then add its configuration to Claude Desktop's `claude_desktop_config.json` as shown in [Configuration](#configuration). Restart Claude Desktop and it will pick up the new tools.
+
+**Can I use this with Couchbase Capella?** Yes. The same `CB_CONNECTION_STRING/CB_USERNAME/CB_PASSWORD` (or mTLS certificate) configuration works for both Couchbase Capella and self-managed Couchbase Server clusters.
+
+**Is it safe to let an AI agent write to my database?** By default, `CB_MCP_READ_ONLY_MODE` is true, so all write operations — document upserts/inserts/replaces/deletes and data-modifying SQL++ statements — are disabled and the write tools aren't even loaded. You can also disable individual tools (see [Disabling Tools](#disabling-tools)) or require explicit user confirmation before specific tools run (see [Elicitation/Confirmation](#elicitationconfirmation-for-tool-calls)). Tool-level controls guide LLM behavior; your Couchbase user's RBAC permissions remain the real security boundary.
+
+**Can I run natural-language queries against my data without writing SQL++ myself?** Yes — ask your AI assistant a question in plain English (e.g. "show me the 10 most recent orders over $100") and it can translate that into a [SQL++](https://www.couchbase.com/sqlplusplus/) query using the `run_sql_plus_plus_query` tool. You can also ask the assistant to `explain_sql_plus_plus_query` a query or ask the index advisor for recommendations.
+
+**What's the difference between STDIO, Streamable HTTP, and SSE transport?** STDIO is for a single local MCP client (e.g. Claude Desktop) launching the server as a subprocess. Streamable HTTP lets multiple clients share one running server instance over HTTP, and supports OAuth 2.1. SSE is the older HTTP transport, now deprecated by the MCP spec in favor of Streamable HTTP — see [Streamable HTTP Transport Mode](#streamable-http-transport-mode).
+
+**Is this officially supported by Couchbase?** This project is Couchbase community-maintained — see [Support Policy](#-support-policy). Enterprise support is available separately through [Couchbase AI Data Plane](https://www.couchbase.com/downloads/?family=agent-memory).
+
+## Contributing
 
 We welcome contributions from the community! Whether you want to fix bugs, add features, or improve documentation, your help is appreciated.
 

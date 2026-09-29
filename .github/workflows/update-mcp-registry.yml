@@ -7,12 +7,39 @@ on:
       - completed
 
 jobs:
+  gate:
+    # Downloads the version artifact from Docker and checks if this is a version tag run.
+    # workflow_run chains always execute on the default branch, so head_branch is always
+    # "main" by this point — we use the artifact to recover the original tag name instead.
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    permissions:
+      actions: read
+    outputs:
+      version: ${{ steps.read-version.outputs.version }}
+      is-version-tag: ${{ steps.read-version.outputs.is-version-tag }}
+    steps:
+      - name: Download version artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-version
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Read and validate version tag
+        id: read-version
+        run: |
+          VERSION=$(tr -d '\r\n' < version.txt)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "is-version-tag=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is-version-tag=false" >> "$GITHUB_OUTPUT"
+          fi
+
   check-and-update-registry:
-    # Only run on tag pushes and if the docker workflow succeeded
-    if: |
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      startsWith(github.event.workflow_run.head_branch, 'v')
+    needs: gate
+    if: needs.gate.outputs.is-version-tag == 'true'
 
     runs-on: ubuntu-latest
     permissions:
@@ -23,111 +50,98 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          ref: ${{ github.event.workflow_run.head_branch }}
-
-      - name: Wait for PyPI release to complete
-        uses: fountainhead/action-wait-for-check@5a908a24814494009c4bb27c242ea38c93c593be # v1.2.0
-        id: wait-for-pypi
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          checkName: "Build and publish Python distributions to PyPI"
-          ref: ${{ github.event.workflow_run.head_sha }}
-          timeoutSeconds: 600
-          intervalSeconds: 10
-
-      - name: Check PyPI release status
-        if: steps.wait-for-pypi.outputs.conclusion != 'success'
-        run: |
-          echo "PyPI release did not succeed. Status: ${{ steps.wait-for-pypi.outputs.conclusion }}"
-          exit 1
+          ref: ${{ needs.gate.outputs.version }}
 
       - name: Validate version consistency
         id: version
         env:
-          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_BRANCH: ${{ needs.gate.outputs.version }}
         run: |
-          # Read versions from files
-          ROOT_VERSION=$(jq -r '.version' server.json)
-          # Only get versions from packages that have a version field (exclude null/empty)
-          PACKAGE_VERSIONS=$(jq -r '.packages[] | select(.version != null) | .version' server.json | sort -u)
-          PYPROJECT_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
           # Get tag from the triggering workflow (Docker), not current workflow
           # Use environment variable to prevent code injection
           TAG_VERSION=${HEAD_BRANCH#v}
+          PYPROJECT_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
 
-          echo "Version Check:"
-          echo "  server.json root:    $ROOT_VERSION"
-          echo "  server.json packages:"
-          jq -r '.packages[] |
-            if .version != null then
-              "     - \(.registryType):\(.identifier) = \(.version)"
-            else
-              "     - \(.registryType):\(.identifier) (no version field)"
-            end' server.json
-          echo "  pyproject.toml:      $PYPROJECT_VERSION"
-          echo "  Git tag:             $TAG_VERSION"
-          echo ""
-
-          # Check if all package versions match root version (only for packages with version field)
-          MISMATCH=false
-          if [ -n "$PACKAGE_VERSIONS" ]; then
-            while IFS= read -r pkg_ver; do
-              if [ "$pkg_ver" != "$ROOT_VERSION" ]; then
-                echo "ERROR: Package version ($pkg_ver) doesn't match root version ($ROOT_VERSION)"
-                MISMATCH=true
-              fi
-            done <<< "$PACKAGE_VERSIONS"
-          fi
-
-          if [ "$MISMATCH" = true ]; then
-            echo ""
-            echo "Fix: Update server.json so all package versions match the root version"
-            exit 1
-          fi
-
-          # Check if root version matches tag
-          if [ "$ROOT_VERSION" != "$TAG_VERSION" ]; then
-            echo "ERROR: server.json version ($ROOT_VERSION) doesn't match tag ($TAG_VERSION)"
-            echo "Fix: Update server.json root version to match the tag"
-            exit 1
-          fi
-
-          # Warn if pyproject.toml doesn't match
+          echo "Git tag:        $TAG_VERSION"
+          echo "pyproject.toml: $PYPROJECT_VERSION"
           if [ "$PYPROJECT_VERSION" != "$TAG_VERSION" ]; then
             echo "WARNING: pyproject.toml version ($PYPROJECT_VERSION) doesn't match tag ($TAG_VERSION)"
             echo "This may cause PyPI issues"
           fi
-
-          # Check Docker image tags in OCI identifiers
           echo ""
-          echo "Checking Docker image tags..."
-          OCI_PACKAGES=$(jq -r '.packages[] | select(.registryType == "oci") | .identifier' server.json)
-          if [ -n "$OCI_PACKAGES" ]; then
-            OCI_TAG_MISMATCH=false
-            while IFS= read -r oci_id; do
-              # Extract tag from identifier (everything after last :)
-              IMAGE_TAG="${oci_id##*:}"
-              echo "  - Image: $oci_id"
-              echo "    Tag: $IMAGE_TAG"
 
-              if [ "$IMAGE_TAG" != "$ROOT_VERSION" ]; then
-                echo "    ERROR: Docker image tag ($IMAGE_TAG) doesn't match version ($ROOT_VERSION)"
-                OCI_TAG_MISMATCH=true
+          # One registry listing per server (see RELEASE.md); each is checked
+          # the same way, since a mismatch in either would publish stale or
+          # inconsistent metadata for that server.
+          for manifest in server.json operational_insights_server.json; do
+            echo "=== $manifest ==="
+            ROOT_VERSION=$(jq -r '.version' "$manifest")
+            # Only get versions from packages that have a version field (exclude null/empty)
+            PACKAGE_VERSIONS=$(jq -r '.packages[] | select(.version != null) | .version' "$manifest" | sort -u)
+
+            echo "  root:    $ROOT_VERSION"
+            echo "  packages:"
+            jq -r '.packages[] |
+              if .version != null then
+                "     - \(.registryType):\(.identifier) = \(.version)"
               else
-                echo "    Tag matches"
-              fi
-            done <<< "$OCI_PACKAGES"
+                "     - \(.registryType):\(.identifier) (no version field)"
+              end' "$manifest"
 
-            if [ "$OCI_TAG_MISMATCH" = true ]; then
+            # Check if all package versions match root version (only for packages with version field)
+            MISMATCH=false
+            if [ -n "$PACKAGE_VERSIONS" ]; then
+              while IFS= read -r pkg_ver; do
+                if [ "$pkg_ver" != "$ROOT_VERSION" ]; then
+                  echo "ERROR: Package version ($pkg_ver) doesn't match root version ($ROOT_VERSION)"
+                  MISMATCH=true
+                fi
+              done <<< "$PACKAGE_VERSIONS"
+            fi
+
+            if [ "$MISMATCH" = true ]; then
               echo ""
-              echo "Fix: Update Docker image tags in server.json to match the version"
+              echo "Fix: Update $manifest so all package versions match the root version"
               exit 1
             fi
-          fi
 
-          echo ""
+            # Check if root version matches tag
+            if [ "$ROOT_VERSION" != "$TAG_VERSION" ]; then
+              echo "ERROR: $manifest version ($ROOT_VERSION) doesn't match tag ($TAG_VERSION)"
+              echo "Fix: Update $manifest root version to match the tag"
+              exit 1
+            fi
+
+            # Check Docker image tags in OCI identifiers
+            echo "  Checking Docker image tags..."
+            OCI_PACKAGES=$(jq -r '.packages[] | select(.registryType == "oci") | .identifier' "$manifest")
+            if [ -n "$OCI_PACKAGES" ]; then
+              OCI_TAG_MISMATCH=false
+              while IFS= read -r oci_id; do
+                # Extract tag from identifier (everything after last :)
+                IMAGE_TAG="${oci_id##*:}"
+                echo "    - Image: $oci_id"
+                echo "      Tag: $IMAGE_TAG"
+
+                if [ "$IMAGE_TAG" != "$ROOT_VERSION" ]; then
+                  echo "      ERROR: Docker image tag ($IMAGE_TAG) doesn't match version ($ROOT_VERSION)"
+                  OCI_TAG_MISMATCH=true
+                else
+                  echo "      Tag matches"
+                fi
+              done <<< "$OCI_PACKAGES"
+
+              if [ "$OCI_TAG_MISMATCH" = true ]; then
+                echo ""
+                echo "Fix: Update Docker image tags in $manifest to match the version"
+                exit 1
+              fi
+            fi
+            echo ""
+          done
+
           echo "All version checks passed!"
-          echo "version=$ROOT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
@@ -161,7 +175,13 @@ jobs:
         run: ./mcp-publisher login github-oidc
 
       - name: Publish to MCP Registry
-        run: ./mcp-publisher publish
+        # Two separate registry listings, one per server (see RELEASE.md):
+        # mcp-publisher publish takes the manifest path as a positional
+        # argument, defaulting to ./server.json when omitted, so the second
+        # server needs its own explicit invocation.
+        run: |
+          ./mcp-publisher publish server.json
+          ./mcp-publisher publish operational_insights_server.json
 
       - name: Notify completion
         if: success()

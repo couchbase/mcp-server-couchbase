@@ -39,7 +39,7 @@ whether the change is accepted. Cover:
 - **Description** (shown to the LLM):
 - **Parameters**: name, type, required/optional, description
 - **Return shape**: fields and types; how large can the result get, and how is its size bounded (e.g., a `limit` parameter, as existing tools use)?
-- **Classification**: `READ_ONLY_TOOLS` or `KV_WRITE_TOOLS` (behavior under read-only mode)
+- **Classification**: `READ_ONLY_TOOLS` or `WRITE_TOOLS` (behavior under read-only mode)
 - **Annotations**: `readOnlyHint` / `idempotentHint` / `destructiveHint`
 - **Confirmation**: does this tool need confirmation/elicitation before executing?
 

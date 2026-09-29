@@ -10,7 +10,7 @@ GitHub Repo: <https://github.com/couchbase/mcp-server-couchbase>
 
 Dockerfile: <https://github.com/couchbase/mcp-server-couchbase/blob/main/Dockerfile>
 
-Documentation: <https://mcp-server.couchbase.com>
+Documentation: <https://docs.couchbase.com/mcp-server/get-started/overview.html>
 
 ## Features/Tools
 
@@ -20,8 +20,10 @@ Documentation: <https://mcp-server.couchbase.com>
 | --------- | ----------- |
 | `get_server_configuration_status` | Get the server status and configuration without connecting to the cluster — reports read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration |
 | `test_cluster_connection` | Check the cluster credentials by connecting to the cluster |
-| `get_cluster_health_and_services` | Get cluster health status and list of all running services |
+| `get_cluster_health_and_services` | Get cluster health status and list of all running services, optionally filtered to specific services via `service_types` |
 | `get_cluster_diagnostics_report` | Get the SDK's cached connection diagnostics — whether connections were already broken and for how long, without any active network probing |
+| `get_cluster_metrics` | Get one or more cluster statistics over a historic time window via the Management REST API's stats-range endpoint. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
+| `discover_tool_input_values` | Look up the exact input values another tool needs, from reference data bundled with the server — currently every Couchbase Server metric name (type, unit, version added, description) for `get_cluster_metrics`. Browse by category or fuzzy-search by keyword. Works offline, without a cluster connection. |
 
 ### Data model & schema discovery tools
 
@@ -54,8 +56,18 @@ Documentation: <https://mcp-server.couchbase.com>
 | `create_index` | Create a scalar (non-vector) GSI secondary index on a collection. Deferred by default — call `build_index` afterward to build it. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `build_index` | Trigger the build of all deferred indexes on a collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `drop_index` | Drop a GSI index (scalar or vector) from a collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
-| `run_sql_plus_plus_query` | Run a [SQL++ query](https://www.couchbase.com/sqlplusplus/) on a specified scope.<br><br>Queries are automatically scoped to the specified bucket and scope, so use collection names directly (e.g., `SELECT * FROM users` instead of `SELECT * FROM bucket.scope.users`).<br><br>`CB_MCP_READ_ONLY_MODE` is `true` by default, which means that **all write operations (KV, Query, and index management)** are disabled. When enabled, KV and index write tools are not loaded and SQL++ queries that modify data are blocked. |
+| `run_sql_plus_plus_query` | Run a [SQL++ query](https://www.couchbase.com/sqlplusplus/) on a specified scope.<br><br>Queries are automatically scoped to the specified bucket and scope, so use collection names directly (e.g., `SELECT * FROM users` instead of `SELECT * FROM bucket.scope.users`).<br><br>`CB_MCP_READ_ONLY_MODE` is `true` by default, which means that **all write operations (KV, Query, and index management)** are disabled. When enabled (i.e. `CB_MCP_READ_ONLY_MODE=true`), write tools are not loaded and SQL++ queries that modify data are blocked. |
 | `explain_sql_plus_plus_query` | Generate and evaluate an EXPLAIN plan for a SQL++ query. Returns query metadata, extracted plan, and plan evaluation findings. |
+
+### Full-text search (FTS) tools
+
+Requires Couchbase Server 7.6+ and the Search service. Vector search is not supported by these tools (see the separate vector search tooling).
+
+| Tool Name | Description |
+| --------- | ----------- |
+| `list_fts_indexes` | List Search (FTS) indexes. With no filters, lists cluster-level (legacy) indexes; with `bucket_name`, lists scope-level (scoped) indexes across every scope in that bucket; with `bucket_name` and `scope_name`, lists scope-level indexes in that one scope. |
+| `get_fts_index_definition` | Get the full definition of a single Search index (mappings, analyzers, plan params). Pass `bucket_name` and `scope_name` together for a scope-level index, or omit both for a cluster-level (legacy) index. |
+| `run_fts_query` | Run an FTS query against a Search index, or fetch its execution plan. `query` is the raw FTS query JSON body, supporting any non-vector query type (match, match_phrase, term, conjuncts, disjuncts, geo, date/numeric range, query_string, ...). Pass `explain=true` to fetch the execution plan instead of results — this still executes the query (`limit` defaulting to 1) since the Search service only exposes the plan per matched hit, not as a separate dry-run call. |
 
 ### Query performance analysis tools
 
@@ -68,6 +80,42 @@ Documentation: <https://mcp-server.couchbase.com>
 | `get_queries_using_primary_index` | Get queries that use a primary index (potential performance concern) |
 | `get_queries_not_using_covering_index` | Get queries that don't use a covering index |
 | `get_queries_not_selective` | Get queries that are not selective (index scans return many more documents than final result) |
+
+### Operational Insights tools
+
+This image also runs a second server, for Operational Insights clusters —
+append `operational-insights` to the container's command to select it
+instead of the default `operational` server (see [Configuration](#configuration)
+below).
+
+| Tool Name | Description |
+| --------- | ----------- |
+| `get_server_configuration_status` | Get this server's status and configuration without connecting to a cluster — read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration. Shared with the operational server: the same tool, registered by both. |
+| `get_databases_in_cluster` | List all databases in the Operational Insights cluster. |
+| `get_scopes_in_database` | List all scopes in a database. |
+| `get_collections_in_scope` | List all collections (datasets) in a scope. Shares its name with the operational server's tool of the same name — see the note below. |
+| `get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. Shares its name with the operational server's tool of the same name — see the note below. |
+| `list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog. Shares its name with the operational server's tool of the same name — see the note below. |
+| `run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return all result rows. Enforces read-only mode server-side; there is no client-side SQL++ parser. |
+| `explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
+| `create_index` | Create a secondary index via `CREATE INDEX`. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** Shares its name with the operational server's tool of the same name — see the note below. |
+| `run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Same read-only enforcement as `run_query_sync`. |
+| `get_async_query_results` | Check whether an async query has finished and, if so, return its rows. |
+| `discard_async_query_results` | Free a finished async query's result buffers on the server. |
+| `cancel_async_query` | Stop an async query that is still running. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+
+The Server Async Request API tools form a start → poll → discard-or-cancel
+flow: `run_query_async` returns a `query_handle`, `get_async_query_results` is
+polled until ready, then `discard_async_query_results` frees the results or
+`cancel_async_query` stops a still-running query.
+
+> **Note:** `get_collections_in_scope`, `get_schema_for_collection`,
+> `create_index` and `list_indexes` exist, with different behavior, on both
+> servers — each runs as a separate container/process, so this only matters
+> if one MCP client registers both simultaneously.
+> (`get_server_configuration_status` also appears on both, but it is
+> deliberately *one* shared tool — same implementation, same result shape —
+> so it needs no disambiguation.)
 
 ## Usage
 
@@ -105,6 +153,19 @@ Add the configuration specified below to the MCP configuration in your MCP clien
 }
 ```
 
+To run the [Operational Insights server](#operational-insights-tools)
+instead, append `operational-insights` to `args` and use its own env vars
+(`CB_OI_CONNECTION_STRING`/`CB_OI_USERNAME`/`CB_OI_PASSWORD`, see below) —
+with no trailing argument the container runs the default operational server:
+
+```bash
+docker run --rm -i \
+  -e CB_OI_CONNECTION_STRING=http://localhost:8095 \
+  -e CB_OI_USERNAME=Administrator \
+  -e CB_OI_PASSWORD=password \
+  docker.io/couchbase/mcp-server:latest operational-insights
+```
+
 ### Environment Variables
 
 The detailed explanation for the environment variables can be found on the [GitHub Repo](https://github.com/couchbase/mcp-server-couchbase?tab=readme-ov-file#additional-configuration-for-mcp-server).
@@ -117,10 +178,17 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_CLIENT_CERT_PATH`                | Path to the client certificate file for mTLS authentication                                                                                              | **Required if using mTLS (or Username and Password required)** |
 | `CB_CLIENT_KEY_PATH`                 | Path to the client key file for mTLS authentication                                                                                                      | **Required if using mTLS (or Username and Password required)** |
 | `CB_CA_CERT_PATH`                    | Path to server root certificate for TLS if server is configured with a self-signed/untrusted certificate.                                                |                                                                |
-| `CB_MCP_READ_ONLY_MODE`              | Prevent all data modifications (KV, Query, and index management). When `true`, KV and index write tools are not loaded.                                                               | `true`                                                         |
+| `CB_OI_CONNECTION_STRING`            | [Operational Insights server](#operational-insights-tools) endpoint URL (HTTP/HTTPS, not `couchbase://`). Ignored by the default `operational` server.  | **Required for `operational-insights`**                       |
+| `CB_OI_USERNAME`                     | Operational Insights username. Ignored by the default `operational` server.                                                                              | **Required for `operational-insights`**                       |
+| `CB_OI_PASSWORD`                     | Operational Insights password. Ignored by the default `operational` server.                                                                              | **Required for `operational-insights`**                       |
+| `CB_OI_CA_CERT_PATH`                 | Path to server root certificate (PEM) for the Operational Insights server, if self-signed/untrusted. Ignored by the default `operational` server.        |                                                                |
+| `CB_OI_CLIENT_CERT_PATH`             | Path to the client certificate for Operational Insights mTLS authentication (PEM, or a PKCS#12 bundle with `CB_OI_CLIENT_KEY_PATH` unset). Requires an `https://` `CB_OI_CONNECTION_STRING`; overrides username/password when set. Ignored by the default `operational` server. | **Required if using mTLS (or Username and Password required)** |
+| `CB_OI_CLIENT_KEY_PATH`              | Path to the client certificate's private key (PEM) for Operational Insights mTLS. Leave unset for a PKCS#12 bundle. Ignored by the default `operational` server. | **Required if using mTLS (or Username and Password required)** |
+| `CB_OI_CLIENT_CERT_PASSWORD`         | Decryption password for an encrypted Operational Insights client key/PKCS#12 bundle. Ignored by the default `operational` server.                        |                                                                |
+| `CB_MCP_READ_ONLY_MODE`              | Prevent all data modifications (KV, Query, and index management). When `true`, write tools are not loaded.                                                               | `true`                                                         |
 | `CB_MCP_TRANSPORT`                   | Transport mode (stdio/http/sse)                                                                                                                          | `stdio`                                                        |
 | `CB_MCP_HOST`                        | Server host (HTTP/SSE modes)                                                                                                                             | `127.0.0.1`                                                    |
-| `CB_MCP_PORT`                        | Server port (HTTP/SSE modes)                                                                                                                             | `8000`                                                         |
+| `CB_MCP_PORT`                        | Server port (HTTP/SSE modes). Defaults to each server's own port when unset (`operational`: `8000`, `operational-insights`: `8001`) — set explicitly only to override. | `8000` (`operational`) / `8001` (`operational-insights`) |
 | `CB_MCP_DISABLED_TOOLS`              | Tools to disable (see [Disabling Tools](#disabling-tools))                                                                                               | None                                                           |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | Tools that require explicit user confirmation before execution (see [Elicitation/Confirmation for Tool Calls](#elicitationconfirmation-for-tool-calls))  | None                                                           |
 | `CB_MCP_LOG_LEVEL`                   | Logging level for the server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging))                                                        | `info`                                                         |
@@ -321,7 +389,7 @@ The server logs to `stderr` by default. Logging is configured with the `CB_MCP_L
 - **Rotation & retention** — rotation size is configured **in MB** via `CB_MCP_LOG_ROTATION_MAX_SIZE_MB` (global) and per-level `CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE_MB` (inheriting the global); retention via `CB_MCP_LOG_RETENTION_BACKUP_COUNT` (global) and per-level `CB_MCP_LOG_<LEVEL>_RETENTION_BACKUP_COUNT`. A rotation size of `0` is invalid and falls back to the default with a startup warning. `CB_MCP_LOG_MAX_BYTES` (bytes) is deprecated but still honored for backward compatibility.
 - **Server-config snapshot** — with the `file` sink active, a one-shot record is written as JSON to a dedicated `mcp_server_config.log.json` file (derived from `CB_MCP_LOG_FILE`), overwritten each start, so support always has the current config even after other logs rotate.
 
-For more details, see the [documentation](https://mcp-server.couchbase.com/configuration/logging).
+For more details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/logging.html).
 
 ### OAuth 2.1 Authorization
 
@@ -333,4 +401,4 @@ OAuth is configured with the `CB_MCP_OAUTH_*` variables in the [Environment Vari
 - Setting `CB_MCP_OAUTH_MCP_BASE_URL` additionally publishes RFC 9728 Protected Resource Metadata so PRM-aware clients can discover the authorization server.
 - Access is gated by two scopes read from the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools, including SQL++) and `couchbase-mcp:write` (write tools: KV mutations and index management). Full access requires both. If your IdP can't emit those canonical labels, override them with `CB_MCP_OAUTH_SCOPE_READ_LABEL` / `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`.
 
-For full details, see the [documentation](https://mcp-server.couchbase.com/configuration/oauth).
+For full details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/oauth-overview.html).

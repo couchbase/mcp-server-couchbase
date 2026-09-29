@@ -1,10 +1,14 @@
-"""Standard result envelopes for write/mutation MCP tools.
+"""Standard result envelopes for MCP tools that report failure as data.
 
-Write tools return a structured dict rather than a bare bool so the calling
+These tools return a structured dict rather than a bare bool so the calling
 LLM can see *why* an operation failed, not just that it did. The base shape is
 ``{"success": bool}`` plus ``"error"`` on failure; each tool adds
 operation-specific context (``keyspace``, ``index_name``, ...) as keyword
 arguments. KV write tools can adopt these helpers later for a uniform contract.
+
+Used by every write tool, and by read tools that catch their own failures rather
+than letting them propagate (``discover_tool_input_values``). Read tools whose
+only failure mode is an unreachable cluster still return bare data and raise.
 """
 
 from typing import Any

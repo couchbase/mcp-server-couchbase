@@ -15,9 +15,9 @@ from pydantic import BaseModel, Field
 
 from ..audit import state as audit_state
 from ..audit.exceptions import ConfirmationDeclinedError
-from .constants import MCP_SERVER_NAME
+from .constants import LOGGER_NAMESPACE
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.elicitation")
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.utils.elicitation")
 
 
 class ConfirmationResult(BaseModel):

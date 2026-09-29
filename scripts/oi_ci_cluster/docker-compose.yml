@@ -1,0 +1,34 @@
+# Boots the two containers Operational Insights integration tests need (see
+# tests/README.md's "Integration (Operational Insights)" section) on a shared
+# network. Compose creates one implicit network for this project and lets
+# services reach each other by service name — no explicit `docker network
+# create` needed. Both images are used as-is (no Dockerfile/build step):
+# confirmed by inspection that each already ships curl/wget, which is all
+# the healthchecks below need. Image tags, ports, and the S3Mock bucket name
+# are ${VAR} references, not literals — the caller (oi-integration-tests.yml's
+# job-level `env:`, or your own shell for local runs) is expected to set them.
+services:
+  oi:
+    image: ${OI_IMAGE}
+    ports:
+      - "${OI_ADMIN_PORT}:8091"
+      - "${OI_ANALYTICS_PORT}:8095"
+    healthcheck:
+      # /pools responds before clusterInit too — this only proves the node
+      # is up and taking HTTP requests, not that a cluster has been formed.
+      test: ["CMD", "curl", "-sf", "http://localhost:8091/pools"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  s3mock:
+    image: ${S3MOCK_IMAGE}
+    environment:
+      COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: ${S3MOCK_BUCKET}
+      COM_ADOBE_TESTING_S3MOCK_STORE_ROOT: ${S3MOCK_STORE_ROOT}
+      COM_ADOBE_TESTING_S3MOCK_STORE_RETAIN_FILES_ON_EXIT: ${S3MOCK_RETAIN_FILES_ON_EXIT}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090"]
+      interval: 5s
+      timeout: 3s
+      retries: 30

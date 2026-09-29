@@ -1,4 +1,11 @@
-"""Unit tests for get_server_configuration_status tool payload."""
+"""Unit tests for the shared ``get_server_configuration_status`` payload.
+
+Stays at the cross-server tier rather than moving into ``operational/``:
+the tool is registered by every server (see
+``tests/unit/test_server_specs.py::test_shared_tools_are_registered_by_every_server``),
+and its body reads only the lifespan context and the service-agnostic half
+of the provider contract, so nothing here is Couchbase-specific.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +14,7 @@ from typing import cast
 
 from fastmcp import Context
 
-from cb_mcp.tools.server import get_server_configuration_status
+from cb_mcp.tools.status import get_server_configuration_status
 
 
 def _make_ctx(settings=None, cluster_provider=None, logging_config=None) -> Context:

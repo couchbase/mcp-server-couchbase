@@ -1,0 +1,202 @@
+name: Operational Insights Integration Tests
+
+# Runs tests/integration/operational_insights against a live Operational
+# Insights cluster (steps 2-5 of the quick-install guide:
+# https://docs.couchbase.com/enterprise-analytics/current/intro/do-a-quick-install.html).
+# Steps 2-3 (booting the containers) happen in "Start OI containers" below;
+# steps 4-5 (blob storage config + clusterInit) are
+# scripts/oi_ci_cluster/configure_cluster.sh.
+#
+# One job, matrixed over transport x server-binary — the same shape test.yml
+# uses for the operational server, minus the cb_version axis (only one
+# Operational Insights image is pinned). Four cells:
+#
+#   stdio / source   no build; pytest spawns the server over stdio itself.
+#   http  / source   runs the server as a background process from checkout.
+#   http  / docker   builds the image and runs the server as a container.
+#   http  / pypi     builds the wheel, installs it, runs the console script.
+#
+# docker and pypi are http-only because there is nothing distinct to build
+# for stdio — pytest always spawns it from source (see the OI conftest).
+# Each cell still surfaces as its own check.
+on:
+  pull_request:
+    branches: [main, multi_package]
+
+# One in-flight run per branch. Each run stands up four Operational Insights
+# clusters (one per matrix cell) plus an S3Mock sidecar each, and the docker
+# cell also builds the image — so a superseded run is expensive to leave
+# going. Pull-request only, so an unconditional cancel is correct here;
+# test.yml guards its `main` pushes instead.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Inherited by every job. These were repeated verbatim in each of the four
+# jobs this workflow used to declare.
+env:
+  # docker-compose.yml's ${VAR} references (steps 2-3).
+  OI_IMAGE: couchbase/enterprise-analytics:2.2.1
+  S3MOCK_IMAGE: adobe/s3mock:5.2.3
+  S3MOCK_BUCKET: cloud-storage-container
+  S3MOCK_STORE_ROOT: fs
+  S3MOCK_RETAIN_FILES_ON_EXIT: "true"
+  OI_ADMIN_PORT: 8091
+  OI_ANALYTICS_PORT: 8095
+  # configure_cluster.sh's blob storage settings (step 4).
+  BLOB_STORAGE_SCHEME: s3
+  BLOB_STORAGE_REGION: us-east-1
+  BLOB_STORAGE_ENDPOINT: http://s3mock:9090
+  BLOB_STORAGE_ANONYMOUS_AUTH: "true"
+  BLOB_STORAGE_PATH_STYLE_ADDRESSING: "true"
+  NUM_STORAGE_PARTITIONS: 16
+  # configure_cluster.sh's clusterInit settings (step 5).
+  CLUSTER_USERNAME: Administrator
+  CLUSTER_PASSWORD: password
+  CLUSTER_MEMORY_QUOTA: 100
+  CLUSTER_NAME: OI CI Cluster
+  # 127.0.0.1, not localhost: the couchbase_operational_insights SDK picks a
+  # random address when a hostname resolves to more than one (localhost ->
+  # 127.0.0.1 and ::1), and the ::1 the container's port publishing does not
+  # forward causes an immediate connection reset. A literal IP is not looked
+  # up, so it cannot happen. Port matches OI_ANALYTICS_PORT above; kept
+  # literal because an env entry cannot reference a sibling env entry.
+  CB_OI_CONNECTION_STRING: http://127.0.0.1:8095
+  # Where the server listens under the http cells, and where the tests then
+  # look for it.
+  MCP_HTTP_PORT: 8001
+  MCP_SERVER_URL: http://127.0.0.1:8001/mcp
+  # Name for the container the docker cell runs the server in.
+  MCP_CONTAINER_NAME: mcp-server-oi-http
+
+jobs:
+  oi-integration-tests:
+    name: 'Integration: operational-insights (${{ matrix.transport }} / ${{ matrix.server_binary }})'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        transport: ["stdio", "http"]
+        server_binary: ["source", "docker", "pypi"]
+        exclude:
+          - transport: stdio
+            server_binary: docker
+          - transport: stdio
+            server_binary: pypi
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: "latest"
+
+      - name: Set up Python (latest)
+        run: uv python install 3.13
+
+      # Needed by every cell: pytest itself always runs from the checkout via
+      # `uv run`, whatever binary the server under test came from.
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      - name: Start OI containers
+        run: docker compose -f scripts/oi_ci_cluster/docker-compose.yml up -d --wait
+
+      - name: Configure OI cluster
+        run: ./scripts/oi_ci_cluster/configure_cluster.sh
+
+      - name: Build Docker image
+        if: matrix.server_binary == 'docker'
+        run: docker build -t mcp-server-test:latest .
+
+      - name: Build and install PyPI wheel
+        if: matrix.server_binary == 'pypi'
+        run: |
+          uv build
+          python3 -m venv /tmp/pypi-test-venv
+          /tmp/pypi-test-venv/bin/pip install --quiet dist/couchbase_mcp_server-*.whl
+
+      # stdio cells skip this entirely: pytest spawns the server per test.
+      - name: Start MCP server (HTTP)
+        if: matrix.transport == 'http'
+        env:
+          CB_OI_USERNAME: ${{ env.CLUSTER_USERNAME }}
+          CB_OI_PASSWORD: ${{ env.CLUSTER_PASSWORD }}
+          CB_MCP_TRANSPORT: http
+          CB_MCP_PORT: ${{ env.MCP_HTTP_PORT }}
+          CB_MCP_READ_ONLY_MODE: "false"
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          echo "Starting Operational Insights MCP server (${{ matrix.server_binary }}) over HTTP..."
+
+          case "${{ matrix.server_binary }}" in
+            source)
+              # CB_* already in this step's environment; no re-export needed.
+              CB_MCP_HOST=127.0.0.1 uv run python -m mcp_server operational-insights &
+              echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+              ;;
+            pypi)
+              CB_MCP_HOST=127.0.0.1 \
+                /tmp/pypi-test-venv/bin/couchbase-mcp-server operational-insights &
+              echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+              ;;
+            docker)
+              # 0.0.0.0 inside the container so the host can reach it; env
+              # must be passed explicitly since it is a separate process tree.
+              docker run -d --network host \
+                --name "$MCP_CONTAINER_NAME" \
+                -e CB_OI_CONNECTION_STRING="$CB_OI_CONNECTION_STRING" \
+                -e CB_OI_USERNAME="$CB_OI_USERNAME" \
+                -e CB_OI_PASSWORD="$CB_OI_PASSWORD" \
+                -e CB_MCP_TRANSPORT=http \
+                -e CB_MCP_HOST=0.0.0.0 \
+                -e CB_MCP_PORT="$CB_MCP_PORT" \
+                -e CB_MCP_READ_ONLY_MODE="$CB_MCP_READ_ONLY_MODE" \
+                mcp-server-test:latest operational-insights
+              ;;
+          esac
+
+          echo "Waiting for HTTP server to be ready..."
+          for i in {1..30}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$MCP_SERVER_URL" 2>/dev/null || echo "000")
+            if [[ -n "$code" && "$code" != "000" ]]; then
+              echo "HTTP server is ready (HTTP $code after ${i}s)"
+              break
+            fi
+            echo "Waiting for HTTP server... ($i/30)"
+            sleep 1
+          done
+          # Uvicorn can accept connections before FastMCP's session manager
+          # finishes initializing — give it a moment to fully settle.
+          sleep 3
+
+      # MCP_SERVER_URL is set for every cell but only read when
+      # CB_MCP_TRANSPORT selects the http branch (see the OI conftest), so
+      # this step needs no per-transport branching.
+      - name: Run OI integration tests
+        env:
+          CB_OI_USERNAME: ${{ env.CLUSTER_USERNAME }}
+          CB_OI_PASSWORD: ${{ env.CLUSTER_PASSWORD }}
+          CB_MCP_TRANSPORT: ${{ matrix.transport }}
+          PYTHONPATH: src
+        run: |
+          echo "Running OI tests (${{ matrix.transport }} / ${{ matrix.server_binary }})..."
+          uv run pytest tests/integration/operational_insights -v --tb=short
+
+      - name: Stop HTTP server
+        if: always() && matrix.transport == 'http'
+        run: |
+          if [ "${{ matrix.server_binary }}" = "docker" ]; then
+            docker logs "$MCP_CONTAINER_NAME" 2>&1 | tail -50 || true
+            docker rm -f "$MCP_CONTAINER_NAME" 2>/dev/null || true
+          elif [ -n "${SERVER_PID:-}" ]; then
+            kill "$SERVER_PID" 2>/dev/null || true
+          fi
+
+      - name: Tear down OI containers
+        if: always()
+        run: docker compose -f scripts/oi_ci_cluster/docker-compose.yml down -v

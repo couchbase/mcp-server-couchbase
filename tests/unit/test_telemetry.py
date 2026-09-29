@@ -28,7 +28,7 @@ class TestSendInstallPing:
         fake_logger = _RecordingLogger()
         monkeypatch.setattr(telemetry, "telemetry_logger", fake_logger)
 
-        telemetry.send_install_ping("stdio")
+        telemetry.send_install_ping("stdio", server_id="operational")
 
         assert len(fake_logger.events) == 1
         assert fake_logger.events[0]["activity_type"] == "mcp_server_start"
@@ -37,7 +37,7 @@ class TestSendInstallPing:
     def test_noop_when_logger_unavailable(self, monkeypatch):
         monkeypatch.setattr(telemetry, "telemetry_logger", None)
         # Must not raise even with no logger configured.
-        telemetry.send_install_ping("http")
+        telemetry.send_install_ping("http", server_id="operational")
 
     def test_swallows_logger_exceptions(self, monkeypatch):
         class BrokenLogger:
@@ -46,7 +46,7 @@ class TestSendInstallPing:
 
         monkeypatch.setattr(telemetry, "telemetry_logger", BrokenLogger())
         # Must not raise even when the underlying SDK call blows up.
-        telemetry.send_install_ping("stdio")
+        telemetry.send_install_ping("stdio", server_id="operational")
 
 
 class TestWrapWithTelemetry:
@@ -58,7 +58,7 @@ class TestWrapWithTelemetry:
         def sample_tool(x: int) -> int:
             return x * 2
 
-        wrapped = telemetry.wrap_with_telemetry(sample_tool)
+        wrapped = telemetry.wrap_with_telemetry(sample_tool, server_id="operational")
         result = wrapped(21)
 
         assert result == 42
@@ -80,7 +80,9 @@ class TestWrapWithTelemetry:
             called = True
             return True
 
-        wrapped = telemetry.wrap_with_telemetry(async_sample_tool)
+        wrapped = telemetry.wrap_with_telemetry(
+            async_sample_tool, server_id="operational"
+        )
         result = await wrapped()
 
         assert called is True
@@ -96,7 +98,7 @@ class TestWrapWithTelemetry:
         def failing_tool():
             raise ValueError("bad input")
 
-        wrapped = telemetry.wrap_with_telemetry(failing_tool)
+        wrapped = telemetry.wrap_with_telemetry(failing_tool, server_id="operational")
 
         with pytest.raises(ValueError, match="bad input"):
             wrapped()
@@ -111,5 +113,5 @@ class TestWrapWithTelemetry:
         def sample_tool() -> str:
             return "ok"
 
-        wrapped = telemetry.wrap_with_telemetry(sample_tool)
+        wrapped = telemetry.wrap_with_telemetry(sample_tool, server_id="operational")
         assert wrapped() == "ok"

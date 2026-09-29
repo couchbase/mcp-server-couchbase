@@ -1,3 +1,10 @@
-from .contracts import ClusterProvider
+from .contracts import ClusterProvider, ProviderLifecycle
+from .spec import ScopeSpec, ServerSpec, ToolSet
 
-__all__ = ["ClusterProvider"]
+__all__ = [
+    "ClusterProvider",
+    "ProviderLifecycle",
+    "ScopeSpec",
+    "ServerSpec",
+    "ToolSet",
+]

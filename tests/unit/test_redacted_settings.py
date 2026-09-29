@@ -2,8 +2,10 @@
 
 This is security-sensitive code: the env-info log lands in support bundles,
 log aggregators, and screenshots. Anything that leaks here would leak there.
-The redaction relies on an explicit allow-list + a presence-only list; any
-settings key not in either is silently dropped. These tests assert that
+The redaction relies on an explicit allow-list + a presence-only list, each
+composed of a shared part and the server's own (``ServerSpec.safe_settings_keys``
+/ ``secret_settings_keys``); any settings key not in either is silently dropped.
+These tests pass the operational spec, so they exercise the real composition. These tests assert that
 contract end-to-end, including the "future settings key" failure mode where
 an unclassified field would otherwise leak by default.
 """
@@ -12,6 +14,7 @@ from __future__ import annotations
 
 import json
 
+from cb_mcp.servers.operational.spec import SPEC
 from cb_mcp.utils.environment import _redacted_settings
 
 
@@ -24,7 +27,8 @@ def test_safe_keys_pass_through_verbatim():
             "port": 8000,
             "connection_string": "couchbase://example",
             "username": "admin",
-        }
+        },
+        SPEC,
     )
     assert out["read_only_mode"] is True
     assert out["transport"] == "http"
@@ -46,7 +50,8 @@ def test_secret_paths_redacted_to_presence_booleans():
             "ca_cert_path": "/etc/ssl/ca.pem",
             "client_cert_path": "/etc/ssl/client.pem",
             "client_key_path": "/etc/ssl/client.key",
-        }
+        },
+        SPEC,
     )
     assert out == {
         # all safe keys absent in input → fall through as None
@@ -55,6 +60,7 @@ def test_secret_paths_redacted_to_presence_booleans():
         "host": None,
         "port": None,
         "connection_string": None,
+        "username": None,
         "disabled_tools": None,
         "confirmation_required_tools": None,
         # OAuth coordinates: safe keys, absent in input → None
@@ -75,7 +81,7 @@ def test_secret_paths_redacted_to_presence_booleans():
 
 
 def test_unset_presence_only_keys_report_false():
-    out = _redacted_settings({})
+    out = _redacted_settings({}, SPEC)
     assert out["password_configured"] is False
     assert out["ca_cert_path_configured"] is False
     assert out["client_cert_path_configured"] is False
@@ -88,7 +94,7 @@ def test_empty_string_secrets_treated_as_unset():
     Catches the "user passed --password '' by accident" case so we don't
     falsely advertise that a secret is set.
     """
-    out = _redacted_settings({"password": "", "ca_cert_path": ""})
+    out = _redacted_settings({"password": "", "ca_cert_path": ""}, SPEC)
     assert out["password_configured"] is False
     assert out["ca_cert_path_configured"] is False
 
@@ -103,7 +109,8 @@ def test_iterables_normalised_to_sorted_lists():
         {
             "disabled_tools": {"z_tool", "a_tool", "m_tool"},
             "confirmation_required_tools": ["replace", "delete"],
-        }
+        },
+        SPEC,
     )
     assert out["disabled_tools"] == ["a_tool", "m_tool", "z_tool"]
     assert out["confirmation_required_tools"] == ["delete", "replace"]
@@ -117,7 +124,7 @@ def test_iterables_accept_sets_lists_tuples_frozensets():
         ("b", "a"),
         frozenset({"b", "a"}),
     ):
-        out = _redacted_settings({"disabled_tools": collection})
+        out = _redacted_settings({"disabled_tools": collection}, SPEC)
         assert out["disabled_tools"] == ["a", "b"]
 
 
@@ -133,7 +140,8 @@ def test_unknown_keys_are_silently_dropped():
             "oauth_token": "very-secret",
             "api_key": "also-secret",
             "future_feature_flag": True,
-        }
+        },
+        SPEC,
     )
     # The keys themselves are dropped (not "future_feature_flag_configured" — only
     # the explicit allow-list entries get the "_configured" suffix treatment).
@@ -156,7 +164,7 @@ def test_secrets_never_appear_in_serialised_output():
         "client_key_path": "/secret/path/client.key-very-distinctive",
         "future_secret": "should-never-leak-very-distinctive",
     }
-    out = _redacted_settings(secrets)
+    out = _redacted_settings(secrets, SPEC)
     serialised = json.dumps(out, default=str)
     for value in secrets.values():
         assert value not in serialised, f"value leaked into output: {value!r}"

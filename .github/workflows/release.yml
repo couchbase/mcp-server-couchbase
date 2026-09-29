@@ -1,38 +1,145 @@
-name: PyPI Release
+name: Release and Build Python Wheels
+
+# Description:
+# Creates a GitHub release with changelog on version tag pushes, then triggers a Jenkins
+# job to build the distribution wheel. Combines what were previously two separate workflows
+# (Release and Build Wheel) to stay within GitHub's 3-level workflow_run chain limit.
+# Downstream workflows (Test PyPI Upload, PyPI Upload) trigger on successful completion.
+# Supports workflow_dispatch for manual re-runs; skips release creation if it already exists.
 
 on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+*" # Match tags like v0.1.0, v1.2.3, v1.2.3-alpha.1
   workflow_dispatch:
+    inputs:
+      version:
+        type: string
+        required: true
+        description: version tag name to release (e.g. v1.2.3)
 
 jobs:
-  pypi-publish:
-    name: Build and publish Python distributions to PyPI
+  create-release:
+    name: Create release and build wheel
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
-      id-token: write # Required for trusted publishing
-      contents: write # Required for creating releases
-
+      contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Check if stable release
+        id: check-stable
+        run: |
+          VERSION="${{ github.event.inputs.version || github.ref_name }}"
+          if [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_stable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_stable=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Install uv with python 3.11
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-        with:
-          version: latest
-          python-version: 3.11
-
-      - name: Build package
-        run: uv build
-
-      - name: Publish package to PyPI
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      - name: Check if release already exists
+        id: check-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.event.inputs.version || github.ref_name }}
+        run: |
+          if gh release view "$VERSION" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release $VERSION already exists, skipping creation"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Generate changelog and create release
+        if: steps.check-release.outputs.exists == 'false'
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           generate_release_notes: true
-          prerelease: false
-          files: dist/*
+          prerelease: ${{ steps.check-stable.outputs.is_stable == 'false' }}
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+
+      - name: Trigger Jenkins Job
+        run: |
+          set -eo pipefail
+          queued_job_url=$(curl -X POST \
+            "$JENKINS_BASE_URL/job/$JOB_NAME/buildWithParameters" \
+            -d "PRODUCT=${PRODUCT}" \
+            -d "VERSION=${VERSION}" \
+            --user "$JENKINS_USER:$JENKINS_API_TOKEN" \
+            --fail -s -D - -o /dev/null | grep -i "location:" | cut -d' ' -f2 | tr -d '\r')
+
+          echo "Queued job URL: ${queued_job_url}"
+
+          if [[ "$queued_job_url" =~ ^http: ]]; then
+            queued_job_url="https:${queued_job_url:5}"
+          fi
+          echo "Queued job URL after conversion: ${queued_job_url}"
+
+          echo "Waiting for build to start..."
+          build_url=""
+          for (( count=0; count<60; count++ )); do
+            response=$(curl -s --user "${JENKINS_USER}:${JENKINS_API_TOKEN}" \
+              "${queued_job_url}/api/json")
+
+            build_url=$(echo "$response" | jq -r '.executable.url // empty')
+            if [ -n "${build_url}" ]; then
+              echo "Build URL: ${build_url}"
+              break
+            fi
+
+            stuck=$(echo "$response" | jq -r '.stuck // false')
+            why=$(echo "$response" | jq -r '.why // empty')
+            echo "Build not started yet (stuck=${stuck}): ${why}"
+
+            if [[ "${stuck}" == "true" ]]; then
+              echo "Jenkins reports the queued item is stuck; giving up."
+              echo "Check job status at: ${JENKINS_BASE_URL}/job/${JOB_NAME}"
+              exit 1
+            fi
+
+            sleep 10
+          done
+
+          if [ -z "${build_url}" ]; then
+            echo "Unable to determine URL for the jenkins run."
+            echo "Check job status at: ${JENKINS_BASE_URL}/job/${JOB_NAME}"
+            exit 1
+          fi
+
+          echo "Polling for build completion..."
+          while true; do
+            response=$(curl -s --user "${JENKINS_USER}:${JENKINS_API_TOKEN}" \
+              "${build_url}/api/json")
+            building=$(echo "$response" | jq -r .building)
+
+            if [[ "$building" == "false" ]]; then
+              result=$(echo "$response" | jq -r .result)
+              echo "Build finished with result: ${result}"
+
+              if [[ "$result" != "SUCCESS" ]]; then
+                echo "Jenkins build did not succeed. Check details at: ${build_url}"
+                exit 1
+              fi
+              break
+            fi
+
+            echo "Still building... checking again in 30 seconds."
+            sleep 30
+          done
+        env:
+          JENKINS_BASE_URL: "https://server.jenkins.couchbase.com"
+          JENKINS_USER: ${{ secrets.SERVER_JENKINS_USERNAME }}
+          JENKINS_API_TOKEN: ${{ secrets.SERVER_JENKINS_PAT }}
+          PRODUCT: "mcp-server-couchbase"
+          VERSION: ${{ github.event.inputs.version || github.ref_name }}
+          JOB_NAME: "wheel-build"
+
+      - name: Save version for downstream workflows
+        env:
+          VERSION: ${{ github.event.inputs.version || github.ref_name }}
+        run: echo "$VERSION" > version.txt
+
+      - name: Upload version artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-version
+          path: version.txt
