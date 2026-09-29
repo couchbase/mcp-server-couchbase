@@ -7,7 +7,6 @@ from couchbase_operational_insights.options import ClusterOptions, SecurityOptio
 from ...servers.operational_insights.constants import (
     OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE,
 )
-from .sdk_logging import quiesce_new_root_handlers
 
 logger = logging.getLogger(f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.utils.connection")
 
@@ -52,6 +51,7 @@ def connect_to_operational_insights_cluster(
         )
 
     if client_cert_path:
+        logger.debug("Using client certificate authentication")
         if not connection_string.startswith("https://"):
             raise ValueError(
                 "Client certificate (mTLS) authentication requires an "
@@ -62,6 +62,7 @@ def connect_to_operational_insights_cluster(
             client_cert_path, client_key_path, password=client_cert_password
         )
     else:
+        logger.debug("Using username/password authentication")
         missing = [
             name
             for name, value in (("username", username), ("password", password))
@@ -86,15 +87,7 @@ def connect_to_operational_insights_cluster(
 
     try:
         logger.info("Connecting to Operational Insights cluster...")
-        # The SDK's own import-time logging setup (protocol/__init__.py's
-        # configure_logger()) turns out to actually fire here, on the first
-        # real connection, not at module-import time — this call is what
-        # triggers `couchbase_operational_insights.protocol` to be imported.
-        # Scoped tightly around just this call (not the whole function) so
-        # only a handler that appears during this exact call is treated as
-        # the SDK's, regardless of whether the connection succeeds.
-        with quiesce_new_root_handlers():
-            cluster = Cluster.create_instance(connection_string, credential, options)
+        cluster = Cluster.create_instance(connection_string, credential, options)
         logger.info("Successfully connected to Operational Insights cluster")
         return cluster
     except Exception as e:

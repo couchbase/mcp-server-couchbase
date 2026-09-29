@@ -17,6 +17,7 @@ For full documentation, visit [docs.couchbase.com/mcp-server](https://docs.couch
 </a>
 
 <!-- mcp-name: io.github.couchbase/mcp-server-couchbase -->
+<!-- mcp-name: io.github.couchbase/mcp-server-couchbase-operational-insights -->
 
 ## Table of Contents
 - [Why Couchbase MCP Server](#why-couchbase-mcp-server)
