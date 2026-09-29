@@ -171,22 +171,32 @@ def build_app(
         # whenever the user runs with --log-level DEBUG.
         log_environment_info(transport, settings, spec)
         send_install_ping(transport, server_id=spec.id)
-        app_context = AppContext(
-            cluster_provider=provider_factory(),
-            settings=settings,
-            read_only_mode=read_only_mode,
-            logging_config=logging_config,
-            audit_config=audit_config.as_dict() if audit_config is not None else None,
-            server_id=spec.id,
-            server_name=spec.fastmcp_name,
-        )
+        # Built inside the try, not before it: ``provider_factory`` opens a
+        # connection and can fail, and auditing has already started by this
+        # point — with a sink open, a writer thread running and the
+        # server-started record queued. Constructing this outside the try meant
+        # a provider failure skipped the cleanup below entirely, losing
+        # whatever was queued and leaving the sink open for the life of the
+        # process. A failed startup is exactly when the audit trail matters.
+        app_context: AppContext | None = None
         try:
+            app_context = AppContext(
+                cluster_provider=provider_factory(),
+                settings=settings,
+                read_only_mode=read_only_mode,
+                logging_config=logging_config,
+                audit_config=(
+                    audit_config.as_dict() if audit_config is not None else None
+                ),
+                server_id=spec.id,
+                server_name=spec.fastmcp_name,
+            )
             yield app_context
         except Exception as e:
             logger.error(f"Error in app lifespan: {e}", exc_info=True)
             raise
         finally:
-            if app_context.cluster_provider:
+            if app_context is not None and app_context.cluster_provider:
                 app_context.cluster_provider.close()
             # Recorded before the sink closes so the stop record is the last
             # line written. A process killed outright leaves no stop record;

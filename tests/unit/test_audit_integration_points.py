@@ -24,14 +24,18 @@ Coverage map:
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import Context
 
 from cb_mcp.audit import state as audit_state
+from cb_mcp.audit.config import resolve_audit_config
+from cb_mcp.audit.emitter import get_audit_logger
 from cb_mcp.audit.exceptions import (
     ConfirmationDeclinedError,
     ReadOnlyWriteBlockedError,
@@ -45,6 +49,8 @@ from cb_mcp.audit.identity import (
     resolve_real_userid,
     warn_on_unauthenticated_http,
 )
+from cb_mcp.core.app import build_app
+from cb_mcp.servers.operational.spec import SPEC
 from cb_mcp.tools.operational.query import (
     _query_correlation_options,
     run_sql_plus_plus_query,
@@ -359,6 +365,67 @@ def test_unparseable_statement_still_fails_safe_when_writes_are_blocked():
         audit_state.reset(token)
 
 
+def test_statement_is_classified_before_the_cluster_is_touched():
+    """A failed DML attempt must not be booked against the filterable read id.
+
+    Connecting first meant an unreachable cluster raised before the statement
+    was ever inspected, so "someone tried to UPDATE and it failed" was recorded
+    as a query *read* — and read ids are filterable, so an operator turning
+    read noise down would lose it.
+    """
+
+    def unreachable(_ctx):
+        raise RuntimeError("cluster unreachable")
+
+    ctx = SimpleNamespace(
+        request_context=SimpleNamespace(
+            lifespan_context=SimpleNamespace(
+                cluster_provider=SimpleNamespace(get_cluster=unreachable),
+                read_only_mode=False,
+            )
+        )
+    )
+    token = audit_state.install()
+    try:
+        with (
+            patch(
+                "cb_mcp.tools.operational.query.get_audit_logger",
+                return_value=SimpleNamespace(active=True),
+            ),
+            pytest.raises(RuntimeError, match="unreachable"),
+        ):
+            run_sql_plus_plus_query(ctx, "b", "s", "UPDATE users SET age = 25")
+        assert audit_state.get_statement_class() == "write"
+    finally:
+        audit_state.reset(token)
+
+
+def test_read_only_block_does_not_need_a_reachable_cluster():
+    """The guard is a policy decision, so it answers before any connection.
+
+    The caller now gets the accurate reason — blocked — rather than whichever
+    connection error happened to come first.
+    """
+
+    def unreachable(_ctx):
+        raise RuntimeError("cluster unreachable")
+
+    ctx = SimpleNamespace(
+        request_context=SimpleNamespace(
+            lifespan_context=SimpleNamespace(
+                cluster_provider=SimpleNamespace(get_cluster=unreachable),
+                read_only_mode=True,
+            )
+        )
+    )
+    token = audit_state.install()
+    try:
+        with pytest.raises(ReadOnlyWriteBlockedError):
+            run_sql_plus_plus_query(ctx, "b", "s", "UPDATE users SET age = 25")
+    finally:
+        audit_state.reset(token)
+
+
 # ---------------------------------------------------------------------------
 # identity
 # ---------------------------------------------------------------------------
@@ -458,3 +525,71 @@ def test_query_correlation_is_omitted_when_state_carries_no_cid():
         assert _query_correlation_options() == {}
     finally:
         audit_state.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# lifecycle
+# ---------------------------------------------------------------------------
+
+
+def test_audit_is_shut_down_when_provider_startup_fails(tmp_path):
+    """A failed startup is exactly when the audit trail matters.
+
+    ``_start_audit`` runs first, so by the time the provider is constructed the
+    sink is open, the writer thread is running and the server-started record is
+    queued. Building the AppContext outside the try meant a provider failure
+    skipped the cleanup entirely: the queued record was lost and the sink stayed
+    open for the life of the process.
+    """
+    audit_config = resolve_audit_config(
+        enabled=True,
+        file=str(tmp_path / "audit.log"),
+        rotation_max_size_mb=None,
+        retention_backup_count=None,
+        tool_args=None,
+        disabled_events=None,
+    )
+    captured: dict = {}
+
+    def capture(*_args, **kwargs):
+        captured["lifespan"] = kwargs.get("lifespan")
+        return MagicMock()
+
+    def exploding_provider():
+        raise RuntimeError("cannot reach the cluster")
+
+    with patch("cb_mcp.core.app.FastMCP", side_effect=capture):
+        build_app(
+            SPEC,
+            tools=list(SPEC.tools.all_tools)[:2],
+            settings={
+                "transport": "stdio",
+                "oauth_enabled": False,
+                "disabled_tools": set(),
+                "confirmation_required_tools": set(),
+            },
+            provider_factory=exploding_provider,
+            read_only_mode=True,
+            audit_config=audit_config,
+        )
+
+    async def drive():
+        async with captured["lifespan"](SimpleNamespace()):
+            pass  # pragma: no cover - startup raises before the body runs
+
+    with pytest.raises(RuntimeError, match="cannot reach the cluster"):
+        asyncio.run(drive())
+
+    # The sink was closed rather than left open for the process lifetime.
+    assert not get_audit_logger().active
+
+    written = [
+        json.loads(line)
+        for path in tmp_path.iterdir()
+        if path.suffix == ".log"
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    names = [record["name"] for record in written]
+    assert "server started" in names, "queued records were lost on the failed startup"
+    assert "server stopped" in names, "no clean-shutdown record for the failed startup"

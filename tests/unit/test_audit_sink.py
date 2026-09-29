@@ -24,7 +24,9 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -34,6 +36,14 @@ from cb_mcp.audit.sink import AuditSink, process_scoped_path
 def _drain(sink: AuditSink) -> None:
     """Close the sink so the writer thread finishes and flushes."""
     sink.close(timeout=10.0)
+
+
+def _settle(sink: AuditSink, timeout: float = 2.0) -> None:
+    """Wait for the writer to drain the queue, without closing the sink."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and not sink._queue.empty():
+        time.sleep(0.02)
+    time.sleep(0.1)
 
 
 # ---------------------------------------------------------------------------
@@ -252,3 +262,89 @@ def test_emit_from_many_threads_loses_nothing(tmp_path):
     # Every line must be complete JSON: no interleaved partial writes.
     parsed = [json.loads(line) for line in lines]
     assert len({(r["w"], r["i"]) for r in parsed}) == 800
+
+
+def test_sink_recovers_after_a_failed_rotation(tmp_path):
+    """A failed reopen must not stop the sink for good.
+
+    Rotation closes the live file before reopening it. If that reopen fails —
+    full disk, revoked permission, unmounted volume — the sink was left holding
+    a closed handle and never wrote again, even after the condition cleared.
+    Silent and permanent is the worst failure mode an audit log can have.
+    """
+    sink = AuditSink(tmp_path / "a.log", max_bytes=200, backup_count=0)
+    sink.start()
+    line = '{"pad":"' + "x" * 80 + '"}\n'
+
+    for _ in range(3):
+        sink.emit(line)
+    _settle(sink)
+    before = sink.stats["written"]
+
+    real_open = open
+    failed = {"done": False}
+    # The sink writes a process-scoped path (a.<pid>.log), so match on the
+    # resolved filename rather than the configured one.
+    target = str(sink.path)
+
+    def flaky(*args, **kwargs):
+        # Fail the first reopen attempted during rotation, then behave.
+        if not failed["done"] and args and str(args[0]) == target:
+            mode = args[1] if len(args) > 1 else kwargs.get("mode", "r")
+            if "w" in mode or "a" in mode:
+                failed["done"] = True
+                raise OSError("disk full")
+        return real_open(*args, **kwargs)
+
+    with patch("builtins.open", side_effect=flaky):
+        for _ in range(3):
+            sink.emit(line)
+        _settle(sink)
+
+    assert failed["done"], "the probe never exercised the failing reopen"
+    assert sink.stats["write_errors"] >= 1, "the failed reopen was not recorded"
+
+    # The measurement that matters: writes attempted *after* the failure. The
+    # count is taken here, once the stream is known to be closed, so a record
+    # that happened to land before the failing rotation cannot mask a sink that
+    # never recovered.
+    stalled_at = sink.stats["written"]
+    for _ in range(3):
+        sink.emit(line)
+    _settle(sink)
+    sink.close()
+
+    assert sink.stats["written"] > stalled_at, (
+        "sink never wrote again after the failed rotation: "
+        f"written stayed at {stalled_at}"
+    )
+    assert before <= stalled_at
+
+
+def test_writer_exits_when_the_queue_is_full_at_close(tmp_path):
+    """close() cannot post the sentinel into a full queue.
+
+    Dropping a queued record to make room would lose an audit line purely to
+    shut down faster, so the writer polls the closed flag instead. Before that,
+    it blocked on an empty get() forever and the thread leaked.
+    """
+    sink = AuditSink(tmp_path / "b.log", max_bytes=10_000, backup_count=1, queue_size=4)
+    sink.start()
+    time.sleep(0.05)
+
+    with patch.object(sink, "_write_batch", side_effect=lambda lines: time.sleep(0.5)):
+        for index in range(20):
+            sink.emit(f'{{"i":{index}}}\n')
+        sink.close(timeout=3.0)
+
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        if not any(
+            t.name == "cb-mcp-audit-writer" and t.is_alive()
+            for t in threading.enumerate()
+        ):
+            break
+        time.sleep(0.05)
+    assert not any(
+        t.name == "cb-mcp-audit-writer" and t.is_alive() for t in threading.enumerate()
+    ), "writer thread did not exit"

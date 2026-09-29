@@ -54,6 +54,12 @@ _ERROR_LOG_INTERVAL_SECONDS = 60.0
 #: Seconds the writer thread is given to drain on close.
 DEFAULT_CLOSE_TIMEOUT = 5.0
 
+#: How long the writer blocks on an empty queue before re-checking whether the
+#: sink has been closed. The sentinel normally wakes it immediately; this is the
+#: fallback for the one case the sentinel cannot cover — a queue already full
+#: when ``close`` runs, so the sentinel could not be posted.
+_POLL_SECONDS = 0.2
+
 _SENTINEL = object()
 
 
@@ -141,8 +147,10 @@ class AuditSink:
             return
         self._closed.set()
         if self._thread is not None:
-            # A full queue means the writer is already behind; it will reach
-            # the sentinel-free shutdown path via the join timeout below.
+            # Best-effort: on a full queue the sentinel cannot be posted, and
+            # dropping a queued record to make room for it would lose an audit
+            # line purely to shut down faster. The writer polls the closed flag
+            # instead, so it still exits once it has drained what it has.
             with contextlib.suppress(queue.Full):
                 self._queue.put_nowait(_SENTINEL)
             self._thread.join(timeout=timeout)
@@ -184,7 +192,15 @@ class AuditSink:
 
     def _run(self) -> None:
         while True:
-            item = self._queue.get()
+            try:
+                item = self._queue.get(timeout=_POLL_SECONDS)
+            except queue.Empty:
+                # Nothing left to write. Exit only once the sink is closed,
+                # which is what lets the thread finish when ``close`` could not
+                # post the sentinel into a full queue.
+                if self._closed.is_set():
+                    return
+                continue
             if item is _SENTINEL:
                 return
             batch = [item]
@@ -200,20 +216,41 @@ class AuditSink:
                 batch.append(nxt)
             self._write_batch(batch)
 
+    def _reopen_if_closed(self) -> None:
+        """Re-establish the stream if it is not open.
+
+        Rotation closes the live file before reopening it, so a failure in
+        between — a full disk, a revoked permission, an unmounted volume —
+        leaves the sink holding a closed handle. Without this the sink would
+        never write again even after the condition cleared, which is the worst
+        possible failure mode for an audit log: silent and permanent. Recovery
+        is attempted per record, so the first write after the disk frees up
+        succeeds.
+        """
+        if self._stream is not None and not self._stream.closed:
+            return
+        self._stream = open(self.path, "a", encoding="utf-8")  # noqa: SIM115
+        self._size = self.path.stat().st_size
+
     def _write_batch(self, lines: list[str]) -> None:
         for line in lines:
             try:
+                self._reopen_if_closed()
                 self._rotate_if_needed(len(line.encode("utf-8")))
                 self._stream.write(line)
                 self._size += len(line.encode("utf-8"))
                 self._written += 1
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
+                # ValueError is "I/O operation on closed file": reachable when
+                # ``close`` closes the stream while this thread is still
+                # draining, and not an OSError subclass.
                 self._errors += 1
                 self._dropped += 1
                 self._log_failure(f"failed to write audit record: {exc}")
         try:
-            self._stream.flush()
-        except OSError as exc:
+            if not self._stream.closed:
+                self._stream.flush()
+        except (OSError, ValueError) as exc:
             self._errors += 1
             self._log_failure(f"failed to flush audit file: {exc}")
 
