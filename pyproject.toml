@@ -20,6 +20,13 @@ dependencies = [
     "lark-sqlpp>=0.2.1",
     "fastmcp>=3.2.0,<4.0.0",
     "reo-census>=0.1.3,<0.2.0",
+    # Uvicorn uses uvloop and httptools automatically when they are installed,
+    # and falls back to the pure-Python asyncio event loop and h11 parser when
+    # they are not. Declaring them makes the faster implementations the default
+    # rather than something a deployment has to know to add. uvloop publishes
+    # no Windows wheels, hence the marker.
+    "uvloop>=0.21.0; sys_platform != 'win32'",
+    "httptools>=0.6.0",
 ]
 
 [project.urls]
