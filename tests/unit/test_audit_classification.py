@@ -27,32 +27,44 @@ from cb_mcp.audit.classification import (
     resolve_tool_call_event,
     unclassified_tool_names,
 )
-from cb_mcp.tools import (
-    ALL_TOOLS,
-    COLLECTION_WRITE_TOOLS,
-    INDEX_WRITE_TOOLS,
-    KV_WRITE_TOOLS,
-    READ_ONLY_TOOLS,
-)
+from cb_mcp.tools.operational import ALL_TOOLS, READ_ONLY_TOOLS, WRITE_TOOLS
 
+#: The audited package. Only ``operational`` has a Tier-2 block and a
+#: classification table; the Operational Insights server declares no
+#: ``audit_package`` and is deliberately not audited.
+PACKAGE = "operational"
+
+#: Main collapsed the four per-area tool groups into read-only and write when
+#: the second server landed (#250), so the parity assertions below read the two
+#: that remain. The contract they test is unchanged: the audit class must agree
+#: with the server's own categorisation of every registered tool.
 REGISTERED = {tool.__name__ for tool in ALL_TOOLS}
-WRITE_TOOL_NAMES = {
-    tool.__name__
-    for tool in KV_WRITE_TOOLS + COLLECTION_WRITE_TOOLS + INDEX_WRITE_TOOLS
-}
+WRITE_TOOL_NAMES = {tool.__name__ for tool in WRITE_TOOLS}
 READ_ONLY_NAMES = {tool.__name__ for tool in READ_ONLY_TOOLS}
 
 
 def test_every_registered_tool_is_classified():
-    assert unclassified_tool_names(REGISTERED) == []
+    assert unclassified_tool_names(REGISTERED, PACKAGE) == []
 
 
 def test_no_stale_entries_for_tools_that_do_not_exist():
-    assert sorted(set(TOOL_CLASSIFICATION) - REGISTERED) == []
+    assert sorted(set(TOOL_CLASSIFICATION[PACKAGE]) - REGISTERED) == []
 
 
 def test_classification_covers_the_registered_set_exactly():
-    assert set(TOOL_CLASSIFICATION) == REGISTERED
+    assert set(TOOL_CLASSIFICATION[PACKAGE]) == REGISTERED
+
+
+def test_only_the_operational_package_is_classified():
+    """Operational Insights is deliberately unaudited.
+
+    Its tools collide with operational's on five names, so classifying it
+    without its own Tier-2 block would book its records against operational
+    ids. Adding it is a table here plus a block in the catalogue — this test
+    is what will fail, informatively, on the day someone adds one without
+    the other.
+    """
+    assert set(TOOL_CLASSIFICATION) == {"operational"}
 
 
 @pytest.mark.parametrize("tool_name", sorted(WRITE_TOOL_NAMES))
@@ -129,6 +141,6 @@ def test_required_scope_is_derived_from_the_operation_class(operation_class, exp
 
 
 def test_every_classification_uses_a_known_category_and_class():
-    for tool_name, (category, operation_class) in TOOL_CLASSIFICATION.items():
+    for tool_name, (category, operation_class) in TOOL_CLASSIFICATION[PACKAGE].items():
         assert category in CATEGORIES, tool_name
         assert operation_class in ("read", "write"), tool_name

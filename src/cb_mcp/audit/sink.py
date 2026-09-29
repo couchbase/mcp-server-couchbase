@@ -35,9 +35,9 @@ import threading
 import time
 from pathlib import Path
 
-from ..utils.constants import MCP_SERVER_NAME
+from ..utils.constants import LOGGER_NAMESPACE
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.audit.sink")
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.audit.sink")
 
 #: Bounded queue depth. Deep enough to absorb a burst of tool calls while the
 #: writer thread is mid-flush, shallow enough that a wedged disk cannot grow

@@ -26,55 +26,85 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from .catalog import ToolCallEvent, tool_call_event
+from .catalog import DEFAULT_SERVICE_PACKAGE, ToolCallEvent, tool_call_event
 
-#: ``tool_name -> (category, operation_class)``.
+#: ``service package -> {tool_name -> (category, operation_class)}``.
 #:
-#: Ordered by category to match the catalogue layout rather than
-#: alphabetically, so a reviewer can check a whole block in one pass.
-TOOL_CLASSIFICATION: dict[str, tuple[str, str]] = {
-    # -- cluster / health -------------------------------------------------
-    "get_server_configuration_status": ("cluster", "read"),
-    "test_cluster_connection": ("cluster", "read"),
-    "get_cluster_health_and_services": ("cluster", "read"),
-    "get_cluster_diagnostics_report": ("cluster", "read"),  # PENDING PRD
-    # -- schema / discovery ----------------------------------------------
-    "get_buckets_in_cluster": ("schema", "read"),
-    "get_scopes_in_bucket": ("schema", "read"),
-    "get_collections_in_scope": ("schema", "read"),
-    "get_scopes_and_collections_in_bucket": ("schema", "read"),
-    "get_schema_for_collection": ("schema", "read"),
-    "create_scope": ("schema", "write"),  # PENDING PRD
-    "create_collection": ("schema", "write"),  # PENDING PRD
-    "delete_scope": ("schema", "write"),  # PENDING PRD
-    "delete_collection": ("schema", "write"),  # PENDING PRD
-    # -- kv (document) ----------------------------------------------------
-    "get_document_by_id": ("kv", "read"),
-    "lookup_subdocument": ("kv", "read"),  # PENDING PRD
-    "upsert_document_by_id": ("kv", "write"),
-    "insert_document_by_id": ("kv", "write"),
-    "replace_document_by_id": ("kv", "write"),
-    "delete_document_by_id": ("kv", "write"),
-    "mutate_subdocument": ("kv", "write"),  # PENDING PRD
-    # -- query (SQL++) ----------------------------------------------------
-    # run_sql_plus_plus_query is re-classified per statement at invocation; the
-    # entry here is the class used when the statement was not inspected.
-    "run_sql_plus_plus_query": ("query", "read"),
-    "explain_sql_plus_plus_query": ("query", "read"),
-    # -- index ------------------------------------------------------------
-    "list_indexes": ("index", "read"),
-    "get_index_advisor_recommendations": ("index", "read"),
-    "create_index": ("index", "write"),  # PENDING PRD
-    "build_index": ("index", "write"),  # PENDING PRD
-    "drop_index": ("index", "write"),  # PENDING PRD
-    # -- performance ------------------------------------------------------
-    "get_longest_running_queries": ("performance", "read"),
-    "get_most_frequent_queries": ("performance", "read"),
-    "get_queries_with_largest_response_sizes": ("performance", "read"),
-    "get_queries_with_large_result_count": ("performance", "read"),
-    "get_queries_using_primary_index": ("performance", "read"),
-    "get_queries_not_using_covering_index": ("performance", "read"),
-    "get_queries_not_selective": ("performance", "read"),
+#: Keyed by service package, not by bare tool name. The repository ships two
+#: servers and they genuinely collide on five names — ``create_index``,
+#: ``list_indexes``, ``get_collections_in_scope``, ``get_schema_for_collection``
+#: and ``get_server_configuration_status``. A flat table cannot represent both,
+#: and booking one server's tool against another's block would put records in a
+#: block whose ids mean something else.
+#:
+#: Only ``operational`` is populated today; the Operational Insights server is
+#: not audited (see :data:`cb_mcp.audit.catalog.DEFAULT_SERVICE_PACKAGE`).
+#: Adding it later means a table here and a block in
+#: :data:`~cb_mcp.audit.catalog.SERVICE_PACKAGE_BLOCKS`, and renumbers nothing.
+#:
+#: Within a package, ordered by category to match the catalogue layout rather
+#: than alphabetically, so a reviewer can check a whole block in one pass.
+TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
+    "operational": {
+        # -- cluster / health ---------------------------------------------
+        "get_server_configuration_status": ("cluster", "read"),
+        "test_cluster_connection": ("cluster", "read"),
+        "get_cluster_health_and_services": ("cluster", "read"),
+        "get_cluster_diagnostics_report": ("cluster", "read"),  # PENDING PRD
+        "get_cluster_metrics": ("cluster", "read"),  # PENDING PRD
+        # Reads bundled reference data rather than the cluster, so it touches
+        # no keyspace and has no service of its own. Booked as a cluster read:
+        # it is a server-level informational call, which is what that category
+        # already covers.
+        "discover_tool_input_values": ("cluster", "read"),  # PENDING PRD
+        # -- schema / discovery --------------------------------------------
+        "get_buckets_in_cluster": ("schema", "read"),
+        "get_scopes_in_bucket": ("schema", "read"),
+        "get_collections_in_scope": ("schema", "read"),
+        "get_scopes_and_collections_in_bucket": ("schema", "read"),
+        "get_schema_for_collection": ("schema", "read"),
+        "create_scope": ("schema", "write"),  # PENDING PRD
+        "create_collection": ("schema", "write"),  # PENDING PRD
+        "delete_scope": ("schema", "write"),  # PENDING PRD
+        "delete_collection": ("schema", "write"),  # PENDING PRD
+        # -- kv (document) --------------------------------------------------
+        "get_document_by_id": ("kv", "read"),
+        "lookup_subdocument": ("kv", "read"),  # PENDING PRD
+        "upsert_document_by_id": ("kv", "write"),
+        "insert_document_by_id": ("kv", "write"),
+        "replace_document_by_id": ("kv", "write"),
+        "delete_document_by_id": ("kv", "write"),
+        "mutate_subdocument": ("kv", "write"),  # PENDING PRD
+        # -- query (SQL++) ---------------------------------------------------
+        # run_sql_plus_plus_query is re-classified per statement at invocation;
+        # the entry here is the class used when the statement was not inspected.
+        "run_sql_plus_plus_query": ("query", "read"),
+        "explain_sql_plus_plus_query": ("query", "read"),
+        # -- index -----------------------------------------------------------
+        "list_indexes": ("index", "read"),
+        "get_index_advisor_recommendations": ("index", "read"),
+        "get_index_stats": ("index", "read"),  # PENDING PRD
+        "create_index": ("index", "write"),  # PENDING PRD
+        "build_index": ("index", "write"),  # PENDING PRD
+        "drop_index": ("index", "write"),  # PENDING PRD
+        # -- performance -----------------------------------------------------
+        "get_longest_running_queries": ("performance", "read"),
+        "get_most_frequent_queries": ("performance", "read"),
+        "get_queries_with_largest_response_sizes": ("performance", "read"),
+        "get_queries_with_large_result_count": ("performance", "read"),
+        "get_queries_using_primary_index": ("performance", "read"),
+        "get_queries_not_using_covering_index": ("performance", "read"),
+        "get_queries_not_selective": ("performance", "read"),
+        # -- search (FTS) ------------------------------------------------------
+        # Its own category rather than folded into index: run_fts_query is a
+        # query, so a reviewer filtering on `index read` should not get search
+        # traffic mixed in. All three tools ship read-only; the search *write*
+        # id (61528) exists in the catalogue for when FTS index management
+        # lands, so adding it will need no new id.
+        "list_fts_indexes": ("search", "read"),  # PENDING PRD
+        "get_fts_index_definition": ("search", "read"),  # PENDING PRD
+        "run_fts_query": ("search", "read"),  # PENDING PRD
+    },
 }
 
 #: The one tool whose read/write class depends on the statement it is given.
@@ -90,13 +120,23 @@ FAILSAFE_OPERATION_CLASS = "write"
 FAILSAFE_CATEGORY = "cluster"
 
 
-def is_classified(tool_name: str) -> bool:
-    """True when ``tool_name`` has an explicit classification entry."""
-    return tool_name in TOOL_CLASSIFICATION
+def classification_for(
+    package: str = DEFAULT_SERVICE_PACKAGE,
+) -> dict[str, tuple[str, str]]:
+    """Return ``package``'s classification table, or an empty one if unaudited."""
+    return TOOL_CLASSIFICATION.get(package, {})
+
+
+def is_classified(tool_name: str, package: str = DEFAULT_SERVICE_PACKAGE) -> bool:
+    """True when ``tool_name`` has an explicit entry in ``package``'s table."""
+    return tool_name in classification_for(package)
 
 
 def classify_tool(
-    tool_name: str, *, operation_class_override: str | None = None
+    tool_name: str,
+    *,
+    package: str = DEFAULT_SERVICE_PACKAGE,
+    operation_class_override: str | None = None,
 ) -> tuple[str, str]:
     """Return ``(category, operation_class)`` for ``tool_name``.
 
@@ -108,7 +148,7 @@ def classify_tool(
 
     Unknown tools fail closed to a write class.
     """
-    category, operation_class = TOOL_CLASSIFICATION.get(
+    category, operation_class = classification_for(package).get(
         tool_name, (FAILSAFE_CATEGORY, FAILSAFE_OPERATION_CLASS)
     )
     if operation_class_override is not None:
@@ -117,13 +157,18 @@ def classify_tool(
 
 
 def resolve_tool_call_event(
-    tool_name: str, *, operation_class_override: str | None = None
+    tool_name: str,
+    *,
+    package: str = DEFAULT_SERVICE_PACKAGE,
+    operation_class_override: str | None = None,
 ) -> ToolCallEvent:
-    """Resolve the catalogue entry for a tool invocation."""
+    """Resolve the catalogue entry for a tool invocation in ``package``."""
     category, operation_class = classify_tool(
-        tool_name, operation_class_override=operation_class_override
+        tool_name,
+        package=package,
+        operation_class_override=operation_class_override,
     )
-    return tool_call_event(category, operation_class)
+    return tool_call_event(category, operation_class, package)
 
 
 def required_scope_for(operation_class: str) -> str:
@@ -135,13 +180,17 @@ def required_scope_for(operation_class: str) -> str:
     return "write" if operation_class == "write" else "read"
 
 
-def unclassified_tool_names(tool_names: Iterable[str]) -> list[str]:
-    """Return the subset of ``tool_names`` with no classification entry."""
-    return sorted(name for name in tool_names if name not in TOOL_CLASSIFICATION)
+def unclassified_tool_names(
+    tool_names: Iterable[str], package: str = DEFAULT_SERVICE_PACKAGE
+) -> list[str]:
+    """Return the subset of ``tool_names`` with no entry in ``package``'s table."""
+    table = classification_for(package)
+    return sorted(name for name in tool_names if name not in table)
 
 
 __all__ = [
     "FAILSAFE_CATEGORY",
+    "classification_for",
     "FAILSAFE_OPERATION_CLASS",
     "STATEMENT_CLASSIFIED_TOOL",
     "TOOL_CLASSIFICATION",

@@ -49,9 +49,9 @@ from typing import Any
 from fastmcp.exceptions import NotFoundError
 from fastmcp.server.middleware import Middleware
 
-from ..utils.constants import MCP_SERVER_NAME
+from ..utils.constants import LOGGER_NAMESPACE
 from . import state
-from .catalog import AuditEvent
+from .catalog import DEFAULT_SERVICE_PACKAGE, AuditEvent
 from .classification import (
     STATEMENT_CLASSIFIED_TOOL,
     is_classified,
@@ -71,7 +71,7 @@ from .record import (
     REASON_EXECUTION_ERROR,
 )
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.audit.middleware")
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.audit.middleware")
 
 #: Argument names that together identify the keyspace a tool acted on. Every
 #: keyspace-scoped tool in this server uses exactly these names.
@@ -136,6 +136,7 @@ class AuditMiddleware(Middleware):
         *,
         transport: str,
         cb_userid: str | None = None,
+        service_package: str = DEFAULT_SERVICE_PACKAGE,
         audit_logger: AuditLogger | None = None,
     ) -> None:
         """
@@ -143,6 +144,10 @@ class AuditMiddleware(Middleware):
             transport: The resolved transport name, used to decide whether an
                 unauthenticated caller is ``anonymous`` (HTTP) or the local
                 process owner (stdio).
+            service_package: Which Tier-2 block this server's tool calls are
+                booked against, and which classification table names them.
+                Supplied from ``ServerSpec.audit_package`` so two servers that
+                share a tool name cannot share an event id.
             cb_userid: The Couchbase user the server connects to the cluster
                 with. Recorded so a reviewer can see which cluster identity the
                 MCP-layer caller was mapped onto — the collapse this audit log
@@ -151,6 +156,7 @@ class AuditMiddleware(Middleware):
         """
         self._transport = transport
         self._cb_userid = cb_userid
+        self._service_package = service_package
         self._injected_logger = audit_logger
 
     @property
@@ -363,7 +369,11 @@ class AuditMiddleware(Middleware):
             if tool_name == STATEMENT_CLASSIFIED_TOOL
             else None
         )
-        event = resolve_tool_call_event(tool_name, operation_class_override=override)
+        event = resolve_tool_call_event(
+            tool_name,
+            package=self._service_package,
+            operation_class_override=override,
+        )
 
         outcome = OUTCOME_SUCCESS
         reason: str | None = None
@@ -383,7 +393,7 @@ class AuditMiddleware(Middleware):
             "cb_userid": self._cb_userid,
             "confirmation": confirmation,
         }
-        if not is_classified(tool_name):
+        if not is_classified(tool_name, self._service_package):
             # Fail-closed classification: recorded against a write id so it is
             # never filtered, and flagged so the placeholder category is never
             # mistaken for a real one.

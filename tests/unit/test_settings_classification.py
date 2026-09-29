@@ -43,8 +43,16 @@ SERVERS = [
 # Listing them here is the opt-out: it forces the omission to be a decision
 # somebody wrote down, rather than an oversight. Keyed by server id.
 DELIBERATELY_UNREPORTED: dict[str, set[str]] = {
-    "operational": set(),
-    "operational-insights": set(),
+    # audit_config is a nested mapping, not a scalar setting, and it is already
+    # reported in full by two places that are better suited to it:
+    # ``get_server_configuration_status`` returns it alongside the live sink
+    # counters, and the ``server configuration`` audit record carries it into
+    # the audit file itself. Flattening it into the env-info snapshot would
+    # duplicate that without adding anything, so it is classified here rather
+    # than on either ServerSpec. It holds no secrets — a file path, sizes, and
+    # a list of disabled event ids.
+    "operational": {"audit_config"},
+    "operational-insights": {"audit_config"},
 }
 
 

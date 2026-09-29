@@ -54,6 +54,7 @@ def test_category_order_is_the_wire_contract():
         "query",
         "index",
         "performance",
+        "search",
     )
 
 
@@ -188,14 +189,16 @@ def test_category_slots_and_categories_cannot_disagree():
     assert (
         tuple(
             name
-            for name, _ in sorted(catalog.CATEGORY_SLOTS.items(), key=lambda kv: kv[1])
+            for name, _ in sorted(
+                catalog.CATEGORY_SLOTS["operational"].items(), key=lambda kv: kv[1]
+            )
         )
         == catalog.CATEGORIES
     )
 
 
 def test_slot_numbers_are_unique_and_within_the_template():
-    slots = list(catalog.CATEGORY_SLOTS.values())
+    slots = list(catalog.CATEGORY_SLOTS["operational"].values())
     assert len(slots) == len(set(slots)), "two categories share a slot"
     assert all(0 <= slot <= catalog.MAX_SLOT for slot in slots)
 
@@ -207,13 +210,16 @@ def test_slot_table_pins_the_shipped_numbers():
     test change rather than something that quietly renumbers a customer's SIEM
     rule.
     """
-    assert catalog.CATEGORY_SLOTS == {
+    assert catalog.CATEGORY_SLOTS["operational"] == {
         "cluster": 0,
         "schema": 1,
         "kv": 2,
         "query": 3,
         "index": 4,
         "performance": 5,
+        # Added 2026-09-29 with the FTS tools. Slot 8, not the reusable
+        # retired 6, so no number has ever meant two things.
+        "search": 8,
     }
 
 
@@ -225,9 +231,11 @@ def test_retiring_a_category_does_not_move_its_neighbours(monkeypatch):
     event that customers already have SIEM rules for.
     """
     trimmed = {
-        name: slot for name, slot in catalog.CATEGORY_SLOTS.items() if name != "index"
+        name: slot
+        for name, slot in catalog.CATEGORY_SLOTS["operational"].items()
+        if name != "index"
     }
-    monkeypatch.setattr(catalog, "CATEGORY_SLOTS", trimmed)
+    monkeypatch.setattr(catalog, "CATEGORY_SLOTS", {"operational": trimmed})
     assert catalog.tool_call_event_id("performance", "read") == 61493
     assert catalog.tool_call_event_id("query", "read") == 61491
 
@@ -235,30 +243,37 @@ def test_retiring_a_category_does_not_move_its_neighbours(monkeypatch):
 def test_next_free_slot_takes_the_lowest_never_allocated(monkeypatch):
     monkeypatch.setattr(catalog, "RETIRED_SLOTS", {})
     monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset())
+    # 0-5 and 8 are allocated, so 6 is the lowest never-allocated slot.
     assert catalog.next_free_slot() == 6
 
 
-def test_next_free_slot_reuses_a_retired_slot_first(monkeypatch):
-    """Reuse is safe only for a slot that never emitted a record.
+def test_next_free_slot_skips_retired_slots(monkeypatch):
+    """Retired slots are not offered, even when reuse would be safe.
 
-    A category retired with no tools classified to it produced no records, so
-    no SIEM rule can exist for its old meaning.
+    Reuse remains *permissible* for a slot that never emitted a record — the
+    rule in ``RETIRED_SLOTS`` still says so. It is simply not automatic. When
+    the search category was added the reusable slot 6 was declined in favour of
+    8, on the grounds that a number which has meant two different things is a
+    trap for anyone reading an old rule. Handing retired slots back from a
+    helper would make the trap the default path.
     """
-    monkeypatch.setattr(catalog, "RETIRED_SLOTS", {"vector": 6})
+    monkeypatch.setattr(catalog, "RETIRED_SLOTS", {"operational": {"vector": 6}})
     monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset())
-    assert catalog.next_free_slot() == 6
+    assert catalog.next_free_slot() == 7
 
 
 def test_permanently_reserved_slots_are_never_reallocated(monkeypatch):
     """A slot that has emitted records must not be handed to a new category."""
-    monkeypatch.setattr(catalog, "RETIRED_SLOTS", {"vector": 6})
+    monkeypatch.setattr(catalog, "RETIRED_SLOTS", {"operational": {"vector": 6}})
     monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset({6}))
     assert catalog.next_free_slot() == 7
 
 
 def test_exhausted_block_is_an_explicit_error(monkeypatch):
     monkeypatch.setattr(
-        catalog, "CATEGORY_SLOTS", {f"c{n}": n for n in range(catalog.MAX_SLOT + 1)}
+        catalog,
+        "CATEGORY_SLOTS",
+        {"operational": {f"c{n}": n for n in range(catalog.MAX_SLOT + 1)}},
     )
     monkeypatch.setattr(catalog, "RETIRED_SLOTS", {})
     monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset())
@@ -274,9 +289,9 @@ def test_retired_categories_are_gone_but_their_slots_are_recorded():
     a future category. The numbers stay recorded so the history is visible and
     nobody wonders why the live table starts skipping at 6.
     """
-    assert "vector" not in catalog.CATEGORY_SLOTS
-    assert "analytics" not in catalog.CATEGORY_SLOTS
-    assert catalog.RETIRED_SLOTS == {"vector": 6, "analytics": 7}
+    assert "vector" not in catalog.CATEGORY_SLOTS["operational"]
+    assert "analytics" not in catalog.CATEGORY_SLOTS["operational"]
+    assert catalog.RETIRED_SLOTS == {"operational": {"vector": 6, "analytics": 7}}
     # Never emitted a record, so never permanently reserved.
     assert not catalog.PERMANENTLY_RESERVED_SLOTS
 
@@ -302,6 +317,16 @@ def test_retirement_did_not_move_the_surviving_ids():
     assert tool_call_event_id("performance", "write") == 61525
 
 
-def test_a_new_category_would_reuse_the_lowest_retired_slot():
-    """Reuse is safe here because neither retired slot ever emitted a record."""
-    assert catalog.next_free_slot() == 6
+def test_a_new_category_takes_the_next_never_allocated_slot():
+    """Slots 6 and 7 stay retired; the next category gets 9, after search's 8."""
+    assert catalog.next_free_slot() == 9
+
+
+def test_search_ids_are_the_shipped_numbers():
+    """Pinned literally, like every other shipped id.
+
+    Search took slot 8 rather than the reusable retired slot 6, so these are
+    61496/61528 and not 61494/61526.
+    """
+    assert tool_call_event_id("search", "read") == 61496
+    assert tool_call_event_id("search", "write") == 61528

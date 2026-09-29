@@ -126,6 +126,14 @@
       "filterable": true
     },
     {
+      "id": 61496,
+      "name": "search read",
+      "description": "A search read operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": true
+    },
+    {
       "id": 61520,
       "name": "cluster write",
       "description": "A cluster write operation was requested through a tool",
@@ -169,6 +177,14 @@
       "id": 61525,
       "name": "performance write",
       "description": "A performance write operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 61528,
+      "name": "search write",
+      "description": "A search write operation was requested through a tool",
       "category": "tool_call",
       "default_enabled": true,
       "filterable": false

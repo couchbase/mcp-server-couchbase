@@ -45,7 +45,10 @@ from cb_mcp.audit.identity import (
     resolve_real_userid,
     warn_on_unauthenticated_http,
 )
-from cb_mcp.tools.query import _query_correlation_options, run_sql_plus_plus_query
+from cb_mcp.tools.operational.query import (
+    _query_correlation_options,
+    run_sql_plus_plus_query,
+)
 from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
 from cb_mcp.utils.elicitation import ConfirmationResult, wrap_with_confirmation
 from cb_mcp.utils.scope_enforcement import wrap_with_scope_check
@@ -243,7 +246,7 @@ def test_statement_class_is_recorded_when_auditing_is_active():
     token = audit_state.install()
     try:
         with patch(
-            "cb_mcp.tools.query.get_audit_logger",
+            "cb_mcp.tools.operational.query.get_audit_logger",
             return_value=SimpleNamespace(active=True),
         ):
             run_sql_plus_plus_query(ctx, "b", "s", "UPDATE users SET age = 25")
@@ -257,7 +260,7 @@ def test_select_is_classified_read_when_auditing_is_active():
     token = audit_state.install()
     try:
         with patch(
-            "cb_mcp.tools.query.get_audit_logger",
+            "cb_mcp.tools.operational.query.get_audit_logger",
             return_value=SimpleNamespace(active=True),
         ):
             run_sql_plus_plus_query(ctx, "b", "s", "SELECT * FROM users")
@@ -271,7 +274,7 @@ def test_explain_is_classified_read_without_parsing():
     token = audit_state.install()
     try:
         with patch(
-            "cb_mcp.tools.query.get_audit_logger",
+            "cb_mcp.tools.operational.query.get_audit_logger",
             return_value=SimpleNamespace(active=True),
         ):
             run_sql_plus_plus_query(ctx, "b", "s", "EXPLAIN SELECT * FROM users")
@@ -285,9 +288,9 @@ def test_no_statement_parse_when_auditing_is_off_and_writes_are_allowed():
     ctx = _query_ctx(read_only_mode=False)
     token = audit_state.install()
     try:
-        with patch("cb_mcp.tools.query.parse_sqlpp") as parse:
+        with patch("cb_mcp.tools.operational.query.parse_sqlpp") as parse:
             with patch(
-                "cb_mcp.tools.query.get_audit_logger",
+                "cb_mcp.tools.operational.query.get_audit_logger",
                 return_value=SimpleNamespace(active=False),
             ):
                 run_sql_plus_plus_query(ctx, "b", "s", "UPDATE users SET age = 25")
@@ -311,11 +314,11 @@ def test_unparseable_statement_still_runs_when_writes_are_allowed_and_auditing_o
     try:
         with (
             patch(
-                "cb_mcp.tools.query.parse_sqlpp",
+                "cb_mcp.tools.operational.query.parse_sqlpp",
                 side_effect=Exception("unparseable by the partial grammar"),
             ),
             patch(
-                "cb_mcp.tools.query.get_audit_logger",
+                "cb_mcp.tools.operational.query.get_audit_logger",
                 return_value=SimpleNamespace(active=True),
             ),
         ):
@@ -340,11 +343,11 @@ def test_unparseable_statement_still_fails_safe_when_writes_are_blocked():
     try:
         with (
             patch(
-                "cb_mcp.tools.query.parse_sqlpp",
+                "cb_mcp.tools.operational.query.parse_sqlpp",
                 side_effect=Exception("unparseable by the partial grammar"),
             ),
             patch(
-                "cb_mcp.tools.query.get_audit_logger",
+                "cb_mcp.tools.operational.query.get_audit_logger",
                 return_value=SimpleNamespace(active=True),
             ),
             pytest.raises(Exception, match="unparseable"),

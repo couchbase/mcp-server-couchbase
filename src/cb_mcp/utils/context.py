@@ -114,4 +114,3 @@ def get_audit_config(ctx: Context) -> Mapping[str, Any] | None:
     correct report in both cases.
     """
     return getattr(ctx.request_context.lifespan_context, "audit_config", None)  # type: ignore
-

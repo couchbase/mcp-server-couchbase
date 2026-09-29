@@ -23,12 +23,12 @@ from ..utils.constants import (
     DEFAULT_AUDIT_ENABLED,
     DEFAULT_AUDIT_ROTATION_MAX_SIZE_MB,
     DEFAULT_AUDIT_TOOL_ARGS,
-    MCP_SERVER_NAME,
+    LOGGER_NAMESPACE,
 )
 from .catalog import ALL_IDS, EVENT_NAMES_TO_IDS, FILTERABLE_IDS
 from .sink import process_scoped_path
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.audit.config")
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.audit.config")
 
 
 @dataclass(frozen=True)

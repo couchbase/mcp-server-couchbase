@@ -33,9 +33,9 @@ import os
 
 from fastmcp.server.dependencies import get_access_token
 
-from ..utils.constants import MCP_SERVER_NAME, STREAMABLE_HTTP_TRANSPORT
+from ..utils.constants import LOGGER_NAMESPACE, STREAMABLE_HTTP_TRANSPORT
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.audit.identity")
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.audit.identity")
 
 DOMAIN_OAUTH = "oauth"
 DOMAIN_LOCAL = "local"

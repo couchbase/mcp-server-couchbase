@@ -16,13 +16,13 @@ import atexit
 import logging
 from typing import Any
 
-from ..utils.constants import MCP_SERVER_NAME
+from ..utils.constants import LOGGER_NAMESPACE
 from .catalog import SERVICE_PACKAGE, AuditEvent, ToolCallEvent
 from .config import ResolvedAuditConfig
 from .record import AuditRecord, ServerContext
 from .sink import AuditSink
 
-logger = logging.getLogger(f"{MCP_SERVER_NAME}.audit")
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.audit")
 
 
 class AuditLogger:

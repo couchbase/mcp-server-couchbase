@@ -44,6 +44,23 @@ CORE_BLOCK = 0xE000  # 57344
 #: Tier-2 block for the operational service package (kv, query, index, ...).
 OPERATIONAL_BLOCK = 0xF000  # 61440
 
+#: Service package this build audits by default, and the only one today.
+#:
+#: The repository ships two servers. Only ``operational`` is audited: the
+#: Operational Insights server's tool surface is new and still moving, and a
+#: Tier-2 block, once records exist against it, can never be renumbered. Its
+#: block is therefore left unallocated rather than spent early.
+DEFAULT_SERVICE_PACKAGE = "operational"
+
+#: ``service package -> Tier-2 block base``. Blocks are 0x1000 apart, so the
+#: next package takes 0x10000. Adding one means an entry here, an entry in
+#: :data:`CATEGORY_SLOTS`, a classification table in
+#: :mod:`cb_mcp.audit.classification`, and ``audit_package`` on its
+#: ``ServerSpec`` — and renumbers nothing that already exists.
+SERVICE_PACKAGE_BLOCKS: dict[str, int] = {
+    "operational": OPERATIONAL_BLOCK,
+}
+
 #: Relative offset of the first read event inside a Tier-2 block.
 READ_OFFSET = 48
 
@@ -66,13 +83,22 @@ MAX_SLOT = 15
 #:
 #: Add a category by giving it the next free slot (:func:`next_free_slot`).
 #: Never change a number already in this table.
-CATEGORY_SLOTS: dict[str, int] = {
-    "cluster": 0,
-    "schema": 1,
-    "kv": 2,
-    "query": 3,
-    "index": 4,
-    "performance": 5,
+CATEGORY_SLOTS: dict[str, dict[str, int]] = {
+    "operational": {
+        "cluster": 0,
+        "schema": 1,
+        "kv": 2,
+        "query": 3,
+        "index": 4,
+        "performance": 5,
+        # Slots 6 and 7 are retired (see RETIRED_SLOTS) and deliberately left
+        # unused, so search took the next never-allocated slot instead of
+        # reusing one. Reuse was permitted by the rule below — neither retired
+        # slot ever emitted a record — but declined: two dead numbers cost
+        # nothing in a 16-slot block, and a slot that has meant two different
+        # things is a trap for anyone reading old rules.
+        "search": 8,
+    },
 }
 
 #: Slots retired from use, kept here so their history is visible — ``category
@@ -87,69 +113,88 @@ CATEGORY_SLOTS: dict[str, int] = {
 #: category is withdrawn — reallocating it would make an old rule silently
 #: match a new, unrelated event. Record such a slot here and leave it out of
 #: :func:`next_free_slot`'s reusable set.
-RETIRED_SLOTS: dict[str, int] = {
-    # Retired before release: no tool was ever classified to either category,
-    # so neither slot ever emitted a record and both are safe to reallocate.
-    # The managed Capella runtime registers this server's tool set and adds
-    # none of its own, so nothing outside this repo needed them either.
-    "vector": 6,
-    "analytics": 7,
+RETIRED_SLOTS: dict[str, dict[str, int]] = {
+    "operational": {
+        # Retired before release: no tool was ever classified to either
+        # category, so neither slot ever emitted a record and both would be
+        # safe to reallocate. Left unallocated by choice when the search
+        # category was added on 2026-09-29 — see the note in CATEGORY_SLOTS.
+        "vector": 6,
+        "analytics": 7,
+    },
 }
 
 #: Retired slots that must never be reallocated because records exist for them.
 PERMANENTLY_RESERVED_SLOTS: frozenset[int] = frozenset()
 
-#: Category axis for Tier-2 blocks, ordered by slot. Derived from
-#: :data:`CATEGORY_SLOTS` so the two can never disagree.
-CATEGORIES: tuple[str, ...] = tuple(
-    name for name, _ in sorted(CATEGORY_SLOTS.items(), key=lambda item: item[1])
-)
 
-#: Name of the service package this build ships. Recorded once at startup
+def categories_for(package: str = DEFAULT_SERVICE_PACKAGE) -> tuple[str, ...]:
+    """Category axis for ``package``'s Tier-2 block, ordered by slot.
+
+    Derived from :data:`CATEGORY_SLOTS` so the two can never disagree.
+    """
+    return tuple(
+        name
+        for name, _ in sorted(CATEGORY_SLOTS[package].items(), key=lambda item: item[1])
+    )
+
+
+#: Category axis of the default package, kept as a module constant because
+#: it is the axis every descriptor and every test refers to today.
+CATEGORIES: tuple[str, ...] = categories_for()
+
+#: Name of the service package this build audits. Recorded once at startup
 #: rather than repeated on every record.
-SERVICE_PACKAGE = "operational"
+SERVICE_PACKAGE = DEFAULT_SERVICE_PACKAGE
 
 
-def category_index(category: str) -> int:
-    """Return the slot ``n`` for ``category`` within a Tier-2 block."""
+def category_index(category: str, package: str = DEFAULT_SERVICE_PACKAGE) -> int:
+    """Return the slot ``n`` for ``category`` within ``package``'s block."""
     try:
-        return CATEGORY_SLOTS[category]
+        return CATEGORY_SLOTS[package][category]
     except KeyError as exc:  # pragma: no cover - guarded by classification
         raise ValueError(
-            f"Unknown audit category {category!r}; expected one of {CATEGORIES}."
+            f"Unknown audit category {category!r} for service package "
+            f"{package!r}; expected one of {categories_for(package)}."
         ) from exc
 
 
-def next_free_slot() -> int:
+def next_free_slot(package: str = DEFAULT_SERVICE_PACKAGE) -> int:
     """Return the slot a newly added category should take.
 
-    Prefers the lowest retired slot that is safe to reuse — a category retired
-    with no tools classified to it emitted no records, so no SIEM rule can exist
-    for its old meaning. Otherwise returns the lowest never-allocated slot.
+    Returns the lowest **never-allocated** slot. Retired slots are deliberately
+    not offered, even the ones :data:`RETIRED_SLOTS` records as safe to reuse:
+    when the search category was added on 2026-09-29 the reusable slots 6 and 7
+    were declined in favour of slot 8, on the grounds that two dead numbers cost
+    nothing in a 16-slot block while a slot that has meant two different things
+    is a trap for anyone reading an old rule. Reuse remains permissible, but it
+    is a decision someone must take deliberately rather than inherit from a
+    helper.
 
     Raises:
         ValueError: when the block's category template is exhausted. A new
             service package should then take a fresh 0x1000 block rather than
             crowding this one.
     """
-    taken = set(CATEGORY_SLOTS.values()) | PERMANENTLY_RESERVED_SLOTS
-    reusable = sorted(
-        slot
-        for slot in RETIRED_SLOTS.values()
-        if slot not in taken and slot not in PERMANENTLY_RESERVED_SLOTS
+    taken = (
+        set(CATEGORY_SLOTS[package].values())
+        | set(RETIRED_SLOTS.get(package, {}).values())
+        | PERMANENTLY_RESERVED_SLOTS
     )
-    if reusable:
-        return reusable[0]
     for slot in range(MAX_SLOT + 1):
         if slot not in taken:
             return slot
     raise ValueError(
-        f"All {MAX_SLOT + 1} category slots in this block are allocated. "
-        "A new service package should request its own block."
+        f"All {MAX_SLOT + 1} category slots in the {package!r} block are "
+        "allocated or retired. A new service package should request its own "
+        "block; reusing a retired slot is possible but must be decided "
+        "explicitly — see RETIRED_SLOTS."
     )
 
 
-def tool_call_event_id(category: str, operation_class: str) -> int:
+def tool_call_event_id(
+    category: str, operation_class: str, package: str = DEFAULT_SERVICE_PACKAGE
+) -> int:
     """Resolve the Tier-2 event ID for a tool call.
 
     Args:
@@ -160,7 +205,11 @@ def tool_call_event_id(category: str, operation_class: str) -> int:
         raise ValueError(
             f"operation_class must be 'read' or 'write', got {operation_class!r}."
         )
-    base = OPERATIONAL_BLOCK + READ_OFFSET + category_index(category)
+    base = (
+        SERVICE_PACKAGE_BLOCKS[package]
+        + READ_OFFSET
+        + category_index(category, package)
+    )
     return base + WRITE_DELTA if operation_class == "write" else base
 
 
@@ -299,16 +348,19 @@ _CATEGORY_LABELS: dict[str, str] = {
     "query": "query",
     "index": "index",
     "performance": "performance",
+    "search": "search",
 }
 
 
-def tool_call_event(category: str, operation_class: str) -> ToolCallEvent:
+def tool_call_event(
+    category: str, operation_class: str, package: str = DEFAULT_SERVICE_PACKAGE
+) -> ToolCallEvent:
     """Build the :class:`ToolCallEvent` for a category and operation class."""
     label = _CATEGORY_LABELS[category]
     verb = "read" if operation_class == "read" else "write"
     article = "An" if label[0].lower() in "aeiou" else "A"
     return ToolCallEvent(
-        id=tool_call_event_id(category, operation_class),
+        id=tool_call_event_id(category, operation_class, package),
         event_name=f"{label} {verb}",
         description=f"{article} {label} {verb} operation was requested through a tool",
         category=category,
@@ -316,11 +368,13 @@ def tool_call_event(category: str, operation_class: str) -> ToolCallEvent:
     )
 
 
-def all_tool_call_events() -> list[ToolCallEvent]:
-    """Every Tier-2 tool-call entry, for descriptor generation."""
+def all_tool_call_events(
+    package: str = DEFAULT_SERVICE_PACKAGE,
+) -> list[ToolCallEvent]:
+    """Every Tier-2 tool-call entry for ``package``, for descriptor generation."""
     return [
-        tool_call_event(category, operation_class)
-        for category in CATEGORIES
+        tool_call_event(category, operation_class, package)
+        for category in categories_for(package)
         for operation_class in ("read", "write")
     ]
 
@@ -352,7 +406,7 @@ def build_descriptor() -> dict:
     entries.sort(key=lambda entry: entry["id"])
     return {
         "service_package": SERVICE_PACKAGE,
-        "blocks": {"core": CORE_BLOCK, "operational": OPERATIONAL_BLOCK},
+        "blocks": {"core": CORE_BLOCK, **SERVICE_PACKAGE_BLOCKS},
         "events": entries,
     }
 
@@ -377,6 +431,9 @@ __all__ = [
     "ALL_IDS",
     "CATEGORIES",
     "CATEGORY_SLOTS",
+    "DEFAULT_SERVICE_PACKAGE",
+    "SERVICE_PACKAGE_BLOCKS",
+    "categories_for",
     "MAX_SLOT",
     "PERMANENTLY_RESERVED_SLOTS",
     "RETIRED_SLOTS",
