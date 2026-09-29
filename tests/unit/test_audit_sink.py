@@ -51,24 +51,52 @@ def _settle(sink: AuditSink, timeout: float = 2.0) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_process_scoped_path_inserts_pid_before_the_suffix():
-    result = process_scoped_path("/var/log/audit.log", pid=4321)
-    assert result == Path("/var/log/audit.4321.log")
+def test_process_scoped_path_inserts_host_and_pid_before_the_suffix():
+    result = process_scoped_path("/var/log/audit.log", pid=4321, host="node-a")
+    assert result == Path("/var/log/audit.node-a.4321.log")
 
 
 def test_process_scoped_path_appends_when_there_is_no_suffix():
-    result = process_scoped_path("/var/log/audit", pid=4321)
-    assert result == Path("/var/log/audit.4321")
+    result = process_scoped_path("/var/log/audit", pid=4321, host="node-a")
+    assert result == Path("/var/log/audit.node-a.4321")
 
 
-def test_process_scoped_path_uses_the_live_pid_by_default():
+def test_process_scoped_path_uses_the_live_host_and_pid_by_default():
     assert str(os.getpid()) in process_scoped_path("audit.log").name
+
+
+def test_containers_sharing_a_volume_do_not_share_a_file():
+    """The reason the host is in the name at all.
+
+    This image's ENTRYPOINT is exec form, so the server is PID 1 in *every*
+    container. Two containers mounting the same volume would both have written
+    ``audit.1.log`` — the interleaving and rotation races that per-writer files
+    exist to prevent, in the configuration DOCKER.md recommends. Docker gives
+    each container a distinct hostname by default, which restores uniqueness.
+    """
+    first = process_scoped_path("/audit/audit.log", pid=1, host="3f2a91c4b7de")
+    second = process_scoped_path("/audit/audit.log", pid=1, host="a81ce4470f19")
+    assert first != second
+    assert first.name == "audit.3f2a91c4b7de.1.log"
+
+
+def test_host_token_is_filename_safe():
+    """An FQDN or an odd hostname must not put dots or separators in the name."""
+    assert (
+        process_scoped_path("a.log", pid=7, host="node1.example.com").name
+        == "a.node1.7.log"
+    )
+    assert (
+        process_scoped_path("a.log", pid=7, host="we ird/name").name
+        == "a.we-ird-name.7.log"
+    )
+    assert process_scoped_path("a.log", pid=7, host="").name == "a.unknown.7.log"
 
 
 def test_sink_writes_to_the_process_scoped_path(tmp_path):
     sink = AuditSink(tmp_path / "audit.log", max_bytes=4096, backup_count=1)
     try:
-        assert sink.path == tmp_path / f"audit.{os.getpid()}.log"
+        assert sink.path == process_scoped_path(tmp_path / "audit.log")
         assert sink.path.exists()
     finally:
         _drain(sink)
@@ -95,7 +123,7 @@ def test_lines_are_written_and_flushed(tmp_path):
 
 
 def test_existing_file_is_appended_not_truncated(tmp_path):
-    path = tmp_path / f"audit.{os.getpid()}.log"
+    path = process_scoped_path(tmp_path / "audit.log")
     path.write_text('{"pre":true}\n', encoding="utf-8")
 
     sink = AuditSink(tmp_path / "audit.log", max_bytes=1_000_000, backup_count=1)
@@ -198,7 +226,7 @@ def test_parent_directories_are_created(tmp_path):
 def test_unwritable_path_raises_so_startup_can_report_it(tmp_path):
     # A directory where the file should be is the portable way to make open()
     # fail without depending on running as an unprivileged user.
-    collision = tmp_path / f"audit.{os.getpid()}.log"
+    collision = process_scoped_path(tmp_path / "audit.log")
     collision.mkdir()
     with pytest.raises(OSError):
         AuditSink(tmp_path / "audit.log", max_bytes=4096, backup_count=1)
@@ -348,3 +376,30 @@ def test_writer_exits_when_the_queue_is_full_at_close(tmp_path):
     assert not any(
         t.name == "cb-mcp-audit-writer" and t.is_alive() for t in threading.enumerate()
     ), "writer thread did not exit"
+
+
+def test_a_draining_writer_does_not_reopen_the_file_after_close(tmp_path):
+    """``close`` joins with a timeout, then closes the stream.
+
+    A writer still draining past that timeout — the wedged filesystem the
+    timeout exists for — would otherwise reopen a handle nobody closes again,
+    and append records dated after "server stopped". It must drop them instead.
+    """
+    sink = AuditSink(tmp_path / "c.log", max_bytes=100_000, backup_count=1)
+    sink.start()
+    released = threading.Event()
+    real_write = sink._write_batch
+
+    def slow(lines):
+        released.wait(timeout=5.0)
+        return real_write(lines)
+
+    with patch.object(sink, "_write_batch", side_effect=slow):
+        sink.emit('{"first":1}\n')
+        time.sleep(0.2)
+        sink.emit('{"second":2}\n')
+        sink.close(timeout=0.2)  # returns while the batch is still in flight
+        released.set()
+        time.sleep(0.4)
+
+    assert sink._stream.closed, "the writer reopened the stream after close"

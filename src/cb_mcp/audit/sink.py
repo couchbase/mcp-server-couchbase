@@ -7,11 +7,21 @@ multi-process safe, and the default stdio deployment is inherently
 multi-process: every MCP client spawns its own server process, and they all
 read the same ``CB_MCP_AUDIT_FILE`` from the environment. Sharing one rotating
 file across them produces interleaved partial lines and rotation races that
-silently destroy records. So each process writes its **own** file, with the
-PID inserted before the extension (``audit.log`` → ``audit.12345.log``). No
-locking is needed because no two processes ever touch the same file, and it
-behaves identically on every platform. This matches the PRD's own position that
-auditing is per-node and consolidation is the operator's responsibility.
+silently destroy records. So each writer gets its **own** file, named
+``audit.<host>.<pid>.log``. No locking is needed because no two processes ever
+touch the same file, and it behaves identically on every platform. This matches
+the PRD's own position that auditing is per-node and consolidation is the
+operator's responsibility.
+
+The host is part of the name, not just the pid, because the pid alone is not
+unique across containers. This image's ``ENTRYPOINT`` is exec form, so the
+server is **PID 1 in every container**: several containers sharing one mounted
+volume would every one of them write ``audit.1.log`` — precisely the
+interleaving this design exists to prevent, in the configuration the Docker
+documentation recommends. Docker assigns each container a distinct hostname by
+default, which restores uniqueness. Two containers explicitly given the same
+hostname and the same volume will still collide; that is documented rather than
+defended against.
 
 **Never block the event loop.** ``emit`` only puts a formatted line on a
 bounded queue; a dedicated daemon thread does the writing and flushing. A
@@ -31,6 +41,8 @@ import contextlib
 import logging
 import os
 import queue
+import re
+import socket
 import threading
 import time
 from pathlib import Path
@@ -63,18 +75,43 @@ _POLL_SECONDS = 0.2
 _SENTINEL = object()
 
 
-def process_scoped_path(path: str | os.PathLike[str], pid: int | None = None) -> Path:
-    """Insert the process id before the file extension.
+#: Characters kept from a hostname. Anything else — dots that would confuse the
+#: suffix split, path separators, whitespace — collapses to a single dash.
+_HOST_UNSAFE = re.compile(r"[^A-Za-z0-9_-]+")
 
-    ``audit.log`` becomes ``audit.<pid>.log``; a path with no suffix becomes
-    ``audit.<pid>``. Exposed separately so startup can log, and tests can
-    assert, the exact file that will be written.
+
+def _host_token(host: str | None = None) -> str:
+    """A filename-safe short hostname, or ``unknown`` if it cannot be read."""
+    try:
+        raw = socket.gethostname() if host is None else host
+    except Exception:  # pragma: no cover - defensive
+        return "unknown"
+    # Short form only: an FQDN would put dots in the middle of the filename.
+    token = _HOST_UNSAFE.sub("-", (raw or "").split(".")[0]).strip("-")
+    return token[:64] or "unknown"
+
+
+def process_scoped_path(
+    path: str | os.PathLike[str],
+    pid: int | None = None,
+    host: str | None = None,
+) -> Path:
+    """Insert the host and process id before the file extension.
+
+    ``audit.log`` becomes ``audit.<host>.<pid>.log``; a path with no suffix
+    becomes ``audit.<host>.<pid>``. Exposed separately so startup can log, and
+    tests can assert, the exact file that will be written.
+
+    The host is included because the pid is not unique across containers: this
+    image's ENTRYPOINT is exec form, so the server is PID 1 in every container
+    and a shared volume would otherwise give every container ``audit.1.log``.
     """
     resolved = Path(path)
     actual_pid = os.getpid() if pid is None else pid
+    scope = f"{_host_token(host)}.{actual_pid}"
     if resolved.suffix:
-        return resolved.with_name(f"{resolved.stem}.{actual_pid}{resolved.suffix}")
-    return resolved.with_name(f"{resolved.name}.{actual_pid}")
+        return resolved.with_name(f"{resolved.stem}.{scope}{resolved.suffix}")
+    return resolved.with_name(f"{resolved.name}.{scope}")
 
 
 class AuditSink:
@@ -229,6 +266,13 @@ class AuditSink:
         """
         if self._stream is not None and not self._stream.closed:
             return
+        if self._closed.is_set():
+            # ``close`` joins the writer with a timeout and then closes the
+            # stream, so a writer still draining past that timeout — the wedged
+            # filesystem this timeout exists for — would otherwise reopen a file
+            # nobody will close again, and append records dated after "server
+            # stopped". Refuse, and let the caller count the record as dropped.
+            raise ValueError("audit sink is closed")
         self._stream = open(self.path, "a", encoding="utf-8")  # noqa: SIM115
         self._size = self.path.stat().st_size
 

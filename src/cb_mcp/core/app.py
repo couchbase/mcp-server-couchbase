@@ -31,7 +31,7 @@ from ..audit import (
     unclassified_tool_names,
     warn_on_unauthenticated_http,
 )
-from ..audit.record import OUTCOME_SUCCESS
+from ..audit.record import OUTCOME_ERROR, OUTCOME_SUCCESS
 from ..utils.constants import (
     LOGGER_NAMESPACE,
     NETWORK_TRANSPORTS,
@@ -179,6 +179,7 @@ def build_app(
         # whatever was queued and leaving the sink open for the life of the
         # process. A failed startup is exactly when the audit trail matters.
         app_context: AppContext | None = None
+        failed = False
         try:
             app_context = AppContext(
                 cluster_provider=provider_factory(),
@@ -193,6 +194,7 @@ def build_app(
             )
             yield app_context
         except Exception as e:
+            failed = True
             logger.error(f"Error in app lifespan: {e}", exc_info=True)
             raise
         finally:
@@ -204,8 +206,15 @@ def build_app(
             if audits:
                 active_audit = get_audit_logger()
                 if active_audit.active:
+                    # The catalogue describes this event as "shut down
+                    # cleanly", so it must not claim success for a lifespan
+                    # that exited by raising. A failed startup that recorded
+                    # "server started" followed by "success" would read as a
+                    # healthy run in an audit review.
                     active_audit.emit_event(
-                        AuditEvent.SERVER_STOPPED, outcome=OUTCOME_SUCCESS
+                        AuditEvent.SERVER_STOPPED,
+                        outcome=OUTCOME_ERROR if failed else OUTCOME_SUCCESS,
+                        reason="lifespan_error" if failed else None,
                     )
                 shutdown_audit()
             logger.info("Closing MCP server")

@@ -109,12 +109,21 @@ def wrap_with_scope_check(
                 # Record the refusal for the audit middleware before raising.
                 # FastMCP wraps a tool's exception in ToolError, so the
                 # middleware cannot classify this from the exception it sees.
+                # Deliberately does not record ``required_scope``. This gate
+                # holds the server's full scope labels
+                # (``couchbase-mcp:write``), while the tool-call record and the
+                # SQL++ statement gate both record the short class
+                # (``write``) that the PRD's samples use. One event id must not
+                # carry two JSON shapes — a SIEM field mapping would have to
+                # handle a list and a string for event 57377 — so the
+                # middleware derives the short form from the tool's audit
+                # classification instead, in one place.
                 audit_state.record_refusal(
                     event_id=ScopeDeniedError.audit_event.id,
                     event_name=ScopeDeniedError.audit_event.event_name,
                     outcome=ScopeDeniedError.audit_outcome,
                     reason=ScopeDeniedError.audit_reason,
-                    required_scope=sorted(required_scopes),
+                    missing_scopes=sorted(missing),
                 )
                 raise ScopeDeniedError(msg)
 

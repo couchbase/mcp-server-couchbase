@@ -415,9 +415,6 @@ def build_settings(
             **cli.oauth.as_settings(enabled=oauth_enabled),
             "disabled_tools": gated.disabled,
             "confirmation_required_tools": gated.confirmation_required,
-            # Audit configuration as resolved, so get_server_configuration_status
-            # and the startup audit record report exactly the same thing.
-            "audit_config": cli.audit.as_dict(),
         }
     )
     return settings

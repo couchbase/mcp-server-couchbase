@@ -12,7 +12,6 @@ Per the PRD, enabling auditing without a file path is an error that is
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -236,15 +235,8 @@ def resolve_audit_config(
     )
 
 
-def audit_config_from_settings(settings: Mapping[str, Any]) -> dict[str, Any] | None:
-    """Read the audit snapshot out of the lifespan settings mapping."""
-    snapshot = settings.get("audit_config")
-    return dict(snapshot) if isinstance(snapshot, Mapping) else None
-
-
 __all__ = [
     "ResolvedAuditConfig",
-    "audit_config_from_settings",
     "parse_disabled_events",
     "resolve_audit_config",
 ]

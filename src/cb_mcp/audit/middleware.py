@@ -54,6 +54,7 @@ from . import state
 from .catalog import DEFAULT_SERVICE_PACKAGE, AuditEvent
 from .classification import (
     STATEMENT_CLASSIFIED_TOOL,
+    classify_tool,
     is_classified,
     required_scope_for,
     resolve_tool_call_event,
@@ -65,7 +66,6 @@ from .identity import (
     scopes_of_current_token,
 )
 from .record import (
-    OUTCOME_BLOCKED,
     OUTCOME_ERROR,
     OUTCOME_SUCCESS,
     REASON_EXECUTION_ERROR,
@@ -281,9 +281,14 @@ class AuditMiddleware(Middleware):
 
             confirmation = state.get_confirmation()
             if confirmation == state.CONFIRMATION_SKIPPED:
+                # Not ``blocked``: the tool *ran*, unconfirmed, which is what
+                # the catalogue entry describes. Recording it as blocked would
+                # make a reviewer counting ``outcome=blocked`` read unconfirmed
+                # destructive executions as prevented ones — the exact opposite
+                # of what happened. The ``reason`` carries the disposition.
                 audit.emit_event(
                     AuditEvent.CONFIRMATION_SKIPPED,
-                    outcome=OUTCOME_BLOCKED,
+                    outcome=OUTCOME_SUCCESS,
                     real_userid=real_userid,
                     cid=cid,
                     reason="confirmation_unsupported",
@@ -341,6 +346,12 @@ class AuditMiddleware(Middleware):
         if event is AuditEvent.SCOPE_CHECK_DENIED:
             payload.setdefault("client_id", client_id_of_current_token())
             payload.setdefault("scopes", scopes_of_current_token())
+            # One shape for this field across every event that carries it: the
+            # short class, as on tool-call records. ``setdefault`` leaves the
+            # SQL++ statement gate's explicit value alone, since that gate
+            # classifies per statement rather than per tool.
+            _, operation_class = classify_tool(tool_name, package=self._service_package)
+            payload.setdefault("required_scope", required_scope_for(operation_class))
 
         audit.emit_event(
             event,

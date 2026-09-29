@@ -217,3 +217,102 @@ class TestResolveOauthScopeLabelCollision:
         )
         assert result.exit_code == 2
         assert "must be distinct" in result.output
+
+
+class TestAuditOptions:
+    """The six audit flags, through Click, to a resolved configuration.
+
+    Audit settings do not appear in ``app_context.settings`` — deliberately, so
+    they are not duplicated into the env-info snapshot — so these assert on the
+    ``ResolvedAuditConfig`` the entrypoint hands to ``build_app`` instead.
+    """
+
+    @staticmethod
+    def _resolved(args: list[str], env: dict | None = None):
+        captured: dict = {}
+        real = mcp_server.build_app
+
+        def capture(*a, **kw):
+            captured["audit"] = kw.get("audit_config")
+            return real(*a, **kw)
+
+        with (
+            patch("cb_mcp.core.app.FastMCP", return_value=MagicMock()),
+            patch("mcp_server.build_app", side_effect=capture),
+            patch("mcp_server.run_app"),
+        ):
+            result = CliRunner().invoke(
+                mcp_server.main,
+                ["--connection-string", "couchbase://localhost", *args],
+                env={**os.environ, **(env or {})},
+                catch_exceptions=False,
+            )
+        assert result.exit_code == 0, result.output
+        return captured["audit"]
+
+    def test_auditing_is_off_by_default(self):
+        config = self._resolved([])
+        assert config.enabled is False
+        assert config.file is None
+        assert config.tool_args is False
+
+    def test_flags_reach_the_resolved_configuration(self, tmp_path):
+        config = self._resolved(
+            [
+                "--audit-log-enabled",
+                "true",
+                "--audit-file",
+                str(tmp_path / "audit.log"),
+                "--audit-rotation-max-size-mb",
+                "4",
+                "--audit-retention-backup-count",
+                "7",
+                "--audit-tool-args",
+                "true",
+                "--audit-disabled-events",
+                "61490,61491",
+            ]
+        )
+        assert config.enabled is True
+        assert config.file == str(tmp_path / "audit.log")
+        assert config.rotation_max_size_mb == 4.0
+        assert config.retention_backup_count == 7
+        assert config.tool_args is True
+        assert config.disabled_events == (61490, 61491)
+        # The process-scoped path is resolved once, here, so startup can log
+        # the exact file and an operator is never left guessing.
+        assert config.process_file and config.process_file.endswith(".log")
+
+    def test_env_vars_are_honoured(self, tmp_path):
+        config = self._resolved(
+            [],
+            env={
+                "CB_MCP_AUDIT_LOG_ENABLED": "true",
+                "CB_MCP_AUDIT_FILE": str(tmp_path / "from-env.log"),
+                "CB_MCP_AUDIT_TOOL_ARGS": "true",
+            },
+        )
+        assert config.enabled is True
+        assert config.file == str(tmp_path / "from-env.log")
+        assert config.tool_args is True
+
+    def test_enabling_without_a_file_starts_the_server_with_auditing_off(self):
+        """Per the PRD this is reported, not fatal: the server still starts."""
+        config = self._resolved(["--audit-log-enabled", "true"])
+        assert config.enabled is False
+
+    def test_both_subcommands_accept_the_audit_flags(self):
+        for command in ("operational", "operational-insights"):
+            result = CliRunner().invoke(
+                mcp_server.main, [command, "--help"], catch_exceptions=False
+            )
+            assert result.exit_code == 0
+            for flag in (
+                "--audit-log-enabled",
+                "--audit-file",
+                "--audit-rotation-max-size-mb",
+                "--audit-retention-backup-count",
+                "--audit-tool-args",
+                "--audit-disabled-events",
+            ):
+                assert flag in result.output, f"{flag} missing from {command} --help"

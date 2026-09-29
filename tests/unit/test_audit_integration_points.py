@@ -114,7 +114,11 @@ async def test_scope_check_records_a_refusal_and_raises_scope_denied():
         assert refusal["event_id"] == 57377
         assert refusal["outcome"] == "denied"
         assert refusal["reason"] == "missing_scope"
-        assert refusal["required_scope"] == [SCOPE_WRITE]
+        # The gate records what it knows: which labels were missing. The
+        # short ``required_scope`` is added by the middleware, so event
+        # 57377 carries one JSON shape whichever gate refused the call.
+        assert refusal["missing_scopes"] == [SCOPE_WRITE]
+        assert "required_scope" not in refusal
     finally:
         audit_state.reset(token)
 
@@ -590,6 +594,13 @@ def test_audit_is_shut_down_when_provider_startup_fails(tmp_path):
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    names = [record["name"] for record in written]
-    assert "server started" in names, "queued records were lost on the failed startup"
-    assert "server stopped" in names, "no clean-shutdown record for the failed startup"
+    by_name = {record["name"]: record for record in written}
+    assert "server started" in by_name, "queued records were lost on the failed startup"
+    assert "server stopped" in by_name, "no shutdown record for the failed startup"
+
+    # The catalogue describes this event as "shut down cleanly", so a lifespan
+    # that exited by raising must not claim success. "server started" followed
+    # by "success" would read as a healthy run in an audit review.
+    stopped = by_name["server stopped"]
+    assert stopped["outcome"] == "error", stopped
+    assert stopped["reason"] == "lifespan_error", stopped
