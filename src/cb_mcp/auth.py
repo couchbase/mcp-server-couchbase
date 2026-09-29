@@ -20,12 +20,17 @@ provider.
 """
 
 import logging
+import uuid
 from typing import ClassVar
 
-from fastmcp.server.auth import AuthProvider, RemoteAuthProvider
+from fastmcp.server.auth import AccessToken, AuthProvider, RemoteAuthProvider
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from pydantic import AnyHttpUrl, ValidationError
 
+from .audit.catalog import AuditEvent
+from .audit.emitter import get_audit_logger
+from .audit.identity import DOMAIN_ANONYMOUS
+from .audit.record import OUTCOME_DENIED, REASON_TOKEN_INVALID
 from .utils.constants import (
     DEFAULT_OAUTH_ALGORITHM,
     MCP_SERVER_NAME,
@@ -102,6 +107,48 @@ class CouchbaseJWTVerifier(JWTVerifier):
         """
         raw = super()._extract_scopes(claims)
         return [self._scope_aliases.get(s, s) for s in raw]
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        """Validate a bearer token, auditing a rejection.
+
+        This is the one audit hook that cannot live in middleware: a rejected
+        token is refused in the ASGI auth layer, so no JSON-RPC message is ever
+        constructed and the MCP message pipeline never runs.
+
+        The rejection is recorded without a fine-grained reason. FastMCP's
+        verifier collapses expiry, bad signature, wrong audience and wrong
+        issuer into a single ``None`` return, keeping the discriminating detail
+        in a debug log line only; re-deriving it would mean decoding the token a
+        second time and duplicating upstream validation logic. A single
+        ``token_invalid`` reason is the honest record. ``real_userid`` is
+        ``anonymous`` because a rejected token establishes no identity.
+
+        A token that is *missing* entirely is refused before this method is
+        reached and is therefore not audited in this release — see ``AUDIT.md``.
+
+        Correlation: this record carries a freshly minted ``cid``, so that
+        grouping an audit file by ``cid`` works unconditionally, and carries no
+        ``sid``, because no MCP session exists. It is a deliberate singleton —
+        the rejection produced a 401 and no MCP message was ever dispatched, so
+        no sibling record can exist. Nothing is read from the request scope
+        here on purpose: correlation is minted in middleware precisely so that
+        a host with a different authentication layer inherits it unchanged.
+        """
+        result = await super().verify_token(token)
+        if result is None:
+            audit = get_audit_logger()
+            if audit.active:
+                audit.emit_event(
+                    AuditEvent.TOKEN_REJECTED,
+                    outcome=OUTCOME_DENIED,
+                    real_userid={
+                        "domain": DOMAIN_ANONYMOUS,
+                        "user": DOMAIN_ANONYMOUS,
+                    },
+                    cid=str(uuid.uuid4()),
+                    reason=REASON_TOKEN_INVALID,
+                )
+        return result
 
 
 def build_oauth(

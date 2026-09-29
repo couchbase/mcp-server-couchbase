@@ -11,12 +11,26 @@ from fastmcp import FastMCP
 from fastmcp.tools import FunctionTool
 
 # Reusable tools and utilities from the cb_mcp package
+from cb_mcp.audit import (
+    AuditEvent,
+    AuditMiddleware,
+    get_audit_logger,
+    init_audit,
+    resolve_audit_config,
+    shutdown_audit,
+    unclassified_tool_names,
+    warn_on_unauthenticated_http,
+)
+from cb_mcp.audit.record import OUTCOME_SUCCESS
 from cb_mcp.auth import OAuthConfigError, resolve_oauth
 from cb_mcp.tool_registration import prepare_tools_for_registration
 from cb_mcp.tools import TOOL_ANNOTATIONS
 from cb_mcp.utils import (
     ALLOWED_OAUTH_ALGORITHMS,
     ALLOWED_TRANSPORTS,
+    DEFAULT_AUDIT_ENABLED,
+    DEFAULT_AUDIT_FILE,
+    DEFAULT_AUDIT_TOOL_ARGS,
     DEFAULT_HOST,
     DEFAULT_LOG_BACKUP_COUNT,
     DEFAULT_LOG_FILE,
@@ -46,6 +60,56 @@ from cb_mcp.utils import (
 from providers.static import StaticClusterProvider
 
 logger = logging.getLogger(MCP_SERVER_NAME)
+
+
+def _start_audit(
+    audit_config,
+    *,
+    transport: str,
+    oauth_enabled: bool,
+    read_only_mode: bool,
+    registered_tool_names: list[str],
+    disabled_tool_names: set[str],
+    confirmation_required_tool_names: set[str],
+) -> None:
+    """Initialise auditing and write the two startup records.
+
+    Kept out of the lifespan body so the entrypoint stays readable. Emits
+    nothing at all when auditing is disabled.
+    """
+    audit = init_audit(audit_config)
+    if not audit.active:
+        return
+
+    warn_on_unauthenticated_http(transport, oauth_enabled)
+
+    unclassified = unclassified_tool_names(registered_tool_names)
+    if unclassified:
+        # Fail-closed classification keeps these audited, but an operator
+        # should not have to discover the gap by reading the audit file.
+        logger.warning(
+            "Audit: %d registered tool(s) have no classification entry and "
+            "will be recorded against a write event id: %s",
+            len(unclassified),
+            unclassified,
+        )
+
+    audit.emit_event(AuditEvent.SERVER_STARTED, outcome=OUTCOME_SUCCESS)
+    audit.emit_event(
+        AuditEvent.SERVER_CONFIGURATION,
+        outcome=OUTCOME_SUCCESS,
+        transport=transport,
+        read_only_mode=read_only_mode,
+        oauth_enabled=oauth_enabled,
+        # The withheld and disabled tool sets are recorded here rather than as
+        # per-call refusals: neither kind of tool is registered with FastMCP, so
+        # a client is never told they exist and there is no invocation to
+        # refuse. This record is what makes the enforced surface auditable.
+        registered_tools=sorted(registered_tool_names),
+        disabled_tools=sorted(disabled_tool_names),
+        confirmation_required_tools=sorted(confirmation_required_tool_names),
+        audit_config=audit_config.as_dict(),
+    )
 
 
 @click.command(context_settings={"show_default": True})
@@ -252,6 +316,72 @@ logger = logging.getLogger(MCP_SERVER_NAME)
     "--log-retention-backup-count for DEBUG; inherits it when unset.",
 )
 @click.option(
+    "--audit-log-enabled",
+    "audit_log_enabled",
+    envvar="CB_MCP_AUDIT_LOG_ENABLED",
+    type=bool,
+    default=DEFAULT_AUDIT_ENABLED,
+    help="Enable audit logging. Applies to both stdio and http transports; the "
+    "set of applicable events differs by transport (authorization events are "
+    "http-only). Requires --audit-file. Audit output is a separate sink from "
+    "the --log-* operational logs, with a stable schema and its own retention.",
+)
+@click.option(
+    "--audit-file",
+    "audit_file",
+    envvar="CB_MCP_AUDIT_FILE",
+    default=DEFAULT_AUDIT_FILE,
+    help="Path to the audit log file. Required when --audit-log-enabled is "
+    "true; if it is missing the server still starts, with auditing disabled and "
+    "an error recorded. Each server process writes its own file with the "
+    "process id inserted before the extension (audit.log -> audit.1234.log), "
+    "because a single stdio deployment runs one server process per client and "
+    "sharing one file between them would corrupt records.",
+)
+@click.option(
+    "--audit-rotation-max-size-mb",
+    "audit_rotation_max_size_mb",
+    envvar="CB_MCP_AUDIT_ROTATION_MAX_SIZE_MB",
+    type=click.FloatRange(min=0),
+    default=None,
+    help="Maximum size in MB an audit file may reach before it rotates. "
+    "Default is 1 MB. 0 is invalid and falls back to the default with a "
+    "startup warning.",
+)
+@click.option(
+    "--audit-retention-backup-count",
+    "audit_retention_backup_count",
+    envvar="CB_MCP_AUDIT_RETENTION_BACKUP_COUNT",
+    type=click.IntRange(min=0),
+    default=None,
+    help="Number of rotated audit files retained, excluding the live file. "
+    "Default is 1000. Set to 0 to keep only the live file, which stays bounded "
+    "by the rotation size.",
+)
+@click.option(
+    "--audit-tool-args",
+    "audit_tool_args",
+    envvar="CB_MCP_AUDIT_TOOL_ARGS",
+    type=bool,
+    default=DEFAULT_AUDIT_TOOL_ARGS,
+    help="Record tool argument values in the audit log. Off by default: there "
+    "is no redaction capability in this release, so enabling this writes "
+    "arguments verbatim, including the full document bodies passed to "
+    "document-write tools. Review the audit file's retention and access "
+    "controls before enabling it.",
+)
+@click.option(
+    "--audit-disabled-events",
+    "audit_disabled_events",
+    envvar="CB_MCP_AUDIT_DISABLED_EVENTS",
+    default=None,
+    help="Audit events to suppress. Accepts comma-separated event ids or "
+    "names (e.g. '61490,document read'), or a file path with one entry per "
+    "line. Only filterable events can be suppressed: write and security events "
+    "are always recorded, and an attempt to disable one is refused with a "
+    "warning.",
+)
+@click.option(
     "--oauth-jwks-uri",
     envvar="CB_MCP_OAUTH_JWT_JWKS_URI",
     default=None,
@@ -329,6 +459,12 @@ def main(
     port,
     disabled_tools,
     confirmation_required_tools,
+    audit_log_enabled,
+    audit_file,
+    audit_rotation_max_size_mb,
+    audit_retention_backup_count,
+    audit_tool_args,
+    audit_disabled_events,
     oauth_jwks_uri,
     oauth_issuer,
     oauth_audience,
@@ -392,6 +528,18 @@ def main(
         invalid_sinks=log_sinks.invalid_tokens,
     )
 
+    # Resolved after configure_logging so the error for "audit enabled without
+    # a file" and the tool-args warning land in the operator's configured log
+    # sinks rather than on the last-resort handler.
+    audit_config = resolve_audit_config(
+        enabled=audit_log_enabled,
+        file=audit_file,
+        rotation_max_size_mb=audit_rotation_max_size_mb,
+        retention_backup_count=audit_retention_backup_count,
+        tool_args=audit_tool_args,
+        disabled_events=audit_disabled_events,
+    )
+
     try:
         auth = resolve_oauth(
             transport=transport,
@@ -444,12 +592,27 @@ def main(
         "oauth_scope_write_label": oauth_scope_write,
         "disabled_tools": disabled_tool_names,
         "confirmation_required_tools": configured_confirmation_tool_names,
+        # Audit configuration as resolved, so get_server_configuration_status
+        # and the startup audit record report exactly the same thing.
+        "audit_config": audit_config.as_dict(),
     }
     ctx.obj = settings
 
     @asynccontextmanager
     async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
         """Build the lifespan AppContext with settings captured from the CLI."""
+        # Audit is initialised first so the server-started record is the first
+        # line in the file and every later record shares its static context.
+        _start_audit(
+            audit_config,
+            transport=transport,
+            oauth_enabled=auth is not None,
+            read_only_mode=read_only_mode,
+            registered_tool_names=[tool.__name__ for tool in final_tools],
+            disabled_tool_names=disabled_tool_names,
+            confirmation_required_tool_names=configured_confirmation_tool_names,
+        )
+
         logger.info(
             f"MCP server initialized in lazy mode for tool discovery. "
             f"Modes: (read_only_mode={read_only_mode})"
@@ -467,6 +630,7 @@ def main(
             settings=settings,
             read_only_mode=read_only_mode,
             logging_config=resolved_logging.as_dict() if resolved_logging else None,
+            audit_config=audit_config.as_dict(),
         )
         try:
             yield app_context
@@ -476,12 +640,30 @@ def main(
         finally:
             if app_context.cluster_provider:
                 app_context.cluster_provider.close()
+            # Recorded before the sink closes so the stop record is the last
+            # line written. A process killed outright leaves no stop record;
+            # its absence means "not a clean shutdown", not "tampered with".
+            active_audit = get_audit_logger()
+            if active_audit.active:
+                active_audit.emit_event(
+                    AuditEvent.SERVER_STOPPED, outcome=OUTCOME_SUCCESS
+                )
+            shutdown_audit()
             logger.info("Closing MCP server")
 
     # Map user-friendly transport names to SDK transport names
     sdk_transport = NETWORK_TRANSPORTS_SDK_MAPPING.get(transport, transport)
 
     mcp = FastMCP(MCP_SERVER_NAME, lifespan=app_lifespan, auth=auth)
+
+    # Registered unconditionally: the middleware short-circuits when auditing
+    # is inactive, so one registration path serves both modes. ``transport``
+    # decides whether an unauthenticated caller is recorded as anonymous (http)
+    # or as the local process owner (stdio); ``cb_userid`` records the single
+    # cluster identity every caller collapses onto, which is the gap this audit
+    # log exists to close.
+    if audit_config.enabled:
+        mcp.add_middleware(AuditMiddleware(transport=transport, cb_userid=username))
 
     logger.info(
         f"Registering {len(final_tools)} tool(s) with modes (read_only_mode={read_only_mode})"

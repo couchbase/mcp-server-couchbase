@@ -10,10 +10,12 @@ from typing import Any
 
 from fastmcp import Context
 
+from ..audit.emitter import get_audit_logger
 from ..utils.config import get_settings
 from ..utils.connection import connect_to_bucket
 from ..utils.constants import MCP_SERVER_NAME
 from ..utils.context import (
+    get_audit_config,
     get_cluster_connection,
     get_cluster_provider,
     get_logging_config,
@@ -66,11 +68,25 @@ def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
     # implementations that don't populate it.
     logging_status = get_logging_config(ctx)
 
+    # Audit state: the resolved configuration plus the sink counters. The
+    # counters matter as much as the config — ``dropped`` is the only way an
+    # operator discovers that audit records were lost to a full disk or revoked
+    # permissions, since the sink deliberately fails open rather than turning an
+    # audit outage into a server outage.
+    audit_status = get_audit_config(ctx)
+    if audit_status is not None:
+        audit_status = dict(audit_status)
+        audit_logger = get_audit_logger()
+        audit_status["active"] = audit_logger.active
+        if audit_logger.active:
+            audit_status["stats"] = audit_logger.stats
+
     return {
         "server_name": MCP_SERVER_NAME,
         "status": "running",
         "configuration": configuration,
         "logging": logging_status,
+        "audit": audit_status,
         "connections": connection_status,
     }
 

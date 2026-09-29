@@ -22,6 +22,8 @@ from collections.abc import Callable
 
 from fastmcp.server.dependencies import get_access_token
 
+from ..audit import state as audit_state
+from ..audit.exceptions import ScopeDeniedError
 from .constants import MCP_SERVER_NAME, SCOPE_READ, SCOPE_WRITE
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.scope_enforcement")
@@ -97,7 +99,17 @@ def wrap_with_scope_check(
                 if hint:
                     msg = f"{msg} {hint}"
                 logger.warning(msg)
-                raise PermissionError(msg)
+                # Record the refusal for the audit middleware before raising.
+                # FastMCP wraps a tool's exception in ToolError, so the
+                # middleware cannot classify this from the exception it sees.
+                audit_state.record_refusal(
+                    event_id=ScopeDeniedError.audit_event.id,
+                    event_name=ScopeDeniedError.audit_event.event_name,
+                    outcome=ScopeDeniedError.audit_outcome,
+                    reason=ScopeDeniedError.audit_reason,
+                    required_scope=sorted(required_scopes),
+                )
+                raise ScopeDeniedError(msg)
 
         if inspect.iscoroutinefunction(fn):
             return await fn(*args, **kwargs)

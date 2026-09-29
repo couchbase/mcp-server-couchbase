@@ -30,6 +30,11 @@ from .constants import (
     ALLOWED_LOG_SINKS,
     ALLOWED_OAUTH_ALGORITHMS,
     ALLOWED_TRANSPORTS,
+    DEFAULT_AUDIT_BACKUP_COUNT,
+    DEFAULT_AUDIT_ENABLED,
+    DEFAULT_AUDIT_FILE,
+    DEFAULT_AUDIT_ROTATION_MAX_SIZE_MB,
+    DEFAULT_AUDIT_TOOL_ARGS,
     DEFAULT_HOST,
     DEFAULT_LOG_BACKUP_COUNT,
     DEFAULT_LOG_FILE,
@@ -52,6 +57,7 @@ from .constants import (
 # Context utilities
 from .context import (
     AppContext,
+    get_audit_config,
     get_cluster_connection,
     get_cluster_provider,
     get_logging_config,
@@ -98,11 +104,17 @@ __all__ = [
     "get_cluster_connection",
     "get_cluster_provider",
     "get_logging_config",
+    "get_audit_config",
     # Index utilities
     "fetch_indexes_from_rest_api",
     # Constants
     "MCP_SERVER_NAME",
     "DEFAULT_READ_ONLY_MODE",
+    "DEFAULT_AUDIT_ENABLED",
+    "DEFAULT_AUDIT_FILE",
+    "DEFAULT_AUDIT_ROTATION_MAX_SIZE_MB",
+    "DEFAULT_AUDIT_BACKUP_COUNT",
+    "DEFAULT_AUDIT_TOOL_ARGS",
     "DEFAULT_TRANSPORT",
     "DEFAULT_LOG_LEVEL",
     "DEFAULT_LOG_MAX_BYTES",

@@ -13,6 +13,8 @@ from collections.abc import Callable
 from mcp import types
 from pydantic import BaseModel, Field
 
+from ..audit import state as audit_state
+from ..audit.exceptions import ConfirmationDeclinedError
 from .constants import MCP_SERVER_NAME
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.utils.elicitation")
@@ -92,6 +94,12 @@ def wrap_with_confirmation(fn: Callable) -> Callable:
                     f"Client does not advertise elicitation support for '{tool_name}'; "
                     "proceeding without confirmation"
                 )
+                # A confirmation-required tool is about to run *without*
+                # confirmation. Before auditing existed this bypass left no
+                # trace above DEBUG, which made it invisible in exactly the
+                # situation an auditor would care about. Record it so the
+                # middleware can emit the guardrail event.
+                audit_state.record_confirmation(audit_state.CONFIRMATION_SKIPPED)
             else:
                 message = _build_confirmation_message(tool_name, call_arguments)
                 result = await ctx.elicit(
@@ -104,8 +112,17 @@ def wrap_with_confirmation(fn: Callable) -> Callable:
                 ):
                     msg = f"Execution of '{tool_name}' was not confirmed by the user."
                     logger.warning(msg)
-                    raise PermissionError(msg)
+                    audit_state.record_confirmation(audit_state.CONFIRMATION_DECLINED)
+                    audit_state.record_refusal(
+                        event_id=ConfirmationDeclinedError.audit_event.id,
+                        event_name=ConfirmationDeclinedError.audit_event.event_name,
+                        outcome=ConfirmationDeclinedError.audit_outcome,
+                        reason=ConfirmationDeclinedError.audit_reason,
+                        confirmation="declined",
+                    )
+                    raise ConfirmationDeclinedError(msg)
 
+                audit_state.record_confirmation(audit_state.CONFIRMATION_ACCEPTED)
                 logger.info(f"User confirmed execution of '{tool_name}'")
 
         # Keep wrapper behavior transparent: await async tools, call sync tools directly.

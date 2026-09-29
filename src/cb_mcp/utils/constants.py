@@ -52,6 +52,27 @@ DEFAULT_LOG_SINKS = "stderr"
 # layer (mcp_server.py) wires this as the --log-file Click default.
 DEFAULT_LOG_FILE = "mcp_server.log"
 
+# Audit Logging Configuration
+# Audit is a separate sink from the CB_MCP_LOG_* operational logs: it
+# guarantees a stable schema, completeness for non-filterable events, and is
+# sensitive by default. Opt-in — an operator must both enable it and name a
+# file. Retention is expressed in bytes (rotation size x backup count), matching
+# the operational log configuration.
+DEFAULT_AUDIT_ENABLED = False
+# No default path: enabling audit without naming a file is a configuration
+# error that is reported at startup, leaving audit off rather than aborting.
+DEFAULT_AUDIT_FILE = None
+# Rotation size per audit file, in MB.
+DEFAULT_AUDIT_ROTATION_MAX_SIZE_MB = 1.0
+# Rotated backups retained per audit file, excluding the live file. Much larger
+# than the operational-log default because audits are reviewed on a quarterly
+# or annual cadence, not for day-to-day triage.
+DEFAULT_AUDIT_BACKUP_COUNT = 1000
+# Tool argument values are sensitive: document-write tools carry entire
+# document bodies. There is no redaction capability in this release, so the
+# default is off and enabling it emits a startup warning.
+DEFAULT_AUDIT_TOOL_ARGS = False
+
 # OAuth Scopes
 # Tokens carrying SCOPE_READ may call read-only tools (including SQL++ query,
 # which is classified read-only at startup and runtime-gated by
