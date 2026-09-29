@@ -5,7 +5,7 @@ Coverage map:
 - enabling without a file is reported and leaves auditing off, not fatal
 - rotation size and backup count fallbacks on invalid input
 - MB to bytes conversion
-- disabled-events parsing: ids, names, files, comments, whitespace
+- disabled-events parsing: ids only, files, comments, whitespace
 - non-filterable events cannot be suppressed
 - unknown events are ignored with a warning
 - the tool-args warning fires only when it can matter
@@ -136,10 +136,25 @@ def test_tool_args_warns_only_when_auditing_is_active(tmp_path, caplog):
 # ---------------------------------------------------------------------------
 
 
-def test_disabled_events_accepts_ids_and_names():
+def test_disabled_events_accepts_numeric_ids():
     assert parse_disabled_events("61490") == {61490}
-    assert parse_disabled_events("document read") == {61490}
-    assert parse_disabled_events("61490, query read") == {61490, 61491}
+    assert parse_disabled_events("61490, 61491") == {61490, 61491}
+    assert parse_disabled_events(" 61490 ,61491 ") == {61490, 61491}
+
+
+def test_catalogue_names_are_not_accepted(caplog):
+    """Names were accepted once and were withdrawn deliberately.
+
+    The id is the wire contract; the name is prose. Names carry spaces and
+    parentheses, which makes them awkward to quote in a shell or a Docker -e
+    value, and a name may be reworded for clarity in a way an id never is — so
+    a filter written against one could silently stop matching. A name is now
+    treated as an unknown entry and warned about, rather than half-working.
+    """
+    with caplog.at_level(logging.WARNING):
+        assert parse_disabled_events("document read") == set()
+        assert parse_disabled_events("61490, query read") == {61490}
+    assert "unknown audit event" in caplog.text.lower()
 
 
 @pytest.mark.parametrize("raw", [None, "", "   ", ","])
@@ -153,9 +168,9 @@ def test_disabled_events_from_a_file_ignores_comments_and_blanks(tmp_path):
         "\n".join(
             [
                 "# suppress the noisy reads",
-                "document read",
+                "61490",
                 "",
-                "   query read   ",
+                "   61491   ",
                 "# trailing comment",
             ]
         ),
@@ -166,21 +181,21 @@ def test_disabled_events_from_a_file_ignores_comments_and_blanks(tmp_path):
 
 def test_non_filterable_events_cannot_be_suppressed(caplog):
     with caplog.at_level(logging.WARNING):
-        # A write id, a security event and a lifecycle event.
-        result = parse_disabled_events("61522, scope check denied, server started")
+        # A write id, a security event and a lifecycle event, all by id.
+        result = parse_disabled_events("61522, 57377, 57344")
     assert result == set()
     assert "Refused to disable non-filterable" in caplog.text
 
 
 def test_unknown_events_are_ignored_with_a_warning(caplog):
     with caplog.at_level(logging.WARNING):
-        result = parse_disabled_events("99999, not an event, document read")
+        result = parse_disabled_events("99999, not an event, 61490")
     assert result == {61490}
     assert "unknown audit event" in caplog.text.lower()
 
 
 def test_filters_are_not_parsed_when_auditing_is_disabled():
-    config = _resolve(enabled=False, disabled_events="document read")
+    config = _resolve(enabled=False, disabled_events="61490")
     assert config.disabled_events == ()
 
 
@@ -188,7 +203,7 @@ def test_session_initialized_is_filterable(tmp_path):
     config = _resolve(
         enabled=True,
         file=str(tmp_path / "a.log"),
-        disabled_events="session initialized",
+        disabled_events="57360",
     )
     assert config.disabled_events == (57360,)
 
@@ -205,7 +220,7 @@ def test_as_dict_is_json_friendly_and_complete(tmp_path):
         rotation_max_size_mb=4,
         retention_backup_count=7,
         tool_args=True,
-        disabled_events="document read",
+        disabled_events="61490",
     )
     snapshot = config.as_dict()
     assert snapshot == {

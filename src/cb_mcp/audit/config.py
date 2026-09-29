@@ -25,7 +25,7 @@ from ..utils.constants import (
     DEFAULT_AUDIT_TOOL_ARGS,
     LOGGER_NAMESPACE,
 )
-from .catalog import ALL_IDS, EVENT_NAMES_TO_IDS, FILTERABLE_IDS
+from .catalog import ALL_IDS, FILTERABLE_IDS
 from .sink import process_scoped_path
 
 logger = logging.getLogger(f"{LOGGER_NAMESPACE}.audit.config")
@@ -90,11 +90,21 @@ def _read_event_tokens(value: str) -> list[str] | None:
 
 
 def _resolve_event_id(token: str) -> int | None:
-    """Map one entry — a numeric id or a catalogue name — onto an event id."""
-    if token.isdigit():
-        event_id = int(token)
-        return event_id if event_id in ALL_IDS else None
-    return EVENT_NAMES_TO_IDS.get(token)
+    """Map one entry — a numeric event id — onto an event id.
+
+    Numeric ids only. Catalogue names were accepted here at one point and were
+    withdrawn deliberately: the id is the wire contract and the name is not.
+    Names carry spaces and are English prose ("write blocked (read-only mode)"),
+    which makes them awkward to quote in a shell and in a Docker ``-e`` value,
+    and a name is free to be reworded for clarity in a way an id never is — so
+    a filter written against a name could silently stop matching after an
+    editorial change. ``descriptor.json`` maps every id to its name for anyone
+    composing a filter.
+    """
+    if not token.isdigit():
+        return None
+    event_id = int(token)
+    return event_id if event_id in ALL_IDS else None
 
 
 def parse_disabled_events(raw: str | None) -> set[int]:
@@ -102,13 +112,14 @@ def parse_disabled_events(raw: str | None) -> set[int]:
 
     Accepts a comma-separated list, or a path to a file with one entry per line
     (``#`` comments allowed), matching how ``--disabled-tools`` already works.
-    Entries may be either the numeric event id or the catalogue event name.
+    Entries are **numeric event ids**; see :func:`_resolve_event_id` for why
+    catalogue names are not accepted.
 
     Two classes of entry are rejected with a warning rather than silently
     honoured, because both would leave an operator believing they had filtered
     something they had not:
 
-    * an id or name that is not in the catalogue at all;
+    * an entry that is not a numeric id in the catalogue at all;
     * a **non-filterable** event. Writes and security decisions are mandated —
       an operator may turn read noise down but may not switch off the record of
       who changed what.

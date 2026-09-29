@@ -459,11 +459,11 @@ audit_options = compose(
         "audit_disabled_events",
         envvar="CB_MCP_AUDIT_DISABLED_EVENTS",
         default=None,
-        help="Audit events to suppress. Accepts comma-separated event ids or "
-        "names (e.g. '61490,document read'), or a file path with one entry per "
-        "line. Only filterable events can be suppressed: write and security events "
-        "are always recorded, and an attempt to disable one is refused with a "
-        "warning.",
+        help="Audit events to suppress. Accepts comma-separated numeric event "
+        "ids (e.g. '61490,61491'), or a file path with one id per line. Ids are "
+        "listed in the audit descriptor. Only filterable events can be "
+        "suppressed: write and security events are always recorded, and an "
+        "attempt to disable one is refused with a warning.",
     ),
 )
 """Audit sink configuration. Shared by every server; honored where a spec declares an audit package."""

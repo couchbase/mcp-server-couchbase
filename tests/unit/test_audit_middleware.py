@@ -389,7 +389,7 @@ async def test_sqlpp_write_statement_uses_the_query_write_id(tmp_path):
 
 @pytest.mark.asyncio
 async def test_disabled_event_is_not_written(tmp_path):
-    audit = _build_logger(tmp_path, disabled_events="document read")
+    audit = _build_logger(tmp_path, disabled_events="61490")  # document read
     mcp = _server(audit)
 
     @mcp.tool
