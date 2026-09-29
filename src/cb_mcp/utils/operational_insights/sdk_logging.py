@@ -13,12 +13,6 @@ import logging
 #: Name the SDK logs under. Not this repo's ``couchbase`` tree at all.
 SDK_LOGGER_NAME = "couchbase_operational_insights"
 
-#: The SDK's own env var for its startup logging configuration
-#: (``couchbase_operational_insights.common.logging.configure_logging_from_env``).
-#: Surfaced here purely as documentation for operators who go looking for
-#: it; this module does not read it.
-SDK_LOG_LEVEL_ENV_VAR = "PYCBOI_LOG_LEVEL"
-
 
 class _ForwardingHandler(logging.Handler):
     """Re-emit a record through another logger's handlers, resolved per call.
