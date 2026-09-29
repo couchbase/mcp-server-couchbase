@@ -212,6 +212,12 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_MCP_OAUTH_MCP_BASE_URL`          | Public base URL of this server. When set, publishes RFC 9728 Protected Resource Metadata for PRM-aware clients                                            | None                                                           |
 | `CB_MCP_OAUTH_SCOPE_READ_LABEL`      | Override the OAuth scope label treated as 'read' access (advertised in PRM and matched against the token `scope`/`scp` claim). Use when your IdP can't emit the canonical form | `couchbase-mcp:read`                       |
 | `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`     | Override the OAuth scope label treated as 'write' access; same semantics as the read label                                                                | `couchbase-mcp:write`                                          |
+| `CB_MCP_AUDIT_LOG_ENABLED`           | Enable audit logging — a separate sink from the `CB_MCP_LOG_*` operational logs, with a stable schema and its own retention (see [Auditing](#auditing))   | `false`                                                        |
+| `CB_MCP_AUDIT_FILE`                  | Path to the audit log file. Required when auditing is enabled; the process id is inserted before the extension (`audit.log` → `audit.1234.log`). Mount a volume at this path to keep records after the container stops | None                          |
+| `CB_MCP_AUDIT_ROTATION_MAX_SIZE_MB`  | Maximum size **in MB** an audit file may reach before it rotates. `0` is invalid and falls back to the default with a startup warning                     | `1` (1 MB)                                                     |
+| `CB_MCP_AUDIT_RETENTION_BACKUP_COUNT`| Rotated audit files retained, excluding the live file. `0` keeps only the live file                                                                       | `1000`                                                         |
+| `CB_MCP_AUDIT_TOOL_ARGS`             | Record tool argument values. **Off by default** — there is no redaction in this release, so enabling it writes arguments verbatim, including full document bodies | `false`                                                |
+| `CB_MCP_AUDIT_DISABLED_EVENTS`       | Audit events to suppress: comma-separated ids or names (e.g. `61490,document read`), or a file with one entry per line. Only filterable events can be suppressed | None                                                    |
 
 ### Disabling Tools
 
@@ -390,6 +396,31 @@ The server logs to `stderr` by default. Logging is configured with the `CB_MCP_L
 - **Server-config snapshot** — with the `file` sink active, a one-shot record is written as JSON to a dedicated `mcp_server_config.log.json` file (derived from `CB_MCP_LOG_FILE`), overwritten each start, so support always has the current config even after other logs rotate.
 
 For more details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/logging.html).
+
+### Auditing
+
+Audit logging records **who did what, and whether it was allowed** — a different question from the operational logs, which record what went wrong. It is off by default and enabled with the `CB_MCP_AUDIT_*` variables in the [Environment Variables](#environment-variables) table.
+
+Records are JSON Lines, one immutable record per line, in the same field vocabulary as Couchbase Server and Sync Gateway.
+
+- **`CB_MCP_AUDIT_LOG_ENABLED` / `CB_MCP_AUDIT_FILE`** — both are needed. Enabling auditing without a path leaves the server running with auditing disabled and an error in the log.
+- **Mount a volume at the audit path.** The audit file is written inside the container like any other file, so without a volume the records are destroyed when the container is removed — which defeats the purpose of keeping them. This matters more than it does for logs: audit retention defaults to 1000 rotated backups precisely because the records are meant to outlive the process.
+- **One file per container.** The process id is inserted before the extension (`audit.log` → `audit.1234.log`), so several containers can share a mounted directory without corrupting each other's records. Consolidating them is the operator's job.
+- **Filtering** — `CB_MCP_AUDIT_DISABLED_EVENTS` turns read noise down. Write and security events cannot be disabled; an attempt to do so is refused with a warning.
+- **`CB_MCP_AUDIT_TOOL_ARGS`** — off by default, and warns at startup when enabled. There is no redaction in this release, so arguments are written verbatim, including full document bodies.
+- **Fail-open** — if the audit file cannot be written, the server keeps serving and records are dropped and counted. `get_server_configuration_status` reports the live `written` / `dropped` / `write_errors` counters.
+
+Auditing applies to the **operational** server. The `operational-insights` server accepts the same variables and reports them, but records nothing.
+
+```bash
+docker run --rm \
+  -e CB_CONNECTION_STRING=couchbases://your-cluster \
+  -e CB_USERNAME=user -e CB_PASSWORD=password \
+  -e CB_MCP_AUDIT_LOG_ENABLED=true \
+  -e CB_MCP_AUDIT_FILE=/audit/audit.log \
+  -v "$(pwd)/audit:/audit" \
+  couchbase/mcp-server-couchbase:latest
+```
 
 ### OAuth 2.1 Authorization
 

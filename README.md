@@ -307,6 +307,12 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_OAUTH_MCP_BASE_URL` | `--oauth-mcp-base-url` | Public base URL of this server. When set, publishes RFC 9728 Protected Resource Metadata so PRM-aware clients can discover the IdP | None |
 | `CB_MCP_OAUTH_SCOPE_READ_LABEL` | `--oauth-scope-read-label` | Override the OAuth scope label treated as 'read' access (advertised in PRM and matched against the token's `scope`/`scp` claim). Use when your IdP can't emit the canonical form | `couchbase-mcp:read` |
 | `CB_MCP_OAUTH_SCOPE_WRITE_LABEL` | `--oauth-scope-write-label` | Override the OAuth scope label treated as 'write' access; same semantics as the read label | `couchbase-mcp:write` |
+| `CB_MCP_AUDIT_LOG_ENABLED` | `--audit-log-enabled` | Enable audit logging — a separate sink from the `CB_MCP_LOG_*` operational logs, with a stable schema and its own retention (see [Auditing](#auditing)) | `false` |
+| `CB_MCP_AUDIT_FILE` | `--audit-file` | Path to the audit log file. Required when auditing is enabled; the process id is inserted before the extension (`audit.log` → `audit.1234.log`) | None |
+| `CB_MCP_AUDIT_ROTATION_MAX_SIZE_MB` | `--audit-rotation-max-size-mb` | Maximum size **in MB** an audit file may reach before it rotates. `0` is invalid and falls back to the default with a startup warning | `1` (1 MB) |
+| `CB_MCP_AUDIT_RETENTION_BACKUP_COUNT` | `--audit-retention-backup-count` | Rotated audit files retained, excluding the live file. `0` keeps only the live file | `1000` |
+| `CB_MCP_AUDIT_TOOL_ARGS` | `--audit-tool-args` | Record tool argument values in the audit log. **Off by default** — there is no redaction in this release, so enabling it writes arguments verbatim, including full document bodies | `false` |
+| `CB_MCP_AUDIT_DISABLED_EVENTS` | `--audit-disabled-events` | Audit events to suppress: comma-separated ids or names (e.g. `61490,document read`), or a file with one entry per line. Only filterable events can be suppressed | None |
 
 #### Read-Only Mode Configuration
 
@@ -460,6 +466,38 @@ uvx couchbase-mcp-server --log-level=debug --log-sinks=file \
 ```
 
 For more details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/logging.html).
+
+### Auditing
+
+Audit logging answers a different question from the operational logs. Logs tell you **what went wrong**; the audit log tells you **who did what, and whether it was allowed**. It exists because the MCP server is the only layer that can answer either question about an agent: every request reaches the cluster as the single `CB_USERNAME` the server connects with, so Couchbase Server's own audit log cannot tell two callers apart — and decisions such as a scope denial, a read-only block or a declined confirmation never reach the cluster at all.
+
+Auditing is **off by default**. It is enabled with `CB_MCP_AUDIT_LOG_ENABLED` and a path in `CB_MCP_AUDIT_FILE`; enabling it without a path leaves the server running with auditing disabled and an error in the log.
+
+Records are **JSON Lines** — one immutable record per line — using the same field vocabulary as Couchbase Server and Sync Gateway (`id`, `name`, `description`, `timestamp`, `real_userid`, `server`, `cid`, `outcome`, `reason`), so an existing audit pipeline gets one format across the estate.
+
+```json
+{"id":61522,"name":"document write","description":"A document write operation was requested through a tool","timestamp":"2026-09-29T09:14:22.418Z","real_userid":{"domain":"oauth","user":"agent-svc-7"},"server":{"version":"1.0.2","host":"mcp-01"},"cid":"9f2c...","outcome":"success","tool_name":"upsert_document_by_id","required_scope":"write","ks":"travel-sample.inventory.airline","cb_userid":"mcp_service"}
+```
+
+- **Identity** — `real_userid` records the *caller*, in one of three domains: `oauth` (the bearer token's subject), `local` (the OS process owner, on stdio), or `anonymous` (HTTP with OAuth disabled). Enabling auditing on HTTP without OAuth warns at startup, because every record then resolves to `anonymous`.
+- **Correlation** — `cid` groups every record produced by one request, so an authorization denial, a guardrail refusal and the eventual tool result join without matching on timestamps. There is deliberately **no session identifier**: MCP is moving to a stateless model in which connection identity must not be read as session continuity. For SQL++, the same `cid` is sent as the query's `client_context_id`, which Couchbase Server records as `clientContextId` — an exact join between the two logs.
+- **Events** — a fixed catalogue on numbered ID blocks: server lifecycle and configuration, session initialize, token rejected, scope check denied, read-only write blocked, confirmation declined or skipped, and one read/write pair per tool category (cluster, schema, document, query, index, performance, search). Adding a tool needs no new ID and no change to a SIEM rule. The full catalogue ships as `descriptor.json` inside the package.
+- **Filtering** — `CB_MCP_AUDIT_DISABLED_EVENTS` turns *read* noise down. Write and security events are **not filterable**: an attempt to disable one is refused with a warning, so the record of who changed what cannot be switched off by configuration.
+- **Retention** — rotation size and backup count work like the operational logs, but the default retention is far larger (1000 backups) because audit records are reviewed on a quarterly or annual cadence, not for day-to-day triage.
+- **Per-process files** — the process id is inserted before the extension, because a stdio deployment runs one server process per client and a shared rotating file would interleave and corrupt records.
+- **Fail-open** — if the audit file cannot be written, the server keeps serving and the records are dropped and counted rather than turning an audit outage into a server outage. `get_server_configuration_status` reports the live `written` / `dropped` / `write_errors` counters, and `dropped` is the only way to discover that records were lost.
+- **Tool arguments** — recorded only when `CB_MCP_AUDIT_TOOL_ARGS` is enabled, which warns at startup. There is no redaction in this release, so arguments are written verbatim, including the full document bodies passed to document-write tools.
+
+Auditing currently applies to the **operational** server. The Operational Insights server accepts the same flags and reports them, but records nothing.
+
+```bash
+# Audit to a file, keeping the default 1000 rotated backups
+uvx couchbase-mcp-server --audit-log-enabled=true --audit-file=/var/log/cb-mcp/audit.log
+
+# Turn down read noise, keeping every write and security event
+uvx couchbase-mcp-server --audit-log-enabled=true --audit-file=/var/log/cb-mcp/audit.log \
+  --audit-disabled-events="document read,query read"
+```
 
 ### Client Specific Configuration
 
