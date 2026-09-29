@@ -435,3 +435,74 @@ def test_array_slice_projection_with_is_not_missing_parses() -> None:
     tree = parse_sqlpp(query)
     assert modifies_data(tree) is False
     assert modifies_structure(tree) is False
+
+
+class TestGetSchemaForCollectionNumSampleValues:
+    """num_sample_values: WITH-clause construction and input validation.
+
+    The parameter is annotated `int | None`, but annotations are not enforced
+    at runtime and arguments arrive as decoded JSON over MCP — so a client can
+    genuinely deliver a float, a bool, or a string here.
+    """
+
+    def test_omitted_by_default(self) -> None:
+        """Unset must leave the query untouched so the server applies its own
+        default of 5 — existing callers see no behavior change."""
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+        scope.query.return_value = iter([])
+
+        get_schema_for_collection(ctx, "b", "s", "users")
+
+        assert scope.query.call_args[0][0] == "INFER `users`"
+
+    def test_explicit_value_builds_with_clause(self) -> None:
+        """A positive value must be rendered as a JSON object literal."""
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+        scope.query.return_value = iter([])
+
+        get_schema_for_collection(ctx, "b", "s", "users", num_sample_values=10)
+
+        query = scope.query.call_args[0][0]
+        assert query == 'INFER `users` WITH {"num_sample_values": 10}'
+
+    def test_zero_is_allowed(self) -> None:
+        """0 is a meaningful value to INFER — it drops the `samples` key from
+        every field while keeping structure and type info — so it must not be
+        treated as 'unset'."""
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+        scope.query.return_value = iter([])
+
+        get_schema_for_collection(ctx, "b", "s", "users", num_sample_values=0)
+
+        query = scope.query.call_args[0][0]
+        assert query == 'INFER `users` WITH {"num_sample_values": 0}'
+
+    @pytest.mark.parametrize(
+        "bad_value",
+        [
+            pytest.param(-3, id="negative"),
+            # INFER silently truncates a fraction (2.7 -> 2), returning a
+            # different count than asked for with no warning.
+            pytest.param(2.7, id="fractional"),
+            # bool subclasses int, so isinstance(True, int) is True and
+            # True < 0 is False — without an explicit bool guard this would
+            # pass both checks and interpolate as Python-cased "True",
+            # which is not valid JSON.
+            pytest.param(True, id="bool"),
+            # A string must raise ValueError, not crash with a TypeError
+            # from the `< 0` comparison.
+            pytest.param("5", id="string"),
+        ],
+    )
+    def test_invalid_values_rejected_before_query(self, bad_value) -> None:
+        """Invalid values must raise before the cluster is touched, with a
+        message naming the offending parameter — the upstream SQL++ parse
+        error never mentions num_sample_values."""
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+
+        with pytest.raises(ValueError, match="num_sample_values"):
+            get_schema_for_collection(
+                ctx, "b", "s", "users", num_sample_values=bad_value
+            )
+
+        scope.query.assert_not_called()
