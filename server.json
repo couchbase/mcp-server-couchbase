@@ -61,14 +61,14 @@
         },
         {
           "name": "CB_MCP_READ_ONLY_MODE",
-          "description": "Couchbase read only mode. Set to true to allow disable write operations across both KV and query. KV write tools are not loaded and SQL++ queries that modify data are blocked. Set to false to allow data modification queries and tools.",
+          "description": "Couchbase read only mode. Set to true to disable write operations: KV document, scope/collection and index write tools are not loaded, and SQL++ queries that modify data are blocked. Set to false to allow them. Default is true.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
         },
         {
           "name": "CB_MCP_TRANSPORT",
-          "description": "Transport mode for the server (stdio, http or sse). Default is stdio",
+          "description": "Transport mode for the server (stdio, http or sse). Default is stdio. OAuth is only honored with http.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -308,7 +308,7 @@
         {
           "type": "named",
           "name": "--read-only-mode",
-          "description": "Couchbase read only mode. Set to true to disable write operations across both KV and query. KV write tools are not loaded and SQL++ queries that modify data are blocked. Set to false to allow data modification queries and tools.",
+          "description": "Couchbase read only mode. Set to true to disable write operations: KV document, scope/collection and index write tools are not loaded, and SQL++ queries that modify data are blocked. Set to false to allow them. Default is true.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
@@ -316,7 +316,7 @@
         {
           "type": "named",
           "name": "--transport",
-          "description": "Transport mode for the server (stdio, http or sse). Default is stdio",
+          "description": "Transport mode for the server (stdio, http or sse). Default is stdio. OAuth is only honored with http.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -533,35 +533,63 @@
       "environmentVariables": [
         {
           "name": "CB_OI_CONNECTION_STRING",
-          "description": "Operational Insights (Enterprise Analytics) endpoint URL, e.g. http://localhost:8095. An HTTP(S) URL, not a couchbase:// connection string.",
+          "description": "Operational Insights (Enterprise Analytics) endpoint URL, e.g. http://localhost:8095 (local) or https://<host>:18095 (Capella). An HTTP(S) URL, not a couchbase:// connection string.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
         },
         {
           "name": "CB_OI_USERNAME",
-          "description": "Operational Insights username.",
+          "description": "Operational Insights database username. Required for basic authentication.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
         },
         {
           "name": "CB_OI_PASSWORD",
-          "description": "Operational Insights password.",
+          "description": "Operational Insights database password. Required for basic authentication.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "CB_OI_CA_CERT_PATH",
+          "description": "Operational Insights CA certificate (trust store) path, used to verify the server certificate over https://.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_OI_CLIENT_CERT_PATH",
+          "description": "Client certificate path for mTLS: a PEM certificate (paired with the client key path) or a PKCS#12 bundle (.p12/.pfx). Requires an https:// connection string. When set, username/password are ignored.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_OI_CLIENT_KEY_PATH",
+          "description": "Client private key path (PEM) for mTLS. Leave unset when the client certificate is a PKCS#12 bundle that already contains the key.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_OI_CLIENT_CERT_PASSWORD",
+          "description": "Decryption password for the client key or PKCS#12 bundle, if it is encrypted. Omit if the file is unencrypted.",
           "isRequired": false,
           "format": "string",
           "isSecret": true
         },
         {
           "name": "CB_MCP_READ_ONLY_MODE",
-          "description": "Operational Insights read only mode. Set to true to disable write operations (index/query management). Set to false to allow data modification queries and tools.",
+          "description": "Operational Insights read only mode. Set to true to disable write operations: the create_index and cancel_async_query tools are not loaded, and queries that modify data are blocked. Set to false to allow them. Default is true.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
         },
         {
           "name": "CB_MCP_TRANSPORT",
-          "description": "Transport mode for the server (stdio, http or sse). Default is stdio",
+          "description": "Transport mode for the server (stdio, http or sse). Default is stdio. OAuth is only honored with http.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -610,7 +638,7 @@
         },
         {
           "name": "CB_MCP_LOG_FILE",
-          "description": "Base path for the per-level log files. One rotating file is written per level (e.g. mcp_server.info.log, mcp_server.error.log). Only used when 'file' is in CB_MCP_LOG_SINKS. Default is mcp_server.log.",
+          "description": "Base path for the per-level log files. One rotating file is written per level (e.g. mcp_server_operational_insights.info.log, mcp_server_operational_insights.error.log). Only used when 'file' is in CB_MCP_LOG_SINKS. Default is mcp_server_operational_insights.log.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -753,7 +781,7 @@
         {
           "type": "named",
           "name": "--connection-string",
-          "description": "Operational Insights (Enterprise Analytics) endpoint URL, e.g. http://localhost:8095. An HTTP(S) URL, not a couchbase:// connection string.",
+          "description": "Operational Insights (Enterprise Analytics) endpoint URL, e.g. http://localhost:8095 (local) or https://<host>:18095 (Capella). An HTTP(S) URL, not a couchbase:// connection string.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -761,7 +789,7 @@
         {
           "type": "named",
           "name": "--username",
-          "description": "Operational Insights username.",
+          "description": "Operational Insights database username. Required for basic authentication.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -769,7 +797,39 @@
         {
           "type": "named",
           "name": "--password",
-          "description": "Operational Insights password.",
+          "description": "Operational Insights database password. Required for basic authentication.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "type": "named",
+          "name": "--ca-cert-path",
+          "description": "Operational Insights CA certificate (trust store) path, used to verify the server certificate over https://.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--client-cert-path",
+          "description": "Client certificate path for mTLS: a PEM certificate (paired with the client key path) or a PKCS#12 bundle (.p12/.pfx). Requires an https:// connection string. When set, username/password are ignored.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--client-key-path",
+          "description": "Client private key path (PEM) for mTLS. Leave unset when the client certificate is a PKCS#12 bundle that already contains the key.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--client-cert-password",
+          "description": "Decryption password for the client key or PKCS#12 bundle, if it is encrypted. Omit if the file is unencrypted.",
           "isRequired": false,
           "format": "string",
           "isSecret": true
@@ -777,7 +837,7 @@
         {
           "type": "named",
           "name": "--read-only-mode",
-          "description": "Operational Insights read only mode. Set to true to disable write operations (index/query management). Set to false to allow data modification queries and tools.",
+          "description": "Operational Insights read only mode. Set to true to disable write operations: the create_index and cancel_async_query tools are not loaded, and queries that modify data are blocked. Set to false to allow them. Default is true.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
@@ -785,7 +845,7 @@
         {
           "type": "named",
           "name": "--transport",
-          "description": "Transport mode for the server (stdio, http or sse). Default is stdio",
+          "description": "Transport mode for the server (stdio, http or sse). Default is stdio. OAuth is only honored with http.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -841,7 +901,7 @@
         {
           "type": "named",
           "name": "--log-file",
-          "description": "Base path for the per-level log files. One rotating file is written per level (e.g. mcp_server.info.log, mcp_server.error.log). Only used when 'file' is in --log-sinks. Default is mcp_server.log.",
+          "description": "Base path for the per-level log files. One rotating file is written per level (e.g. mcp_server_operational_insights.info.log, mcp_server_operational_insights.error.log). Only used when 'file' is in --log-sinks. Default is mcp_server_operational_insights.log.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -1052,14 +1112,14 @@
         },
         {
           "name": "CB_MCP_READ_ONLY_MODE",
-          "description": "Couchbase read only mode. Set to true to disable write operations across both KV and query. KV write tools are not loaded and SQL++ queries that modify data are blocked. Set to false to allow data modification queries and tools.",
+          "description": "Couchbase read only mode. Set to true to disable write operations: KV document, scope/collection and index write tools are not loaded, and SQL++ queries that modify data are blocked. Set to false to allow them. Default is true.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
         },
         {
           "name": "CB_MCP_TRANSPORT",
-          "description": "Transport mode for the server (stdio, http or sse). Default is stdio",
+          "description": "Transport mode for the server (stdio, http or sse). Default is stdio. OAuth is only honored with http.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -1259,35 +1319,63 @@
       "environmentVariables": [
         {
           "name": "CB_OI_CONNECTION_STRING",
-          "description": "Operational Insights (Enterprise Analytics) endpoint URL, e.g. http://localhost:8095. An HTTP(S) URL, not a couchbase:// connection string.",
+          "description": "Operational Insights (Enterprise Analytics) endpoint URL, e.g. http://localhost:8095 (local) or https://<host>:18095 (Capella). An HTTP(S) URL, not a couchbase:// connection string.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
         },
         {
           "name": "CB_OI_USERNAME",
-          "description": "Operational Insights username.",
+          "description": "Operational Insights database username. Required for basic authentication.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
         },
         {
           "name": "CB_OI_PASSWORD",
-          "description": "Operational Insights password.",
+          "description": "Operational Insights database password. Required for basic authentication.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "CB_OI_CA_CERT_PATH",
+          "description": "Operational Insights CA certificate (trust store) path, used to verify the server certificate over https://.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_OI_CLIENT_CERT_PATH",
+          "description": "Client certificate path for mTLS: a PEM certificate (paired with the client key path) or a PKCS#12 bundle (.p12/.pfx). Requires an https:// connection string. When set, username/password are ignored.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_OI_CLIENT_KEY_PATH",
+          "description": "Client private key path (PEM) for mTLS. Leave unset when the client certificate is a PKCS#12 bundle that already contains the key.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_OI_CLIENT_CERT_PASSWORD",
+          "description": "Decryption password for the client key or PKCS#12 bundle, if it is encrypted. Omit if the file is unencrypted.",
           "isRequired": false,
           "format": "string",
           "isSecret": true
         },
         {
           "name": "CB_MCP_READ_ONLY_MODE",
-          "description": "Operational Insights read only mode. Set to true to disable write operations (index/query management). Set to false to allow data modification queries and tools.",
+          "description": "Operational Insights read only mode. Set to true to disable write operations: the create_index and cancel_async_query tools are not loaded, and queries that modify data are blocked. Set to false to allow them. Default is true.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
         },
         {
           "name": "CB_MCP_TRANSPORT",
-          "description": "Transport mode for the server (stdio, http or sse). Default is stdio",
+          "description": "Transport mode for the server (stdio, http or sse). Default is stdio. OAuth is only honored with http.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -1336,7 +1424,7 @@
         },
         {
           "name": "CB_MCP_LOG_FILE",
-          "description": "Base path for the per-level log files. One rotating file is written per level (e.g. mcp_server.info.log, mcp_server.error.log). Only used when 'file' is in CB_MCP_LOG_SINKS. Default is mcp_server.log.",
+          "description": "Base path for the per-level log files. One rotating file is written per level (e.g. mcp_server_operational_insights.info.log, mcp_server_operational_insights.error.log). Only used when 'file' is in CB_MCP_LOG_SINKS. Default is mcp_server_operational_insights.log.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
