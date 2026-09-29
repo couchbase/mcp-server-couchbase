@@ -64,11 +64,18 @@ async def test_get_schema_for_collection() -> None:
 
 @pytest.mark.asyncio
 async def test_get_schema_for_collection_num_sample_values_zero() -> None:
-    """num_sample_values=0 must drop the per-field `samples` key while keeping
-    the structure and type information.
+    """num_sample_values=0 must return no example values for any field, while
+    keeping the structure and type information.
 
     Exercises the WITH-clause path against a real INFER, which the unit tests
     can only assert as a query string against a mocked cluster.
+
+    INFER reports a field two different ways, and both must be checked: for a
+    single-typed field it omits `samples` entirely, but for a field whose type
+    varies across documents it emits parallel per-type arrays (`#docs`,
+    `%docs`, `samples`) and keeps `samples` present as a list of empty/null
+    entries. The invariant that holds for both is that no actual sample value
+    comes back.
     """
     bucket = require_test_bucket()
     scope = get_test_scope()
@@ -102,9 +109,15 @@ async def test_get_schema_for_collection_num_sample_values_zero() -> None:
             else:
                 for flavor in flavors:
                     for field, spec in flavor.get("properties", {}).items():
-                        assert "samples" not in spec, (
-                            f"num_sample_values=0 should omit samples, "
-                            f"but field {field!r} has {spec.get('samples')!r}"
+                        samples = spec.get("samples")
+                        # None / absent, or per-type entries that are each
+                        # themselves empty or null.
+                        empty = samples is None or all(
+                            entry is None or entry == [] for entry in samples
+                        )
+                        assert empty, (
+                            f"num_sample_values=0 should return no sample values, "
+                            f"but field {field!r} has {samples!r}"
                         )
 
     if skip_reason:
