@@ -391,3 +391,68 @@ oauth_options = compose(
     ),
 )
 """OAuth resource-server configuration. Shared by every server; scope label defaults are per-server."""
+
+embedding_options = compose(
+    click.option(
+        "--embedding-provider",
+        "embedding_provider",
+        envvar="EMBEDDING_PROVIDER",
+        type=click.Choice(
+            ["couchbase", "openai", "cohere", "voyage", "bedrock"], case_sensitive=False
+        ),
+        default=None,
+        help="Embedding provider for run_vector_search / run_search_vector_search. "
+        "Unset disables both tools' embedding step until configured (they stay "
+        "registered and fail with an actionable error at call time, not at startup).",
+    ),
+    click.option(
+        "--embedding-model",
+        "embedding_model",
+        envvar="EMBEDDING_MODEL",
+        default=None,
+        help="Model name/ID for the configured embedding provider.",
+    ),
+    click.option(
+        "--embedding-api-key",
+        "embedding_api_key",
+        envvar="EMBEDDING_API_KEY",
+        default=None,
+        help="API key for the configured embedding provider. Not used by bedrock "
+        "(uses the AWS credential chain / --embedding-aws-* instead).",
+    ),
+    click.option(
+        "--embedding-endpoint",
+        "embedding_endpoint",
+        envvar="EMBEDDING_ENDPOINT",
+        default=None,
+        help="Base URL override for the configured embedding provider (e.g. an "
+        "OpenAI-compatible local server, or a Couchbase Model Service deployment's "
+        "own URL — required when --embedding-provider=couchbase).",
+    ),
+    click.option(
+        "--embedding-aws-access-key-id",
+        "embedding_aws_access_key_id",
+        envvar="EMBEDDING_AWS_ACCESS_KEY_ID",
+        default=None,
+        help="AWS access key ID, bedrock provider only. Omit to use the default "
+        "AWS credential chain.",
+    ),
+    click.option(
+        "--embedding-aws-secret-access-key",
+        "embedding_aws_secret_access_key",
+        envvar="EMBEDDING_AWS_SECRET_ACCESS_KEY",
+        default=None,
+        help="AWS secret access key, bedrock provider only.",
+    ),
+    click.option(
+        "--embedding-aws-region",
+        "embedding_aws_region",
+        envvar="EMBEDDING_AWS_REGION",
+        default=None,
+        help="AWS region, bedrock provider only. Falls back to the AWS SDK's own "
+        "region resolution if unset.",
+    ),
+)
+"""Embedding-provider configuration for the vector search tools. Server-agnostic
+(unlike credential_options), so it is composed the same way for every server even
+though only the operational server currently registers tools that read it."""

@@ -753,6 +753,55 @@
           "isRequired": false,
           "format": "string",
           "isSecret": false
+        },
+        {
+          "name": "EMBEDDING_PROVIDER",
+          "description": "Embedding provider for run_vector_search / run_search_vector_search: one of couchbase, openai, cohere, voyage, bedrock. Unset disables both tools' embedding step until configured.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "EMBEDDING_MODEL",
+          "description": "Model name/ID for the configured embedding provider.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "EMBEDDING_API_KEY",
+          "description": "API key for the configured embedding provider. Not used by bedrock (uses the AWS credential chain / EMBEDDING_AWS_* instead).",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "EMBEDDING_ENDPOINT",
+          "description": "Base URL override for the configured embedding provider (e.g. an OpenAI-compatible local server, or a Couchbase Model Service deployment's own URL). Required when EMBEDDING_PROVIDER=couchbase.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "EMBEDDING_AWS_ACCESS_KEY_ID",
+          "description": "AWS access key ID, bedrock provider only. Omit to use the default AWS credential chain.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "EMBEDDING_AWS_SECRET_ACCESS_KEY",
+          "description": "AWS secret access key, bedrock provider only.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "EMBEDDING_AWS_REGION",
+          "description": "AWS region, bedrock provider only. Falls back to the AWS SDK's own region resolution if unset.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
         }
       ]
     }

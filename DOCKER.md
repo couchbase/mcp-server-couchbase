@@ -61,13 +61,22 @@ Documentation: <https://docs.couchbase.com/mcp-server/get-started/overview.html>
 
 ### Full-text search (FTS) tools
 
-Requires Couchbase Server 7.6+ and the Search service. Vector search is not supported by these tools (see the separate vector search tooling).
+Requires Couchbase Server 7.6+ and the Search service. Vector search is not supported by these tools (see [Vector search tools](#vector-search-tools) below).
 
 | Tool Name | Description |
 | --------- | ----------- |
 | `list_fts_indexes` | List Search (FTS) indexes. With no filters, lists cluster-level (legacy) indexes; with `bucket_name`, lists scope-level (scoped) indexes across every scope in that bucket; with `bucket_name` and `scope_name`, lists scope-level indexes in that one scope. |
 | `get_fts_index_definition` | Get the full definition of a single Search index (mappings, analyzers, plan params). Pass `bucket_name` and `scope_name` together for a scope-level index, or omit both for a cluster-level (legacy) index. |
 | `run_fts_query` | Run an FTS query against a Search index, or fetch its execution plan. `query` is the raw FTS query JSON body, supporting any non-vector query type (match, match_phrase, term, conjuncts, disjuncts, geo, date/numeric range, query_string, ...). Pass `explain=true` to fetch the execution plan instead of results — this still executes the query (`limit` defaulting to 1) since the Search service only exposes the plan per matched hit, not as a separate dry-run call. |
+
+### Vector search tools
+
+Both tools embed query text using the model configured via `EMBEDDING_*` environment variables (see the table below) — the caller passes plain text, never a raw vector. `run_vector_search` targets Couchbase Server 8.0+'s GSI vector indexes via SQL++; `run_search_vector_search` targets the Search service's vector search on Couchbase Server 7.6+. Available on both self-managed Couchbase Server and Capella.
+
+| Tool Name | Description |
+| --------- | ----------- |
+| `run_vector_search` | Embed a query and run a vector similarity search against a GSI vector index (Couchbase Server 8.0+), via SQL++'s `APPROX_VECTOR_DISTANCE()`. GSI selects the index automatically from the vector field referenced in the query — there is no `index_name` parameter. |
+| `run_search_vector_search` | Run the Search service's vector search (Couchbase Server 7.6+) against a *named* Search index, including hybrid search — pass an optional `scalar_query` (the same raw FTS query JSON body `run_fts_query` accepts) alongside the embedded vector query to combine full-text matching with vector similarity in one ranked result set. |
 
 ### Query performance analysis tools
 
@@ -212,6 +221,13 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_MCP_OAUTH_MCP_BASE_URL`          | Public base URL of this server. When set, publishes RFC 9728 Protected Resource Metadata for PRM-aware clients                                            | None                                                           |
 | `CB_MCP_OAUTH_SCOPE_READ_LABEL`      | Override the OAuth scope label treated as 'read' access (advertised in PRM and matched against the token `scope`/`scp` claim). Use when your IdP can't emit the canonical form | `couchbase-mcp:read`                       |
 | `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`     | Override the OAuth scope label treated as 'write' access; same semantics as the read label                                                                | `couchbase-mcp:write`                                          |
+| `EMBEDDING_PROVIDER`                 | Embedding provider for `run_vector_search` / `run_search_vector_search`: one of `couchbase`, `openai`, `cohere`, `voyage`, `bedrock`. Unset disables both tools' embedding step until configured. | None                                                           |
+| `EMBEDDING_MODEL`                    | Model name/ID for the configured embedding provider                                                                                                       | None                                                           |
+| `EMBEDDING_API_KEY`                  | API key for the configured provider. Not used by `bedrock` (uses the AWS credential chain / `EMBEDDING_AWS_*` instead)                                    | None                                                           |
+| `EMBEDDING_ENDPOINT`                 | Base URL override (an OpenAI-compatible local server, or a Couchbase Model Service deployment's own URL — **required** when `EMBEDDING_PROVIDER=couchbase`) | None                                                         |
+| `EMBEDDING_AWS_ACCESS_KEY_ID`        | AWS access key ID, `bedrock` provider only. Omit to use the default AWS credential chain                                                                  | None                                                           |
+| `EMBEDDING_AWS_SECRET_ACCESS_KEY`    | AWS secret access key, `bedrock` provider only                                                                                                             | None                                                           |
+| `EMBEDDING_AWS_REGION`               | AWS region, `bedrock` provider only. Falls back to the AWS SDK's own region resolution if unset                                                           | None                                                           |
 
 ### Disabling Tools
 

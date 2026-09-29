@@ -149,6 +149,17 @@ async def test_fts_tools_are_registered() -> None:
 
 
 @pytest.mark.asyncio
+async def test_vector_search_tools_are_registered() -> None:
+    """Verify both vector search tools are registered."""
+    async with create_mcp_session() as session:
+        tools_response = await session.list_tools()
+        tool_names = {tool.name for tool in tools_response.tools}
+
+        missing = TOOLS_BY_CATEGORY["vector_search"] - tool_names
+        assert not missing, f"Missing vector search tools: {sorted(missing)}"
+
+
+@pytest.mark.asyncio
 async def test_management_tools_are_registered() -> None:
     """Verify all scope/collection management tools are registered."""
     async with create_mcp_session() as session:
