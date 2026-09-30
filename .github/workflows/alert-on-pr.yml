@@ -46,6 +46,9 @@ jobs:
         shell: python
         run: |
           import os, requests
+          # PR fields are fork-controlled; escape Slack control chars (mentions, links).
+          def esc(s):
+              return str(s or '').replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
           repo = os.environ['REPO']
           pr_number = os.environ['PR_NUMBER']
           token = os.environ['GITHUB_TOKEN']
@@ -54,11 +57,11 @@ jobs:
           pr_resp = requests.get(api_url, headers=headers, timeout=15)
           if pr_resp.ok:
               pr = pr_resp.json()
-              branch_name = pr.get('head', {}).get('ref') or os.environ.get('GITHUB_HEAD_REF', '')
-              pr_title = pr.get('title', '')
-              pr_body = pr.get('body', '')
-              pr_user = pr.get('user', {}).get('login', '')
-              pr_url = pr.get('html_url', '')
+              branch_name = esc(pr.get('head', {}).get('ref') or os.environ.get('GITHUB_HEAD_REF', ''))
+              pr_title = esc(pr.get('title', ''))
+              pr_body = esc(pr.get('body', ''))
+              pr_user = esc(pr.get('user', {}).get('login', ''))
+              pr_url = esc(pr.get('html_url', ''))
               prefix = "PR Alert from Forked Repo!" if pr.get('head', {}).get('repo', {}).get('fork') else "PR Alert!"
               message = f"{prefix}\nTitle: {pr_title}\nBranch: {branch_name}\nAuthor: {pr_user}\nURL: {pr_url}\nDescription: {pr_body}"
           else:

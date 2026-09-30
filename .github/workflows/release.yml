@@ -28,8 +28,9 @@ jobs:
     steps:
       - name: Check if stable release
         id: check-stable
+        env:
+          VERSION: ${{ github.event.inputs.version || github.ref_name }}
         run: |
-          VERSION="${{ github.event.inputs.version || github.ref_name }}"
           if [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "is_stable=true" >> "$GITHUB_OUTPUT"
           else
@@ -62,8 +63,8 @@ jobs:
           set -eo pipefail
           queued_job_url=$(curl -X POST \
             "$JENKINS_BASE_URL/job/$JOB_NAME/buildWithParameters" \
-            -d "PRODUCT=${PRODUCT}" \
-            -d "VERSION=${VERSION}" \
+            --data-urlencode "PRODUCT=${PRODUCT}" \
+            --data-urlencode "VERSION=${VERSION}" \
             --user "$JENKINS_USER:$JENKINS_API_TOKEN" \
             --fail -s -D - -o /dev/null | grep -i "location:" | cut -d' ' -f2 | tr -d '\r')
 
