@@ -673,10 +673,12 @@ See [Operational Insights tools](#operational-insights-tools) above for the
 tool list, and the note there about the three tool names shared with the
 operational server.
 
-This server has its own [MCP Registry](https://registry.modelcontextprotocol.io)
-listing, published from `operational_insights_server.json` — separate from
-the operational server's `server.json` — so it's independently discoverable
-in the registry rather than buried inside the operational server's entry.
+Both servers share a single [MCP Registry](https://registry.modelcontextprotocol.io)
+listing, `io.github.couchbase/mcp-server-couchbase`, published from
+`server.json`. The listing has a separate package entry for each server (PyPI
+and Docker). Each entry passes its subcommand (`operational` or
+`operational-insights`) and declares only that server's arguments and
+environment variables.
 
 ## Streamable HTTP Transport Mode
 
