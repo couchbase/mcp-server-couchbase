@@ -299,8 +299,18 @@ async def test_get_cluster_tasks() -> None:
     """
     async with create_mcp_session() as session:
         response = await session.call_tool("get_cluster_tasks")
-        payload = ensure_list(extract_payload(response))
+        payload = extract_payload(response)
 
+        if is_error_response(response):
+            # Only the documented Capella rejection is an acceptable error here —
+            # anything else (connectivity, RBAC, an unsupported server) is a real
+            # failure this test should catch, not silently pass through.
+            assert "Capella" in str(payload), (
+                f"Expected only a Capella rejection, got: {payload}"
+            )
+            return
+
+        payload = ensure_list(payload)
         assert isinstance(payload, list), f"Expected a list, got {type(payload)}"
         for task in payload:
             assert isinstance(task, dict), f"Expected task objects, got: {task}"
