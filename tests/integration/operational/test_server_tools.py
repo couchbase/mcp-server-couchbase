@@ -284,3 +284,27 @@ async def test_get_cluster_metrics_invalid_metric_reports_per_spec_error() -> No
         # The server reports the unrecognized metric via a per-spec error rather
         # than failing the whole request.
         assert data[0].get("errors") or data[0].get("data") == []
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_tasks() -> None:
+    """Verify get_cluster_tasks returns the raw task array from the cluster.
+
+    Self-managed Couchbase Server 7.6+ only; Capella is rejected by the tool.
+    Unlike the enveloped tools, this returns the endpoint's array unchanged, so
+    the assertions are about shape rather than a status envelope.
+
+    An idle cluster still reports a rebalance task with status "notRunning", so
+    this asserts on per-task "status" rather than on the array being empty.
+    """
+    async with create_mcp_session() as session:
+        response = await session.call_tool("get_cluster_tasks")
+        payload = ensure_list(extract_payload(response))
+
+        assert isinstance(payload, list), f"Expected a list, got {type(payload)}"
+        for task in payload:
+            assert isinstance(task, dict), f"Expected task objects, got: {task}"
+            # "type" and "status" are the only fields common to every task type;
+            # everything else varies by type and is passed through untouched.
+            assert "type" in task, f"Task missing 'type': {task}"
+            assert "status" in task, f"Task missing 'status': {task}"

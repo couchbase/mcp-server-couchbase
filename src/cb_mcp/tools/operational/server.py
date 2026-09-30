@@ -361,3 +361,89 @@ def get_cluster_metrics(
             "error": str(e),
             "message": "Failed to get cluster metrics",
         }
+
+
+def get_cluster_tasks(ctx: Context, timeout: int = 30) -> list[dict[str, Any]]:
+    """Get the cluster tasks running right now — rebalance, compaction, XDCR, index build.
+
+    Answers "what is this cluster doing?" — where stuck rebalances, hung index builds and
+    lagging XDCR surface. One call is a single sample, so pair it with get_cluster_metrics
+    to tell "slow but progressing" from "flatlined".
+
+    Calls GET /pools/default/tasks. Self-managed Couchbase Server 7.6+ only (Capella is
+    rejected without a REST call); needs the Read-Only Admin (ro_admin) role.
+
+    Returns the endpoint's array unchanged, or [] if no tasks are reported. Only "type" and
+    "status" are common to every entry; the rest are per type — rebalance: progress,
+    perNode, detailedProgress, stageInfo, subtype; bucket_compaction: bucket, progress,
+    changesDone, totalChanges; xdcr: changesLeft, docsChecked, docsWritten, source, target;
+    global_indexes/indexer: bucket, index, progress, id; loadingSampleBucket: task_id,
+    bucket, bucket_uuid.
+
+    Reading the result:
+    - An idle cluster still reports a rebalance entry with status "notRunning", so check
+      each task's "status" rather than counting entries.
+    - "statusIsStale": true means the cluster cannot vouch for that status — read it as
+      "unknown", not "stuck". Flatlined progress and a status that stopped updating look
+      identical here but mean different things.
+    - "progress" means different things per type, so do not compare it across tasks.
+    - Poll no faster than "recommendedRefreshPeriod" (seconds), the server's own hint.
+    - "cancelURI"/"lastReportURI" are informational UI links; this tool only ever GETs and
+      never invokes them.
+    """
+    try:
+        settings = get_settings(ctx)
+        validate_connection_settings(settings)
+        connection_string = settings["connection_string"]
+        if is_capella_connection(connection_string):
+            raise ValueError("get_cluster_tasks is not supported on Capella clusters")
+
+        is_tls = connection_string.lower().startswith("couchbases://")
+        protocol, port = (
+            ("https", MANAGEMENT_REST_PORT_TLS)
+            if is_tls
+            else ("http", MANAGEMENT_REST_PORT_PLAIN)
+        )
+        verify_ssl = determine_ssl_verification(
+            connection_string, settings.get("ca_cert_path")
+        )
+        hosts = [
+            f"[{host}]" if ":" in host else host
+            for host in extract_hosts_from_connection_string(connection_string)
+        ]
+        if not hosts:
+            raise ValueError(
+                f"No hosts found in connection_string: {connection_string!r}"
+            )
+
+        # Failover, not fan-out: tasks are tracked by the orchestrator and every node
+        # relays its view, so any one node returns the whole cluster's answer. The first
+        # host that responds is therefore complete — the rest are only tried if it is
+        # unreachable. (Contrast fetch_index_stats_from_rest_api, which must visit every
+        # index node because each one knows only its own indexes.)
+        last_error: Exception | None = None
+        with httpx.Client(verify=verify_ssl, timeout=timeout) as client:
+            for host in hosts:
+                try:
+                    response = client.get(
+                        f"{protocol}://{host}:{port}/pools/default/tasks",
+                        auth=(settings["username"], settings["password"]),
+                    )
+                    response.raise_for_status()
+                    tasks = response.json()
+                    running = sum(
+                        1
+                        for task in tasks
+                        if isinstance(task, dict) and task.get("status") == "running"
+                    )
+                    logger.info(
+                        f"Retrieved {len(tasks)} cluster task(s) ({running} running) from {host}"
+                    )
+                    return tasks
+                except Exception as e:
+                    logger.warning(f"Failed to fetch cluster tasks from {host}: {e}")
+                    last_error = e
+        raise RuntimeError(f"Failed to reach any host in {hosts}: {last_error}")
+    except Exception as e:
+        logger.error(f"Error getting cluster tasks: {e}", exc_info=True)
+        raise

@@ -15,6 +15,8 @@ reached against a live cluster:
   reject Capella connections up front without attempting the REST call.
 - get_cluster_metrics rejects malformed specs (non-object spec, non-integer
   step/start/end) without attempting the REST call.
+- get_cluster_tasks rejects Capella/malformed connection strings up front, falls
+  over between hosts, and returns the REST array unchanged (no envelope).
 """
 
 from __future__ import annotations
@@ -23,11 +25,13 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
 from couchbase.diagnostics import ServiceType
 
 from cb_mcp.tools.operational.server import (
     get_cluster_health_and_services,
     get_cluster_metrics,
+    get_cluster_tasks,
     get_scopes_and_collections_in_bucket,
     get_scopes_in_bucket,
 )
@@ -544,3 +548,160 @@ class TestGetClusterMetrics:
 
         mock_client.post.assert_called_once()
         assert result == {"status": "success", "data": [{"data": []}]}
+
+
+class TestGetClusterTasks:
+    """get_cluster_tasks: Capella rejection, host failover, and raw passthrough.
+
+    Unlike the enveloped tools above, this one returns the endpoint's array
+    unchanged and re-raises on failure (the get_index_stats convention), so
+    these tests assert on the raised exception rather than an error envelope.
+    """
+
+    def test_raises_on_missing_settings(self) -> None:
+        """Missing connection settings must fail before any REST attempt."""
+        ctx = _make_ctx_with_settings({})
+
+        with (
+            patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
+            pytest.raises(ValueError, match="Missing required connection settings"),
+        ):
+            get_cluster_tasks(ctx)
+
+        mock_client_cls.assert_not_called()
+
+    def test_rejects_capella_connection_without_rest_call(self) -> None:
+        """A Capella connection must be rejected up front, with no REST attempt."""
+        ctx = _make_ctx_with_settings(_CAPELLA_SETTINGS)
+
+        with (
+            patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
+            pytest.raises(ValueError, match="Capella"),
+        ):
+            get_cluster_tasks(ctx)
+
+        mock_client_cls.assert_not_called()
+
+    def test_rejects_malformed_connection_string_without_rest_call(self) -> None:
+        """A connection string with no extractable host must fail fast."""
+        ctx = _make_ctx_with_settings(
+            {**_VALID_SETTINGS, "connection_string": "not-a-url"}
+        )
+
+        with (
+            patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
+            pytest.raises(ValueError, match="No hosts found"),
+        ):
+            get_cluster_tasks(ctx)
+
+        mock_client_cls.assert_not_called()
+
+    def test_returns_rest_array_unchanged(self) -> None:
+        """The endpoint's array is passed through as-is — every task type, every
+        field, including the cancelURI/lastReportURI links, which are kept
+        deliberately (this tool only ever issues a GET)."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        rest_response = [
+            {
+                "type": "rebalance",
+                "status": "notRunning",
+                "statusIsStale": False,
+                "lastReportURI": "/logs/rebalanceReport?reportID=abc",
+            },
+            {
+                "type": "bucket_compaction",
+                "status": "running",
+                "bucket": "travel-sample",
+                "progress": 8,
+                "changesDone": 92,
+                "totalChanges": 1024,
+                "cancelURI": "/pools/default/buckets/travel-sample/controller/cancelBucketCompaction",
+            },
+        ]
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get", [TestGetClusterMetrics._ok_response(rest_response)]
+        )
+
+        with client_patch:
+            result = get_cluster_tasks(ctx)
+
+        assert result == rest_response
+        # Raw passthrough: no envelope wrapping, and nothing stripped.
+        assert "cancelURI" in result[1]
+        assert mock_client.get.call_count == 1
+
+    def test_returns_empty_list_when_no_tasks(self) -> None:
+        """No tasks is an empty array, not an error."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        client_patch, _ = TestGetClusterMetrics._patch_httpx_client(
+            "get", [TestGetClusterMetrics._ok_response([])]
+        )
+
+        with client_patch:
+            assert get_cluster_tasks(ctx) == []
+
+    def test_falls_over_to_second_host(self) -> None:
+        """A dead first host must not fail the call — the next host is tried."""
+        ctx = _make_ctx_with_settings(
+            {**_VALID_SETTINGS, "connection_string": "couchbase://host1,host2"}
+        )
+        tasks = [{"type": "rebalance", "status": "notRunning"}]
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get",
+            [
+                httpx.ConnectError("host1 unreachable"),
+                TestGetClusterMetrics._ok_response(tasks),
+            ],
+        )
+
+        with client_patch:
+            result = get_cluster_tasks(ctx)
+
+        assert result == tasks
+        assert mock_client.get.call_count == 2
+
+    def test_raises_when_every_host_fails(self) -> None:
+        """All hosts down surfaces as a RuntimeError naming the hosts tried."""
+        ctx = _make_ctx_with_settings(
+            {**_VALID_SETTINGS, "connection_string": "couchbase://host1,host2"}
+        )
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get",
+            [httpx.ConnectError("down"), httpx.ConnectError("down")],
+        )
+
+        with (
+            client_patch,
+            pytest.raises(RuntimeError, match="Failed to reach any host"),
+        ):
+            get_cluster_tasks(ctx)
+
+        assert mock_client.get.call_count == 2
+
+    def test_uses_management_port_and_tasks_path(self) -> None:
+        """Plain connections hit the plain management port over http."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get", [TestGetClusterMetrics._ok_response([])]
+        )
+
+        with client_patch:
+            get_cluster_tasks(ctx)
+
+        url = mock_client.get.call_args[0][0]
+        assert url == "http://localhost:8091/pools/default/tasks"
+
+    def test_uses_tls_port_for_couchbases_connection(self) -> None:
+        """A couchbases:// connection must use https and the TLS management port."""
+        ctx = _make_ctx_with_settings(
+            {**_VALID_SETTINGS, "connection_string": "couchbases://localhost"}
+        )
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get", [TestGetClusterMetrics._ok_response([])]
+        )
+
+        with client_patch:
+            get_cluster_tasks(ctx)
+
+        url = mock_client.get.call_args[0][0]
+        assert url == "https://localhost:18091/pools/default/tasks"
