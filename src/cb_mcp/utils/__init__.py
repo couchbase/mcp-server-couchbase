@@ -26,6 +26,11 @@ from .constants import (
     ALLOWED_LOG_SINKS,
     ALLOWED_OAUTH_ALGORITHMS,
     ALLOWED_TRANSPORTS,
+    DEFAULT_AUDIT_BACKUP_COUNT,
+    DEFAULT_AUDIT_ENABLED,
+    DEFAULT_AUDIT_FILE,
+    DEFAULT_AUDIT_ROTATION_MAX_SIZE_MB,
+    DEFAULT_AUDIT_TOOL_ARGS,
     DEFAULT_HOST,
     DEFAULT_LOG_BACKUP_COUNT,
     DEFAULT_LOG_FORMAT,
@@ -48,6 +53,7 @@ from .constants import (
 # Context utilities
 from .context import (
     AppContext,
+    get_audit_config,
     get_cluster_provider,
     get_logging_config,
 )
@@ -86,10 +92,16 @@ __all__ = [
     "AppContext",
     "get_cluster_provider",
     "get_logging_config",
+    "get_audit_config",
     # Constants
     "LOGGER_NAMESPACE",
     "LOGGER_ROOT",
     "DEFAULT_READ_ONLY_MODE",
+    "DEFAULT_AUDIT_ENABLED",
+    "DEFAULT_AUDIT_FILE",
+    "DEFAULT_AUDIT_ROTATION_MAX_SIZE_MB",
+    "DEFAULT_AUDIT_BACKUP_COUNT",
+    "DEFAULT_AUDIT_TOOL_ARGS",
     "DEFAULT_TRANSPORT",
     "DEFAULT_LOG_LEVEL",
     "DEFAULT_LOG_MAX_BYTES",

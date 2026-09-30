@@ -43,8 +43,10 @@ from typing import Any, NamedTuple
 import click
 from fastmcp.server.auth import AuthProvider
 
+from ..audit.config import ResolvedAuditConfig, resolve_audit_config
 from ..auth import OAuthConfigError, resolve_oauth
 from ..core.cli.options import (
+    audit_options,
     compose,
     credential_options,
     logging_options,
@@ -308,6 +310,7 @@ class CliParams:
     transport: TransportParams
     gating: GatingParams
     oauth: OAuthParams
+    audit: ResolvedAuditConfig
 
     @classmethod
     def from_click(
@@ -319,6 +322,19 @@ class CliParams:
             transport=TransportParams.from_click(params),
             gating=GatingParams.from_click(params),
             oauth=OAuthParams.from_click(params),
+            # Resolved eagerly like the rest, but note the ordering contract in
+            # ``_start_server``: ``cli.logging.apply()`` runs before anything
+            # reads ``cli.audit``, so the "audit enabled without a file" error
+            # and the tool-args warning land in the operator's configured log
+            # sinks rather than on the last-resort handler.
+            audit=resolve_audit_config(
+                enabled=params.get("audit_log_enabled"),
+                file=params.get("audit_file"),
+                rotation_max_size_mb=params.get("audit_rotation_max_size_mb"),
+                retention_backup_count=params.get("audit_retention_backup_count"),
+                tool_args=params.get("audit_tool_args"),
+                disabled_events=params.get("audit_disabled_events"),
+            ),
         )
 
     def resolve_auth(self, spec: ServerSpec) -> AuthProvider | None:
@@ -441,4 +457,5 @@ def server_options(
         tool_gating_options,
         logging_options(default_log_file=default_log_file),
         oauth_options,
+        audit_options,
     )

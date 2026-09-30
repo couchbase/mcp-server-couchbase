@@ -58,4 +58,7 @@ SPEC = ServerSpec(
     # server has. mTLS client credentials have no analytics equivalent.
     safe_settings_keys=(),
     secret_settings_keys=("client_cert_path", "client_key_path"),
+    # The only audited server today. Its Tier-2 block (0xF000) and category
+    # slots are shipped and frozen; see cb_mcp.audit.catalog.
+    audit_package="operational",
 )
