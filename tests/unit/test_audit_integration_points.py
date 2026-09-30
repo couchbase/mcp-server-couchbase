@@ -150,7 +150,7 @@ async def test_scope_check_records_nothing_when_the_token_is_sufficient():
 def _ctx_with_elicitation(
     *, supported: bool, action: str = "accept", confirm: bool = True
 ) -> Context:
-    async def elicit(message, schema):
+    async def elicit(message, response_type):
         return SimpleNamespace(action=action, data=ConfirmationResult(confirm=confirm))
 
     session = SimpleNamespace(check_client_capability=lambda _caps: supported)

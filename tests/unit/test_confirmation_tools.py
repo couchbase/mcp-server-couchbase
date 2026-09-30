@@ -10,13 +10,21 @@ Coverage map:
   - capability detection and fallback when elicitation is not advertised
   - fail-closed behavior for unexpected runtime errors
   - positional argument forwarding compatibility
+  - that the fakes below have not drifted from the real FastMCP signature
 """
 
+import inspect
 from types import SimpleNamespace
 
 import pytest
 from fastmcp import Context
+from fastmcp.server.elicitation import (
+    AcceptedElicitation,
+    CancelledElicitation,
+    DeclinedElicitation,
+)
 
+import cb_mcp.utils.elicitation as production_elicitation
 from cb_mcp.tools.operational import TOOL_ANNOTATIONS, get_tools
 from cb_mcp.utils.config import parse_tool_names
 from cb_mcp.utils.elicitation import (
@@ -176,8 +184,8 @@ class TestWrapWithConfirmation:
                     session=FakeSession(supports_elicitation),
                 )
 
-            async def elicit(self, message, schema):
-                return await elicit_callback(message, schema)
+            async def elicit(self, message, response_type):
+                return await elicit_callback(message, response_type)
 
         return FakeContext()
 
@@ -192,7 +200,7 @@ class TestWrapWithConfirmation:
 
         wrapped = wrap_with_confirmation(sample_tool)
 
-        async def decline_elicit(message, schema):
+        async def decline_elicit(message, response_type):
             return SimpleNamespace(action="decline")
 
         fake_ctx = self._make_context(
@@ -217,7 +225,7 @@ class TestWrapWithConfirmation:
 
         wrapped = wrap_with_confirmation(sample_tool)
 
-        async def cancel_elicit(message, schema):
+        async def cancel_elicit(message, response_type):
             return SimpleNamespace(action="cancel")
 
         fake_ctx = self._make_context(
@@ -242,7 +250,7 @@ class TestWrapWithConfirmation:
 
         wrapped = wrap_with_confirmation(sample_tool)
 
-        async def reject_confirm_elicit(message, schema):
+        async def reject_confirm_elicit(message, response_type):
             return SimpleNamespace(
                 action="accept",
                 data=SimpleNamespace(confirm=False),
@@ -270,7 +278,7 @@ class TestWrapWithConfirmation:
 
         wrapped = wrap_with_confirmation(sample_tool)
 
-        async def accept_elicit(message, schema):
+        async def accept_elicit(message, response_type):
             return SimpleNamespace(
                 action="accept",
                 data=SimpleNamespace(confirm=True),
@@ -296,7 +304,7 @@ class TestWrapWithConfirmation:
 
         wrapped = wrap_with_confirmation(sample_tool)
 
-        async def should_not_be_called_elicit(message, schema):
+        async def should_not_be_called_elicit(message, response_type):
             raise AssertionError("elicit should not be called without client support")
 
         fake_ctx = self._make_context(
@@ -318,7 +326,7 @@ class TestWrapWithConfirmation:
 
         wrapped = wrap_with_confirmation(sample_tool)
 
-        async def transient_error_elicit(message, schema):
+        async def transient_error_elicit(message, response_type):
             raise RuntimeError("Transient elicitation failure")
 
         fake_ctx = self._make_context(
@@ -344,7 +352,7 @@ class TestWrapWithConfirmation:
 
         wrapped = wrap_with_confirmation(sample_tool)
 
-        async def accept_elicit(message, schema):
+        async def accept_elicit(message, response_type):
             return SimpleNamespace(
                 action="accept",
                 data=SimpleNamespace(confirm=True),
@@ -378,7 +386,7 @@ class TestWrapWithConfirmation:
                     session=None,
                 )
 
-            async def elicit(self, message, schema):
+            async def elicit(self, message, response_type):
                 raise AssertionError("elicit must not be called when session is None")
 
         result = await wrapped(ctx=FakeContext())
@@ -402,7 +410,7 @@ class TestWrapWithConfirmation:
                     session=SimpleNamespace(),  # no check_client_capability
                 )
 
-            async def elicit(self, message, schema):
+            async def elicit(self, message, response_type):
                 raise AssertionError(
                     "elicit must not be called when capability check is unavailable"
                 )
@@ -422,7 +430,7 @@ class TestWrapWithConfirmation:
 
         wrapped = wrap_with_confirmation(async_sample_tool)
 
-        async def accept_elicit(message, schema):
+        async def accept_elicit(message, response_type):
             return SimpleNamespace(
                 action="accept",
                 data=SimpleNamespace(confirm=True),
@@ -436,3 +444,60 @@ class TestWrapWithConfirmation:
         result = await wrapped(ctx=fake_ctx)
         assert result is True
         assert called is True
+
+
+class TestElicitSignatureContract:
+    """The fakes in this file must not drift from the real FastMCP API.
+
+    This class exists because of a bug it would have caught. The production
+    call passed ``schema=ConfirmationResult`` while every ``Context.elicit``
+    fake in this file declared ``elicit(self, message, schema)``. The tests
+    therefore agreed with the bug and disagreed with FastMCP, and stayed green
+    while the confirmation path raised
+
+        Context.elicit() got an unexpected keyword argument 'schema'
+
+    in every deployment whose client advertises elicitation. The parameter has
+    been ``response_type`` since at least fastmcp 3.2.0, the project's own
+    minimum pin, so the call never worked with any supported version.
+
+    A hand-written fake can only ever prove the code agrees with the fake.
+    These tests bind against the installed library instead.
+    """
+
+    def test_the_keywords_we_send_bind_to_the_real_signature(self):
+        """The guard: rename the parameter upstream and this fails, not prod."""
+        signature = inspect.signature(Context.elicit)
+        signature.bind(
+            SimpleNamespace(),  # self
+            message="Confirm execution of 'replace_document_by_id'?",
+            response_type=ConfirmationResult,
+        )
+
+    def test_the_old_keyword_is_genuinely_gone(self):
+        """Pins the reason for the change, so nobody reverts it as cosmetic."""
+        with pytest.raises(TypeError):
+            inspect.signature(Context.elicit).bind(
+                SimpleNamespace(), message="x", schema=ConfirmationResult
+            )
+
+    def test_the_production_call_uses_the_real_keyword(self):
+        """Checks the module that actually calls FastMCP, not a fake of it.
+
+        The binding tests above prove which keyword is correct; this proves the
+        production call site uses it. Together they close the gap that let the
+        bug ship: agreement between the code and a fake of the library is not
+        agreement with the library.
+        """
+        real = list(inspect.signature(Context.elicit).parameters)
+        assert real[:3] == ["self", "message", "response_type"], real
+
+        source = inspect.getsource(production_elicitation)
+        assert "response_type=ConfirmationResult" in source
+        assert "schema=Confirmation" not in source
+
+    def test_the_result_types_expose_what_the_wrapper_reads(self):
+        """The wrapper branches on ``result.action`` and guards ``result.data``."""
+        for cls in (AcceptedElicitation, DeclinedElicitation, CancelledElicitation):
+            assert "action" in cls.model_fields, cls.__name__
+        assert "data" in AcceptedElicitation.model_fields

@@ -104,7 +104,7 @@ def wrap_with_confirmation(fn: Callable) -> Callable:
                 message = _build_confirmation_message(tool_name, call_arguments)
                 result = await ctx.elicit(
                     message=message,
-                    schema=ConfirmationResult,
+                    response_type=ConfirmationResult,
                 )
 
                 if result.action != "accept" or (
