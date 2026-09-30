@@ -24,7 +24,6 @@ from fastmcp.server.elicitation import (
     DeclinedElicitation,
 )
 
-import cb_mcp.utils.elicitation as production_elicitation
 from cb_mcp.tools.operational import TOOL_ANNOTATIONS, get_tools
 from cb_mcp.utils.config import parse_tool_names
 from cb_mcp.utils.elicitation import (
@@ -492,7 +491,11 @@ class TestElicitSignatureContract:
         real = list(inspect.signature(Context.elicit).parameters)
         assert real[:3] == ["self", "message", "response_type"], real
 
-        source = inspect.getsource(production_elicitation)
+        # The module is derived from a symbol this file already imports, so
+        # there is one import style for cb_mcp.utils.elicitation (CodeQL
+        # py/import-and-import-from) and the assertion is anchored to the
+        # function under test rather than to a separately imported name.
+        source = inspect.getsource(inspect.getmodule(wrap_with_confirmation))
         assert "response_type=ConfirmationResult" in source
         assert "schema=Confirmation" not in source
 
