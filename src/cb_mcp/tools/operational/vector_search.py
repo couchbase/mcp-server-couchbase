@@ -225,13 +225,14 @@ def run_search_vector_search(
     vector_field: str,
     vector_query_text: str,
     scalar_query: dict[str, Any] | None = None,
+    prefilter: dict[str, Any] | None = None,
     bucket_name: str | None = None,
     scope_name: str | None = None,
     num_candidates: int = 10,
     limit: int | None = None,
     fields: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Run the Search service's vector search, including hybrid (vector + scalar) search.
+    """Run the Search service's vector search, including hybrid and prefiltered search.
 
     Embedding: vector_query_text is embedded the same way as
     run_vector_search's query_text -- see that tool's docstring for
@@ -245,13 +246,27 @@ def run_search_vector_search(
     this tool does not pre-validate index_name; a wrong or non-vector index
     name fails naturally at the Search service with its own error.
 
-    scalar_query is optional and, when given, makes this a genuinely hybrid
-    search: it is the same raw FTS query JSON body run_fts_query accepts
-    (e.g. {"match": "jacket", "field": "description"}) -- both the vector
-    query and this scalar query are sent to the Search service together, and
-    it ranks/combines their hits server-side. Omit it for a vector-only
-    search through this tool (equivalent in intent to run_vector_search, but
-    against a named Search index instead of a GSI vector index).
+    scalar_query and prefilter are both optional and both take the same raw
+    FTS query JSON body run_fts_query accepts (e.g. {"match": "jacket",
+    "field": "description"}), but they do different things -- do not confuse
+    them:
+    - scalar_query makes this a genuinely hybrid search: both the vector
+      query and this scalar query are sent to the Search service together,
+      and it ranks/combines their hits server-side (a document can match via
+      either signal). is_hybrid in the response reflects whether this was
+      set.
+    - prefilter narrows which documents the vector search is even allowed to
+      consider as nearest-neighbor candidates, evaluated *before* the
+      k-nearest-neighbor search runs -- the Search-service equivalent of
+      run_vector_search's `where` prefilter on a GSI Composite Vector Index.
+      A document that doesn't match prefilter is never returned, regardless
+      of vector similarity.
+
+    Both can be set together (prefilter narrows the candidate pool, then
+    scalar_query's relevance signal still contributes to ranking within it).
+    Omit both for a plain vector-only search through this tool (equivalent
+    in intent to run_vector_search, but against a named Search index instead
+    of a GSI vector index).
 
     num_candidates bounds how many nearest-neighbor candidates the vector
     query considers. limit defaults to 10 (matching run_fts_query). fields
@@ -264,8 +279,8 @@ def run_search_vector_search(
     the full document for.
 
     Returns {"success": True, "index_name", "vector_field", "num_candidates",
-    "limit", "total_hits", "hits": [{"id", "score", "fields"}], "is_hybrid"}
-    or {"success": False, "error": ...}.
+    "limit", "total_hits", "hits": [{"id", "score", "fields"}], "is_hybrid",
+    "is_prefiltered"} or {"success": False, "error": ...}.
     """
 
     if (bucket_name is None) != (scope_name is None):
@@ -282,13 +297,19 @@ def run_search_vector_search(
     )
     logger.debug(
         f"run_search_vector_search on {index_name!r} (vector_field={vector_field!r}, "
-        f"num_candidates={num_candidates}, hybrid={scalar_query is not None})"
+        f"num_candidates={num_candidates}, hybrid={scalar_query is not None}, "
+        f"prefiltered={prefilter is not None})"
     )
 
     try:
         vector, embedding_info = _embed_query(ctx, vector_query_text)
 
-        vq = VectorQuery(vector_field, vector, num_candidates=num_candidates)
+        vq = VectorQuery(
+            vector_field,
+            vector,
+            num_candidates=num_candidates,
+            prefilter=RawQuery(prefilter) if prefilter else None,
+        )
         request = SearchRequest.create(VectorSearch.from_vector_query(vq))
         if scalar_query:
             request = request.with_search_query(RawQuery(scalar_query))
@@ -307,8 +328,8 @@ def run_search_vector_search(
         ]
 
         logger.info(
-            f"run_search_vector_search on {index_name!r} (hybrid={scalar_query is not None}) "
-            f"returned {len(hits)} hit(s)"
+            f"run_search_vector_search on {index_name!r} (hybrid={scalar_query is not None}, "
+            f"prefiltered={prefilter is not None}) returned {len(hits)} hit(s)"
         )
         return tool_success(
             index_name=index_name,
@@ -318,6 +339,7 @@ def run_search_vector_search(
             total_hits=len(hits),
             hits=hits,
             is_hybrid=scalar_query is not None,
+            is_prefiltered=prefilter is not None,
             **embedding_info,
         )
     except Exception as e:

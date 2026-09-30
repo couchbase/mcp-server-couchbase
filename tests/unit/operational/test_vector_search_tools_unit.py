@@ -330,7 +330,9 @@ class TestRunSearchVectorSearchConstruction:
         ):
             result = run_search_vector_search(ctx, "idx1", "embedding", "find widgets")
 
-        mock_vq.assert_called_once_with("embedding", [0.1, 0.2], num_candidates=10)
+        mock_vq.assert_called_once_with(
+            "embedding", [0.1, 0.2], num_candidates=10, prefilter=None
+        )
         mock_vs.from_vector_query.assert_called_once_with(mock_vq.return_value)
         mock_request.create.assert_called_once_with(
             mock_vs.from_vector_query.return_value
@@ -342,10 +344,76 @@ class TestRunSearchVectorSearchConstruction:
 
         assert result["success"] is True
         assert result["is_hybrid"] is False
+        assert result["is_prefiltered"] is False
         assert result["total_hits"] == 1
         assert result["hits"] == [
             {"id": "doc1", "score": 1.2, "fields": {"name": "widget"}}
         ]
+
+    def test_prefilter_wired_into_vector_query(self) -> None:
+        ctx = _make_ctx()
+        cluster = MagicMock()
+        cluster.search.return_value = self._make_search_result()
+
+        with (
+            patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
+            patch(f"{_MODULE}.VectorQuery") as mock_vq,
+            patch(f"{_MODULE}.VectorSearch"),
+            patch(f"{_MODULE}.SearchRequest"),
+            patch(f"{_MODULE}.SearchOptions"),
+            patch(f"{_MODULE}.RawQuery") as mock_raw_query,
+            _patch_embedding(vector=[0.1, 0.2]),
+        ):
+            result = run_search_vector_search(
+                ctx,
+                "idx1",
+                "embedding",
+                "find widgets",
+                prefilter={"match": "in-stock", "field": "status"},
+            )
+
+        mock_raw_query.assert_called_once_with({"match": "in-stock", "field": "status"})
+        mock_vq.assert_called_once_with(
+            "embedding",
+            [0.1, 0.2],
+            num_candidates=10,
+            prefilter=mock_raw_query.return_value,
+        )
+        assert result["is_prefiltered"] is True
+        assert result["is_hybrid"] is False
+
+    def test_prefilter_and_scalar_query_can_combine(self) -> None:
+        """prefilter (narrows candidates) and scalar_query (hybrid ranking)
+        are independent knobs -- both can be set on the same call."""
+        ctx = _make_ctx()
+        cluster = MagicMock()
+        cluster.search.return_value = self._make_search_result()
+
+        with (
+            patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
+            patch(f"{_MODULE}.VectorQuery") as mock_vq,
+            patch(f"{_MODULE}.VectorSearch"),
+            patch(f"{_MODULE}.SearchRequest") as mock_request,
+            patch(f"{_MODULE}.SearchOptions"),
+            patch(f"{_MODULE}.RawQuery") as mock_raw_query,
+            _patch_embedding(),
+        ):
+            result = run_search_vector_search(
+                ctx,
+                "idx1",
+                "embedding",
+                "query text",
+                scalar_query={"match": "jacket", "field": "description"},
+                prefilter={"match": "in-stock", "field": "status"},
+            )
+
+        assert mock_raw_query.call_count == 2
+        mock_raw_query.assert_any_call({"match": "in-stock", "field": "status"})
+        mock_raw_query.assert_any_call({"match": "jacket", "field": "description"})
+        assert mock_vq.call_args.kwargs["prefilter"] is not None
+        mock_request.create.return_value.with_search_query.assert_called_once()
+        assert result["is_hybrid"] is True
+        assert result["is_prefiltered"] is True
 
     def test_hybrid_search_attaches_scalar_query_via_raw_query(self) -> None:
         ctx = _make_ctx()

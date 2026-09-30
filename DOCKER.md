@@ -76,7 +76,7 @@ Both tools embed query text using the model configured via `EMBEDDING_*` environ
 | Tool Name | Description |
 | --------- | ----------- |
 | `run_vector_search` | Embed a query and run a vector similarity search against a GSI vector index (Couchbase Server 8.0+), via SQL++'s `APPROX_VECTOR_DISTANCE()`. GSI selects the index automatically from the vector field referenced in the query — there is no `index_name` parameter. |
-| `run_search_vector_search` | Run the Search service's vector search (Couchbase Server 7.6+) against a *named* Search index, including hybrid search — pass an optional `scalar_query` (the same raw FTS query JSON body `run_fts_query` accepts) alongside the embedded vector query to combine full-text matching with vector similarity in one ranked result set. |
+| `run_search_vector_search` | Run the Search service's vector search (Couchbase Server 7.6+) against a *named* Search index. `scalar_query` makes this a hybrid search (full-text and vector similarity both contribute to ranking); `prefilter` narrows the vector search's candidate pool before it runs (the Search-service equivalent of `run_vector_search`'s `where` prefilter). Both take the same raw FTS query JSON body `run_fts_query` accepts, and both are optional and combinable. |
 
 ### Query performance analysis tools
 
