@@ -49,6 +49,7 @@ EXPECTED_TOOLS = {
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
     "get_cluster_metrics",
+    "get_cluster_tasks",
     # Performance analysis tools
     "get_longest_running_queries",
     "get_most_frequent_queries",
@@ -73,6 +74,7 @@ TOOLS_BY_CATEGORY = {
         "get_cluster_health_and_services",
         "get_cluster_diagnostics_report",
         "get_cluster_metrics",
+        "get_cluster_tasks",
     },
     "kv": {
         "get_document_by_id",
