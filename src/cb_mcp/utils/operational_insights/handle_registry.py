@@ -66,7 +66,7 @@ class HandleEntry:
     statement: str
 
 
-class HandleRegistry:
+class QueryResultsRegistry:
     """Thread-safe map of opaque token -> live async query handle.
 
     Tool handlers run in FastMCP's thread pool, so access is guarded by a
@@ -99,6 +99,17 @@ class HandleRegistry:
         """Evict a token (after fetch, discard, or cancel). Idempotent."""
         with self._lock:
             self._entries.pop(token, None)
+
+    def clear(self) -> None:
+        """Evict every tracked entry.
+
+        Called on provider teardown: a closed cluster connection tears down
+        the HTTP client/thread pool every tracked handle depends on, so
+        leaving stale tokens registered would let a later ``get()`` hand back
+        a handle that can no longer do anything.
+        """
+        with self._lock:
+            self._entries.clear()
 
     def count(self) -> int:
         """Number of currently tracked queries (diagnostic)."""

@@ -60,6 +60,16 @@ def test_close_before_connecting_is_a_no_op():
     provider.close()  # must not raise
 
 
+def test_close_clears_the_handle_registry():
+    provider, _ = _provider_with_cached_cluster()
+    provider.handle_registry.register(MagicMock(), "SELECT 1")
+    assert provider.handle_registry.count() == 1
+
+    provider.close()
+
+    assert provider.handle_registry.count() == 0
+
+
 def test_get_configuration_omits_secrets_and_reserved_keys():
     provider = OperationalInsightsClusterProvider(settings=_SETTINGS)
 

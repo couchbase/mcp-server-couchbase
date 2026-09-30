@@ -17,7 +17,7 @@ This automatically updates:
 - `pyproject.toml` version
 - `server.json` and `operational_insights_server.json` root versions
 - `server.json` and `operational_insights_server.json` all package versions
-- `server.json` and `operational_insights_server.json` Docker image tags (OCI identifiers)
+- `server.json` Docker image tag (OCI identifier)
 - `uv.lock`
 
 > **Note:** `server.json` and `operational_insights_server.json` are two
@@ -25,12 +25,24 @@ This automatically updates:
 > (see the "Operational Insights Server" section of the README). Both must
 > stay in sync with the release version; the helper script and CI both
 > handle them identically, in a loop.
+>
+> **Docker/OCI package:** `operational_insights_server.json` currently has
+> no `oci` package entry — only `server.json` does. Both manifests' OCI
+> packages would need to point at the same shared image
+> (`docker.io/couchbase/mcp-server`), but that image can only carry one
+> `io.modelcontextprotocol.server.name` label, so it can only prove
+> ownership for one of the two registry names. The OI listing's OCI package
+> was removed until that's resolved (e.g. separately tagged/labeled images,
+> or dropping OCI from one listing permanently) — it relies on the PyPI
+> package alone for now.
 
 **Option B: Manual update:**
 
-Update the version in all locations. Steps 2-4 apply to **both**
+Update the version in all locations. Steps 2-3 apply to **both**
 `server.json` and `operational_insights_server.json` — repeat them for each
-file.
+file. Step 4 (Docker image tag) applies to `server.json` only —
+`operational_insights_server.json` has no OCI package right now (see the
+note in Option A above).
 
 1. **`pyproject.toml`:**
 
@@ -60,7 +72,7 @@ file.
    }
    ```
 
-4. **`server.json`** and **`operational_insights_server.json`** (Docker image tags in OCI packages):
+4. **`server.json`** only (Docker image tag in its OCI package):
 
    ```json
    {
@@ -80,7 +92,7 @@ file.
    uv lock
    ```
 
-> **Important:** All versions and Docker image tags must match the root version, in *both* manifest files. The CI/CD pipeline validates this for each file and will fail if versions are inconsistent.
+> **Important:** All versions must match the root version, in *both* manifest files; the Docker image tag must additionally match it, but only exists in `server.json` right now. The CI/CD pipeline validates this for each file and will fail if versions are inconsistent.
 
 ### 2. Validate Versions
 
@@ -105,7 +117,7 @@ done
 **Expected output:**
 
 - All versions should be `0.5.2`
-- Docker image tag should be `:0.5.2`
+- `server.json`'s Docker image tag should be `:0.5.2` (`operational_insights_server.json` has no OCI package)
 
 If versions don't match, run `./scripts/update_version.sh 0.5.2` again.
 
@@ -295,8 +307,9 @@ All version numbers must be **manually synchronized** across:
 - **`pyproject.toml`**: Python package version
 - **`server.json` root `version`**: MCP Registry metadata version for the operational server listing
 - **`server.json` package `version`**: Must match root version
-- **`server.json` OCI identifiers**: Docker image tags must match root version
-- **`operational_insights_server.json`**: Same three checks as `server.json`, for the Operational Insights server's own listing
+- **`server.json` OCI identifier**: Docker image tag must match root version
+- **`operational_insights_server.json` root `version`**: MCP Registry metadata version for the OI listing
+- **`operational_insights_server.json` package `version`**: Must match root version (no OCI package to check here — see the Docker/OCI note under "Update Version Numbers")
 - **Git tag**: Must match all versions
 
 ### Why All Versions Must Match
@@ -304,7 +317,7 @@ All version numbers must be **manually synchronized** across:
 The CI/CD pipeline validates version consistency **independently for each of the two manifests** and will **fail the build** if, in either `server.json` or `operational_insights_server.json`:
 
 - Package versions don't match that file's root version
-- Docker image tags in OCI identifiers don't match that file's root version
+- `server.json`'s Docker image tag in its OCI identifier doesn't match its root version (`operational_insights_server.json` has no OCI package, so this check doesn't apply there)
 - Root version doesn't match the git tag
 - (Warning only) `pyproject.toml` doesn't match the git tag
 
