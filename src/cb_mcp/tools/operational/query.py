@@ -50,17 +50,38 @@ def _query_correlation_options() -> dict[str, str]:
 
 
 def get_schema_for_collection(
-    ctx: Context, bucket_name: str, scope_name: str, collection_name: str
+    ctx: Context,
+    bucket_name: str,
+    scope_name: str,
+    collection_name: str,
+    num_sample_values: int | None = None,
 ) -> dict[str, Any]:
     """Get the schema for a collection in the specified scope.
     Returns a dictionary with the collection name and the schema returned by running INFER query on the Couchbase collection.
+
+    num_sample_values sets how many example values INFER reports per field.
+    Leave it unset to use the server's own default (5). Pass 0 to omit sample
+    values entirely, keeping only the structure and type information.
     """
+    if num_sample_values is not None and (
+        isinstance(num_sample_values, bool) or not isinstance(num_sample_values, int)
+    ):
+        raise ValueError(
+            f"num_sample_values must be a whole number, got {num_sample_values!r}"
+        )
+    if num_sample_values is not None and num_sample_values < 0:
+        raise ValueError(
+            f"num_sample_values must not be negative, got {num_sample_values}"
+        )
+
     schema = {"collection_name": collection_name, "schema": []}
     try:
         logger.debug(
             f"Inferring schema for {format_keyspace(bucket_name, scope_name, collection_name)}"
         )
         query = f"INFER {safe_ident(collection_name)}"
+        if num_sample_values is not None:
+            query += f' WITH {{"num_sample_values": {num_sample_values}}}'
         result = run_sql_plus_plus_query(ctx, bucket_name, scope_name, query)
         # Result is a list of list of schemas. We convert it to a list of schemas.
         if result:
