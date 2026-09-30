@@ -21,7 +21,7 @@ name: Operational Insights Integration Tests
 # Each cell still surfaces as its own check.
 on:
   pull_request:
-    branches: [main, multi_package]
+    branches: [main]
 
 # One in-flight run per branch. Each run stands up four Operational Insights
 # clusters (one per matrix cell) plus an S3Mock sidecar each, and the docker
