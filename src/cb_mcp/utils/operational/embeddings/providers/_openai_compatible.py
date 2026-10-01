@@ -33,6 +33,11 @@ logger = logging.getLogger(
 class _OpenAICompatibleProvider(EmbeddingProvider):
     #: None means EMBEDDING_ENDPOINT is required (no public shared domain).
     _default_base_url: str | None = None
+    #: OpenAI's documented /v1/embeddings schema (model, input,
+    #: encoding_format, dimensions, user) has no input_type field -- False by
+    #: default. Override to True only for a provider that documents support
+    #: for it, e.g. Couchbase's Model Service (see couchbase_provisioned.py).
+    _include_input_type: bool = False
 
     def __init__(self, *, api_key: str, model: str, base_url: str) -> None:
         self._api_key = api_key
@@ -69,15 +74,14 @@ class _OpenAICompatibleProvider(EmbeddingProvider):
         logger.debug(
             f"Requesting embedding from {self._base_url}/embeddings (model={model!r})"
         )
+        body: dict[str, Any] = {"model": model, "input": request.text}
+        if self._include_input_type:
+            body["input_type"] = request.input_type
         with httpx.Client(timeout=30) as client:
             resp = client.post(
                 f"{self._base_url}/embeddings",
                 headers={"Authorization": f"Bearer {self._api_key}"},
-                json={
-                    "model": model,
-                    "input": request.text,
-                    "input_type": request.input_type,
-                },
+                json=body,
             )
             if resp.is_error:
                 # The exception raise_for_status() throws carries the status

@@ -124,7 +124,10 @@ class TestOpenAIProvider:
         assert url[0] == "https://api.openai.com/v1/embeddings"
         assert kwargs["headers"]["Authorization"] == "Bearer sk-x"
         assert kwargs["json"]["input"] == "hello"
-        assert kwargs["json"]["input_type"] == "query"
+        # OpenAI's real /v1/embeddings schema has no input_type field --
+        # must not be sent, unlike Couchbase's Model Service (see
+        # TestCouchbaseProvisionedProvider.test_embed_includes_input_type).
+        assert "input_type" not in kwargs["json"]
         assert result.vector == [0.1, 0.2, 0.3]
         assert result.dimensions == 3
 
@@ -179,6 +182,28 @@ class TestCouchbaseProvisionedProvider:
 
         url = client.post.call_args[0][0]
         assert url == "https://abc123.ai.couchbase.com/v1/embeddings"
+
+    def test_embed_includes_input_type(self) -> None:
+        """Unlike OpenAI's real API, Couchbase's Model Service documents
+        input_type as a real optional field -- must be sent here, the
+        opposite of TestOpenAIProvider.test_embed_posts_and_parses_response."""
+        provider = CouchbaseProvisionedEmbeddingProvider.from_settings(
+            {
+                "embedding_api_key": "k",
+                "embedding_model": "m",
+                "embedding_endpoint": "https://abc123.ai.couchbase.com",
+            }
+        )
+        patcher, client = _mock_httpx_client(
+            "cb_mcp.utils.operational.embeddings.providers._openai_compatible",
+            {"data": [{"embedding": [0.1, 0.2]}], "model": "m"},
+        )
+        with patcher:
+            provider.embed(
+                EmbeddingRequest(text="hello", model="m", input_type="query")
+            )
+
+        assert client.post.call_args.kwargs["json"]["input_type"] == "query"
 
 
 class TestCohereProvider:

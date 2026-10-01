@@ -20,6 +20,9 @@ from ._openai_compatible import _OpenAICompatibleProvider
 class CouchbaseProvisionedEmbeddingProvider(_OpenAICompatibleProvider):
     provider_id = "couchbase"
     _default_base_url = None  # EMBEDDING_ENDPOINT is required — see module docstring
+    _include_input_type = (
+        True  # documented optional field here, unlike OpenAI's real API
+    )
 
     @classmethod
     def _normalize_base_url(cls, base_url: str) -> str:
