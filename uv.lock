@@ -401,7 +401,7 @@ wheels = [
 
 [[package]]
 name = "couchbase-mcp-server"
-version = "1.0.2rc4"
+version = "1.0.2rc5"
 source = { editable = "." }
 dependencies = [
     { name = "click" },

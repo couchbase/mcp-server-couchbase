@@ -15,34 +15,24 @@ This document describes how to create a new release of `mcp-server-couchbase`.
 This automatically updates:
 
 - `pyproject.toml` version
-- `server.json` and `operational_insights_server.json` root versions
-- `server.json` and `operational_insights_server.json` all package versions
-- `server.json` Docker image tag (OCI identifier)
+- `server.json` root version
+- `server.json` all package versions
+- `server.json` Docker image tags (OCI identifiers)
 - `uv.lock`
 
-> **Note:** `server.json` and `operational_insights_server.json` are two
-> separate MCP Registry listings — one per server this distribution ships
-> (see the "Operational Insights Server" section of the README). Both must
-> stay in sync with the release version; the helper script and CI both
-> handle them identically, in a loop.
->
-> **Docker/OCI package:** `operational_insights_server.json` currently has
-> no `oci` package entry — only `server.json` does. Both manifests' OCI
-> packages would need to point at the same shared image
-> (`docker.io/couchbase/mcp-server`), but that image can only carry one
-> `io.modelcontextprotocol.server.name` label, so it can only prove
-> ownership for one of the two registry names. The OI listing's OCI package
-> was removed until that's resolved (e.g. separately tagged/labeled images,
-> or dropping OCI from one listing permanently) — it relies on the PyPI
-> package alone for now.
+> **Note:** `server.json` is the single MCP Registry listing
+> (`io.github.couchbase/mcp-server-couchbase`) for every server this
+> distribution ships. Each server gets its own package entries (one PyPI,
+> one OCI). They all point at the same `couchbase-mcp-server` PyPI package
+> and `docker.io/couchbase/mcp-server` image, and each one selects its
+> server with a positional subcommand (`operational` or
+> `operational-insights`). All entries must stay in sync with the release
+> version.
 
 **Option B: Manual update:**
 
-Update the version in all locations. Steps 2-3 apply to **both**
-`server.json` and `operational_insights_server.json` — repeat them for each
-file. Step 4 (Docker image tag) applies to `server.json` only —
-`operational_insights_server.json` has no OCI package right now (see the
-note in Option A above).
+Update the version in all locations. Steps 3-4 apply to **every** package
+entry in `server.json` (one PyPI and one OCI entry per server).
 
 1. **`pyproject.toml`:**
 
@@ -50,7 +40,7 @@ note in Option A above).
    version = "0.5.2"
    ```
 
-2. **`server.json`** and **`operational_insights_server.json`** (root version):
+2. **`server.json`** (root version):
 
    ```json
    {
@@ -59,7 +49,7 @@ note in Option A above).
    }
    ```
 
-3. **`server.json`** and **`operational_insights_server.json`** (each package version):
+3. **`server.json`** (each PyPI package version):
 
    ```json
    {
@@ -72,7 +62,7 @@ note in Option A above).
    }
    ```
 
-4. **`server.json`** only (Docker image tag in its OCI package):
+4. **`server.json`** (Docker image tag in each OCI package):
 
    ```json
    {
@@ -92,7 +82,7 @@ note in Option A above).
    uv lock
    ```
 
-> **Important:** All versions must match the root version, in *both* manifest files; the Docker image tag must additionally match it, but only exists in `server.json` right now. The CI/CD pipeline validates this for each file and will fail if versions are inconsistent.
+> **Important:** All package versions and Docker image tags must match the root version. The CI/CD pipeline validates this and will fail if versions are inconsistent.
 
 ### 2. Validate Versions
 
@@ -102,22 +92,20 @@ Before pushing, verify all versions match:
 # Check versions
 echo "Checking version consistency..."
 echo "pyproject.toml: $(grep '^version = ' pyproject.toml)"
-for manifest in server.json operational_insights_server.json; do
-  echo "$manifest root: $(jq -r '.version' "$manifest")"
-  echo "$manifest packages:"
-  jq -r '.packages[] |
-    if .registryType == "oci" then
-      "  - \(.registryType):\(.identifier) (tag: \(.identifier | split(":")[1]))"
-    else
-      "  - \(.registryType):\(.identifier) (version: \(.version))"
-    end' "$manifest"
-done
+echo "server.json root: $(jq -r '.version' server.json)"
+echo "server.json packages:"
+jq -r '.packages[] |
+  if .registryType == "oci" then
+    "  - \(.registryType):\(.identifier) \(.packageArguments[0].value // "") (tag: \(.identifier | split(":")[1]))"
+  else
+    "  - \(.registryType):\(.identifier) \(.packageArguments[0].value // "") (version: \(.version))"
+  end' server.json
 ```
 
 **Expected output:**
 
 - All versions should be `0.5.2`
-- `server.json`'s Docker image tag should be `:0.5.2` (`operational_insights_server.json` has no OCI package)
+- Every Docker image tag in `server.json` should be `:0.5.2`
 
 If versions don't match, run `./scripts/update_version.sh 0.5.2` again.
 
@@ -130,7 +118,7 @@ published.
 
 ```bash
 git checkout -b bump-version-0.5.2
-git add pyproject.toml server.json operational_insights_server.json uv.lock
+git add pyproject.toml server.json uv.lock
 git commit -m "Bump version to 0.5.2"
 git push origin bump-version-0.5.2
 ```
@@ -177,9 +165,9 @@ Once the tag is pushed, the following GitHub Actions workflows run sequentially:
 
 4. **MCP Registry Update** (runs after Docker completes)
    - Waits for both PyPI and Docker to complete
-   - Validates version consistency for both `server.json` and
-     `operational_insights_server.json`
-   - Publishes both manifests to the MCP Registry as two separate listings
+   - Validates version consistency for `server.json`
+   - Publishes `server.json` to the MCP Registry as a single listing that
+     covers every server
 
 > **Note:** Version validation happens in the MCP Registry workflow, which runs **after** PyPI and Docker have already published. This is why local validation (step 2) is critical!
 
@@ -215,7 +203,7 @@ Release candidates let you test the full release pipeline without committing to 
 
 # Open a PR with the RC bump
 git checkout -b bump-version-0.5.2rc1
-git add pyproject.toml server.json operational_insights_server.json uv.lock
+git add pyproject.toml server.json uv.lock
 git commit -m "Bump version to 0.5.2rc1"
 git push origin bump-version-0.5.2rc1
 
@@ -230,10 +218,8 @@ git push origin v0.5.2rc1
 
 - PyPI: `couchbase-mcp-server==0.5.2rc1`
 - Docker Hub: `couchbase/mcp-server:0.5.2rc1`
-- MCP Registry: version `0.5.2rc1`, as two listings — `server.json`
-  (`io.github.couchbase/mcp-server-couchbase`) and
-  `operational_insights_server.json`
-  (`io.github.couchbase/mcp-server-couchbase-operational-insights`)
+- MCP Registry: version `0.5.2rc1` of the single listing
+  `io.github.couchbase/mcp-server-couchbase` (from `server.json`)
 
 **If RC succeeds, release the final version:**
 
@@ -241,7 +227,7 @@ git push origin v0.5.2rc1
 ./scripts/update_version.sh 0.5.2
 
 git checkout -b bump-version-0.5.2
-git add pyproject.toml server.json operational_insights_server.json uv.lock
+git add pyproject.toml server.json uv.lock
 git commit -m "Bump version to 0.5.2"
 git push origin bump-version-0.5.2
 
@@ -273,7 +259,7 @@ If a release fails after PyPI has published (e.g., Docker build fails, MCP Regis
 ./scripts/update_version.sh 0.5.3
 
 git checkout -b bump-version-0.5.3
-git add pyproject.toml server.json operational_insights_server.json uv.lock
+git add pyproject.toml server.json uv.lock
 git commit -m "Bump version to 0.5.3"
 git push origin bump-version-0.5.3
 
@@ -305,19 +291,17 @@ git push origin v0.5.3
 All version numbers must be **manually synchronized** across:
 
 - **`pyproject.toml`**: Python package version
-- **`server.json` root `version`**: MCP Registry metadata version for the operational server listing
-- **`server.json` package `version`**: Must match root version
-- **`server.json` OCI identifier**: Docker image tag must match root version
-- **`operational_insights_server.json` root `version`**: MCP Registry metadata version for the OI listing
-- **`operational_insights_server.json` package `version`**: Must match root version (no OCI package to check here — see the Docker/OCI note under "Update Version Numbers")
+- **`server.json` root `version`**: MCP Registry metadata version for the listing
+- **`server.json` package `version`**: Every PyPI package entry must match root version
+- **`server.json` OCI identifiers**: Every Docker image tag must match root version
 - **Git tag**: Must match all versions
 
 ### Why All Versions Must Match
 
-The CI/CD pipeline validates version consistency **independently for each of the two manifests** and will **fail the build** if, in either `server.json` or `operational_insights_server.json`:
+The CI/CD pipeline validates version consistency in `server.json` and will **fail the build** if:
 
-- Package versions don't match that file's root version
-- `server.json`'s Docker image tag in its OCI identifier doesn't match its root version (`operational_insights_server.json` has no OCI package, so this check doesn't apply there)
+- Package versions don't match the root version
+- A Docker image tag in an OCI identifier doesn't match the root version
 - Root version doesn't match the git tag
 - (Warning only) `pyproject.toml` doesn't match the git tag
 
@@ -336,4 +320,4 @@ The `scripts/update_version.sh` script keeps all versions synchronized automatic
 ./scripts/update_version.sh 0.5.2
 ```
 
-This updates `pyproject.toml`, both manifest files, and runs `uv lock` in one command.
+This updates `pyproject.toml` and `server.json`, and runs `uv lock`, in one command.
