@@ -40,6 +40,16 @@ class _OpenAICompatibleProvider(EmbeddingProvider):
         self._base_url = base_url
 
     @classmethod
+    def _normalize_base_url(cls, base_url: str) -> str:
+        """Hook for a subclass whose operator-supplied endpoint needs a fixed
+        suffix appended -- e.g. Couchbase's bare deployment host needs /v1,
+        see couchbase_provisioned.py. No-op by default: OpenAI and
+        OpenAI-compatible local servers already expect the operator to supply
+        the full path, /v1 included, matching the documented examples.
+        """
+        return base_url
+
+    @classmethod
     def from_settings(cls, settings: Mapping[str, Any]) -> _OpenAICompatibleProvider:
         fields = require_fields(settings, cls.describe_config())
         base_url = fields.get("embedding_endpoint") or cls._default_base_url
@@ -47,10 +57,11 @@ class _OpenAICompatibleProvider(EmbeddingProvider):
             raise EmbeddingConfigError(
                 f"EMBEDDING_ENDPOINT is required for provider {cls.provider_id!r}."
             )
+        base_url = cls._normalize_base_url(base_url.rstrip("/"))
         return cls(
             api_key=fields["embedding_api_key"],
             model=fields["embedding_model"],
-            base_url=base_url.rstrip("/"),
+            base_url=base_url,
         )
 
     def embed(self, request: EmbeddingRequest) -> EmbeddingResult:

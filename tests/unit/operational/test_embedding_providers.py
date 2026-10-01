@@ -136,7 +136,10 @@ class TestCouchbaseProvisionedProvider:
                 {"embedding_api_key": "k", "embedding_model": "m"}
             )
 
-    def test_endpoint_configured_succeeds(self) -> None:
+    def test_bare_deployment_host_gets_v1_appended(self) -> None:
+        """The host Capella's UI shows has no /v1 -- the actual API lives
+        under /v1/embeddings, so it must be appended, or every real call
+        hits the wrong route."""
         provider = CouchbaseProvisionedEmbeddingProvider.from_settings(
             {
                 "embedding_api_key": "k",
@@ -144,7 +147,38 @@ class TestCouchbaseProvisionedProvider:
                 "embedding_endpoint": "https://abc123.ai.couchbase.com",
             }
         )
-        assert provider._base_url == "https://abc123.ai.couchbase.com"
+        assert provider._base_url == "https://abc123.ai.couchbase.com/v1"
+
+    def test_endpoint_already_ending_in_v1_is_not_duplicated(self) -> None:
+        provider = CouchbaseProvisionedEmbeddingProvider.from_settings(
+            {
+                "embedding_api_key": "k",
+                "embedding_model": "m",
+                "embedding_endpoint": "https://abc123.ai.couchbase.com/v1",
+            }
+        )
+        assert provider._base_url == "https://abc123.ai.couchbase.com/v1"
+
+    def test_embed_posts_to_v1_embeddings_route(self) -> None:
+        """Proves the fix end-to-end: the actual URL posted to, not just
+        the stored base_url, includes /v1 -- for the exact bare-host
+        configuration Capella's UI gives an operator."""
+        provider = CouchbaseProvisionedEmbeddingProvider.from_settings(
+            {
+                "embedding_api_key": "k",
+                "embedding_model": "m",
+                "embedding_endpoint": "https://abc123.ai.couchbase.com",
+            }
+        )
+        patcher, client = _mock_httpx_client(
+            "cb_mcp.utils.operational.embeddings.providers._openai_compatible",
+            {"data": [{"embedding": [0.1, 0.2]}], "model": "m"},
+        )
+        with patcher:
+            provider.embed(EmbeddingRequest(text="hello", model="m"))
+
+        url = client.post.call_args[0][0]
+        assert url == "https://abc123.ai.couchbase.com/v1/embeddings"
 
 
 class TestCohereProvider:

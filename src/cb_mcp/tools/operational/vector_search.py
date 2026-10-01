@@ -179,7 +179,8 @@ def run_vector_search(
             if not select_fields
             else "{"
             + ", ".join(
-                f"{quote_literal(field)}: b.{safe_ident(field)}" for field in select_fields
+                f"{quote_literal(field)}: b.{safe_ident(field)}"
+                for field in select_fields
             )
             + "}"
         )

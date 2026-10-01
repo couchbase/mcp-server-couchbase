@@ -22,5 +22,15 @@ class CouchbaseProvisionedEmbeddingProvider(_OpenAICompatibleProvider):
     _default_base_url = None  # EMBEDDING_ENDPOINT is required — see module docstring
 
     @classmethod
+    def _normalize_base_url(cls, base_url: str) -> str:
+        """Capella's UI shows the bare deployment host (e.g.
+        https://<id>.ai.couchbase.com), but the actual API lives under /v1
+        (POST {host}/v1/embeddings — see module docstring). Append it if an
+        operator pastes the bare host as-is; idempotent if they already
+        included it.
+        """
+        return base_url if base_url.endswith("/v1") else f"{base_url}/v1"
+
+    @classmethod
     def describe_config(cls) -> ProviderConfigDoc:
         return PROVIDER_CONFIG_DOCS[cls.provider_id]
