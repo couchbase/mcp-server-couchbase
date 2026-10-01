@@ -49,11 +49,14 @@ from .index import (
 # Key-Value tools
 from .kv import (
     delete_document_by_id,
+    document_exists_by_id,
+    get_and_touch_document_by_id,
     get_document_by_id,
     insert_document_by_id,
     lookup_subdocument,
     mutate_subdocument,
     replace_document_by_id,
+    touch_document_by_id,
     upsert_document_by_id,
 )
 
@@ -134,6 +137,7 @@ TOOL_SET = ToolSet(
         get_active_queries,
         # KV read tools
         get_document_by_id,
+        document_exists_by_id,
         lookup_subdocument,
         # Query tools (read operations)
         get_schema_for_collection,
@@ -169,6 +173,8 @@ TOOL_SET = ToolSet(
         replace_document_by_id,
         delete_document_by_id,
         mutate_subdocument,
+        touch_document_by_id,
+        get_and_touch_document_by_id,
         # Scope/collection management write tools
         create_scope,
         create_collection,
@@ -212,6 +218,7 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_active_queries": ToolAnnotations(readOnlyHint=True),
     # KV read tools
     "get_document_by_id": ToolAnnotations(readOnlyHint=True),
+    "document_exists_by_id": ToolAnnotations(readOnlyHint=True),
     "lookup_subdocument": ToolAnnotations(readOnlyHint=True),
     # Query tools
     "get_schema_for_collection": ToolAnnotations(readOnlyHint=True),
@@ -244,6 +251,14 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "replace_document_by_id": ToolAnnotations(idempotentHint=True),
     "delete_document_by_id": ToolAnnotations(destructiveHint=True, idempotentHint=True),
     "mutate_subdocument": ToolAnnotations(destructiveHint=True),
+    # A TTL schedules the server to remove the document, so these carry
+    # destructiveHint even though the call itself deletes nothing. They are
+    # explicitly not idempotent: a relative TTL restarts from now on every
+    # call, so repeating the same arguments moves the deadline again.
+    "touch_document_by_id": ToolAnnotations(destructiveHint=True, idempotentHint=False),
+    "get_and_touch_document_by_id": ToolAnnotations(
+        destructiveHint=True, idempotentHint=False
+    ),
     # Scope/collection management write tools
     "create_scope": ToolAnnotations(),
     "create_collection": ToolAnnotations(),
@@ -319,7 +334,16 @@ TOOL_SCOPE_HINTS: dict[str, str] = {
     "run_sql_plus_plus_query": (
         f"A '{SCOPE_WRITE}'-only token cannot invoke SQL++; '{SCOPE_READ}' is required."
     ),
+    "get_and_touch_document_by_id": (
+        "It changes the document's expiry and returns its content, so it needs "
+        f"both '{SCOPE_READ}' and '{SCOPE_WRITE}'."
+    ),
 }
+
+# Write tools that also hand back document content. They stay registered,
+# audited and read-only-filtered as writes, but a token must hold the read
+# scope too, so a write-only token cannot use one to read a document.
+DUAL_SCOPE_TOOLS: frozenset[str] = frozenset({"get_and_touch_document_by_id"})
 
 
 def get_tools(read_only_mode: bool = True) -> list[Callable]:
@@ -341,6 +365,9 @@ __all__ = [
     "get_buckets_in_cluster",
     "get_bucket_config",
     "get_document_by_id",
+    "document_exists_by_id",
+    "touch_document_by_id",
+    "get_and_touch_document_by_id",
     "lookup_subdocument",
     "mutate_subdocument",
     "upsert_document_by_id",

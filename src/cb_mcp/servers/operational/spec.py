@@ -13,6 +13,7 @@ import couchbase
 
 from ...core.spec import ScopeSpec, ServerSpec
 from ...tools.operational import (
+    DUAL_SCOPE_TOOLS,
     TOOL_ANNOTATIONS,
     TOOL_DEPLOYMENT_REQUIREMENTS,
     TOOL_SCOPE_HINTS,
@@ -55,6 +56,7 @@ SPEC = ServerSpec(
     scopes=ScopeSpec(read=SCOPE_READ, write=SCOPE_WRITE),
     annotations=TOOL_ANNOTATIONS,
     scope_hints=TOOL_SCOPE_HINTS,
+    dual_scope_tool_names=DUAL_SCOPE_TOOLS,
     # Capella does not expose the REST endpoints a few of these tools call, so
     # those tools are not registered when the connection string names a Capella
     # cluster. The resolver lives beside the connection-string helpers it uses;

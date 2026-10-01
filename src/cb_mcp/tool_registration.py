@@ -156,7 +156,10 @@ def prepare_tools_for_registration(
             wrapped = wrap_with_confirmation(wrapped)
         if enforce_scopes:
             required_scopes = required_scopes_for_tool(
-                tool.__name__, write_tool_names=write_tool_names, scopes=spec.scopes
+                tool.__name__,
+                write_tool_names=write_tool_names,
+                scopes=spec.scopes,
+                dual_scope_tool_names=spec.dual_scope_tool_names,
             )
             wrapped = wrap_with_scope_check(
                 wrapped,

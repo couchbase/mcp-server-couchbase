@@ -45,6 +45,7 @@ def required_scopes_for_tool(
     *,
     write_tool_names: set[str] | frozenset[str],
     scopes: ScopeSpec,
+    dual_scope_tool_names: set[str] | frozenset[str] = frozenset(),
 ) -> set[str]:
     """Return the set of scopes a token must hold to invoke ``tool_name``.
 
@@ -58,12 +59,19 @@ def required_scopes_for_tool(
     A token holding only ``SCOPE_WRITE`` therefore cannot reach SQL++ or any
     read tool. Full access requires both scopes.
 
+    Names in ``dual_scope_tool_names`` are write tools that also return
+    document content (``get_and_touch_document_by_id``). They require BOTH
+    scopes, so a write-only token cannot read a document through them that it
+    could not read with ``get_document_by_id``.
+
     ``scopes`` supplies the server's canonical scope labels — required, not
     defaulted: silently falling back to some other server's labels would gate
     tools against scopes the token was never issued for. These are the
     canonical values a token's scopes are normalized to, not the
     operator-facing labels an IdP emits.
     """
+    if tool_name in dual_scope_tool_names:
+        return {scopes.read, scopes.write}
     if tool_name in write_tool_names:
         return {scopes.write}
     return {scopes.read}
