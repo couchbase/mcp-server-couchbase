@@ -61,6 +61,7 @@ from cb_mcp.utils.operational.embeddings import (
     EmbeddingRequest,
     resolve_embedding_provider,
 )
+from cb_mcp.utils.operational.index_utils import resolve_cluster_major_version
 
 try:
     from couchbase.management.search import SearchIndex
@@ -99,6 +100,24 @@ def _require_embedding_provider() -> dict[str, Any]:
     if not settings.get("embedding_provider"):
         pytest.skip("EMBEDDING_PROVIDER not set")
     return settings
+
+
+def _skip_if_cluster_below(cluster, min_major: int, *, feature: str) -> None:
+    """Skip only when the cluster's version *confirms* the feature is
+    unsupported. If version detection itself fails, don't skip either way --
+    "can't tell" isn't "confirmed unsupported"; let the real DDL attempt
+    that follows be the source of truth, so a genuine bug in it fails the
+    test loudly instead of silently blending into a version-gap skip.
+    """
+    try:
+        major = resolve_cluster_major_version(cluster)
+    except Exception:
+        return
+    if major < min_major:
+        pytest.skip(
+            f"Cluster reports major version {major}; {feature} requires "
+            f"Couchbase Server {min_major}.0+."
+        )
 
 
 def _wait_for_search_vector_doc(
@@ -150,6 +169,8 @@ def seeded_gsi_vector_index() -> Iterator[dict[str, Any]]:
 
     cluster = _direct_cluster()
     try:
+        _skip_if_cluster_below(cluster, 8, feature="GSI vector indexes")
+
         bucket = cluster.bucket(bucket_name)
         collection = bucket.scope(scope_name).collection(collection_name)
         collection.upsert(
@@ -161,15 +182,11 @@ def seeded_gsi_vector_index() -> Iterator[dict[str, Any]]:
             f"CREATE INDEX `{index_name}` ON `{collection_name}`(`{vector_field}` VECTOR) "
             f'WITH {{"dimension": {embedding.dimensions}, "similarity": "cosine"}}'
         )
-        try:
-            list(scope.query(create_stmt))
-        except Exception as e:
-            with contextlib.suppress(Exception):
-                collection.remove(doc_id)
-            pytest.skip(
-                f"Could not create GSI vector index (requires Couchbase Server "
-                f"8.0+ with vector indexing enabled): {e}"
-            )
+        # Not wrapped in try/skip: on a cluster confirmed (or unknown, see
+        # _skip_if_cluster_below) to support vector indexing, any failure
+        # here is a real bug in the DDL/mapping and must fail the test, not
+        # vanish into a silent skip.
+        list(scope.query(create_stmt))
 
         indexed = False
         last_error: str | None = None
@@ -241,6 +258,13 @@ def seeded_search_vector_index() -> Iterator[dict[str, Any]]:
 
     cluster = _direct_cluster()
     try:
+        # Floor is the best this can confirm: major-version granularity can't
+        # distinguish 7.0-7.5 from the real 7.6+ requirement, but major < 7 is
+        # still a confirmed-unsupported signal worth skipping on. See
+        # _skip_if_cluster_below's docstring for why an unknown version
+        # doesn't skip either way.
+        _skip_if_cluster_below(cluster, 7, feature="Search-service vector indexes")
+
         bucket = cluster.bucket(bucket_name)
         scope_index_manager = bucket.scope(scope_name).search_indexes()
 
@@ -268,7 +292,19 @@ def seeded_search_vector_index() -> Iterator[dict[str, Any]]:
                                             "index": True,
                                         }
                                     ],
-                                }
+                                },
+                                # Indexed (not left to "dynamic": False's
+                                # default of unindexed) so the hybrid test's
+                                # scalar_query={"match": marker, "field":
+                                # "name"} has real content to match -- without
+                                # this, that scalar clause matches nothing and
+                                # the test only passes on the vector half.
+                                "name": {
+                                    "enabled": True,
+                                    "fields": [
+                                        {"name": "name", "type": "text", "index": True}
+                                    ],
+                                },
                             },
                         }
                     },
@@ -278,10 +314,10 @@ def seeded_search_vector_index() -> Iterator[dict[str, Any]]:
             },
         )
 
-        try:
-            scope_index_manager.upsert_index(definition)
-        except Exception as e:
-            pytest.skip(f"Could not create Search vector index for tests: {e}")
+        # Not wrapped in try/skip: see the GSI fixture's identical comment
+        # above -- on a cluster confirmed (or unknown) to support it, any
+        # failure here is a real bug, not a version gap, and must fail loud.
+        scope_index_manager.upsert_index(definition)
 
         collection = bucket.scope(scope_name).collection(collection_name)
         collection.upsert(
