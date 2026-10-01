@@ -350,6 +350,10 @@ async def test_run_vector_search_finds_seeded_document(
     # Same text embedded through the same provider/model should be identical
     # (or near-identical) to the seeded vector -> ~0 distance.
     assert payload["hits"][0]["distance"] < 1e-3
+    # The document is nested under "document", not flattened into the hit --
+    # proves the id/distance metadata fields can't collide with same-named
+    # document fields (see the "document" projection in run_vector_search).
+    assert payload["hits"][0]["document"]["name"] == fixture["marker"]
 
 
 @pytest.mark.asyncio

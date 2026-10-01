@@ -121,7 +121,7 @@ class TestRunVectorSearchQueryConstruction:
 
     def test_composite_query_uses_named_parameter_and_default_projection(self) -> None:
         ctx = _make_ctx()
-        rows = [{"id": "doc1", "distance": 0.1, "name": "widget"}]
+        rows = [{"id": "doc1", "distance": 0.1, "document": {"name": "widget"}}]
         cluster, bucket, scope = self._cluster_with_scope_query(rows)
 
         with (
@@ -145,7 +145,10 @@ class TestRunVectorSearchQueryConstruction:
         assert "APPROX_VECTOR_DISTANCE" in query_text
         assert "b.`embedding`" in query_text
         assert '"cosine"' in query_text
-        assert "b.*" in query_text
+        # Nested under "document", never flattened with b.* -- see
+        # test_select_fields_projects_as_nested_object_not_flattened for why.
+        assert "b AS document" in query_text
+        assert "b.*" not in query_text
         assert "FROM `c` AS b" in query_text
         assert "LIMIT 5" in query_text
         assert "WHERE" not in query_text
@@ -200,7 +203,9 @@ class TestRunVectorSearchQueryConstruction:
 
         query_text = scope.query.call_args[0][0]
         assert "WHERE b.status = 'active'" in query_text
-        assert "b.`name`, b.`status`" in query_text
+        # Nested object literal, not a flattened b.`name`, b.`status` --
+        # select_fields never bypasses the "document" namespacing either.
+        assert '{"name": b.`name`, "status": b.`status`} AS document' in query_text
         assert "b.*" not in query_text
 
     def test_pre_8_cluster_gets_warning_not_a_block(self) -> None:

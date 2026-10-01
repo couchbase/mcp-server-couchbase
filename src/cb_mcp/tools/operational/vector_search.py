@@ -127,16 +127,20 @@ def run_vector_search(
     this tool only ever emits a SELECT, so, unlike run_sql_plus_plus_query,
     there is no write-guard for it to bypass.
 
-    select_fields limits the projected columns; omit it to return full
-    documents (b.*). limit defaults to 10, matching the other query/search
+    select_fields limits the projected document fields; omit it to return
+    the full document. limit defaults to 10, matching the other query/search
     tools in this server.
 
-    Returns {"success": True, "hits": [{"id", "distance", ...selected
-    fields...}], "total_hits", "cluster_major_version", and a "warning" key
-    only when the detected cluster major version is below 8 (informational --
-    a pre-8.0 cluster fails the query naturally with its own "unknown
-    function" error rather than being blocked here)} or
-    {"success": False, "error": ...}.
+    Returns {"success": True, "hits": [{"id", "distance", "document": {...
+    selected fields, or the full document}}], "total_hits",
+    "cluster_major_version", and a "warning" key only when the detected
+    cluster major version is below 8 (informational -- a pre-8.0 cluster
+    fails the query naturally with its own "unknown function" error rather
+    than being blocked here)} or {"success": False, "error": ...}.
+    The document is nested under "document" rather than merged into the hit
+    directly -- a document field literally named "id" or "distance" would
+    otherwise silently collide with (and could overwrite) this tool's own
+    id/distance metadata.
     """
 
     if (num_probes is None) != (rerank is None) or (num_probes is None) != (
@@ -165,16 +169,25 @@ def run_vector_search(
             distance_args += f", {int(num_probes)}, {int(rerank)}, {int(top_n_scan)}"
         distance_expr = f"APPROX_VECTOR_DISTANCE({distance_args})"
 
+        # Nested under "document" rather than flattened with `b.*`/select_fields
+        # at the top level: a document field literally named "id" or
+        # "distance" would otherwise collide with (and silently overwrite,
+        # since SQL++ lets a later projected term shadow an earlier one) this
+        # tool's own id/distance metadata.
         projection = (
-            "b.*"
+            "b"
             if not select_fields
-            else ", ".join(f"b.{safe_ident(field)}" for field in select_fields)
+            else "{"
+            + ", ".join(
+                f"{quote_literal(field)}: b.{safe_ident(field)}" for field in select_fields
+            )
+            + "}"
         )
         # Identifiers are backtick-quoted (safe_ident) and the vector itself
         # is a bound named parameter, not interpolated -- same noqa: S608
         # precedent as operational_insights/metadata.py's schema-infer query.
         query = (
-            f"SELECT META(b).id AS id, {distance_expr} AS distance, {projection} "  # noqa: S608
+            f"SELECT META(b).id AS id, {distance_expr} AS distance, {projection} AS document "  # noqa: S608
             f"FROM {safe_ident(collection_name)} AS b "
             + (f"WHERE {where} " if where else "")
             + f"ORDER BY {distance_expr} LIMIT {int(limit)}"
