@@ -46,6 +46,9 @@ EXPECTED_TOOLS = {
     "list_fts_indexes",
     "get_fts_index_definition",
     "run_fts_query",
+    # Vector search tools
+    "run_vector_search",
+    "run_search_vector_search",
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
     "get_cluster_metrics",
@@ -100,6 +103,10 @@ TOOLS_BY_CATEGORY = {
         "list_fts_indexes",
         "get_fts_index_definition",
         "run_fts_query",
+    },
+    "vector_search": {
+        "run_vector_search",
+        "run_search_vector_search",
     },
     "management": {
         "create_scope",
@@ -180,4 +187,12 @@ TOOL_REQUIRED_PARAMS = {
     "drop_index": ["bucket_name", "scope_name", "collection_name", "index_name"],
     "get_fts_index_definition": ["index_name"],
     "run_fts_query": ["index_name", "query"],
+    "run_vector_search": [
+        "bucket_name",
+        "scope_name",
+        "collection_name",
+        "vector_field",
+        "query_text",
+    ],
+    "run_search_vector_search": ["index_name", "vector_field", "vector_query_text"],
 }
