@@ -274,6 +274,25 @@ class TestRunSearchVectorSearchValidation:
         assert result["success"] is False
         assert "bucket_name" in result["error"]
 
+    def test_empty_scalar_query_is_rejected_not_silently_vector_only(self) -> None:
+        """{} is falsy but not None -- must be rejected explicitly rather
+        than silently becoming a vector-only search that still claims
+        is_hybrid=True (the truthy-vs-is-not-None mismatch this guards)."""
+        ctx = _make_ctx()
+        result = run_search_vector_search(
+            ctx, "idx1", "embedding", "query text", scalar_query={}
+        )
+        assert result["success"] is False
+        assert "scalar_query" in result["error"]
+
+    def test_empty_prefilter_is_rejected(self) -> None:
+        ctx = _make_ctx()
+        result = run_search_vector_search(
+            ctx, "idx1", "embedding", "query text", prefilter={}
+        )
+        assert result["success"] is False
+        assert "prefilter" in result["error"]
+
     def test_connection_failure_propagates(self) -> None:
         ctx = _make_ctx()
 

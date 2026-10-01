@@ -301,6 +301,14 @@ def run_search_vector_search(
         return tool_error(
             "bucket_name and scope_name must be provided together, or omitted together"
         )
+    if scalar_query is not None and not scalar_query:
+        return tool_error(
+            "scalar_query must be a non-empty query body when provided, or omitted entirely"
+        )
+    if prefilter is not None and not prefilter:
+        return tool_error(
+            "prefilter must be a non-empty query body when provided, or omitted entirely"
+        )
 
     # Connection problems -- can't reach the cluster, or this bucket doesn't
     # exist / isn't reachable -- propagate uncaught rather than becoming a
@@ -311,8 +319,8 @@ def run_search_vector_search(
     )
     logger.debug(
         f"run_search_vector_search on {index_name!r} (vector_field={vector_field!r}, "
-        f"num_candidates={num_candidates}, hybrid={scalar_query is not None}, "
-        f"prefiltered={prefilter is not None})"
+        f"num_candidates={num_candidates}, hybrid={bool(scalar_query)}, "
+        f"prefiltered={bool(prefilter)})"
     )
 
     try:
@@ -342,8 +350,8 @@ def run_search_vector_search(
         ]
 
         logger.info(
-            f"run_search_vector_search on {index_name!r} (hybrid={scalar_query is not None}, "
-            f"prefiltered={prefilter is not None}) returned {len(hits)} hit(s)"
+            f"run_search_vector_search on {index_name!r} (hybrid={bool(scalar_query)}, "
+            f"prefiltered={bool(prefilter)}) returned {len(hits)} hit(s)"
         )
         return tool_success(
             index_name=index_name,
@@ -352,8 +360,8 @@ def run_search_vector_search(
             limit=applied_limit,
             total_hits=len(hits),
             hits=hits,
-            is_hybrid=scalar_query is not None,
-            is_prefiltered=prefilter is not None,
+            is_hybrid=bool(scalar_query),
+            is_prefiltered=bool(prefilter),
             **embedding_info,
         )
     except Exception as e:
