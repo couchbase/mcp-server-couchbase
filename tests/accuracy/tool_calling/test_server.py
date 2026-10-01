@@ -10,6 +10,7 @@ Covers:
   - get_cluster_health_and_services (including service_types filtering)
   - get_cluster_diagnostics_report
   - get_cluster_metrics
+  - get_cluster_health_snapshot
   - discover_tool_input_values
 """
 
@@ -208,6 +209,39 @@ def _build_cases(bucket: str, scope: str) -> list[AccuracyCase]:
             expected_tools=[
                 ExpectedToolCall(
                     tool_name="get_cluster_metrics",
+                    parameters=Matcher.any_value(),
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="get_cluster_health_snapshot_node_down_alert",
+            prompt=(
+                "We just got an alert that a node is down in our Couchbase "
+                "cluster. Which node is it and what service does it run?"
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_cluster_health_snapshot",
+                    parameters=Matcher.any_value(),
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="get_cluster_health_snapshot_verify_topology_after_replacement",
+            prompt=(
+                "A failed node was just replaced in our Couchbase cluster. Did "
+                "the topology settle correctly - is every node back and is the "
+                "orchestrator stable?"
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_cluster_health_snapshot",
                     parameters=Matcher.any_value(),
                 ),
             ],
