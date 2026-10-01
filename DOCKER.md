@@ -201,7 +201,7 @@ Write tools are only loaded when `CB_MCP_READ_ONLY_MODE=false`. Some admin tools
 
 - **Cluster setup and health:** `get_server_configuration_status`, `test_cluster_connection`, `get_cluster_health_and_services`, `get_client_connectivity_report`, `get_cluster_metrics`, `get_cluster_tasks`, `get_cluster_health_snapshot`, `get_bucket_config`, `get_cluster_system_events`, `discover_tool_input_values`
 - **Data model and schema:** `get_buckets_in_cluster`, `get_scopes_in_bucket`, `get_collections_in_scope`, `get_scopes_and_collections_in_bucket`, `get_schema_for_collection`, `create_scope`, `create_collection`, `delete_scope`, `delete_collection`
-- **Documents (KV):** `get_document_by_id`, `lookup_subdocument`, `upsert_document_by_id`, `insert_document_by_id`, `replace_document_by_id`, `delete_document_by_id`, `mutate_subdocument`
+- **Documents (KV):** `get_document_by_id`, `lookup_subdocument`, `document_exists_by_id`, `upsert_document_by_id`, `insert_document_by_id`, `replace_document_by_id`, `delete_document_by_id`, `mutate_subdocument`, `touch_document_by_id`, `get_and_touch_document_by_id`
 - **Query and indexing:** `run_sql_plus_plus_query`, `explain_sql_plus_plus_query`, `get_index_advisor_recommendations`, `list_indexes`, `get_index_stats`, `create_query_index`, `create_index` (deprecated), `build_index`, `drop_index`
 - **Full-text search:** `list_search_indexes`, `get_search_index_definition`, `run_search`, `upsert_search_index`, `drop_search_index`
 - **Vector search:** `run_vector_query`, `run_vector_search`
