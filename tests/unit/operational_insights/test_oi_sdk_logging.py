@@ -1,20 +1,17 @@
 """Unit tests for the Operational Insights SDK logging bridge.
 
-Covers ``bridge_sdk_logging`` (the ``sdk_log_hook``) and
-``quiesce_new_root_handlers`` in isolation, using synthetic loggers so the
-real ``couchbase_operational_insights`` SDK need not be imported or connect
-anywhere.
+Covers ``bridge_sdk_logging`` (the ``sdk_log_hook``), using synthetic
+loggers so the real ``couchbase_operational_insights`` SDK need not be
+imported or connect anywhere.
 """
 
 import io
 import logging
+import os
 import subprocess
 import sys
 
-from cb_mcp.utils.operational_insights.sdk_logging import (
-    bridge_sdk_logging,
-    quiesce_new_root_handlers,
-)
+from cb_mcp.utils.operational_insights.sdk_logging import bridge_sdk_logging
 
 
 def test_bridge_routes_sdk_records_into_the_target_root():
@@ -53,60 +50,11 @@ def test_bridge_sets_propagate_false_on_the_sdk_logger():
         sdk_logger.propagate = True
 
 
-def test_quiesce_removes_a_handler_added_inside_the_block():
-    root = logging.getLogger()
-    pre_existing = logging.StreamHandler()
-    root.addHandler(pre_existing)
-    try:
-        with quiesce_new_root_handlers():
-            # Simulate the SDK's own connect-time side effect: a handler
-            # added by the code running inside the block.
-            stray = logging.StreamHandler()
-            root.addHandler(stray)
-
-        assert stray not in root.handlers
-        # Added before the block started, so it must survive.
-        assert pre_existing in root.handlers
-    finally:
-        root.removeHandler(pre_existing)
-        pre_existing.close()
-
-
-def test_quiesce_removes_the_handler_even_when_the_block_raises():
-    root = logging.getLogger()
-    stray = logging.StreamHandler()
-
-    try:
-        with quiesce_new_root_handlers():
-            root.addHandler(stray)
-            raise ValueError("connection failed")
-    except ValueError:
-        pass
-
-    assert stray not in root.handlers
-
-
-def test_quiesce_does_not_remove_a_handler_added_before_the_block():
-    """The regression this guards: a handler added *after* this module was
-    imported, but *before* the connect-time block runs (e.g. the host's own
-    ``logging.basicConfig()`` call), must never be mistaken for the SDK's
-    and removed. Only what changes during the block itself counts."""
-    root = logging.getLogger()
-    host_handler = logging.StreamHandler()
-    root.addHandler(host_handler)  # added well after this module was imported
-    try:
-        with quiesce_new_root_handlers():
-            pass  # nothing added during the block this time
-
-        assert host_handler in root.handlers
-    finally:
-        root.removeHandler(host_handler)
-        host_handler.close()
-
-
 def test_importing_the_oi_spec_adds_no_handler_to_the_stdlib_root():
     """Clean-interpreter check: importing the spec (and therefore every OI
-    tool module) must not leave a stray handler on the bare root logger."""
+    tool module) at server startup / tool-discovery time — before anything
+    ever connects to a cluster — must not leave a stray handler on the bare
+    root logger."""
     result = subprocess.run(
         [
             sys.executable,
@@ -119,5 +67,45 @@ def test_importing_the_oi_spec_adds_no_handler_to_the_stdlib_root():
         capture_output=True,
         text=True,
         check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_connecting_triggers_no_handler_on_the_stdlib_root():
+    """Regression test for the bug ``quiesce_new_root_handlers()`` used to
+    clean up after: the SDK's own logging setup
+    (``couchbase_operational_insights.common.logging.configure_logging_from_env``)
+    runs lazily, the first time ``Cluster.create_instance(...)`` actually
+    executes — ``protocol/__init__.py`` (and therefore this side effect) is
+    not imported merely by importing the top-level package or this server's
+    spec. So the "importing the spec" check above proves nothing about the
+    connection-time path; this test drives the real
+    ``connect_to_operational_insights_cluster`` call instead, in a
+    subprocess, so a regression in the SDK's connect-time logging setup
+    would actually be caught.
+
+    ``PYCBOI_LOG_LEVEL`` is set because the *old*, buggy SDK only called
+    ``logging.basicConfig()`` on the bare root logger when that env var was
+    present (or something had already attached a root handler) — leaving it
+    unset would let this test pass against either the old or the fixed SDK,
+    proving nothing. The target host is a loopback address nothing listens
+    on: the SDK's client construction is lazy (no network I/O happens here),
+    so this needs no live cluster and can't hang or flake.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import logging; "
+            "from cb_mcp.utils.operational_insights.connection import "
+            "connect_to_operational_insights_cluster; "
+            "connect_to_operational_insights_cluster('http://127.0.0.1:1', 'u', 'p'); "
+            "assert logging.getLogger().handlers == [], "
+            "logging.getLogger().handlers",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PYCBOI_LOG_LEVEL": "DEBUG"},
     )
     assert result.returncode == 0, result.stderr

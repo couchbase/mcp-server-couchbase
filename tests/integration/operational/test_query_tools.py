@@ -63,6 +63,100 @@ async def test_get_schema_for_collection() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_schema_for_collection_num_sample_values_zero() -> None:
+    """num_sample_values=0 must return no example values for any field, while
+    keeping the structure and type information.
+
+    Exercises the WITH-clause path against a real INFER, which the unit tests
+    can only assert as a query string against a mocked cluster.
+
+    INFER reports a field two different ways, and both must be checked: for a
+    single-typed field it omits `samples` entirely, but for a field whose type
+    varies across documents it emits parallel per-type arrays (`#docs`,
+    `%docs`, `samples`) and keeps `samples` present as a list of empty/null
+    entries. The invariant that holds for both is that no actual sample value
+    comes back.
+    """
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+    skip_reason = None
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "get_schema_for_collection",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "num_sample_values": 0,
+            },
+        )
+        payload = extract_payload(response)
+
+        if isinstance(payload, str):
+            if "No documents found" in payload or "unable to infer schema" in payload:
+                skip_reason = (
+                    f"Collection '{collection}' has no documents to infer schema"
+                )
+            else:
+                raise AssertionError(f"Tool returned error: {payload}")
+        else:
+            assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
+            flavors = ensure_list(payload["schema"])
+            if not flavors:
+                skip_reason = f"Collection '{collection}' returned empty schema"
+            else:
+                for flavor in flavors:
+                    for field, spec in flavor.get("properties", {}).items():
+                        samples = spec.get("samples")
+                        # None / absent, or per-type entries that are each
+                        # themselves empty or null.
+                        empty = samples is None or all(
+                            entry is None or entry == [] for entry in samples
+                        )
+                        assert empty, (
+                            f"num_sample_values=0 should return no sample values, "
+                            f"but field {field!r} has {samples!r}"
+                        )
+
+    if skip_reason:
+        pytest.skip(skip_reason)
+
+
+@pytest.mark.asyncio
+async def test_get_schema_for_collection_rejects_negative_num_sample_values() -> None:
+    """A negative num_sample_values must be rejected with a message naming the
+    parameter.
+
+    Without the guard this reaches the SQL++ parser, which fails with an
+    "Unexpected end-of-input" error that never mentions num_sample_values.
+    """
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "get_schema_for_collection",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "num_sample_values": -3,
+            },
+        )
+
+        assert is_error_response(response), (
+            "Expected an error response for a negative num_sample_values"
+        )
+        # Assert the guard's own message, not merely that some error mentions
+        # the parameter: without the guard the SQL++ parser still fails, and
+        # its error echoes the query text (and so the parameter name) too.
+        assert "must not be negative" in str(extract_payload(response))
+
+
+@pytest.mark.asyncio
 async def test_run_sql_plus_plus_query_select() -> None:
     """Verify run_sql_plus_plus_query can execute a SELECT query."""
     bucket = require_test_bucket()
