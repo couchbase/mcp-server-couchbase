@@ -22,6 +22,7 @@ EXPECTED_TOOLS = {
     "get_collections_in_scope",
     "get_scopes_in_bucket",
     "get_document_by_id",
+    "get_documents_by_ids",
     "lookup_subdocument",
     "mutate_subdocument",
     "upsert_document_by_id",
@@ -76,6 +77,7 @@ TOOLS_BY_CATEGORY = {
     },
     "kv": {
         "get_document_by_id",
+        "get_documents_by_ids",
         "lookup_subdocument",
         "mutate_subdocument",
         "upsert_document_by_id",
@@ -133,6 +135,12 @@ TOOL_REQUIRED_PARAMS = {
         "scope_name",
         "collection_name",
         "document_id",
+    ],
+    "get_documents_by_ids": [
+        "bucket_name",
+        "scope_name",
+        "collection_name",
+        "document_ids",
     ],
     "upsert_document_by_id": [
         "bucket_name",

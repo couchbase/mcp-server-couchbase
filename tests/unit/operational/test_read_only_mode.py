@@ -47,8 +47,9 @@ READ_ONLY_TOOL_NAMES = {
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
     "get_cluster_metrics",
-    # KV read tools (2)
+    # KV read tools (3)
     "get_document_by_id",
+    "get_documents_by_ids",
     "lookup_subdocument",
     # Query tools (3)
     "get_schema_for_collection",
@@ -177,14 +178,14 @@ class TestToolCounts:
         """Verify correct number of tools in read-only mode."""
         tools = get_tools(read_only_mode=True)
         assert len(tools) == len(READ_ONLY_TOOLS)
-        assert len(tools) == 28  # Expected count of read-only tools
+        assert len(tools) == 29  # Expected count of read-only tools
 
     def test_all_tools_mode_tool_count(self):
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (28 read-only + 12 write)
-        assert len(tools) == 40
+        # Expected total count (29 read-only + 12 write)
+        assert len(tools) == 41
 
     def test_write_tools_count(self):
         """Verify exactly 12 write tools exist."""
