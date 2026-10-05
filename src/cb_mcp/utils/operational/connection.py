@@ -79,6 +79,76 @@ def connect_to_bucket(cluster: Cluster, bucket_name: str) -> Bucket:
         raise
 
 
+def parse_major_version(version_str: str | None) -> int:
+    """Extract the integer major version from a Couchbase version string.
+
+    Examples:
+        - "8.0.0-1928-enterprise" -> 8
+        - "7.6.0"                 -> 7
+
+    Args:
+        version_str: Node ``version`` string returned by the cluster, such as a value from ``cluster_info().nodes``.
+
+    Returns:
+        Major version as int.
+
+    Raises:
+        ValueError: If *version_str* is empty, None, or cannot be parsed.
+    """
+    if not version_str:
+        raise ValueError("version_str is empty or None")
+    major_version = version_str.strip().split(".", 1)[0]
+    # Handle prefixes like "v8" defensively.
+    major_version = major_version.lstrip("vV")
+    try:
+        return int(major_version)
+    except ValueError:
+        raise ValueError(f"Cannot parse major version from {version_str!r}") from None
+
+
+def resolve_cluster_major_version(cluster: Cluster) -> int:
+    """Detect the cluster's major version via the SDK.
+
+    Reads the per-node ``version`` field from ``cluster.cluster_info().nodes``
+    (Python SDK 4.1+) and returns the *minimum* major version across all nodes
+    so we only enable the 8.x+ query-service path when every node supports it.
+
+    The high-level helper properties (``server_version`` /
+    ``server_version_short`` / ``server_version_full``) are intentionally not
+    used: the SDK collapses them to ``None`` whenever the cluster reports
+    mixed node versions, which is exactly the case where we still need an
+    answer. Each node entry, in contrast, always carries a ``version`` string.
+
+    Args:
+        cluster: An already-connected Couchbase ``Cluster`` instance.
+
+    Raises if cluster_info() fails — callers should not silently degrade
+    when version detection is unavailable.
+    """
+    info = cluster.cluster_info()
+
+    nodes = info.nodes or []
+    versions: list[str] = []
+    for node in nodes:
+        if isinstance(node, dict):
+            version = node.get("version")
+        else:
+            version = getattr(node, "version", None)
+        if version:
+            versions.append(str(version))
+
+    if not versions:
+        raise RuntimeError(
+            "cluster_info() reported no nodes — cannot determine cluster version"
+        )
+
+    majors = [parse_major_version(v) for v in versions]
+    min_major = min(majors)
+
+    logger.info(f"Detected cluster node versions={versions} (min major={min_major})")
+    return min_major
+
+
 def format_keyspace(bucket_name: str, scope_name: str, collection_name: str) -> str:
     """Render a ``bucket.scope.collection`` keyspace string for log context."""
     return f"{bucket_name}.{scope_name}.{collection_name}"

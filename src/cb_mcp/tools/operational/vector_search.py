@@ -44,10 +44,12 @@ from fastmcp import Context
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.config import get_settings
-from ...utils.operational.connection import connect_to_bucket
+from ...utils.operational.connection import (
+    connect_to_bucket,
+    resolve_cluster_major_version,
+)
 from ...utils.operational.context import get_cluster_connection
 from ...utils.operational.embeddings import EmbeddingRequest, resolve_embedding_provider
-from ...utils.operational.index_utils import resolve_cluster_major_version
 from ...utils.responses import tool_error, tool_success
 from ...utils.sqlpp import quote_literal, safe_ident
 

@@ -21,6 +21,8 @@ from cb_mcp.tools.operational.index import (
 from cb_mcp.utils.operational.connection import (
     connect_to_bucket,
     connect_to_couchbase_cluster,
+    parse_major_version,
+    resolve_cluster_major_version,
 )
 from cb_mcp.utils.operational.connection_string import validate_connection_settings
 from cb_mcp.utils.operational.context import get_cluster_connection
@@ -28,10 +30,8 @@ from cb_mcp.utils.operational.index_utils import (
     _build_query_params,
     clean_index_definition,
     fetch_indexes_from_rest_api,
-    parse_major_version,
     process_index_data_from_query,
     process_index_data_from_rest_api,
-    resolve_cluster_major_version,
     validate_filter_params,
 )
 from providers.operational import OperationalClusterProvider

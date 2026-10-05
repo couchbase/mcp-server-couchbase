@@ -56,12 +56,14 @@ from couchbase.options import SearchOptions
 from couchbase.search import SearchRequest
 from couchbase.vector_search import VectorQuery, VectorSearch
 
-from cb_mcp.utils.operational.connection import connect_to_couchbase_cluster
+from cb_mcp.utils.operational.connection import (
+    connect_to_couchbase_cluster,
+    resolve_cluster_major_version,
+)
 from cb_mcp.utils.operational.embeddings import (
     EmbeddingRequest,
     resolve_embedding_provider,
 )
-from cb_mcp.utils.operational.index_utils import resolve_cluster_major_version
 
 try:
     from couchbase.management.search import SearchIndex
