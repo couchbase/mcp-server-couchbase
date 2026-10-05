@@ -342,7 +342,7 @@ This is the recommended safe default to prevent inadvertent data modifications b
 
 | `EMBEDDING_PROVIDER` | Required | Optional | Notes |
 | --------------------- | -------- | -------- | ----- |
-| `couchbase` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL`, `EMBEDDING_ENDPOINT` | — | Couchbase's own Model Service (Provisioned). `EMBEDDING_ENDPOINT` is this deployment's own base URL (e.g. `https://<id>.ai.couchbase.com`) — get it from Capella's AI Data Plane > Models UI. There is no shared default domain. |
+| `couchbase` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL`, `EMBEDDING_ENDPOINT` | — | Couchbase's own Model Service (Provisioned/Serverless). `EMBEDDING_ENDPOINT` is this deployment's own base URL (e.g. `https://<id>.ai.couchbase.com`) — get it from Capella's AI Data Plane > Models UI. There is no shared default domain. |
 | `openai` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL` | `EMBEDDING_ENDPOINT` | Defaults to `api.openai.com`. Set `EMBEDDING_ENDPOINT` to point at an OpenAI-compatible local server (Ollama, vLLM, LM Studio) instead. |
 | `cohere` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL` | `EMBEDDING_ENDPOINT` | Defaults to `api.cohere.com`. |
 | `voyage` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL` | `EMBEDDING_ENDPOINT` | Defaults to `api.voyageai.com`. |

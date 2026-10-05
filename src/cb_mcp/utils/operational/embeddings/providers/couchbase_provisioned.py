@@ -1,4 +1,4 @@
-"""Couchbase Model Service (Provisioned) embedding provider — managed, first-class.
+"""Couchbase Model Service (Provisioned/Serverless) embedding provider — managed, first-class.
 
 Contract confirmed against docs.couchbase.com/ai/api-guide/api-use.html and
 docs.couchbase.com/ai/model-service-api-reference/rest-api.html

@@ -83,7 +83,7 @@ PROVIDER_CONFIG_DOCS: dict[str, ProviderConfigDoc] = {
     ),
     "couchbase": ProviderConfigDoc(
         provider_id="couchbase",
-        display_name="Couchbase Model Service (Provisioned)",
+        display_name="Couchbase Model Service (Provisioned/Serverless)",
         fields=(
             ConfigField(
                 "EMBEDDING_API_KEY",
