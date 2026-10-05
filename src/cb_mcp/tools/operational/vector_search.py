@@ -134,7 +134,7 @@ def run_vector_search(
     together or none -- a Composite Vector Index doesn't use them, and this
     tool has no way to tell which index type will actually serve the query.
 
-    where is an optional raw SQL++ boolean expression (e.g. "b.status =
+    where is an optional raw SQL++ boolean expression (e.g. "doc.status =
     'active'") appended to prefilter candidates before the vector ordering --
     this tool only ever emits a SELECT, so, unlike run_sql_plus_plus_query,
     there is no write-guard for it to bypass.
@@ -176,22 +176,22 @@ def run_vector_search(
     try:
         vector, embedding_info = _embed_query(ctx, query_text)
 
-        distance_args = f"b.{safe_ident(vector_field)}, $query_vector, {quote_literal(distance_metric)}"
+        distance_args = f"doc.{safe_ident(vector_field)}, $query_vector, {quote_literal(distance_metric)}"
         if num_probes is not None:
             distance_args += f", {int(num_probes)}, {int(rerank)}, {int(top_n_scan)}"
         distance_expr = f"APPROX_VECTOR_DISTANCE({distance_args})"
 
-        # Nested under "document" rather than flattened with `b.*`/select_fields
+        # Nested under "document" rather than flattened with `doc.*`/select_fields
         # at the top level: a document field literally named "id" or
         # "distance" would otherwise collide with (and silently overwrite,
         # since SQL++ lets a later projected term shadow an earlier one) this
         # tool's own id/distance metadata.
         projection = (
-            "b"
+            "doc"
             if not select_fields
             else "{"
             + ", ".join(
-                f"{quote_literal(field)}: b.{safe_ident(field)}"
+                f"{quote_literal(field)}: doc.{safe_ident(field)}"
                 for field in select_fields
             )
             + "}"
@@ -200,8 +200,8 @@ def run_vector_search(
         # is a bound named parameter, not interpolated -- same noqa: S608
         # precedent as operational_insights/metadata.py's schema-infer query.
         query = (
-            f"SELECT META(b).id AS id, {distance_expr} AS distance, {projection} AS document "  # noqa: S608
-            f"FROM {safe_ident(collection_name)} AS b "
+            f"SELECT META(doc).id AS id, {distance_expr} AS distance, {projection} AS document "  # noqa: S608
+            f"FROM {safe_ident(collection_name)} AS doc "
             + (f"WHERE {where} " if where else "")
             + f"ORDER BY {distance_expr} LIMIT {int(limit)}"
         )

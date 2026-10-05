@@ -143,13 +143,13 @@ class TestRunVectorSearchQueryConstruction:
         query_text, kwargs = scope.query.call_args
         query_text = query_text[0]
         assert "APPROX_VECTOR_DISTANCE" in query_text
-        assert "b.`embedding`" in query_text
+        assert "doc.`embedding`" in query_text
         assert '"l2_squared"' in query_text
-        # Nested under "document", never flattened with b.* -- see
+        # Nested under "document", never flattened with doc.* -- see
         # test_select_fields_projects_as_nested_object_not_flattened for why.
-        assert "b AS document" in query_text
-        assert "b.*" not in query_text
-        assert "FROM `c` AS b" in query_text
+        assert "doc AS document" in query_text
+        assert "doc.*" not in query_text
+        assert "FROM `c` AS doc" in query_text
         assert "LIMIT 5" in query_text
         assert "WHERE" not in query_text
         assert kwargs["named_parameters"] == {"query_vector": [0.1, 0.2, 0.3]}
@@ -177,7 +177,7 @@ class TestRunVectorSearchQueryConstruction:
 
         query_text = scope.query.call_args[0][0]
         assert (
-            'APPROX_VECTOR_DISTANCE(b.`embedding`, $query_vector, "l2_squared", 10, 1, 1000)'
+            'APPROX_VECTOR_DISTANCE(doc.`embedding`, $query_vector, "l2_squared", 10, 1, 1000)'
             in query_text
         )
 
@@ -197,16 +197,16 @@ class TestRunVectorSearchQueryConstruction:
                 "c",
                 "embedding",
                 "query",
-                where="b.status = 'active'",
+                where="doc.status = 'active'",
                 select_fields=["name", "status"],
             )
 
         query_text = scope.query.call_args[0][0]
-        assert "WHERE b.status = 'active'" in query_text
-        # Nested object literal, not a flattened b.`name`, b.`status` --
+        assert "WHERE doc.status = 'active'" in query_text
+        # Nested object literal, not a flattened doc.`name`, doc.`status` --
         # select_fields never bypasses the "document" namespacing either.
-        assert '{"name": b.`name`, "status": b.`status`} AS document' in query_text
-        assert "b.*" not in query_text
+        assert '{"name": doc.`name`, "status": doc.`status`} AS document' in query_text
+        assert "doc.*" not in query_text
 
     def test_pre_8_cluster_gets_warning_not_a_block(self) -> None:
         ctx = _make_ctx()

@@ -194,9 +194,9 @@ def seeded_gsi_vector_index() -> Iterator[dict[str, Any]]:
         last_error: str | None = None
         deadline = time.monotonic() + INDEX_READY_TIMEOUT
         probe = (
-            f"SELECT META(b).id AS id FROM `{collection_name}` AS b "
-            f"WHERE META(b).id = $doc_id "
-            f'ORDER BY APPROX_VECTOR_DISTANCE(b.`{vector_field}`, $qvec, "cosine") '
+            f"SELECT META(doc).id AS id FROM `{collection_name}` AS doc "
+            f"WHERE META(doc).id = $doc_id "
+            f'ORDER BY APPROX_VECTOR_DISTANCE(doc.`{vector_field}`, $qvec, "cosine") '
             f"LIMIT 1"
         )
         while time.monotonic() < deadline:
