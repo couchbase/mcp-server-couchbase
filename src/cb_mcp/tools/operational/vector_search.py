@@ -255,7 +255,7 @@ def run_search_vector_search(
     bucket_name: str | None = None,
     scope_name: str | None = None,
     num_candidates: int = 10,
-    limit: int | None = None,
+    limit: int = 10,
     fields: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run the Search service's vector search, including hybrid and prefiltered search.
@@ -296,8 +296,13 @@ def run_search_vector_search(
     of a GSI vector index).
 
     num_candidates bounds how many nearest-neighbor candidates the vector
-    query considers. limit defaults to 10 (matching run_fts_query). fields
-    requests specific stored index fields per hit.
+    query considers; limit bounds how many hits the search as a whole
+    returns, and both default to 10. For a vector-only search (no
+    scalar_query), limit above num_candidates is a no-op -- there are never
+    more than num_candidates vector hits to return. With scalar_query set,
+    limit can meaningfully exceed num_candidates, since scalar_query's own
+    matches aren't bounded by it. fields requests specific stored index
+    fields per hit.
 
     This tool does not fetch full document bodies -- a Search hit carries
     whatever fields the index stores (row.fields), the same as run_fts_query,
@@ -361,9 +366,8 @@ def run_search_vector_search(
         )
         request = SearchRequest.create(VectorSearch.from_vector_query(vq))
 
-        applied_limit = limit if limit is not None else 10
         options = SearchOptions(
-            limit=applied_limit,
+            limit=limit,
             fields=fields,
             raw={"query": scalar_query} if scalar_query else None,
         )
@@ -386,7 +390,7 @@ def run_search_vector_search(
             index_name=index_name,
             vector_field=vector_field,
             num_candidates=num_candidates,
-            limit=applied_limit,
+            limit=limit,
             total_hits=len(hits),
             hits=hits,
             is_hybrid=bool(scalar_query),
