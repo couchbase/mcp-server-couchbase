@@ -49,7 +49,7 @@ from ...utils.operational.connection import (
     resolve_cluster_major_version,
 )
 from ...utils.operational.context import get_cluster_connection
-from ...utils.operational.embeddings import EmbeddingRequest, resolve_embedding_provider
+from ...utils.operational.embeddings import embed_query_text
 from ...utils.responses import tool_error, tool_success
 from ...utils.sqlpp import quote_literal, safe_ident
 
@@ -57,23 +57,12 @@ logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.vector_search"
 
 
 def _embed_query(ctx: Context, query_text: str) -> tuple[list[float], dict[str, Any]]:
-    """Resolve the configured provider and embed query_text.
-
-    Returns (vector, info) rather than an EmbeddingResult so callers can drop
-    `info` straight into their tool_success payload without re-deriving it.
-    Raises EmbeddingConfigError / whatever the provider's embed() raises --
-    both callers wrap this in their own try/except and turn it into
-    tool_error, matching every other failure mode in this module.
+    """Unwrap the MCP Context into settings and delegate to the embeddings
+    package. Raises whatever embed_query_text raises -- both callers wrap
+    this in their own try/except and turn it into tool_error, matching
+    every other failure mode in this module.
     """
-    settings = get_settings(ctx)
-    provider = resolve_embedding_provider(settings)
-    result = provider.embed(
-        EmbeddingRequest(text=query_text, model=settings.get("embedding_model") or "")
-    )
-    return result.vector, {
-        "embedding_model": result.model,
-        "embedding_dimensions": result.dimensions,
-    }
+    return embed_query_text(get_settings(ctx), query_text)
 
 
 def _best_effort_cluster_major_version(cluster: Any) -> int | None:

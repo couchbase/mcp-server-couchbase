@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ....servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
-from .base import EmbeddingConfigError, EmbeddingProvider
+from .base import EmbeddingConfigError, EmbeddingProvider, EmbeddingRequest
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.utils.embeddings")
 
@@ -248,3 +248,24 @@ def resolve_embedding_provider(settings: Mapping[str, Any]) -> EmbeddingProvider
         f"Resolved embedding provider {provider_id!r} -> {provider_cls.__name__}"
     )
     return provider_cls.from_settings(settings)
+
+
+def embed_query_text(
+    settings: Mapping[str, Any], query_text: str
+) -> tuple[list[float], dict[str, Any]]:
+    """Resolve the configured provider and embed query_text.
+
+    Returns (vector, info) rather than an EmbeddingResult so callers can drop
+    `info` straight into their tool_success payload without re-deriving it.
+    Raises EmbeddingConfigError / whatever the provider's embed() raises --
+    callers typically wrap this in their own try/except and turn it into a
+    tool-specific error response.
+    """
+    provider = resolve_embedding_provider(settings)
+    result = provider.embed(
+        EmbeddingRequest(text=query_text, model=settings.get("embedding_model") or "")
+    )
+    return result.vector, {
+        "embedding_model": result.model,
+        "embedding_dimensions": result.dimensions,
+    }

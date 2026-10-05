@@ -29,7 +29,7 @@ from cb_mcp.tools.operational.vector_search import (
     run_search_vector_search,
     run_vector_search,
 )
-from cb_mcp.utils.operational.embeddings import EmbeddingConfigError, EmbeddingResult
+from cb_mcp.utils.operational.embeddings import EmbeddingConfigError
 
 _MODULE = "cb_mcp.tools.operational.vector_search"
 
@@ -42,21 +42,24 @@ def _make_ctx() -> SimpleNamespace:
 def _patch_embedding(
     vector=None, model="text-embedding-3-small", dimensions=3, side_effect=None
 ):
-    """Patch get_settings + resolve_embedding_provider so _embed_query returns
-    a fixed vector without needing a real FastMCP request context on the fake
-    ctx (_make_ctx() is a bare SimpleNamespace)."""
-    provider = MagicMock()
-    if side_effect is not None:
-        provider.embed.side_effect = side_effect
-    else:
-        provider.embed.return_value = EmbeddingResult(
-            vector=vector or [0.1, 0.2, 0.3], model=model, dimensions=dimensions
-        )
-    with (
-        patch(f"{_MODULE}.get_settings", return_value={"embedding_model": model}),
-        patch(f"{_MODULE}.resolve_embedding_provider", return_value=provider),
-    ):
-        yield provider
+    """Patch get_settings + embed_query_text (registry.embed_query_text,
+    re-exported into this tool module) so _embed_query returns a fixed
+    (vector, info) without needing a real FastMCP request context on the
+    fake ctx (_make_ctx() is a bare SimpleNamespace) or any provider config.
+    get_settings must stay patched too: _embed_query's shim still evaluates
+    get_settings(ctx) as an argument before the mocked embed_query_text ever
+    runs, and the real implementation would crash on a bare SimpleNamespace."""
+    with patch(f"{_MODULE}.get_settings", return_value={"embedding_model": model}):
+        if side_effect is not None:
+            with patch(f"{_MODULE}.embed_query_text", side_effect=side_effect) as mock:
+                yield mock
+        else:
+            info = {"embedding_model": model, "embedding_dimensions": dimensions}
+            with patch(
+                f"{_MODULE}.embed_query_text",
+                return_value=(vector or [0.1, 0.2, 0.3], info),
+            ) as mock:
+                yield mock
 
 
 class TestRunVectorSearchValidation:
@@ -251,12 +254,10 @@ class TestRunVectorSearchQueryConstruction:
 
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
-            patch(f"{_MODULE}.get_settings", return_value={}),
-            patch(
-                f"{_MODULE}.resolve_embedding_provider",
+            _patch_embedding(
                 side_effect=EmbeddingConfigError(
                     "EMBEDDING_PROVIDER is not configured."
-                ),
+                )
             ),
         ):
             result = run_vector_search(ctx, "b", "s", "c", "embedding", "query")

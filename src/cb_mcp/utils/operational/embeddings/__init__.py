@@ -13,12 +13,13 @@ from .base import (
     EmbeddingRequest,
     EmbeddingResult,
 )
-from .registry import resolve_embedding_provider
+from .registry import embed_query_text, resolve_embedding_provider
 
 __all__ = [
     "EmbeddingConfigError",
     "EmbeddingProvider",
     "EmbeddingRequest",
     "EmbeddingResult",
+    "embed_query_text",
     "resolve_embedding_provider",
 ]
