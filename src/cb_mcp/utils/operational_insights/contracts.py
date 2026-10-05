@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Protocol
 from fastmcp import Context
 
 from ...core.contracts import ProviderLifecycle
-from .handle_registry import HandleRegistry
+from .handle_registry import QueryResultsRegistry
 
 if TYPE_CHECKING:
     from couchbase_operational_insights.cluster import Cluster
@@ -44,7 +44,7 @@ class OperationalInsightsProvider(ProviderLifecycle, Protocol):
         shared ``AppContext``.
     """
 
-    handle_registry: HandleRegistry
+    handle_registry: QueryResultsRegistry
 
     def get_cluster(self, ctx: Context) -> Cluster:
         """Return (or begin returning) a cluster for this request."""

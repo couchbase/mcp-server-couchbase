@@ -139,6 +139,91 @@ class TestGetSchemaForCollection:
         # close the identifier early.
         assert "`db``.``evil`.`s`.`c`" in query
 
+    def test_defaults_to_requesting_no_sample_values(self) -> None:
+        ctx, cluster = make_oi_ctx()
+        cluster.execute_query.return_value.get_all_rows.return_value = []
+
+        get_schema_for_collection(ctx, "Default", "Default", "oitest_coll")
+
+        query = cluster.execute_query.call_args[0][0]
+        # num_sample_values is interpolated as a literal, not bound —
+        # binding it as a $-parameter 500s the server (verified against a
+        # live cluster), and it's validated non-negative before this point
+        # so interpolating the int is safe.
+        assert '{"num_sample_values": 0}' in query
+        query_options = cluster.execute_query.call_args[0][1]
+        assert "infer_params" not in query_options["named_parameters"]
+
+    def test_passes_through_requested_num_sample_values(self) -> None:
+        ctx, cluster = make_oi_ctx()
+        cluster.execute_query.return_value.get_all_rows.return_value = []
+
+        get_schema_for_collection(
+            ctx, "Default", "Default", "oitest_coll", num_sample_values=5
+        )
+
+        query = cluster.execute_query.call_args[0][0]
+        assert '{"num_sample_values": 5}' in query
+
+    def test_rejects_negative_num_sample_values(self) -> None:
+        ctx, cluster = make_oi_ctx()
+
+        with pytest.raises(ValueError, match="num_sample_values must be non-negative"):
+            get_schema_for_collection(
+                ctx, "Default", "Default", "oitest_coll", num_sample_values=-1
+            )
+
+        cluster.execute_query.assert_not_called()
+
+    def test_strips_samples_recursively_when_num_sample_values_is_zero(self) -> None:
+        """ARRAY_INFER_SCHEMA's own ``num_sample_values: 0`` does not mean
+        "no samples" (verified against a live cluster: 0 behaves like 1) —
+        so this tool strips every ``samples`` key itself, at any nesting
+        depth, whenever the caller asked for 0."""
+        ctx, cluster = make_oi_ctx()
+        flavors = [
+            {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "samples": ["1"]},
+                    "addr": {
+                        "type": "object",
+                        "samples": [{"city": "BLR"}],
+                        "properties": {"city": {"type": "string", "samples": ["BLR"]}},
+                    },
+                },
+            }
+        ]
+        cluster.execute_query.return_value.get_all_rows.return_value = [flavors]
+
+        result = get_schema_for_collection(
+            ctx, "Default", "Default", "oitest_coll", num_sample_values=0
+        )
+
+        assert result == [
+            {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "addr": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                    },
+                },
+            }
+        ]
+
+    def test_keeps_samples_when_num_sample_values_is_positive(self) -> None:
+        ctx, cluster = make_oi_ctx()
+        flavors = [{"properties": {"id": {"type": "string", "samples": ["1"]}}}]
+        cluster.execute_query.return_value.get_all_rows.return_value = [flavors]
+
+        result = get_schema_for_collection(
+            ctx, "Default", "Default", "oitest_coll", num_sample_values=1
+        )
+
+        assert result == flavors
+
 
 class TestSafeIdent:
     def test_passes_through_plain_identifier(self) -> None:

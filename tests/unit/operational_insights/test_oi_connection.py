@@ -6,6 +6,7 @@ Insights connect function: password auth, certificate (mTLS) auth, and the
 validation errors each path can raise.
 """
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,7 +17,7 @@ from cb_mcp.utils.operational_insights.connection import (
 
 
 class TestOiConnectionModule:
-    def test_connect_with_password(self) -> None:
+    def test_connect_with_password(self, caplog: pytest.LogCaptureFixture) -> None:
         mock_cluster = MagicMock()
 
         with (
@@ -27,6 +28,7 @@ class TestOiConnectionModule:
                 "cb_mcp.utils.operational_insights.connection.Cluster.create_instance",
                 return_value=mock_cluster,
             ) as mock_create,
+            caplog.at_level(logging.DEBUG),
         ):
             mock_credential.from_username_and_password.return_value = "cred"
 
@@ -40,8 +42,11 @@ class TestOiConnectionModule:
             mock_credential.from_certificate.assert_not_called()
             mock_create.assert_called_once_with("http://localhost:8095", "cred", None)
             assert result is mock_cluster
+            assert "Using username/password authentication" in caplog.text
 
-    def test_connect_with_client_certificate(self) -> None:
+    def test_connect_with_client_certificate(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         mock_cluster = MagicMock()
 
         with (
@@ -52,6 +57,7 @@ class TestOiConnectionModule:
                 "cb_mcp.utils.operational_insights.connection.Cluster.create_instance",
                 return_value=mock_cluster,
             ) as mock_create,
+            caplog.at_level(logging.DEBUG),
         ):
             mock_credential.from_certificate.return_value = "cert-cred"
 
@@ -70,6 +76,7 @@ class TestOiConnectionModule:
             mock_credential.from_username_and_password.assert_not_called()
             mock_create.assert_called_once_with("https://host:18095", "cert-cred", None)
             assert result is mock_cluster
+            assert "Using client certificate authentication" in caplog.text
 
     def test_connect_with_pkcs12_bundle_needs_no_key_path(self) -> None:
         with (

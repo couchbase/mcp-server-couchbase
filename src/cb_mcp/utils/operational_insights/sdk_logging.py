@@ -5,61 +5,13 @@
 ``couchbase`` handler root (see ``utils.constants.LOGGER_ROOT``), so its
 records would otherwise land in no configured log file.
 
-The SDK also runs ``configure_logger()``
-(``couchbase_operational_insights.protocol``), which can call
-``logging.basicConfig()`` on the bare stdlib root logger — a side effect
-that has nothing to do with this server's own logging setup. This does NOT
-happen at import time of the top-level package (verified empirically): the
-``protocol`` submodule, and therefore this side effect, is only pulled in
-the first time ``Cluster.create_instance(...)`` actually runs — i.e. at
-connection time, which for the standalone host is on the *first tool call*
-(``OperationalInsightsClusterProvider`` connects lazily). So the one place
-that needs to clean up after it is ``connection.connect_to_operational_insights_cluster``,
-wrapping that specific call with ``quiesce_new_root_handlers`` below.
-
 This module does not import the SDK itself.
 """
 
 import logging
-from collections.abc import Iterator
-from contextlib import contextmanager
 
 #: Name the SDK logs under. Not this repo's ``couchbase`` tree at all.
 SDK_LOGGER_NAME = "couchbase_operational_insights"
-
-#: The SDK's own env var for its ``configure_logger()`` side effect
-#: (``couchbase_operational_insights.protocol.configure_logger``). Surfaced
-#: here purely as documentation for operators who go looking for it; this
-#: module does not read it.
-SDK_LOG_LEVEL_ENV_VAR = "PYCBOI_LOG_LEVEL"
-
-
-@contextmanager
-def quiesce_new_root_handlers() -> Iterator[None]:
-    """Undo any handler the wrapped code installs on the bare stdlib root logger.
-
-    Snapshots the root logger's handlers on entry, then on exit removes
-    whatever handler is present that was not there on entry — regardless of
-    whether the wrapped code raised. Nothing present *before* entry is ever
-    touched, so a host application's own root handler is safe even if it was
-    attached after this package was imported: what matters is only what
-    changed during this specific call, not what existed at some earlier,
-    unrelated point in time (e.g. this module's own import).
-
-    Use this around the exact call that can trigger the SDK's side effect
-    (``Cluster.create_instance(...)``), not around unrelated code — a wider
-    window risks catching a handler something else added for its own
-    reasons during the same window.
-    """
-    root = logging.getLogger()
-    before = set(root.handlers)
-    try:
-        yield
-    finally:
-        for handler in list(root.handlers):
-            if handler not in before:
-                root.removeHandler(handler)
-                handler.close()
 
 
 class _ForwardingHandler(logging.Handler):
@@ -103,10 +55,9 @@ def bridge_sdk_logging(logger_root: str, level: int) -> None:
     everything else — parity with what the operational server gets from
     ``couchbase.configure_logging``.
 
-    Does not itself touch the bare stdlib root logger — the SDK's
-    ``logging.basicConfig()`` side effect only happens at connection time,
-    not here (see the module docstring), so that cleanup lives at the one
-    call site that actually triggers it: ``connect_to_operational_insights_cluster``.
+    Does not itself touch the bare stdlib root logger — the SDK only ever
+    configures its own loggers (``configure_logging_from_env`` in
+    ``couchbase_operational_insights.common.logging``), never the root.
 
     Records forwarded this way keep ``%(name)s`` as
     ``couchbase_operational_insights.*``, not this server's own namespace —
