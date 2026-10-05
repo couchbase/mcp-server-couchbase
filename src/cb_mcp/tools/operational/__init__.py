@@ -29,9 +29,11 @@ from .collection_management import (
 
 # FTS tools
 from .fts import (
+    drop_fts_index,
     get_fts_index_definition,
     list_fts_indexes,
     run_fts_query,
+    upsert_fts_index,
 )
 
 # Index tools
@@ -79,7 +81,9 @@ from .server import (
     get_buckets_in_cluster,
     get_cluster_diagnostics_report,
     get_cluster_health_and_services,
+    get_cluster_health_snapshot,
     get_cluster_metrics,
+    get_cluster_tasks,
     get_collections_in_scope,
     get_scopes_and_collections_in_bucket,
     get_scopes_in_bucket,
@@ -108,6 +112,8 @@ TOOL_SET = ToolSet(
         get_cluster_health_and_services,
         get_cluster_diagnostics_report,
         get_cluster_metrics,
+        get_cluster_tasks,
+        get_cluster_health_snapshot,
         # KV read tools
         get_document_by_id,
         lookup_subdocument,
@@ -154,6 +160,9 @@ TOOL_SET = ToolSet(
         create_index,
         build_index,
         drop_index,
+        # FTS write tools
+        upsert_fts_index,
+        drop_fts_index,
     ),
 )
 
@@ -174,6 +183,8 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_cluster_health_and_services": ToolAnnotations(readOnlyHint=True),
     "get_cluster_diagnostics_report": ToolAnnotations(readOnlyHint=True),
     "get_cluster_metrics": ToolAnnotations(readOnlyHint=True),
+    "get_cluster_tasks": ToolAnnotations(readOnlyHint=True),
+    "get_cluster_health_snapshot": ToolAnnotations(readOnlyHint=True),
     # KV read tools
     "get_document_by_id": ToolAnnotations(readOnlyHint=True),
     "lookup_subdocument": ToolAnnotations(readOnlyHint=True),
@@ -217,6 +228,9 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "create_index": ToolAnnotations(),
     "build_index": ToolAnnotations(idempotentHint=True),
     "drop_index": ToolAnnotations(destructiveHint=True),
+    # FTS write tools
+    "upsert_fts_index": ToolAnnotations(idempotentHint=True),
+    "drop_fts_index": ToolAnnotations(destructiveHint=True),
 }
 
 # Per-tool explanations appended to a scope-denial error, reaching the
@@ -276,11 +290,15 @@ __all__ = [
     "list_fts_indexes",
     "get_fts_index_definition",
     "run_fts_query",
+    "upsert_fts_index",
+    "drop_fts_index",
     "run_vector_search",
     "run_search_vector_search",
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
     "get_cluster_metrics",
+    "get_cluster_tasks",
+    "get_cluster_health_snapshot",
     "get_queries_not_selective",
     "get_queries_not_using_covering_index",
     "get_queries_using_primary_index",

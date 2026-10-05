@@ -33,11 +33,14 @@ WRITE_TOOL_NAMES = {
     "create_index",
     "build_index",
     "drop_index",
+    # FTS index management write tools
+    "upsert_fts_index",
+    "drop_fts_index",
 }
 
-# Read-only tool names that should always be available (27 tools)
+# Read-only tool names that should always be available (30 tools)
 READ_ONLY_TOOL_NAMES = {
-    # Server/Cluster management tools (9)
+    # Server/Cluster management tools (11)
     "get_buckets_in_cluster",
     "get_server_configuration_status",
     "test_cluster_connection",
@@ -47,6 +50,8 @@ READ_ONLY_TOOL_NAMES = {
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
     "get_cluster_metrics",
+    "get_cluster_tasks",
+    "get_cluster_health_snapshot",
     # KV read tools (2)
     "get_document_by_id",
     "lookup_subdocument",
@@ -89,7 +94,7 @@ class TestToolCategories:
 
     def test_write_tools_defined(self):
         """Verify WRITE_TOOLS list is properly defined."""
-        assert len(WRITE_TOOLS) == 12
+        assert len(WRITE_TOOLS) == 14
         tool_names = {tool.__name__ for tool in WRITE_TOOLS}
         assert tool_names == WRITE_TOOL_NAMES
 
@@ -180,18 +185,18 @@ class TestToolCounts:
         """Verify correct number of tools in read-only mode."""
         tools = get_tools(read_only_mode=True)
         assert len(tools) == len(READ_ONLY_TOOLS)
-        assert len(tools) == 30  # Expected count of read-only tools
+        assert len(tools) == 32  # Expected count of read-only tools
 
     def test_all_tools_mode_tool_count(self):
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (30 read-only + 12 write)
-        assert len(tools) == 42
+        # Expected total count (32 read-only + 14 write)
+        assert len(tools) == 46
 
     def test_write_tools_count(self):
-        """Verify exactly 12 write tools exist."""
-        assert len(WRITE_TOOLS) == 12
+        """Verify exactly 14 write tools exist."""
+        assert len(WRITE_TOOLS) == 14
 
 
 class TestReadOnlyModeToolFiltering:
@@ -262,6 +267,18 @@ class TestReadOnlyModeToolFiltering:
         tools = get_tools(read_only_mode=True)
         tool_names = {tool.__name__ for tool in tools}
         assert "drop_index" not in tool_names
+
+    def test_upsert_fts_index_tool_filtered_in_read_only_mode(self):
+        """Verify upsert_fts_index is filtered in read-only mode."""
+        tools = get_tools(read_only_mode=True)
+        tool_names = {tool.__name__ for tool in tools}
+        assert "upsert_fts_index" not in tool_names
+
+    def test_drop_fts_index_tool_filtered_in_read_only_mode(self):
+        """Verify drop_fts_index is filtered in read-only mode."""
+        tools = get_tools(read_only_mode=True)
+        tool_names = {tool.__name__ for tool in tools}
+        assert "drop_fts_index" not in tool_names
 
     def test_get_document_always_available(self):
         """Verify get_document_by_id is always available (read operation)."""
