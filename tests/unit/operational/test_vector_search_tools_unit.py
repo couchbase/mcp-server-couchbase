@@ -144,7 +144,7 @@ class TestRunVectorSearchQueryConstruction:
         query_text = query_text[0]
         assert "APPROX_VECTOR_DISTANCE" in query_text
         assert "b.`embedding`" in query_text
-        assert '"cosine"' in query_text
+        assert '"l2_squared"' in query_text
         # Nested under "document", never flattened with b.* -- see
         # test_select_fields_projects_as_nested_object_not_flattened for why.
         assert "b AS document" in query_text
@@ -177,7 +177,7 @@ class TestRunVectorSearchQueryConstruction:
 
         query_text = scope.query.call_args[0][0]
         assert (
-            'APPROX_VECTOR_DISTANCE(b.`embedding`, $query_vector, "cosine", 10, 1, 1000)'
+            'APPROX_VECTOR_DISTANCE(b.`embedding`, $query_vector, "l2_squared", 10, 1, 1000)'
             in query_text
         )
 

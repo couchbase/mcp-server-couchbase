@@ -97,7 +97,7 @@ def run_vector_search(
     collection_name: str,
     vector_field: str,
     query_text: str,
-    distance_metric: str = "cosine",
+    distance_metric: str = "l2_squared",
     limit: int = 10,
     where: str | None = None,
     select_fields: list[str] | None = None,
@@ -118,6 +118,16 @@ def run_vector_search(
     APPROX_VECTOR_DISTANCE(). Unlike Search-service vector search, GSI selects
     the index automatically from the vector field referenced in the query --
     there is no index_name parameter, and none is needed.
+
+    distance_metric must match the `similarity` the index was created with
+    (CREATE INDEX ... WITH {"similarity": ...}) -- Couchbase only selects the
+    Composite/Hyperscale Vector Index when the two agree; a mismatch doesn't
+    error, it silently falls back to not using the index. Defaults to
+    "l2_squared" to match Couchbase's own index-creation default when
+    `similarity` is left unset there too (valid values: cosine, dot,
+    l2/euclidean, l2_squared/euclidean_squared). This tool has no index_name
+    to look the configured similarity up from (see above), so if results seem
+    slow, check what the index was actually created with.
 
     num_probes/rerank/top_n_scan are Hyperscale Vector Index tuning
     parameters (centroids to probe, rerank count, top-N scan). Pass all three

@@ -378,6 +378,10 @@ async def test_run_vector_search_finds_seeded_document(
                 "collection_name": fixture["collection_name"],
                 "vector_field": fixture["vector_field"],
                 "query_text": fixture["marker"],
+                # Must match the fixture's index "similarity": "cosine" (see
+                # below) -- the tool's own default is l2_squared, matching
+                # Couchbase's index-creation default, not this fixture's.
+                "distance_metric": "cosine",
                 "limit": 1,
             },
         )
