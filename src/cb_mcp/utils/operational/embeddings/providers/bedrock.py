@@ -1,7 +1,8 @@
 """Amazon Bedrock embedding provider (BYOM).
 
-Requires the optional ``bedrock`` extra (``pip install couchbase-mcp-server[bedrock]``)
-for ``boto3`` — imported lazily here, never at module scope, so a process that
+Requires the optional ``bedrock-embeddings`` extra
+(``pip install couchbase-mcp-server[bedrock-embeddings]``) for ``boto3`` --
+imported lazily here, never at module scope, so a process that
 never selects ``EMBEDDING_PROVIDER=bedrock`` (and in particular, one that
 doesn't have the extra installed) never pays for or needs the import.
 
@@ -52,8 +53,8 @@ class BedrockEmbeddingProvider(EmbeddingProvider):
             import boto3  # noqa: PLC0415
         except ImportError as e:
             raise EmbeddingConfigError(
-                "Bedrock support requires the 'bedrock' extra: "
-                "pip install couchbase-mcp-server[bedrock]"
+                "Bedrock support requires the 'bedrock-embeddings' extra: "
+                "pip install couchbase-mcp-server[bedrock-embeddings]"
             ) from e
         # Falsy/None credential kwargs fall through to boto3's own default
         # credential chain (env vars, ~/.aws/credentials, instance role) —

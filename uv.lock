@@ -414,7 +414,7 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-bedrock = [
+bedrock-embeddings = [
     { name = "boto3" },
 ]
 dev = [
@@ -428,7 +428,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "boto3", marker = "extra == 'bedrock'", specifier = ">=1.34,<2.0" },
+    { name = "boto3", marker = "extra == 'bedrock-embeddings'", specifier = ">=1.34,<2.0" },
     { name = "click", specifier = ">=8.2.1,<9.0.0" },
     { name = "couchbase", specifier = ">=4.4.0,<5.0.0" },
     { name = "couchbase-operational-insights", git = "https://github.com/couchbaselabs/operational-insights-python-client.git" },
@@ -443,7 +443,7 @@ requires-dist = [
     { name = "reo-census", specifier = ">=0.1.3,<0.2.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.16.0" },
 ]
-provides-extras = ["dev", "bedrock"]
+provides-extras = ["dev", "bedrock-embeddings"]
 
 [[package]]
 name = "couchbase-operational-insights"

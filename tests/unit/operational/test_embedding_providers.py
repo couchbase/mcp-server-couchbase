@@ -249,7 +249,7 @@ class TestBedrockProvider:
     def test_missing_boto3_is_actionable_config_error(self) -> None:
         with (
             patch.dict(sys.modules, {"boto3": None}),
-            pytest.raises(EmbeddingConfigError, match=r"\[bedrock\]"),
+            pytest.raises(EmbeddingConfigError, match=r"\[bedrock-embeddings\]"),
         ):
             BedrockEmbeddingProvider.from_settings(
                 {"embedding_model": "amazon.titan-embed-text-v2:0"}

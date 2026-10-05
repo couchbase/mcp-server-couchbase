@@ -346,7 +346,7 @@ This is the recommended safe default to prevent inadvertent data modifications b
 | `openai` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL` | `EMBEDDING_ENDPOINT` | Defaults to `api.openai.com`. Set `EMBEDDING_ENDPOINT` to point at an OpenAI-compatible local server (Ollama, vLLM, LM Studio) instead. |
 | `cohere` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL` | `EMBEDDING_ENDPOINT` | Defaults to `api.cohere.com`. |
 | `voyage` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL` | `EMBEDDING_ENDPOINT` | Defaults to `api.voyageai.com`. |
-| `bedrock` | `EMBEDDING_MODEL` | `EMBEDDING_AWS_ACCESS_KEY_ID`, `EMBEDDING_AWS_SECRET_ACCESS_KEY`, `EMBEDDING_AWS_REGION` | Titan embedding models only (e.g. `amazon.titan-embed-text-v2:0`). Omit the AWS credential fields to use the default AWS credential chain (env vars, `~/.aws/credentials`, instance role). Requires the `bedrock` extra: `pip install couchbase-mcp-server[bedrock]` (or `uv sync --extra bedrock` from source). |
+| `bedrock` | `EMBEDDING_MODEL` | `EMBEDDING_AWS_ACCESS_KEY_ID`, `EMBEDDING_AWS_SECRET_ACCESS_KEY`, `EMBEDDING_AWS_REGION` | Titan embedding models only (e.g. `amazon.titan-embed-text-v2:0`). Omit the AWS credential fields to use the default AWS credential chain (env vars, `~/.aws/credentials`, instance role). Requires the `bedrock-embeddings` extra: `pip install couchbase-mcp-server[bedrock-embeddings]` (or `uv sync --extra bedrock-embeddings` from source). |
 
 Example (OpenAI):
 
