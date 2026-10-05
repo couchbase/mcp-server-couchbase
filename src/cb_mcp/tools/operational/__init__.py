@@ -81,6 +81,7 @@ from .server import (
     get_buckets_in_cluster,
     get_cluster_diagnostics_report,
     get_cluster_health_and_services,
+    get_cluster_health_snapshot,
     get_cluster_metrics,
     get_cluster_tasks,
     get_collections_in_scope,
@@ -106,6 +107,7 @@ TOOL_SET = ToolSet(
         get_cluster_diagnostics_report,
         get_cluster_metrics,
         get_cluster_tasks,
+        get_cluster_health_snapshot,
         # KV read tools
         get_document_by_id,
         lookup_subdocument,
@@ -173,6 +175,7 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_cluster_diagnostics_report": ToolAnnotations(readOnlyHint=True),
     "get_cluster_metrics": ToolAnnotations(readOnlyHint=True),
     "get_cluster_tasks": ToolAnnotations(readOnlyHint=True),
+    "get_cluster_health_snapshot": ToolAnnotations(readOnlyHint=True),
     # KV read tools
     "get_document_by_id": ToolAnnotations(readOnlyHint=True),
     "lookup_subdocument": ToolAnnotations(readOnlyHint=True),
@@ -281,6 +284,7 @@ __all__ = [
     "get_cluster_diagnostics_report",
     "get_cluster_metrics",
     "get_cluster_tasks",
+    "get_cluster_health_snapshot",
     "get_queries_not_selective",
     "get_queries_not_using_covering_index",
     "get_queries_using_primary_index",

@@ -17,6 +17,9 @@ reached against a live cluster:
   step/start/end) without attempting the REST call.
 - get_cluster_tasks rejects Capella/malformed connection strings up front, falls
   over between hosts, and returns the REST array unchanged (no envelope).
+- get_cluster_health_snapshot rejects Capella connections and unresolvable
+  endpoints up front, reads its three endpoints from a single host, and falls
+  over to the next host when any one of them fails.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ from couchbase.diagnostics import ServiceType
 
 from cb_mcp.tools.operational.server import (
     get_cluster_health_and_services,
+    get_cluster_health_snapshot,
     get_cluster_metrics,
     get_cluster_tasks,
     get_scopes_and_collections_in_bucket,
@@ -705,3 +709,234 @@ class TestGetClusterTasks:
 
         url = mock_client.get.call_args[0][0]
         assert url == "https://localhost:18091/pools/default/tasks"
+
+
+class TestGetClusterHealthSnapshot:
+    """get_cluster_health_snapshot: Capella rejection, the three-GET read, and failover.
+
+    The merge itself is covered in test_cluster_health_unit.py, which needs no
+    HTTP; these tests cover only what the tool adds around it. Like
+    get_cluster_tasks it returns the payload unenveloped and re-raises on
+    failure, so they assert on the raised exception.
+    """
+
+    @staticmethod
+    def _patch_endpoints(endpoints: list[str] | None = None):
+        """Patch the SDK-backed management-endpoint resolution.
+
+        The tool asks the SDK where management listens rather than appending
+        the default port to the connection string, so these tests stub that
+        resolution instead of varying the connection string's hosts.
+        """
+        resolved = ["localhost:8091"] if endpoints is None else endpoints
+        return patch.multiple(
+            "cb_mcp.tools.operational.server",
+            resolve_management_endpoints=MagicMock(return_value=resolved),
+            get_cluster_connection=MagicMock(return_value=MagicMock()),
+        )
+
+    @staticmethod
+    def _payloads(
+        *,
+        orchestrator: str = "ns_1@10.0.1.11",
+        status: str = "healthy",
+    ) -> list[dict]:
+        """The three endpoint responses, in the order the tool reads them."""
+        return [
+            {
+                "clusterName": "prod",
+                "balanced": True,
+                "rebalanceStatus": "none",
+                "alerts": [],
+                "counters": {"rebalance_success": 1, "rebalance_start": 1},
+                "nodes": [
+                    {
+                        "hostname": "10.0.1.11:8091",
+                        "otpNode": "ns_1@10.0.1.11",
+                        "status": "healthy",
+                        "clusterMembership": "active",
+                        "services": ["kv"],
+                    },
+                    {
+                        "hostname": "10.0.1.12:8091",
+                        "otpNode": "ns_1@10.0.1.12",
+                        "status": status,
+                        "clusterMembership": "active",
+                        "services": ["index"],
+                    },
+                ],
+            },
+            {
+                "nodesExt": [
+                    {"hostname": "10.0.1.11", "services": {"mgmt": 8091, "kv": 11210}},
+                    {
+                        "hostname": "10.0.1.12",
+                        "services": {"mgmt": 8091, "indexHttp": 9102},
+                    },
+                ]
+            },
+            {"orchestrator": orchestrator, "clusterCompatVersion": "7.6"},
+        ]
+
+    @classmethod
+    def _ok_responses(cls, **kwargs) -> list[MagicMock]:
+        return [
+            TestGetClusterMetrics._ok_response(payload)
+            for payload in cls._payloads(**kwargs)
+        ]
+
+    def test_raises_on_missing_settings(self) -> None:
+        """Missing connection settings must fail before any REST attempt."""
+        ctx = _make_ctx_with_settings({})
+
+        with (
+            patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
+            pytest.raises(ValueError, match="Missing required connection settings"),
+        ):
+            get_cluster_health_snapshot(ctx)
+
+        mock_client_cls.assert_not_called()
+
+    def test_rejects_capella_connection_without_rest_call(self) -> None:
+        """A Capella connection must be rejected up front, with no REST attempt."""
+        ctx = _make_ctx_with_settings(_CAPELLA_SETTINGS)
+
+        with (
+            patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
+            pytest.raises(ValueError, match="Capella"),
+        ):
+            get_cluster_health_snapshot(ctx)
+
+        mock_client_cls.assert_not_called()
+
+    def test_rejects_unresolvable_endpoints_without_rest_call(self) -> None:
+        """No management endpoint to call must fail before any REST attempt."""
+        ctx = _make_ctx_with_settings(
+            {**_VALID_SETTINGS, "connection_string": "not-a-url"}
+        )
+
+        with (
+            patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
+            self._patch_endpoints([]),
+            pytest.raises(ValueError, match="No management endpoints found"),
+        ):
+            get_cluster_health_snapshot(ctx)
+
+        mock_client_cls.assert_not_called()
+
+    def test_reads_all_three_endpoints_from_one_host(self) -> None:
+        """All three payloads must come from the same node.
+
+        A snapshot stitched from two nodes could disagree about membership
+        mid-rebalance, so the three reads are not spread across hosts.
+        """
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get", self._ok_responses()
+        )
+
+        with client_patch, self._patch_endpoints():
+            snapshot = get_cluster_health_snapshot(ctx)
+
+        urls = [call.args[0] for call in mock_client.get.call_args_list]
+        assert urls == [
+            "http://localhost:8091/pools/default",
+            "http://localhost:8091/pools/default/nodeServices",
+            "http://localhost:8091/pools/default/terseClusterInfo",
+        ]
+        assert snapshot["cluster"]["nodes_total"] == 2
+
+    def test_merges_into_cluster_and_nodes(self) -> None:
+        """The three payloads are joined, not returned raw."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        client_patch, _ = TestGetClusterMetrics._patch_httpx_client(
+            "get", self._ok_responses(status="warning")
+        )
+
+        with client_patch, self._patch_endpoints():
+            snapshot = get_cluster_health_snapshot(ctx)
+
+        assert set(snapshot) == {"cluster", "nodes"}
+        cluster = snapshot["cluster"]
+        assert cluster["orchestrator"] == "ns_1@10.0.1.11"
+        assert cluster["unhealthy_nodes"] == ["10.0.1.12:8091"]
+
+        warning_node = snapshot["nodes"][1]
+        assert warning_node["services"] == ["index"]
+        assert warning_node["service_ports"]["indexHttp"] == 9102
+        # The sick node is not the orchestrator, so it is safe to act on —
+        # the question this tool exists to answer.
+        assert warning_node["is_orchestrator"] is False
+        assert warning_node["safe_to_act_on"] is True
+
+    def test_uses_https_for_couchbases_scheme(self) -> None:
+        """A couchbases:// connection string must use https.
+
+        The port comes from the SDK-resolved endpoint, not from the scheme.
+        """
+        ctx = _make_ctx_with_settings(
+            {**_VALID_SETTINGS, "connection_string": "couchbases://localhost"}
+        )
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get", self._ok_responses()
+        )
+
+        with client_patch, self._patch_endpoints(["localhost:18091"]):
+            get_cluster_health_snapshot(ctx)
+
+        assert (
+            mock_client.get.call_args_list[0]
+            .args[0]
+            .startswith("https://localhost:18091/")
+        )
+
+    def test_falls_over_to_second_host(self) -> None:
+        """A dead first host must not fail the call — the next host is tried."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get", [httpx.ConnectError("host1 unreachable"), *self._ok_responses()]
+        )
+
+        with client_patch, self._patch_endpoints(["host1:8091", "host2:8091"]):
+            snapshot = get_cluster_health_snapshot(ctx)
+
+        assert snapshot["cluster"]["nodes_total"] == 2
+        # One failed attempt on host1, then all three reads on host2.
+        assert mock_client.get.call_count == 4
+        assert mock_client.get.call_args_list[-1].args[0].startswith("http://host2:")
+
+    def test_partial_failure_moves_to_next_host(self) -> None:
+        """A host that answers the first read but not the second is abandoned.
+
+        Returning a snapshot merged from a half-read host would be worse than
+        trying the next one: the join would silently lose the orchestrator.
+        """
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        first, *_ = self._ok_responses()
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get",
+            [first, httpx.ConnectError("died mid-read"), *self._ok_responses()],
+        )
+
+        with client_patch, self._patch_endpoints(["host1:8091", "host2:8091"]):
+            snapshot = get_cluster_health_snapshot(ctx)
+
+        assert snapshot["cluster"]["orchestrator"] == "ns_1@10.0.1.11"
+        assert mock_client.get.call_count == 5
+        assert mock_client.get.call_args_list[-1].args[0].startswith("http://host2:")
+
+    def test_raises_when_every_host_fails(self) -> None:
+        """All hosts down surfaces as a RuntimeError naming the hosts tried."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get", [httpx.ConnectError("down"), httpx.ConnectError("down")]
+        )
+
+        with (
+            client_patch,
+            self._patch_endpoints(["host1:8091", "host2:8091"]),
+            pytest.raises(RuntimeError, match="Failed to reach any host"),
+        ):
+            get_cluster_health_snapshot(ctx)
+
+        assert mock_client.get.call_count == 2
