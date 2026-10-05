@@ -339,6 +339,20 @@ def run_search_vector_search(
     try:
         vector, embedding_info = _embed_query(ctx, vector_query_text)
 
+        # scalar_query reuses fts.py's own raw-query-body convention
+        # (SearchOptions(raw={"query": ...})) -- the request's query and
+        # vector_search encode as separate, independent params (see
+        # couchbase.logic.search.SearchQueryBuilder.as_encodable), so raw's
+        # "query" cleanly overwrites the request's default MatchNoneQuery()
+        # matcher without disturbing the attached VectorSearch. Confirmed
+        # against Couchbase-Ecosystem/langchain-couchbase's own hybrid search,
+        # which does the same.
+        #
+        # prefilter can't use raw= the same way: it's a structural field of
+        # VectorQuery, encoded via query.prefilter.encodable as part of each
+        # knn entry, not a top-level request param -- VectorQuery.prefilter's
+        # setter hard-rejects anything that isn't a SearchQuery instance, and
+        # RawQuery is the SDK's documented wrapper for a raw payload there.
         vq = VectorQuery(
             vector_field,
             vector,
@@ -346,11 +360,13 @@ def run_search_vector_search(
             prefilter=RawQuery(prefilter) if prefilter else None,
         )
         request = SearchRequest.create(VectorSearch.from_vector_query(vq))
-        if scalar_query:
-            request = request.with_search_query(RawQuery(scalar_query))
 
         applied_limit = limit if limit is not None else 10
-        options = SearchOptions(limit=applied_limit, fields=fields)
+        options = SearchOptions(
+            limit=applied_limit,
+            fields=fields,
+            raw={"query": scalar_query} if scalar_query else None,
+        )
 
         if bucket is not None:
             result = bucket.scope(scope_name).search(index_name, request, options)

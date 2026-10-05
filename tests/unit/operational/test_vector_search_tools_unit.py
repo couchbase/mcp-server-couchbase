@@ -361,7 +361,7 @@ class TestRunSearchVectorSearchConstruction:
         mock_request.create.assert_called_once_with(
             mock_vs.from_vector_query.return_value
         )
-        mock_request.create.return_value.with_search_query.assert_not_called()
+        mock_options.assert_called_once_with(limit=10, fields=None, raw=None)
         cluster.search.assert_called_once_with(
             "idx1", mock_request.create.return_value, mock_options.return_value
         )
@@ -417,8 +417,8 @@ class TestRunSearchVectorSearchConstruction:
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.VectorQuery") as mock_vq,
             patch(f"{_MODULE}.VectorSearch"),
-            patch(f"{_MODULE}.SearchRequest") as mock_request,
-            patch(f"{_MODULE}.SearchOptions"),
+            patch(f"{_MODULE}.SearchRequest"),
+            patch(f"{_MODULE}.SearchOptions") as mock_options,
             patch(f"{_MODULE}.RawQuery") as mock_raw_query,
             _patch_embedding(),
         ):
@@ -431,15 +431,23 @@ class TestRunSearchVectorSearchConstruction:
                 prefilter={"match": "in-stock", "field": "status"},
             )
 
-        assert mock_raw_query.call_count == 2
-        mock_raw_query.assert_any_call({"match": "in-stock", "field": "status"})
-        mock_raw_query.assert_any_call({"match": "jacket", "field": "description"})
+        # Only prefilter goes through RawQuery -- scalar_query attaches via
+        # SearchOptions(raw=...) instead, see test_hybrid_search_attaches_
+        # scalar_query_via_raw_option.
+        mock_raw_query.assert_called_once_with({"match": "in-stock", "field": "status"})
         assert mock_vq.call_args.kwargs["prefilter"] is not None
-        mock_request.create.return_value.with_search_query.assert_called_once()
+        mock_options.assert_called_once_with(
+            limit=10,
+            fields=None,
+            raw={"query": {"match": "jacket", "field": "description"}},
+        )
         assert result["is_hybrid"] is True
         assert result["is_prefiltered"] is True
 
-    def test_hybrid_search_attaches_scalar_query_via_raw_query(self) -> None:
+    def test_hybrid_search_attaches_scalar_query_via_raw_option(self) -> None:
+        """scalar_query reuses fts.py's SearchOptions(raw={"query": ...})
+        convention -- it's a top-level request param, not a structural field
+        of VectorQuery, so it doesn't need RawQuery the way prefilter does."""
         ctx = _make_ctx()
         cluster = MagicMock()
         cluster.search.return_value = self._make_search_result()
@@ -448,8 +456,8 @@ class TestRunSearchVectorSearchConstruction:
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.VectorQuery"),
             patch(f"{_MODULE}.VectorSearch"),
-            patch(f"{_MODULE}.SearchRequest") as mock_request,
-            patch(f"{_MODULE}.SearchOptions"),
+            patch(f"{_MODULE}.SearchRequest"),
+            patch(f"{_MODULE}.SearchOptions") as mock_options,
             patch(f"{_MODULE}.RawQuery") as mock_raw_query,
             _patch_embedding(),
         ):
@@ -461,11 +469,11 @@ class TestRunSearchVectorSearchConstruction:
                 scalar_query={"match": "jacket", "field": "description"},
             )
 
-        mock_raw_query.assert_called_once_with(
-            {"match": "jacket", "field": "description"}
-        )
-        mock_request.create.return_value.with_search_query.assert_called_once_with(
-            mock_raw_query.return_value
+        mock_raw_query.assert_not_called()
+        mock_options.assert_called_once_with(
+            limit=10,
+            fields=None,
+            raw={"query": {"match": "jacket", "field": "description"}},
         )
         assert result["is_hybrid"] is True
 
