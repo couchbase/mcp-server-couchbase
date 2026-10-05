@@ -260,9 +260,10 @@ def run_search_vector_search(
 ) -> dict[str, Any]:
     """Run the Search service's vector search, including hybrid and prefiltered search.
 
-    Embedding: vector_query_text is embedded the same way as
-    run_vector_search's query_text -- see that tool's docstring for
-    EMBEDDING_* configuration.
+    Embedding: vector_query_text is embedded using the model configured via
+    EMBEDDING_PROVIDER/EMBEDDING_MODEL/EMBEDDING_API_KEY/EMBEDDING_ENDPOINT
+    (plus EMBEDDING_AWS_* for provider=bedrock). If no provider is configured,
+    this tool returns {"success": False, "error": ...} explaining what to set
 
     Unlike run_vector_search's GSI-backed search, this tool always targets a
     *named* Search (FTS) index -- index_name is required. Pass both
