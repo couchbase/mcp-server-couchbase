@@ -121,6 +121,23 @@ class TestOrchestratorIdentification:
 
         assert [n["safe_to_act_on"] for n in snapshot["nodes"]] == [False, True]
 
+    def test_orchestrator_naming_an_unknown_node_is_not_known(self) -> None:
+        """terseClusterInfo can name a node /pools/default did not report.
+
+        The three payloads are read in sequence, so a topology change between
+        them leaves a name that matches nothing. Reporting that as "known"
+        while every node is flagged safe is the contradiction the field exists
+        to prevent.
+        """
+        snapshot = build_cluster_health_snapshot(
+            _pools_default([_node("10.0.1.12")]),
+            _node_services(["10.0.1.12"]),
+            {"orchestrator": "ns_1@10.0.1.99"},
+        )
+
+        assert snapshot["cluster"]["orchestrator_known"] is False
+        assert all(node["is_orchestrator"] is False for node in snapshot["nodes"])
+
     def test_missing_orchestrator_flags_no_node(self) -> None:
         """Mid-election the cluster reports no orchestrator.
 
@@ -269,6 +286,30 @@ class TestReachableAddress:
         # The raw block stays as a fallback for when the inference is wrong.
         assert node["alternateAddresses"] == self._EXTERNAL
 
+    def test_publishes_external_ports_with_the_external_address(self) -> None:
+        """Ports must match the address they are published with.
+
+        On a NAT'd or port-mapped deployment the internal ports are not
+        reachable at the external address, so pairing one with the other hands
+        the caller an endpoint it cannot dial.
+        """
+        external = {
+            "external": {
+                "hostname": "203.0.113.5",
+                "ports": {"mgmt": 18091, "indexHttp": 19102},
+            }
+        }
+        snapshot = build_cluster_health_snapshot(
+            _pools_default([_node("10.0.1.11", services=["index"])]),
+            _node_services(["10.0.1.11"], external=external),
+            _TERSE,
+            reached_host="203.0.113.5",
+        )
+
+        node = snapshot["nodes"][0]
+        assert node["reachable_from_here"] == "external"
+        assert node["service_ports"] == {"mgmt": 18091, "indexHttp": 19102}
+
     def test_uses_internal_when_reached_on_an_internal_address(self) -> None:
         snapshot = build_cluster_health_snapshot(
             _pools_default([_node("10.0.1.11")]),
@@ -281,24 +322,27 @@ class TestReachableAddress:
         assert node["reachable_address"] == "10.0.1.11"
         assert node["reachable_from_here"] == "internal"
 
-    def test_falls_back_to_reached_host_when_node_reports_no_hostname(self) -> None:
+    def test_joins_sole_node_that_reports_no_hostname(self) -> None:
         """A single-node cluster knows only its own address and sends none.
 
-        The host that answered is the right stand-in, since that is how the
-        cluster was reached; without it the node joins to "" and loses its
-        ports.
+        The address that answered need not be how /pools/default spells the
+        node — a cluster reached at "localhost" reports "172.18.0.2:8091"
+        there — so keying the nameless entry by the reached host alone loses
+        the join, and with it every port the caller needs to probe.
         """
         node_services = {"nodesExt": [{"services": {"mgmt": 8091, "kv": 11210}}]}
-        pools = _pools_default([_node("10.0.1.11")])
-        pools["nodes"][0]["hostname"] = "10.0.1.11:8091"
+        pools = _pools_default([_node("172.18.0.2")])
 
-        snapshot = build_cluster_health_snapshot(
-            pools, node_services, _TERSE, reached_host="10.0.1.11"
-        )
+        for reached in ("localhost", "127.0.0.1", "172.18.0.2"):
+            snapshot = build_cluster_health_snapshot(
+                pools, node_services, _TERSE, reached_host=reached
+            )
 
-        node = snapshot["nodes"][0]
-        assert node["service_ports"]["kv"] == 11210
-        assert node["reachable_address"] == "10.0.1.11"
+            node = snapshot["nodes"][0]
+            assert node["service_ports"]["kv"] == 11210, (
+                f"reached at {reached!r}: ports lost"
+            )
+            assert node["reachable_address"] == reached
 
     def test_brackets_ipv6_reachable_address(self) -> None:
         """The address is handed on for a URL, so an IPv6 literal needs brackets."""

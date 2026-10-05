@@ -31,6 +31,11 @@ _NODE_FIELDS = (
 )
 
 
+#: Key for the sole node of a single-node cluster, which ``nodeServices`` may
+#: report without a hostname. See ``_service_endpoints``.
+_SOLE_NODE_KEY = "*"
+
+
 def bare_host(host: str) -> str:
     """Strip the ``:port`` from a ``host:port``, leaving an IPv6 literal bare.
 
@@ -84,18 +89,34 @@ def _service_endpoints(
     for entry in entries:
         external = _external_addresses(entry)
         external_host = external.get("hostname")
-        # A node that only knows its own address reports no hostname; the host that answered is the right stand-in, since that is how we reached it.
+        # A node that only knows its own address reports no hostname; the host
+        # that answered is the right stand-in, since that is how we reached it.
         internal_host = entry.get("hostname") or reached_host or ""
 
         use_external = bool(prefer_external and external_host)
-        resolved[bare_host(internal_host)] = {
-            "services": entry.get("services") or {},
+        # External addresses come with their own ports: on a NAT'd or
+        # port-mapped deployment the internal ports are not reachable at the
+        # external address, so publishing one with the other would hand the
+        # caller an endpoint that cannot be dialled.
+        services = entry.get("services") or {}
+        if use_external:
+            services = external.get("ports") or services
+        record = {
+            "services": services,
             "alternate_addresses": entry.get("alternateAddresses"),
             "reachable_address": _bracket_ipv6(
                 external_host if use_external else internal_host
             ),
             "reachable_from_here": "external" if use_external else "internal",
         }
+        resolved[bare_host(internal_host)] = record
+        # A nameless entry was keyed by whichever address answered, which need
+        # not be how /pools/default spells the node (a single-node cluster
+        # reached at "localhost" is "172.18.0.2:8091" there). With one node on
+        # each side there is nothing to confuse it with, so publish it under
+        # the empty key too and let the caller fall back to it.
+        if not entry.get("hostname") and len(entries) == 1:
+            resolved[_SOLE_NODE_KEY] = record
     return resolved
 
 
@@ -134,7 +155,9 @@ def build_cluster_health_snapshot(
         # Couchbase sends uptime as a string of seconds; passed through as sent.
         node["uptime_seconds"] = entry.get("uptime")
 
-        resolved = endpoints.get(bare_host(node["hostname"] or ""), {})
+        resolved = endpoints.get(bare_host(node["hostname"] or "")) or endpoints.get(
+            _SOLE_NODE_KEY, {}
+        )
         node["service_ports"] = resolved.get("services", {})
         node["reachable_address"] = resolved.get("reachable_address")
         node["reachable_from_here"] = resolved.get("reachable_from_here")
@@ -146,8 +169,12 @@ def build_cluster_health_snapshot(
     cluster = {
         "name": pools_default.get("clusterName"),
         "orchestrator": orchestrator,
-        # False means no node could be flagged, so safe_to_act_on reads as "unknown" rather than "yes".
-        "orchestrator_known": bool(orchestrator),
+        # Derived from an actual match, not merely from terseClusterInfo
+        # carrying a name: the three payloads are read in sequence, so a
+        # topology change can name an orchestrator that /pools/default did not
+        # report. False means no node was flagged, so safe_to_act_on reads as
+        # "unknown" rather than "yes".
+        "orchestrator_known": any(node["is_orchestrator"] for node in nodes),
         "cluster_compat_version": terse_cluster_info.get("clusterCompatVersion"),
         "balanced": pools_default.get("balanced"),
         "rebalanceStatus": pools_default.get("rebalanceStatus"),
