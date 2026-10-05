@@ -12,6 +12,7 @@ Tests for:
 - test_cluster_connection
 - get_cluster_metrics
 - get_cluster_health_snapshot
+- get_cluster_system_events (ordering, limit, filters, since_time inclusivity)
 """
 
 from __future__ import annotations
@@ -444,3 +445,136 @@ async def test_get_cluster_health_snapshot_is_internally_consistent() -> None:
             n["otpNode"] for n in second["nodes"]
         ]
         assert first["cluster"]["orchestrator"] == second["cluster"]["orchestrator"]
+
+
+def _system_events_or_skip(response, payload):
+    """Return the payload, or skip/fail on the documented error cases.
+
+    /events needs Full Admin or Cluster Admin — a higher bar than the ro_admin
+    the sibling cluster tools need — so narrower test credentials are a reason
+    to skip rather than to fail. A Capella rejection is the other acceptable
+    error; anything else is a real failure.
+    """
+    if not is_error_response(response):
+        return payload
+    text = str(payload)
+    if "Capella" in text:
+        pytest.skip("get_cluster_system_events is not supported on Capella")
+    if "403" in text or "Forbidden" in text or "401" in text:
+        pytest.skip(f"/events needs Full Admin or Cluster Admin: {text}")
+    pytest.fail(f"Unexpected error from get_cluster_system_events: {text}")
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_system_events() -> None:
+    """Verify get_cluster_system_events returns a bounded, ordered event log.
+
+    Self-managed Couchbase Server 7.6+ only; Capella is rejected by the tool.
+    Like get_cluster_tasks it returns its payload unenveloped, so the
+    assertions are about shape rather than a status envelope.
+
+    The ordering assertion is the important one: /events returns events
+    oldest-first and the tool must not re-sort or slice them. A regression
+    there is silent — the call still succeeds, it just returns the wrong end
+    of the window.
+    """
+    async with create_mcp_session() as session:
+        response = await session.call_tool("get_cluster_system_events")
+        payload = _system_events_or_skip(response, extract_payload(response))
+
+        summary = payload["summary"]
+        events = payload["events"]
+        assert summary["ordering"] == "ascending_oldest_first"
+        assert summary["returned"] == len(events) <= 50, (
+            f"Default limit should bound the result at 50, got {summary['returned']}"
+        )
+
+        timestamps = [e["timestamp"] for e in events if isinstance(e, dict)]
+        assert timestamps == sorted(timestamps), (
+            "Events must stay in the server's oldest-first order"
+        )
+        if timestamps:
+            assert summary["time_range"]["earliest"] == timestamps[0]
+            assert summary["time_range"]["latest"] == timestamps[-1]
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_system_events_respects_limit() -> None:
+    """Verify the limit is forwarded to the server and bounds the result."""
+    async with create_mcp_session() as session:
+        response = await session.call_tool("get_cluster_system_events", {"limit": 5})
+        payload = _system_events_or_skip(response, extract_payload(response))
+
+        assert payload["summary"]["limit"] == 5
+        assert len(payload["events"]) <= 5
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_system_events_filters_are_applied_server_side() -> None:
+    """Verify component and severity filter server-side and AND together.
+
+    The token-budget argument for this tool rests on the filters being real:
+    an unfiltered log is thousands of events, nearly all of them "info".
+    A quiet cluster may match nothing, so an empty result is acceptable —
+    what must not happen is a non-matching event coming back.
+    """
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "get_cluster_system_events", {"severity": "info", "limit": 10}
+        )
+        payload = _system_events_or_skip(response, extract_payload(response))
+        assert all(e["severity"] == "info" for e in payload["events"])
+
+        response = await session.call_tool(
+            "get_cluster_system_events",
+            {"component": "ns_server", "severity": "info", "limit": 10},
+        )
+        payload = _system_events_or_skip(response, extract_payload(response))
+        assert all(
+            e["component"] == "ns_server" and e["severity"] == "info"
+            for e in payload["events"]
+        ), "component and severity must AND together, not union"
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_system_events_since_time_is_inclusive() -> None:
+    """Verify since_time narrows the window and includes its boundary event.
+
+    The paging advice in the docstring — page on next_since_time, dedupe on
+    uuid — is only correct if sinceTime is inclusive, so that is pinned here.
+    """
+    async with create_mcp_session() as session:
+        response = await session.call_tool("get_cluster_system_events")
+        payload = _system_events_or_skip(response, extract_payload(response))
+        if not payload["events"]:
+            pytest.skip("No system events logged on this cluster")
+
+        boundary = payload["summary"]["time_range"]["latest"]
+        response = await session.call_tool(
+            "get_cluster_system_events", {"since_time": boundary, "limit": 10}
+        )
+        payload = _system_events_or_skip(response, extract_payload(response))
+
+        timestamps = [e["timestamp"] for e in payload["events"]]
+        assert all(ts >= boundary for ts in timestamps), (
+            f"Every event should be at or after {boundary}, got {timestamps}"
+        )
+        assert boundary in timestamps, "sinceTime is inclusive of its boundary event"
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_system_events_rejects_unbounded_limit() -> None:
+    """Verify the REST API's unlimited -1 cannot be reached through the tool.
+
+    The full event log is several megabytes; forwarding -1 would put all of it
+    into a single tool result.
+    """
+    async with create_mcp_session() as session:
+        for limit in (-1, 10000):
+            response = await session.call_tool(
+                "get_cluster_system_events", {"limit": limit}
+            )
+            assert is_error_response(response), (
+                f"limit={limit} should be rejected, got a result"
+            )
+            assert "limit must be between" in str(extract_payload(response))

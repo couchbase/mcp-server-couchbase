@@ -11,6 +11,8 @@ in this module needs a Couchbase ``Cluster``.
 
 import json
 import logging
+from collections import Counter
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -40,6 +42,14 @@ from ...utils.operational.index_utils import resolve_management_endpoints
 from .query import run_cluster_query
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.server")
+
+# /events returns ~430 bytes per event and its own default of 250 is ~119 KB — far
+# more than a tool result should spend. 50 keeps a call alongside a metrics and a
+# health result in one window; the cap stops a broad request from swamping it.
+SYSTEM_EVENTS_DEFAULT_LIMIT = 50
+SYSTEM_EVENTS_MAX_LIMIT = 500
+
+EVENTS_ORDERING = "ascending_oldest_first"
 
 
 def test_cluster_connection(
@@ -560,4 +570,274 @@ def get_cluster_health_snapshot(ctx: Context, timeout: int = 30) -> dict[str, An
         raise RuntimeError(f"Failed to reach any host in {endpoints}: {last_error}")
     except Exception as e:
         logger.error(f"Error getting cluster health snapshot: {e}", exc_info=True)
+        raise
+
+
+def _validate_system_events_limit(limit: int) -> None:
+    """Reject a limit that would return an unusable amount of data.
+
+    ``-1`` is the REST API's "no limit", which on a full ring buffer is several
+    megabytes; it is rejected rather than forwarded. ``bool`` is excluded
+    explicitly because it is an ``int`` subclass.
+    """
+    if not isinstance(limit, int) or isinstance(limit, bool):
+        raise ValueError(f"limit must be an integer, got {limit!r}")
+    if limit < 1 or limit > SYSTEM_EVENTS_MAX_LIMIT:
+        raise ValueError(
+            f"limit must be between 1 and {SYSTEM_EVENTS_MAX_LIMIT}, got {limit}. "
+            f"The REST API's -1 ('no limit') is not accepted: the event log holds up "
+            f"to 20,000 entries. Narrow the window with severity, component or "
+            f"since_time instead of raising the limit."
+        )
+
+
+def _system_events_params(
+    *,
+    since_time: str | None,
+    limit: int,
+    component: str | None,
+    severity: str | None,
+    event_id: int | None,
+) -> dict[str, Any]:
+    """Build the /events query string, omitting unset filters.
+
+    The endpoint mixes conventions — ``sinceTime`` is camelCase while
+    ``event_id`` is not — so the names are spelled out rather than derived.
+    """
+    params: dict[str, Any] = {"limit": limit}
+    optional = {
+        "sinceTime": since_time,
+        "component": component,
+        "severity": severity,
+        "event_id": event_id,
+    }
+    params.update({k: v for k, v in optional.items() if v is not None})
+    return params
+
+
+def _system_events_rejection(response: httpx.Response) -> str:
+    """Describe a 4xx from /events using the server's own message.
+
+    The endpoint reports a bad filter as ``{"errors": {"severity": "The value
+    must be one of ..."}}`` — the authoritative list for the running version,
+    and the one thing an agent needs to correct itself. ``raise_for_status``
+    discards it, so it is read out here. Other 4xx bodies are not JSON (401 is
+    empty, 404 is plain text), so those fall back to whatever text there is.
+    """
+    detail = ""
+    try:
+        errors = response.json().get("errors")
+        if isinstance(errors, dict):
+            detail = "; ".join(f"{field}: {msg}" for field, msg in errors.items())
+    except (ValueError, AttributeError) as e:
+        # Only 400 answers in JSON; 401 is empty and 404 is plain text. Falling
+        # back to the raw body is the point, so this is logged and moved past
+        # rather than raised — the caller already has a failure to report.
+        logger.debug(f"/events error body was not the expected JSON: {e}")
+    if not detail:
+        detail = response.text.strip() or response.reason_phrase
+    return f"/events rejected the request ({response.status_code}): {detail}"
+
+
+def _shape_system_events(
+    payload: Any,
+    *,
+    limit: int,
+    since_time: str | None,
+    component: str | None,
+    severity: str | None,
+    event_id: int | None,
+) -> dict[str, Any]:
+    """Summarise an event list without reordering it.
+
+    The list is returned exactly as the server sent it. /events emits events
+    oldest-first and has already picked the right window, so re-sorting or
+    re-slicing here would be wrong in a way that is easy to miss: slicing an
+    ascending array keeps the OLDEST events and drops the newest, which is
+    backwards for every use of this tool. To get fewer events, lower ``limit``
+    and let the server choose them.
+    """
+    shaped: dict[str, Any] = {}
+    events = payload.get("events") if isinstance(payload, dict) else None
+    if not isinstance(events, list):
+        shaped["warning"] = (
+            f"Expected an 'events' array, got {type(events).__name__}; "
+            f"reporting it as empty."
+        )
+        events = []
+
+    dicts = [event for event in events if isinstance(event, dict)]
+    timestamps = [event.get("timestamp") for event in dicts if event.get("timestamp")]
+    # len(events) == limit means the server filled the quota, so there are
+    # probably more events outside this window.
+    truncated = len(events) == limit
+
+    shaped["summary"] = {
+        "returned": len(events),
+        "limit": limit,
+        # Stated in the payload as well as the docstring: the ordering is the
+        # thing most likely to be misread.
+        "ordering": EVENTS_ORDERING,
+        "time_range": {
+            "earliest": timestamps[0] if timestamps else None,
+            "latest": timestamps[-1] if timestamps else None,
+        },
+        # Counts describe the returned events only, not the whole event log.
+        "by_severity": dict(Counter(event.get("severity") for event in dicts)),
+        "by_component": dict(Counter(event.get("component") for event in dicts)),
+        "filters_applied": {
+            "since_time": since_time,
+            "component": component,
+            "severity": severity,
+            "event_id": event_id,
+        },
+        "possibly_truncated": truncated,
+        # Supplied ready-made so paging never depends on indexing into the array
+        # from the wrong end. Only meaningful when already paging forward: with
+        # no since_time the batch is the newest there is.
+        "next_since_time": (
+            timestamps[-1] if (truncated and since_time and timestamps) else None
+        ),
+    }
+    shaped["events"] = events
+    return shaped
+
+
+def get_cluster_system_events(
+    ctx: Context,
+    since_time: str | None = None,
+    limit: int = SYSTEM_EVENTS_DEFAULT_LIMIT,
+    component: str | None = None,
+    severity: str | None = None,
+    event_id: int | None = None,
+    timeout: int = 30,
+) -> dict[str, Any]:
+    """Get the cluster's system event log — what changed on the cluster, and when.
+
+    This is the RCA timeline: once a symptom is confirmed, it finds the config
+    change, failover, rebalance or service restart that preceded it. Window it to
+    the symptom's onset with since_time, then cross-check that timestamp against
+    get_cluster_metrics.
+
+    Self-managed Couchbase Server 7.6+ only (Capella is rejected without a REST
+    call); needs the Full Admin or Cluster Admin role. Calls GET /events.
+
+    Filtering — component, severity and event_id are applied by the server and AND
+        together, so component="indexing" with severity="error" matches both. Each
+        takes one value; a bad one returns an HTTP 400 naming what is accepted.
+        severity is "info", "warn", "error" or "fatal" — note "warn", which the REST
+        documentation wrongly calls "warning". Filter before raising `limit`: a
+        cluster's log is overwhelmingly "info", so severity="error" is by far the
+        highest-yield first query.
+        
+    Ordering — easy to misread:
+    - Events are ALWAYS oldest-first, but which ones the server picks depends on
+      since_time. Without it, the server takes the `limit` MOST RECENT events, so
+      the last element is the newest thing on the cluster. With it, it takes the
+      `limit` EARLIEST events at or after that time, so the last element is NOT
+      the newest — more may follow it.
+    - Do not re-sort or re-slice to get "the latest N": slicing keeps the oldest.
+      Lower `limit` and let the server choose.
+    - To page forward, pass summary.next_since_time as the next since_time. It is
+      inclusive, so the boundary event repeats — dedupe on uuid.
+
+    Reading the result:
+    - summary.possibly_truncated means the server filled the limit, so more events
+      probably exist outside the window. Absence of a later event is not evidence.
+    - The log is a ring buffer (10,000 entries by default), so an empty result for
+      an old since_time can mean the events aged out, not that nothing happened.
+
+    Returns {"summary": {...}, "events": [...]}; raises on failure.
+    """
+    try:
+        settings = get_settings(ctx)
+        validate_connection_settings(settings)
+        connection_string = settings["connection_string"]
+        if is_capella_connection(connection_string):
+            raise ValueError(
+                "get_cluster_system_events is not supported on Capella clusters"
+            )
+
+        _validate_system_events_limit(limit)
+        if since_time is not None:
+            try:
+                datetime.fromisoformat(since_time.replace("Z", "+00:00"))
+            except (ValueError, AttributeError) as e:
+                # A malformed timestamp would otherwise come back as an empty
+                # window, which reads as "nothing happened".
+                raise ValueError(
+                    f"since_time must be an ISO-8601 UTC timestamp such as "
+                    f"'2026-10-05T09:12:04Z', got {since_time!r}"
+                ) from e
+
+        params = _system_events_params(
+            since_time=since_time,
+            limit=limit,
+            component=component,
+            severity=severity,
+            event_id=event_id,
+        )
+
+        protocol = (
+            "https" if connection_string.lower().startswith("couchbases://") else "http"
+        )
+        verify_ssl = determine_ssl_verification(
+            connection_string, settings.get("ca_cert_path")
+        )
+        # Ask the SDK where management actually listens rather than appending the
+        # default port to the connection string's hosts: the port it carries is a KV
+        # one, and a port-mapped or NAT'd cluster serves management elsewhere. Same
+        # resolution get_index_stats uses.
+        endpoints = resolve_management_endpoints(
+            get_cluster_connection(ctx), connection_string
+        )
+        if not endpoints:
+            raise ValueError(
+                f"No management endpoints found for connection_string: "
+                f"{connection_string!r}"
+            )
+
+        # Failover, not fan-out
+        last_error: Exception | None = None
+        with httpx.Client(verify=verify_ssl, timeout=timeout) as client:
+            for host in endpoints:
+                try:
+                    response = client.get(
+                        f"{protocol}://{host}/events",
+                        params=params,
+                        auth=(settings["username"], settings["password"]),
+                    )
+                    # A 4xx is this request being refused, not the host being
+                    # unreachable: every other node would refuse it identically,
+                    # so report the server's reason instead of failing over and
+                    # burying it under "failed to reach any host".
+                    if 400 <= response.status_code < 500:
+                        raise ValueError(_system_events_rejection(response))
+                    response.raise_for_status()
+                    shaped = _shape_system_events(
+                        response.json(),
+                        limit=limit,
+                        since_time=since_time,
+                        component=component,
+                        severity=severity,
+                        event_id=event_id,
+                    )
+                    summary = shaped["summary"]
+                    logger.info(
+                        f"Retrieved {summary['returned']} system event(s) from {host}"
+                        f"{' (truncated)' if summary['possibly_truncated'] else ''}"
+                    )
+                    return shaped
+                except ValueError:
+                    # The request itself was refused — failing over would only
+                    # collect the same refusal from every other node.
+                    raise
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to fetch cluster system events from {host}: {e}"
+                    )
+                    last_error = e
+        raise RuntimeError(f"Failed to reach any host in {endpoints}: {last_error}")
+    except Exception as e:
+        logger.error(f"Error getting cluster system events: {e}", exc_info=True)
         raise

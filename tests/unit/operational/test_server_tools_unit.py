@@ -20,6 +20,11 @@ reached against a live cluster:
 - get_cluster_health_snapshot rejects Capella connections and unresolvable
   endpoints up front, reads its three endpoints from a single host, and falls
   over to the next host when any one of them fails.
+- get_cluster_system_events rejects out-of-range limits (including the REST
+  API's unlimited -1) without a REST call, passes filter values through for the
+  server to validate, maps its parameters onto the endpoint's mixed
+  camelCase/snake_case query names, and returns the event array in the server's
+  order without re-sorting or slicing.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from cb_mcp.tools.operational.server import (
     get_cluster_health_and_services,
     get_cluster_health_snapshot,
     get_cluster_metrics,
+    get_cluster_system_events,
     get_cluster_tasks,
     get_scopes_and_collections_in_bucket,
     get_scopes_in_bucket,
@@ -940,3 +946,396 @@ class TestGetClusterHealthSnapshot:
             get_cluster_health_snapshot(ctx)
 
         assert mock_client.get.call_count == 2
+
+
+class TestGetClusterSystemEvents:
+    """get_cluster_system_events: input rejection, query building, and shaping.
+
+    The ordering contract is the thing worth pinning here. /events returns
+    events oldest-first and picks the window itself, so the tool must forward
+    ``limit`` and leave the array alone; a client-side slice would keep the
+    oldest events and drop the newest. Like the other recent cluster tools it
+    returns the payload unenveloped and re-raises, so these assert on the
+    raised exception.
+    """
+
+    @staticmethod
+    def _patch_endpoints(endpoints: list[str] | None = None):
+        """Patch the SDK-backed management-endpoint resolution."""
+        resolved = ["localhost:8091"] if endpoints is None else endpoints
+        return patch.multiple(
+            "cb_mcp.tools.operational.server",
+            resolve_management_endpoints=MagicMock(return_value=resolved),
+            get_cluster_connection=MagicMock(return_value=MagicMock()),
+        )
+
+    @staticmethod
+    def _events(count: int = 4) -> dict:
+        """An ascending event payload, mixing severity and component."""
+        rows = [
+            ("2026-10-05T09:12:04.102Z", "data", "info", "Bucket created"),
+            ("2026-10-05T09:12:30.500Z", "ns_server", "error", "Service crashed"),
+            ("2026-10-05T09:13:01.000Z", "indexing", "info", "Index Online"),
+            ("2026-10-05T09:14:51.883Z", "data", "info", "Bucket online"),
+        ][:count]
+        return {
+            "events": [
+                {
+                    "timestamp": ts,
+                    "component": comp,
+                    "severity": sev,
+                    "description": desc,
+                    "event_id": 1000 + i,
+                    "uuid": f"uuid-{i}",
+                    "node": "127.0.0.1",
+                    "extra_attributes": {"detail": f"value-{i}"},
+                }
+                for i, (ts, comp, sev, desc) in enumerate(rows)
+            ]
+        }
+
+    @classmethod
+    def _call(cls, payload: dict | None = None, **kwargs):
+        """Run the tool against a stubbed 200 response; return (result, client)."""
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = cls._events() if payload is None else payload
+        response.raise_for_status.return_value = None
+        client = MagicMock()
+        client.get.return_value = response
+
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        with cls._patch_endpoints(), patch("httpx.Client") as mock_cls:
+            mock_cls.return_value.__enter__.return_value = client
+            return get_cluster_system_events(ctx, **kwargs), client
+
+    # -- rejections: none of these should reach the network ------------------
+
+    def test_missing_settings_raises_without_rest_call(self):
+        ctx = _make_ctx_with_settings({})
+        with patch("httpx.Client") as mock_cls, pytest.raises(ValueError):
+            get_cluster_system_events(ctx)
+        mock_cls.assert_not_called()
+
+    def test_rejects_capella_without_rest_call(self):
+        ctx = _make_ctx_with_settings(_CAPELLA_SETTINGS)
+        with (
+            patch("httpx.Client") as mock_cls,
+            pytest.raises(ValueError, match="Capella"),
+        ):
+            get_cluster_system_events(ctx)
+        mock_cls.assert_not_called()
+
+    @pytest.mark.parametrize("limit", [0, -1, 501, 10000])
+    def test_rejects_out_of_range_limit(self, limit):
+        """-1 is the REST API's "no limit" — several MB, never forwarded."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        with (
+            patch("httpx.Client") as mock_cls,
+            pytest.raises(ValueError, match="limit must be between"),
+        ):
+            get_cluster_system_events(ctx, limit=limit)
+        mock_cls.assert_not_called()
+
+    def test_rejects_boolean_limit(self):
+        """bool is an int subclass, so it needs excluding explicitly."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        with (
+            patch("httpx.Client") as mock_cls,
+            pytest.raises(ValueError, match="must be an integer"),
+        ):
+            get_cluster_system_events(ctx, limit=True)
+        mock_cls.assert_not_called()
+
+    def test_rejects_malformed_since_time(self):
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        with (
+            patch("httpx.Client") as mock_cls,
+            pytest.raises(ValueError, match="ISO-8601"),
+        ):
+            get_cluster_system_events(ctx, since_time="yesterday")
+        mock_cls.assert_not_called()
+
+    def test_raises_when_no_endpoints_resolved(self):
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        with (
+            self._patch_endpoints([]),
+            patch("httpx.Client") as mock_cls,
+            pytest.raises(ValueError, match="No management endpoints"),
+        ):
+            get_cluster_system_events(ctx)
+        mock_cls.assert_not_called()
+
+    # -- request construction ------------------------------------------------
+
+    def test_default_query_params(self):
+        """Only the bounded limit by default — no stray params."""
+        _, client = self._call()
+        assert client.get.call_args.kwargs["params"] == {"limit": 50}
+        assert client.get.call_args.args[0] == "http://localhost:8091/events"
+
+    def test_maps_params_to_rest_names(self):
+        """sinceTime is camelCase but event_id is not — the server's own mix."""
+        _, client = self._call(
+            since_time="2026-10-05T09:00:00Z",
+            limit=10,
+            component="indexing",
+            severity="error",
+            event_id=2057,
+        )
+        assert client.get.call_args.kwargs["params"] == {
+            "limit": 10,
+            "sinceTime": "2026-10-05T09:00:00Z",
+            "component": "indexing",
+            "severity": "error",
+            "event_id": 2057,
+        }
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            # The REST docs' spelling, which the server rejects with a 400.
+            {"severity": "warning"},
+            {"severity": "bogus"},
+            {"component": "bogus"},
+            # Comma-separated lists are a server-side 400 too.
+            {"component": "indexing,data"},
+            {"severity": "ERROR"},
+        ],
+    )
+    def test_passes_filter_values_through_unchanged(self, kwargs):
+        """Filters are the server's to validate, not this tool's.
+
+        /events answers a bad value with a 400 naming the set it accepts, which
+        is authoritative for the running version — so values go out exactly as
+        given rather than being checked against a copy of that list here.
+        """
+        _, client = self._call(**kwargs)
+        params = client.get.call_args.kwargs["params"]
+        for field, value in kwargs.items():
+            assert params[field] == value
+
+    @staticmethod
+    def _rejection(status: int, *, json_body=None, text: str = ""):
+        """A 4xx response, as the endpoint actually shapes its error bodies."""
+        response = MagicMock()
+        response.status_code = status
+        response.text = text
+        response.reason_phrase = "Bad Request"
+        if json_body is None:
+            response.json.side_effect = ValueError("not json")
+        else:
+            response.json.return_value = json_body
+        return response
+
+    def test_surfaces_the_servers_own_rejection_message(self):
+        """A 400 names the accepted values; that is the whole point of it.
+
+        The server's message is authoritative for the running version, so it
+        reaches the caller instead of httpx's bare status line.
+        """
+        client = MagicMock()
+        client.get.return_value = self._rejection(
+            400,
+            json_body={
+                "errors": {
+                    "severity": "The value must be one of the following: "
+                    "[info,error,warn,fatal]"
+                }
+            },
+        )
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        with (
+            self._patch_endpoints(),
+            patch("httpx.Client") as mock_cls,
+            pytest.raises(ValueError, match=r"info,error,warn,fatal"),
+        ):
+            mock_cls.return_value.__enter__.return_value = client
+            get_cluster_system_events(ctx, severity="warning")
+
+    def test_does_not_fail_over_after_a_rejection(self):
+        """Every other node would refuse the same request identically."""
+        client = MagicMock()
+        client.get.return_value = self._rejection(
+            400, json_body={"errors": {"component": "The value must be one of ..."}}
+        )
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        with (
+            self._patch_endpoints(["host1:8091", "host2:8091", "host3:8091"]),
+            patch("httpx.Client") as mock_cls,
+            pytest.raises(ValueError),
+        ):
+            mock_cls.return_value.__enter__.return_value = client
+            get_cluster_system_events(ctx, component="bogus")
+        assert client.get.call_count == 1, "A 4xx must not be retried on other hosts"
+
+    @pytest.mark.parametrize(
+        "status, text, expected",
+        [
+            # 404 answers in plain text, 401 with nothing at all.
+            (404, "Not found.", "Not found."),
+            (401, "", "Bad Request"),
+        ],
+    )
+    def test_falls_back_when_the_error_body_is_not_json(self, status, text, expected):
+        client = MagicMock()
+        client.get.return_value = self._rejection(status, text=text)
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        with (
+            self._patch_endpoints(),
+            patch("httpx.Client") as mock_cls,
+            pytest.raises(ValueError, match=expected),
+        ):
+            mock_cls.return_value.__enter__.return_value = client
+            get_cluster_system_events(ctx)
+
+    def test_still_fails_over_on_a_5xx(self):
+        """A server-side fault is not the request's fault — try the next host."""
+        broken = MagicMock()
+        broken.status_code = 503
+        broken.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "503", request=MagicMock(), response=MagicMock()
+        )
+        ok = MagicMock()
+        ok.status_code = 200
+        ok.json.return_value = self._events()
+        ok.raise_for_status.return_value = None
+        client = MagicMock()
+        client.get.side_effect = [broken, ok]
+
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        with (
+            self._patch_endpoints(["host1:8091", "host2:8091"]),
+            patch("httpx.Client") as mock_cls,
+        ):
+            mock_cls.return_value.__enter__.return_value = client
+            result = get_cluster_system_events(ctx)
+
+        assert client.get.call_count == 2
+        assert result["summary"]["returned"] == 4
+
+    def test_accepts_z_suffixed_since_time(self):
+        _, client = self._call(since_time="2026-10-05T09:12:04Z")
+        assert client.get.call_args.kwargs["params"]["sinceTime"] == (
+            "2026-10-05T09:12:04Z"
+        )
+
+    def test_uses_https_for_tls_connection_string(self):
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = self._events()
+        response.raise_for_status.return_value = None
+        client = MagicMock()
+        client.get.return_value = response
+
+        settings = {**_VALID_SETTINGS, "connection_string": "couchbases://localhost"}
+        ctx = _make_ctx_with_settings(settings)
+        with (
+            self._patch_endpoints(["localhost:18091"]),
+            patch("httpx.Client") as mock_cls,
+        ):
+            mock_cls.return_value.__enter__.return_value = client
+            get_cluster_system_events(ctx)
+
+        assert client.get.call_args.args[0].startswith("https://localhost:18091/")
+
+    def test_falls_over_to_second_endpoint(self):
+        ok = MagicMock()
+        ok.status_code = 200
+        ok.json.return_value = self._events()
+        ok.raise_for_status.return_value = None
+        client = MagicMock()
+        client.get.side_effect = [httpx.ConnectError("refused"), ok]
+
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        with (
+            self._patch_endpoints(["host1:8091", "host2:8091"]),
+            patch("httpx.Client") as mock_cls,
+        ):
+            mock_cls.return_value.__enter__.return_value = client
+            result = get_cluster_system_events(ctx)
+
+        assert client.get.call_count == 2
+        assert result["summary"]["returned"] == 4
+
+    def test_raises_when_all_endpoints_fail(self):
+        client = MagicMock()
+        client.get.side_effect = httpx.ConnectError("refused")
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        with (
+            self._patch_endpoints(["host1:8091", "host2:8091"]),
+            patch("httpx.Client") as mock_cls,
+            pytest.raises(RuntimeError, match="Failed to reach any host"),
+        ):
+            mock_cls.return_value.__enter__.return_value = client
+            get_cluster_system_events(ctx)
+        assert client.get.call_count == 2
+
+    # -- shaping -------------------------------------------------------------
+
+    def test_preserves_server_order_and_does_not_slice(self):
+        """The core contract: ascending in, ascending out, nothing dropped."""
+        payload = self._events()
+        result, _ = self._call(payload, limit=2)
+        assert [e["timestamp"] for e in result["events"]] == [
+            e["timestamp"] for e in payload["events"]
+        ]
+        assert result["summary"]["ordering"] == "ascending_oldest_first"
+
+    def test_summary_counts_and_time_range(self):
+        result, _ = self._call()
+        summary = result["summary"]
+        assert summary["returned"] == 4
+        assert summary["by_severity"] == {"info": 3, "error": 1}
+        assert summary["by_component"] == {"data": 2, "ns_server": 1, "indexing": 1}
+        assert summary["time_range"] == {
+            "earliest": "2026-10-05T09:12:04.102Z",
+            "latest": "2026-10-05T09:14:51.883Z",
+        }
+
+    def test_extra_attributes_preserved(self):
+        """Where the cause lives — never stripped or truncated."""
+        result, _ = self._call()
+        assert all(e["extra_attributes"] for e in result["events"])
+        assert result["events"][0]["extra_attributes"] == {"detail": "value-0"}
+
+    def test_possibly_truncated_tracks_the_limit(self):
+        at_limit, _ = self._call(limit=4)
+        assert at_limit["summary"]["possibly_truncated"] is True
+        under, _ = self._call(limit=50)
+        assert under["summary"]["possibly_truncated"] is False
+
+    def test_next_since_time_is_the_newest_event_when_paging(self):
+        """Taken from the END of the ascending array, not the start."""
+        paging, _ = self._call(limit=4, since_time="2026-10-05T09:00:00Z")
+        assert paging["summary"]["next_since_time"] == "2026-10-05T09:14:51.883Z"
+
+    def test_next_since_time_absent_without_since_time(self):
+        """With no since_time the batch is already the newest there is."""
+        result, _ = self._call(limit=4)
+        assert result["summary"]["next_since_time"] is None
+
+    def test_filters_applied_echoes_the_request(self):
+        result, _ = self._call(component="data", event_id=42)
+        assert result["summary"]["filters_applied"] == {
+            "since_time": None,
+            "component": "data",
+            "severity": None,
+            "event_id": 42,
+        }
+
+    @pytest.mark.parametrize("payload", [{"events": []}, {}, {"events": "nope"}])
+    def test_handles_empty_or_malformed_payloads(self, payload):
+        result, _ = self._call(payload)
+        assert result["events"] == []
+        assert result["summary"]["returned"] == 0
+        assert result["summary"]["time_range"] == {"earliest": None, "latest": None}
+        assert result["summary"]["possibly_truncated"] is False
+
+    def test_keeps_non_dict_entries_but_skips_them_in_counters(self):
+        """Nothing is silently dropped, even if the server sends junk."""
+        payload = {"events": ["not-an-object", *self._events(1)["events"]]}
+        result, _ = self._call(payload)
+        assert len(result["events"]) == 2
+        assert result["summary"]["returned"] == 2
+        assert result["summary"]["by_severity"] == {"info": 1}
