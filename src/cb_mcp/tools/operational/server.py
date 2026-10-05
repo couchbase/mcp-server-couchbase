@@ -729,7 +729,7 @@ def get_cluster_system_events(
         documentation wrongly calls "warning". Filter before raising `limit`: a
         cluster's log is overwhelmingly "info", so severity="error" is by far the
         highest-yield first query.
-        
+
     Ordering — easy to misread:
     - Events are ALWAYS oldest-first, but which ones the server picks depends on
       since_time. Without it, the server takes the `limit` MOST RECENT events, so
