@@ -10,6 +10,7 @@ Covers:
   - get_cluster_health_and_services (including service_types filtering)
   - get_cluster_diagnostics_report
   - get_cluster_metrics
+  - get_cluster_tasks
   - get_cluster_health_snapshot
   - discover_tool_input_values
 """
@@ -209,6 +210,38 @@ def _build_cases(bucket: str, scope: str) -> list[AccuracyCase]:
             expected_tools=[
                 ExpectedToolCall(
                     tool_name="get_cluster_metrics",
+                    parameters=Matcher.any_value(),
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="get_cluster_tasks_whats_running_now",
+            prompt=(
+                "Is anything actually running on my Couchbase cluster right now — "
+                "a rebalance, a compaction, an index build?"
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_cluster_tasks",
+                    parameters=Matcher.any_value(),
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="get_cluster_tasks_stuck_rebalance",
+            prompt=(
+                "Our rebalance looks like it has been stuck at the same percentage "
+                "for a while. What is the cluster reporting?"
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_cluster_tasks",
                     parameters=Matcher.any_value(),
                 ),
             ],
