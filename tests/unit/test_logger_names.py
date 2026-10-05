@@ -73,7 +73,6 @@ EXPECTED_LOGGER_NAMES = {
     "cb_mcp.utils.operational.embeddings.registry": "couchbase.mcp.operational.utils.embeddings",
     "cb_mcp.utils.operational.embeddings.providers._openai_compatible": "couchbase.mcp.operational.utils.embeddings.providers.openai_compatible",
     "cb_mcp.utils.operational.embeddings.providers.cohere": "couchbase.mcp.operational.utils.embeddings.providers.cohere",
-    "cb_mcp.utils.operational.embeddings.providers.voyage": "couchbase.mcp.operational.utils.embeddings.providers.voyage",
     "cb_mcp.utils.operational.embeddings.providers.bedrock": "couchbase.mcp.operational.utils.embeddings.providers.bedrock",
     "providers.operational": "couchbase.mcp.operational.providers.operational",
     # operational-insights server

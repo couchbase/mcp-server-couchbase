@@ -28,6 +28,7 @@ dependencies = [
     # specifier (e.g. "couchbase-operational-insights>=1.0.0,<2.0.0") and
     # remove [tool.hatch.metadata] allow-direct-references below.
     "couchbase-operational-insights @ git+https://github.com/couchbaselabs/operational-insights-python-client.git",
+    "openai>=2.0.0,<3.0.0",
 ]
 
 [project.urls]
@@ -46,11 +47,12 @@ dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-cov>=7.0.0",
-    "openai>=2.0.0,<3.0.0",
 ]
 # Only needed for run_vector_search / run_search_vector_search with
-# EMBEDDING_PROVIDER=bedrock — every other embedding provider uses httpx,
-# already a transitive dependency via fastmcp.
+# EMBEDDING_PROVIDER=bedrock — openai/couchbase/voyage use the openai SDK (a
+# core dependency, see above); cohere still hand-rolls its request via httpx
+# (already a transitive dependency via fastmcp) since its wire format isn't
+# actually OpenAI-compatible.
 bedrock-embeddings = [
     "boto3>=1.34,<2.0",
 ]

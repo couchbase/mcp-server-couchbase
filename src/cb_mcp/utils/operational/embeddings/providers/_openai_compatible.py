@@ -1,11 +1,20 @@
-"""Shared base for the two OpenAI-shaped REST embedding providers.
+"""Shared base for the three OpenAI-SDK-backed embedding providers.
 
-OpenAI's ``/v1/embeddings`` and Couchbase's Model Service ``/v1/embeddings``
-(confirmed against docs.couchbase.com/ai/model-service-api-reference/rest-api.html)
-are identical in shape: ``Authorization: Bearer <key>``, request body
-``{"model", "input", "input_type"}``, response ``data[0].embedding``. This base
-class holds that logic once; the two subclasses differ only in whether
-``EMBEDDING_ENDPOINT`` has a public default.
+OpenAI's ``/v1/embeddings``, Couchbase's Model Service ``/v1/embeddings``
+(confirmed against docs.couchbase.com/ai/model-service-api-reference/rest-api.html),
+and Voyage's ``/v1/embeddings`` are all close enough to the same shape --
+``Authorization: Bearer <key>``, request body ``{"model", "input", ...}``,
+response ``data[0].embedding`` -- that the official ``openai`` Python SDK's
+client, pointed at each provider's own ``base_url``, talks to all three
+correctly. ``extra_body`` carries ``input_type``, the one field outside
+OpenAI's own documented schema that Couchbase and Voyage both use.
+
+Cohere is deliberately NOT part of this family despite also being
+"OpenAI-compatible" in spirit: its actual wire format differs enough that the
+openai SDK can't talk to it (``POST /embed``, not ``/embeddings``; request
+key ``texts``, not ``input``; response ``data["embeddings"]["float"][0]``,
+not ``data[0].embedding``) -- see cohere.py, which still hand-rolls its
+request via httpx.
 """
 
 from __future__ import annotations
@@ -14,7 +23,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-import httpx
+from openai import OpenAI
 
 from .....servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ..base import (
@@ -36,13 +45,13 @@ class _OpenAICompatibleProvider(EmbeddingProvider):
     #: OpenAI's documented /v1/embeddings schema (model, input,
     #: encoding_format, dimensions, user) has no input_type field -- False by
     #: default. Override to True only for a provider that documents support
-    #: for it, e.g. Couchbase's Model Service (see couchbase_provisioned.py).
+    #: for it via extra_body, e.g. Couchbase's Model Service and Voyage.
     _include_input_type: bool = False
 
     def __init__(self, *, api_key: str, model: str, base_url: str) -> None:
-        self._api_key = api_key
         self._model = model
         self._base_url = base_url
+        self._client = OpenAI(api_key=api_key, base_url=base_url, timeout=30)
 
     @classmethod
     def _normalize_base_url(cls, base_url: str) -> str:
@@ -74,28 +83,14 @@ class _OpenAICompatibleProvider(EmbeddingProvider):
         logger.debug(
             f"Requesting embedding from {self._base_url}/embeddings (model={model!r})"
         )
-        body: dict[str, Any] = {"model": model, "input": request.text}
-        if self._include_input_type:
-            body["input_type"] = request.input_type
-        with httpx.Client(timeout=30) as client:
-            resp = client.post(
-                f"{self._base_url}/embeddings",
-                headers={"Authorization": f"Bearer {self._api_key}"},
-                json=body,
-            )
-            if resp.is_error:
-                # The exception raise_for_status() throws carries the status
-                # line but not the response body, which is usually where the
-                # provider actually explains what went wrong (bad model name,
-                # invalid key, ...). Logged here, at DEBUG, since the caller's
-                # except block already logs the exception itself at ERROR.
-                logger.debug(
-                    f"Embedding request failed: {resp.status_code} {resp.text[:500]}"
-                )
-            resp.raise_for_status()
-            data = resp.json()
-        vector = data["data"][0]["embedding"]
+        extra_body = (
+            {"input_type": request.input_type} if self._include_input_type else None
+        )
+        response = self._client.embeddings.create(
+            model=model, input=request.text, extra_body=extra_body
+        )
+        vector = response.data[0].embedding
         logger.debug(f"Received embedding (dimensions={len(vector)})")
         return EmbeddingResult(
-            vector=vector, model=data.get("model", self._model), dimensions=len(vector)
+            vector=vector, model=response.model or self._model, dimensions=len(vector)
         )

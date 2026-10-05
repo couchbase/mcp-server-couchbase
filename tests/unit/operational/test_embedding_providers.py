@@ -7,8 +7,11 @@ Covers:
 - base.require_fields: missing-required-field error naming every field at
   once, optional fields passing through as None when absent.
 - Each BYOM/managed provider's from_settings (endpoint defaulting/requiring)
-  and embed() request/response handling, with httpx.Client mocked so no
-  network call is ever made.
+  and embed() request/response handling. openai/couchbase/voyage share
+  _OpenAICompatibleProvider (backed by the openai SDK) and are tested via a
+  faked OpenAI class so no network call is ever made; cohere still hand-rolls
+  its request via httpx (see _openai_compatible.py's module docstring for why
+  it isn't part of that family) and is tested the same way it always was.
 - bedrock: the "extra not installed" path (real in this environment, since
   boto3 is an optional extra) and, separately, the happy path with a faked
   boto3 module so the request/response shape is exercised too.
@@ -40,6 +43,8 @@ def _mock_httpx_client(module_path: str, json_body: dict):
     """Patch ``httpx.Client`` in ``module_path`` so ``.post(...)`` returns a
     fake response with the given JSON body, and no real network call happens.
     Returns the mocked client instance so callers can assert on .post's args.
+    Only cohere.py still uses this -- see _mock_openai_client below for the
+    openai/couchbase/voyage family, which goes through the openai SDK.
     """
     response = MagicMock()
     response.json.return_value = json_body
@@ -48,6 +53,32 @@ def _mock_httpx_client(module_path: str, json_body: dict):
     client_cm = MagicMock()
     client_cm.__enter__.return_value = client_instance
     return patch(f"{module_path}.httpx.Client", return_value=client_cm), client_instance
+
+
+_OPENAI_COMPATIBLE_MODULE = (
+    "cb_mcp.utils.operational.embeddings.providers._openai_compatible"
+)
+
+
+def _mock_openai_client(vector: list[float], model: str | None = None):
+    """Patch the openai SDK's ``OpenAI`` class (as imported into
+    _openai_compatible.py, shared by the openai/couchbase/voyage providers)
+    so constructing a client returns a fake whose .embeddings.create(...)
+    returns a fake response exposing .data[0].embedding and .model --
+    mimicking openai.types.CreateEmbeddingResponse's shape without a real
+    network call. Returns (patcher, mock_openai_class, create_mock) so
+    callers can assert on both the client's construction kwargs (api_key,
+    base_url) and the create() call's kwargs (model, input, extra_body).
+    """
+    response = SimpleNamespace(data=[SimpleNamespace(embedding=vector)], model=model)
+    fake_client = MagicMock()
+    fake_client.embeddings.create.return_value = response
+    mock_openai_class = MagicMock(return_value=fake_client)
+    return (
+        patch(f"{_OPENAI_COMPATIBLE_MODULE}.OpenAI", mock_openai_class),
+        mock_openai_class,
+        fake_client.embeddings.create,
+    )
 
 
 class TestRequireFields:
@@ -103,31 +134,36 @@ class TestOpenAIProvider:
         )
         assert provider._base_url == "http://localhost:11434/v1"
 
-    def test_embed_posts_and_parses_response(self) -> None:
-        provider = OpenAIEmbeddingProvider.from_settings(
-            {"embedding_api_key": "sk-x", "embedding_model": "text-embedding-3-small"}
-        )
-        patcher, client = _mock_httpx_client(
-            "cb_mcp.utils.operational.embeddings.providers._openai_compatible",
-            {
-                "data": [{"embedding": [0.1, 0.2, 0.3]}],
-                "model": "text-embedding-3-small",
-            },
+    def test_embed_calls_sdk_and_parses_response(self) -> None:
+        # from_settings() constructs the openai SDK client eagerly (in
+        # __init__), so it must happen inside the patch context too --
+        # patching OpenAI after construction wouldn't affect an
+        # already-built client instance.
+        patcher, mock_openai_class, create = _mock_openai_client(
+            vector=[0.1, 0.2, 0.3], model="text-embedding-3-small"
         )
         with patcher:
+            provider = OpenAIEmbeddingProvider.from_settings(
+                {
+                    "embedding_api_key": "sk-x",
+                    "embedding_model": "text-embedding-3-small",
+                }
+            )
             result = provider.embed(
                 EmbeddingRequest(text="hello", model="text-embedding-3-small")
             )
 
-        client.post.assert_called_once()
-        url, kwargs = client.post.call_args
-        assert url[0] == "https://api.openai.com/v1/embeddings"
-        assert kwargs["headers"]["Authorization"] == "Bearer sk-x"
-        assert kwargs["json"]["input"] == "hello"
+        mock_openai_class.assert_called_once_with(
+            api_key="sk-x", base_url="https://api.openai.com/v1", timeout=30
+        )
+        create.assert_called_once()
+        kwargs = create.call_args.kwargs
+        assert kwargs["model"] == "text-embedding-3-small"
+        assert kwargs["input"] == "hello"
         # OpenAI's real /v1/embeddings schema has no input_type field --
-        # must not be sent, unlike Couchbase's Model Service (see
+        # must not be sent, unlike Couchbase's Model Service and Voyage (see
         # TestCouchbaseProvisionedProvider.test_embed_includes_input_type).
-        assert "input_type" not in kwargs["json"]
+        assert kwargs["extra_body"] is None
         assert result.vector == [0.1, 0.2, 0.3]
         assert result.dimensions == 3
 
@@ -162,48 +198,35 @@ class TestCouchbaseProvisionedProvider:
         )
         assert provider._base_url == "https://abc123.ai.couchbase.com/v1"
 
-    def test_embed_posts_to_v1_embeddings_route(self) -> None:
-        """Proves the fix end-to-end: the actual URL posted to, not just
-        the stored base_url, includes /v1 -- for the exact bare-host
-        configuration Capella's UI gives an operator."""
-        provider = CouchbaseProvisionedEmbeddingProvider.from_settings(
-            {
-                "embedding_api_key": "k",
-                "embedding_model": "m",
-                "embedding_endpoint": "https://abc123.ai.couchbase.com",
-            }
-        )
-        patcher, client = _mock_httpx_client(
-            "cb_mcp.utils.operational.embeddings.providers._openai_compatible",
-            {"data": [{"embedding": [0.1, 0.2]}], "model": "m"},
+    def test_embed_uses_v1_base_url_and_includes_input_type(self) -> None:
+        """Proves the fix end-to-end: the openai SDK client is constructed
+        with the /v1-appended base_url, for the exact bare-host
+        configuration Capella's UI gives an operator (the SDK's own request
+        building handles joining /embeddings onto it from there). Also:
+        unlike OpenAI's real API, Couchbase's Model Service documents
+        input_type as a real optional field -- must be sent via extra_body,
+        the opposite of TestOpenAIProvider.test_embed_calls_sdk_and_parses_response.
+        """
+        patcher, mock_openai_class, create = _mock_openai_client(
+            vector=[0.1, 0.2], model="m"
         )
         with patcher:
-            provider.embed(EmbeddingRequest(text="hello", model="m"))
-
-        url = client.post.call_args[0][0]
-        assert url == "https://abc123.ai.couchbase.com/v1/embeddings"
-
-    def test_embed_includes_input_type(self) -> None:
-        """Unlike OpenAI's real API, Couchbase's Model Service documents
-        input_type as a real optional field -- must be sent here, the
-        opposite of TestOpenAIProvider.test_embed_posts_and_parses_response."""
-        provider = CouchbaseProvisionedEmbeddingProvider.from_settings(
-            {
-                "embedding_api_key": "k",
-                "embedding_model": "m",
-                "embedding_endpoint": "https://abc123.ai.couchbase.com",
-            }
-        )
-        patcher, client = _mock_httpx_client(
-            "cb_mcp.utils.operational.embeddings.providers._openai_compatible",
-            {"data": [{"embedding": [0.1, 0.2]}], "model": "m"},
-        )
-        with patcher:
+            provider = CouchbaseProvisionedEmbeddingProvider.from_settings(
+                {
+                    "embedding_api_key": "k",
+                    "embedding_model": "m",
+                    "embedding_endpoint": "https://abc123.ai.couchbase.com",
+                }
+            )
             provider.embed(
                 EmbeddingRequest(text="hello", model="m", input_type="query")
             )
 
-        assert client.post.call_args.kwargs["json"]["input_type"] == "query"
+        assert (
+            mock_openai_class.call_args.kwargs["base_url"]
+            == "https://abc123.ai.couchbase.com/v1"
+        )
+        assert create.call_args.kwargs["extra_body"] == {"input_type": "query"}
 
 
 class TestCohereProvider:
@@ -228,20 +251,34 @@ class TestCohereProvider:
 
 
 class TestVoyageProvider:
-    def test_embed_uses_embeddings_endpoint(self) -> None:
+    def test_defaults_to_public_base_url(self) -> None:
         provider = VoyageEmbeddingProvider.from_settings(
             {"embedding_api_key": "k", "embedding_model": "voyage-3"}
         )
-        patcher, client = _mock_httpx_client(
-            "cb_mcp.utils.operational.embeddings.providers.voyage",
-            {"data": [{"embedding": [0.6, 0.7]}]},
-        )
+        assert provider._base_url == "https://api.voyageai.com/v1"
+
+    def test_embed_calls_sdk_and_includes_input_type(self) -> None:
+        """Voyage's /v1/embeddings documents input as either a string or a
+        list of strings, so the shared base's bare-string input (matching
+        OpenAI's own schema) is valid here too -- confirmed against Voyage's
+        own API reference, not assumed. Like Couchbase, Voyage documents
+        input_type as a real field outside OpenAI's own schema -- sent via
+        extra_body, same mechanism as
+        TestCouchbaseProvisionedProvider.test_embed_uses_v1_base_url_and_includes_input_type.
+        """
+        patcher, mock_openai_class, create = _mock_openai_client(vector=[0.6, 0.7])
         with patcher:
+            provider = VoyageEmbeddingProvider.from_settings(
+                {"embedding_api_key": "k", "embedding_model": "voyage-3"}
+            )
             result = provider.embed(EmbeddingRequest(text="hello", model="voyage-3"))
 
-        url, kwargs = client.post.call_args
-        assert url[0] == "https://api.voyageai.com/v1/embeddings"
-        assert kwargs["json"]["input"] == ["hello"]
+        mock_openai_class.assert_called_once_with(
+            api_key="k", base_url="https://api.voyageai.com/v1", timeout=30
+        )
+        kwargs = create.call_args.kwargs
+        assert kwargs["input"] == "hello"
+        assert kwargs["extra_body"] == {"input_type": "query"}
         assert result.vector == [0.6, 0.7]
 
 
