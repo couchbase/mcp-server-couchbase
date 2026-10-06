@@ -56,15 +56,6 @@ from ...utils.sqlpp import quote_literal, safe_ident
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.vector_search")
 
 
-def _embed_query(ctx: Context, query_text: str) -> tuple[list[float], dict[str, Any]]:
-    """Unwrap the MCP Context into settings and delegate to the embeddings
-    package. Raises whatever embed_query_text raises -- both callers wrap
-    this in their own try/except and turn it into tool_error, matching
-    every other failure mode in this module.
-    """
-    return embed_query_text(get_settings(ctx), query_text)
-
-
 def _best_effort_cluster_major_version(cluster: Any) -> int | None:
     """Detect the cluster's major version for run_vector_search's advisory
     "warning" field (see its docstring). Purely informational -- a pre-8.0
@@ -164,7 +155,7 @@ def run_vector_search(
     )
 
     try:
-        vector, embedding_info = _embed_query(ctx, query_text)
+        vector, embedding_info = embed_query_text(get_settings(ctx), query_text)
 
         distance_args = f"doc.{safe_ident(vector_field)}, $query_vector, {quote_literal(distance_metric)}"
         if num_probes is not None:
@@ -332,7 +323,7 @@ def run_search_vector_search(
     )
 
     try:
-        vector, embedding_info = _embed_query(ctx, vector_query_text)
+        vector, embedding_info = embed_query_text(get_settings(ctx), vector_query_text)
 
         # scalar_query reuses fts.py's own raw-query-body convention
         # (SearchOptions(raw={"query": ...})) -- the request's query and
