@@ -591,6 +591,30 @@ def _validate_system_events_limit(limit: int) -> None:
         )
 
 
+def _validate_since_time(since_time: str) -> None:
+    """Require an ISO-8601 timestamp at an explicit zero UTC offset.
+
+    ``datetime.fromisoformat`` also accepts a bare date, a naive timestamp and a
+    non-UTC offset, all of which the endpoint answers with a 400 — so they are
+    caught here instead, where the message can name the expected form rather
+    than relaying a bare status code.
+    """
+    try:
+        parsed = datetime.fromisoformat(since_time.replace("Z", "+00:00"))
+        offset = parsed.utcoffset()
+    except (ValueError, AttributeError) as e:
+        raise ValueError(
+            f"since_time must be an ISO-8601 UTC timestamp such as "
+            f"'2026-10-05T09:12:04Z', got {since_time!r}"
+        ) from e
+    if offset is None or offset.total_seconds() != 0:
+        raise ValueError(
+            f"since_time must be in UTC, ending in 'Z' (or '+00:00') — the "
+            f"endpoint rejects a bare date, a naive timestamp or a non-UTC "
+            f"offset. Got {since_time!r}"
+        )
+
+
 def _system_events_rejection(response: httpx.Response) -> str:
     """Describe a 4xx from /events using the server's own message.
 
@@ -645,6 +669,16 @@ def _shape_system_events(
     # probably more events outside this window.
     truncated = len(events) == limit
 
+    # The endpoint's only cursor is sinceTime, and it is inclusive, so a batch
+    # whose first and last events share a timestamp cannot be paged past: the
+    # next call returns the same batch and the same cursor indefinitely. Offer
+    # the cursor only when it is guaranteed to advance.
+    next_since_time = (
+        timestamps[-1]
+        if (truncated and since_time and timestamps and timestamps[0] != timestamps[-1])
+        else None
+    )
+
     shaped["summary"] = {
         "returned": len(events),
         "limit": limit,
@@ -663,10 +697,18 @@ def _shape_system_events(
         # Supplied ready-made so paging never depends on indexing into the array
         # from the wrong end. Only meaningful when already paging forward: with
         # no since_time the batch is the newest there is.
-        "next_since_time": (
-            timestamps[-1] if (truncated and since_time and timestamps) else None
-        ),
+        "next_since_time": next_since_time,
     }
+    if truncated and since_time and timestamps and next_since_time is None:
+        # Every event in a full batch shares one timestamp, so sinceTime — the
+        # only cursor the endpoint offers — cannot move past them: the next call
+        # would return this same batch forever. Say so rather than hand back a
+        # cursor that does not advance.
+        shaped["summary"]["paging_blocked"] = (
+            f"All {len(events)} events share timestamp {timestamps[-1]}, which is "
+            f"more than this limit can return. sinceTime cannot advance past them; "
+            f"raise limit to see the rest of that timestamp."
+        )
     shaped["events"] = events
     return shaped
 
@@ -696,7 +738,10 @@ def get_cluster_system_events(
     - Do not re-sort or re-slice to get "the latest N": slicing keeps the oldest.
       Lower `limit` and let the server choose.
     - To page forward, pass summary.next_since_time as the next since_time. It is
-      inclusive, so the boundary event repeats — dedupe on uuid.
+      inclusive, so the boundary event repeats — dedupe on uuid. When it is null
+      on a truncated result, check summary.paging_blocked: every event in the
+      batch shares one timestamp, so sinceTime cannot move past them and a
+      higher limit is the only way to see the rest.
 
     A cluster's log is overwhelmingly "info", so expect routine entries in the window; move
     the window rather than raising `limit`.
@@ -722,15 +767,7 @@ def get_cluster_system_events(
 
         _validate_system_events_limit(limit)
         if since_time is not None:
-            try:
-                datetime.fromisoformat(since_time.replace("Z", "+00:00"))
-            except (ValueError, AttributeError) as e:
-                # A malformed timestamp would otherwise come back as an empty
-                # window, which reads as "nothing happened".
-                raise ValueError(
-                    f"since_time must be an ISO-8601 UTC timestamp such as "
-                    f"'2026-10-05T09:12:04Z', got {since_time!r}"
-                ) from e
+            _validate_since_time(since_time)
 
         params: dict[str, Any] = {"limit": limit}
         if since_time is not None:
@@ -784,6 +821,15 @@ def get_cluster_system_events(
                         f"{' (truncated)' if summary['possibly_truncated'] else ''}"
                     )
                     return shaped
+                except json.JSONDecodeError as e:
+                    # A garbled body is this host misbehaving, not the request
+                    # being wrong — and JSONDecodeError subclasses ValueError, so
+                    # it must be caught ahead of the rejection branch below or a
+                    # bad response from one node would abort the whole call.
+                    logger.warning(
+                        f"Failed to decode cluster system events from {host}: {e}"
+                    )
+                    last_error = e
                 except ValueError:
                     # The request itself was refused — failing over would only
                     # collect the same refusal from every other node.

@@ -29,6 +29,7 @@ reached against a live cluster:
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -1302,3 +1303,106 @@ class TestGetClusterSystemEvents:
         assert len(result["events"]) == 2
         assert result["summary"]["returned"] == 2
         assert result["summary"]["by_severity"] == {"info": 1}
+
+    # -- review findings -----------------------------------------------------
+
+    @staticmethod
+    def _same_timestamp_events(count: int, ts: str = "2026-10-05T09:12:04.102Z"):
+        """A batch whose events all share one timestamp."""
+        return {
+            "events": [
+                {
+                    "timestamp": ts,
+                    "component": "data",
+                    "severity": "info",
+                    "description": "Bucket online",
+                    "event_id": 8199,
+                    "uuid": f"uuid-{i}",
+                    "extra_attributes": {},
+                }
+                for i in range(count)
+            ]
+        }
+
+    def test_withholds_a_cursor_that_cannot_advance(self):
+        """sinceTime is inclusive, so a single-timestamp batch cannot be paged.
+
+        Returning the last timestamp would hand back a cursor that fetches the
+        same batch forever, and uuid dedupe cannot reach the events it hides.
+        """
+        result, _ = self._call(
+            self._same_timestamp_events(3),
+            limit=3,
+            since_time="2026-10-05T09:00:00Z",
+        )
+        summary = result["summary"]
+        assert summary["possibly_truncated"] is True
+        assert summary["next_since_time"] is None
+        assert "paging_blocked" in summary
+        assert "2026-10-05T09:12:04.102Z" in summary["paging_blocked"]
+
+    def test_offers_a_cursor_when_timestamps_differ(self):
+        """The ordinary case still pages, and says nothing about being blocked."""
+        result, _ = self._call(limit=4, since_time="2026-10-05T09:00:00Z")
+        summary = result["summary"]
+        assert summary["next_since_time"] == "2026-10-05T09:14:51.883Z"
+        assert "paging_blocked" not in summary
+
+    def test_no_paging_block_when_batch_is_not_full(self):
+        """An unfilled batch is the end of the window, not a blocked cursor."""
+        result, _ = self._call(self._same_timestamp_events(2), limit=50)
+        assert result["summary"]["possibly_truncated"] is False
+        assert "paging_blocked" not in result["summary"]
+
+    @pytest.mark.parametrize(
+        "since_time",
+        [
+            "2026-10-05",  # bare date
+            "2026-10-05T09:12:04",  # naive, no offset
+            "2026-10-05T09:12:04+05:30",  # non-UTC offset
+        ],
+    )
+    def test_rejects_since_time_that_is_not_explicit_utc(self, since_time):
+        """The endpoint 400s on each of these, so reject them locally instead."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        with (
+            patch("httpx.Client") as mock_cls,
+            pytest.raises(ValueError, match="must be in UTC"),
+        ):
+            get_cluster_system_events(ctx, since_time=since_time)
+        mock_cls.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "since_time", ["2026-10-05T09:12:04Z", "2026-10-05T09:12:04+00:00"]
+    )
+    def test_accepts_explicit_utc_since_time(self, since_time):
+        _, client = self._call(since_time=since_time)
+        assert client.get.call_args.kwargs["params"]["sinceTime"] == since_time
+
+    def test_fails_over_when_a_host_returns_malformed_json(self):
+        """JSONDecodeError subclasses ValueError, which the 4xx branch re-raises.
+
+        Without an explicit decode branch ahead of it, one garbled response
+        would abort the call instead of trying the next host.
+        """
+        garbled = MagicMock()
+        garbled.status_code = 200
+        garbled.raise_for_status.return_value = None
+        garbled.json.side_effect = json.JSONDecodeError("Expecting value", "", 0)
+        ok = MagicMock()
+        ok.status_code = 200
+        ok.raise_for_status.return_value = None
+        ok.json.return_value = self._events()
+        client = MagicMock()
+        client.get.side_effect = [garbled, ok]
+
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        with (
+            self._patch_endpoints(["host1:8091", "host2:8091"]),
+            patch("httpx.Client") as mock_cls,
+        ):
+            mock_cls.return_value.__enter__.return_value = client
+            result = get_cluster_system_events(ctx)
+
+        assert client.get.call_count == 2, "A garbled body must not abort the call"
+        assert result["summary"]["returned"] == 4
