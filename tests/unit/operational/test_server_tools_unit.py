@@ -21,9 +21,9 @@ reached against a live cluster:
   endpoints up front, reads its three endpoints from a single host, and falls
   over to the next host when any one of them fails.
 - get_cluster_system_events rejects out-of-range limits (including the REST
-  API's unlimited -1) without a REST call, passes filter values through for the
-  server to validate, maps its parameters onto the endpoint's mixed
-  camelCase/snake_case query names, and returns the event array in the server's
+  API's unlimited -1) and malformed since_time without a REST call, sends no
+  version-specific query parameters, surfaces a 4xx using the server's own
+  message without failing over, and returns the event array in the server's
   order without re-sorting or slicing.
 """
 
@@ -1074,46 +1074,23 @@ class TestGetClusterSystemEvents:
         assert client.get.call_args.kwargs["params"] == {"limit": 50}
         assert client.get.call_args.args[0] == "http://localhost:8091/events"
 
-    def test_maps_params_to_rest_names(self):
-        """sinceTime is camelCase but event_id is not — the server's own mix."""
-        _, client = self._call(
-            since_time="2026-10-05T09:00:00Z",
-            limit=10,
-            component="indexing",
-            severity="error",
-            event_id=2057,
-        )
+    def test_maps_since_time_to_its_rest_name(self):
+        """The endpoint spells it camelCase; nothing else is sent."""
+        _, client = self._call(since_time="2026-10-05T09:00:00Z", limit=10)
         assert client.get.call_args.kwargs["params"] == {
             "limit": 10,
             "sinceTime": "2026-10-05T09:00:00Z",
-            "component": "indexing",
-            "severity": "error",
-            "event_id": 2057,
         }
 
-    @pytest.mark.parametrize(
-        "kwargs",
-        [
-            # The REST docs' spelling, which the server rejects with a 400.
-            {"severity": "warning"},
-            {"severity": "bogus"},
-            {"component": "bogus"},
-            # Comma-separated lists are a server-side 400 too.
-            {"component": "indexing,data"},
-            {"severity": "ERROR"},
-        ],
-    )
-    def test_passes_filter_values_through_unchanged(self, kwargs):
-        """Filters are the server's to validate, not this tool's.
+    def test_sends_no_version_specific_filters(self):
+        """severity/component/event_id are 8.0+ and deliberately not exposed.
 
-        /events answers a bad value with a 400 naming the set it accepts, which
-        is authoritative for the running version — so values go out exactly as
-        given rather than being checked against a copy of that list here.
+        Sending one to a 7.6 cluster is a 400 "Unsupported key", so the tool
+        must never put them on the query string.
         """
-        _, client = self._call(**kwargs)
+        _, client = self._call()
         params = client.get.call_args.kwargs["params"]
-        for field, value in kwargs.items():
-            assert params[field] == value
+        assert set(params) == {"limit"}
 
     @staticmethod
     def _rejection(status: int, *, json_body=None, text: str = ""):
@@ -1129,35 +1106,25 @@ class TestGetClusterSystemEvents:
         return response
 
     def test_surfaces_the_servers_own_rejection_message(self):
-        """A 400 names the accepted values; that is the whole point of it.
-
-        The server's message is authoritative for the running version, so it
-        reaches the caller instead of httpx's bare status line.
-        """
+        """The server's reason reaches the caller, not httpx's status line."""
         client = MagicMock()
         client.get.return_value = self._rejection(
-            400,
-            json_body={
-                "errors": {
-                    "severity": "The value must be one of the following: "
-                    "[info,error,warn,fatal]"
-                }
-            },
+            400, json_body={"errors": {"sinceTime": "Unsupported key"}}
         )
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         with (
             self._patch_endpoints(),
             patch("httpx.Client") as mock_cls,
-            pytest.raises(ValueError, match=r"info,error,warn,fatal"),
+            pytest.raises(ValueError, match=r"sinceTime: Unsupported key"),
         ):
             mock_cls.return_value.__enter__.return_value = client
-            get_cluster_system_events(ctx, severity="warning")
+            get_cluster_system_events(ctx, since_time="2026-10-05T09:00:00Z")
 
     def test_does_not_fail_over_after_a_rejection(self):
         """Every other node would refuse the same request identically."""
         client = MagicMock()
         client.get.return_value = self._rejection(
-            400, json_body={"errors": {"component": "The value must be one of ..."}}
+            400, json_body={"errors": {"sinceTime": "Unsupported key"}}
         )
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         with (
@@ -1166,7 +1133,7 @@ class TestGetClusterSystemEvents:
             pytest.raises(ValueError),
         ):
             mock_cls.return_value.__enter__.return_value = client
-            get_cluster_system_events(ctx, component="bogus")
+            get_cluster_system_events(ctx, since_time="2026-10-05T09:00:00Z")
         assert client.get.call_count == 1, "A 4xx must not be retried on other hosts"
 
     @pytest.mark.parametrize(
@@ -1315,14 +1282,10 @@ class TestGetClusterSystemEvents:
         result, _ = self._call(limit=4)
         assert result["summary"]["next_since_time"] is None
 
-    def test_filters_applied_echoes_the_request(self):
-        result, _ = self._call(component="data", event_id=42)
-        assert result["summary"]["filters_applied"] == {
-            "since_time": None,
-            "component": "data",
-            "severity": None,
-            "event_id": 42,
-        }
+    def test_summary_echoes_since_time(self):
+        assert self._call()[0]["summary"]["since_time"] is None
+        windowed, _ = self._call(since_time="2026-10-05T09:00:00Z")
+        assert windowed["summary"]["since_time"] == "2026-10-05T09:00:00Z"
 
     @pytest.mark.parametrize("payload", [{"events": []}, {}, {"events": "nope"}])
     def test_handles_empty_or_malformed_payloads(self, payload):

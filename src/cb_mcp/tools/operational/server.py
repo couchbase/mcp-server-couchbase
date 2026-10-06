@@ -586,43 +586,19 @@ def _validate_system_events_limit(limit: int) -> None:
         raise ValueError(
             f"limit must be between 1 and {SYSTEM_EVENTS_MAX_LIMIT}, got {limit}. "
             f"The REST API's -1 ('no limit') is not accepted: the event log holds up "
-            f"to 20,000 entries. Narrow the window with severity, component or "
-            f"since_time instead of raising the limit."
+            f"to 20,000 entries. Move the window with since_time instead of "
+            f"raising the limit."
         )
-
-
-def _system_events_params(
-    *,
-    since_time: str | None,
-    limit: int,
-    component: str | None,
-    severity: str | None,
-    event_id: int | None,
-) -> dict[str, Any]:
-    """Build the /events query string, omitting unset filters.
-
-    The endpoint mixes conventions — ``sinceTime`` is camelCase while
-    ``event_id`` is not — so the names are spelled out rather than derived.
-    """
-    params: dict[str, Any] = {"limit": limit}
-    optional = {
-        "sinceTime": since_time,
-        "component": component,
-        "severity": severity,
-        "event_id": event_id,
-    }
-    params.update({k: v for k, v in optional.items() if v is not None})
-    return params
 
 
 def _system_events_rejection(response: httpx.Response) -> str:
     """Describe a 4xx from /events using the server's own message.
 
-    The endpoint reports a bad filter as ``{"errors": {"severity": "The value
-    must be one of ..."}}`` — the authoritative list for the running version,
-    and the one thing an agent needs to correct itself. ``raise_for_status``
-    discards it, so it is read out here. Other 4xx bodies are not JSON (401 is
-    empty, 404 is plain text), so those fall back to whatever text there is.
+    The endpoint reports a rejected parameter as ``{"errors": {"sinceTime":
+    "..."}}`` — the authoritative reason for the running version, and the one
+    thing an agent needs to correct itself. ``raise_for_status`` discards it, so
+    it is read out here. Other 4xx bodies are not JSON (401 is empty, 404 is
+    plain text), so those fall back to whatever text there is.
     """
     detail = ""
     try:
@@ -644,9 +620,6 @@ def _shape_system_events(
     *,
     limit: int,
     since_time: str | None,
-    component: str | None,
-    severity: str | None,
-    event_id: int | None,
 ) -> dict[str, Any]:
     """Summarise an event list without reordering it.
 
@@ -685,12 +658,7 @@ def _shape_system_events(
         # Counts describe the returned events only, not the whole event log.
         "by_severity": dict(Counter(event.get("severity") for event in dicts)),
         "by_component": dict(Counter(event.get("component") for event in dicts)),
-        "filters_applied": {
-            "since_time": since_time,
-            "component": component,
-            "severity": severity,
-            "event_id": event_id,
-        },
+        "since_time": since_time,
         "possibly_truncated": truncated,
         # Supplied ready-made so paging never depends on indexing into the array
         # from the wrong end. Only meaningful when already paging forward: with
@@ -707,9 +675,6 @@ def get_cluster_system_events(
     ctx: Context,
     since_time: str | None = None,
     limit: int = SYSTEM_EVENTS_DEFAULT_LIMIT,
-    component: str | None = None,
-    severity: str | None = None,
-    event_id: int | None = None,
     timeout: int = 30,
 ) -> dict[str, Any]:
     """Get the cluster's system event log — what changed on the cluster, and when.
@@ -722,14 +687,6 @@ def get_cluster_system_events(
     Self-managed Couchbase Server 7.6+ only (Capella is rejected without a REST
     call); needs the Full Admin or Cluster Admin role. Calls GET /events.
 
-    Filtering — component, severity and event_id are applied by the server and AND
-        together, so component="indexing" with severity="error" matches both. Each
-        takes one value; a bad one returns an HTTP 400 naming what is accepted.
-        severity is "info", "warn", "error" or "fatal" — note "warn", which the REST
-        documentation wrongly calls "warning". Filter before raising `limit`: a
-        cluster's log is overwhelmingly "info", so severity="error" is by far the
-        highest-yield first query.
-
     Ordering — easy to misread:
     - Events are ALWAYS oldest-first, but which ones the server picks depends on
       since_time. Without it, the server takes the `limit` MOST RECENT events, so
@@ -741,7 +698,12 @@ def get_cluster_system_events(
     - To page forward, pass summary.next_since_time as the next since_time. It is
       inclusive, so the boundary event repeats — dedupe on uuid.
 
+    A cluster's log is overwhelmingly "info", so expect routine entries in the window; move
+    the window rather than raising `limit`.
+
     Reading the result:
+    - summary.by_severity / by_component say what the window holds at a glance, so
+      a lone "error" among routine entries is visible without reading every event.
     - summary.possibly_truncated means the server filled the limit, so more events
       probably exist outside the window. Absence of a later event is not evidence.
     - The log is a ring buffer (10,000 entries by default), so an empty result for
@@ -770,13 +732,10 @@ def get_cluster_system_events(
                     f"'2026-10-05T09:12:04Z', got {since_time!r}"
                 ) from e
 
-        params = _system_events_params(
-            since_time=since_time,
-            limit=limit,
-            component=component,
-            severity=severity,
-            event_id=event_id,
-        )
+        params: dict[str, Any] = {"limit": limit}
+        if since_time is not None:
+            # The endpoint spells it camelCase.
+            params["sinceTime"] = since_time
 
         protocol = (
             "https" if connection_string.lower().startswith("couchbases://") else "http"
@@ -818,9 +777,6 @@ def get_cluster_system_events(
                         response.json(),
                         limit=limit,
                         since_time=since_time,
-                        component=component,
-                        severity=severity,
-                        event_id=event_id,
                     )
                     summary = shaped["summary"]
                     logger.info(

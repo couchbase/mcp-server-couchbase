@@ -12,7 +12,7 @@ Tests for:
 - test_cluster_connection
 - get_cluster_metrics
 - get_cluster_health_snapshot
-- get_cluster_system_events (ordering, limit, filters, since_time inclusivity)
+- get_cluster_system_events (ordering, limit, since_time inclusivity)
 """
 
 from __future__ import annotations
@@ -510,30 +510,19 @@ async def test_get_cluster_system_events_respects_limit() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_cluster_system_events_filters_are_applied_server_side() -> None:
-    """Verify component and severity filter server-side and AND together.
+async def test_get_cluster_system_events_sends_no_version_specific_params() -> None:
+    """Verify the tool works identically on every supported server version.
 
-    The token-budget argument for this tool rests on the filters being real:
-    an unfiltered log is thousands of events, nearly all of them "info".
-    A quiet cluster may match nothing, so an empty result is acceptable —
-    what must not happen is a non-matching event coming back.
+    The endpoint's severity/component/event_id filters only exist in Couchbase
+    Server 8.0+; a 7.6 cluster answers them with 400 "Unsupported key". The tool
+    exposes only since_time and limit, so this passes on both — the regression it
+    guards is a filter parameter creeping back into the query string.
     """
     async with create_mcp_session() as session:
-        response = await session.call_tool(
-            "get_cluster_system_events", {"severity": "info", "limit": 10}
-        )
-        payload = _system_events_or_skip(response, extract_payload(response))
-        assert all(e["severity"] == "info" for e in payload["events"])
-
-        response = await session.call_tool(
-            "get_cluster_system_events",
-            {"component": "ns_server", "severity": "info", "limit": 10},
-        )
-        payload = _system_events_or_skip(response, extract_payload(response))
-        assert all(
-            e["component"] == "ns_server" and e["severity"] == "info"
-            for e in payload["events"]
-        ), "component and severity must AND together, not union"
+        for arguments in ({}, {"limit": 3}, {"since_time": "2020-01-01T00:00:00Z"}):
+            response = await session.call_tool("get_cluster_system_events", arguments)
+            payload = _system_events_or_skip(response, extract_payload(response))
+            assert payload["summary"]["ordering"] == "ascending_oldest_first"
 
 
 @pytest.mark.asyncio
