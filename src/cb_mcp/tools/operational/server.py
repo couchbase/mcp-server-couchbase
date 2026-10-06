@@ -20,6 +20,10 @@ from fastmcp import Context
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.config import get_settings
+from ...utils.operational.cluster_health import (
+    bare_host,
+    build_cluster_health_snapshot,
+)
 from ...utils.operational.connection import connect_to_bucket
 from ...utils.operational.connection_string import (
     determine_ssl_verification,
@@ -32,6 +36,7 @@ from ...utils.operational.constants import (
     MANAGEMENT_REST_PORT_TLS,
 )
 from ...utils.operational.context import get_cluster_connection
+from ...utils.operational.index_utils import resolve_management_endpoints
 from .query import run_cluster_query
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.server")
@@ -361,3 +366,198 @@ def get_cluster_metrics(
             "error": str(e),
             "message": "Failed to get cluster metrics",
         }
+
+
+def get_cluster_tasks(ctx: Context, timeout: int = 30) -> list[dict[str, Any]]:
+    """Get the cluster tasks running right now — rebalance, compaction, XDCR, index build.
+
+    Answers "what is this cluster doing?" — where stuck rebalances, hung index builds and
+    lagging XDCR surface. One call is a single sample, so pair it with get_cluster_metrics
+    to tell "slow but progressing" from "flatlined".
+
+    Calls GET /pools/default/tasks. Self-managed Couchbase Server 7.6+ only (Capella is
+    rejected without a REST call); needs the Read-Only Admin (ro_admin) role.
+
+    Returns the endpoint's array unchanged, or [] if no tasks are reported. Only "type" and
+    "status" are common to every entry; the rest are per type — rebalance: progress,
+    perNode, detailedProgress, stageInfo, subtype; bucket_compaction: bucket, progress,
+    changesDone, totalChanges; xdcr: changesLeft, docsChecked, docsWritten, source, target;
+    global_indexes/indexer: bucket, index, progress, id; loadingSampleBucket: task_id,
+    bucket, bucket_uuid.
+
+    Reading the result:
+    - An idle cluster still reports a rebalance entry with status "notRunning", so check
+      each task's "status" rather than counting entries.
+    - "statusIsStale": true means the cluster cannot vouch for that status — read it as
+      "unknown", not "stuck". Flatlined progress and a status that stopped updating look
+      identical here but mean different things.
+    - "progress" means different things per type, so do not compare it across tasks.
+    - Poll no faster than "recommendedRefreshPeriod" (seconds), the server's own hint.
+    - "cancelURI"/"lastReportURI" are informational UI links; this tool only ever GETs and
+      never invokes them.
+    """
+    try:
+        settings = get_settings(ctx)
+        validate_connection_settings(settings)
+        connection_string = settings["connection_string"]
+        if is_capella_connection(connection_string):
+            raise ValueError("get_cluster_tasks is not supported on Capella clusters")
+
+        is_tls = connection_string.lower().startswith("couchbases://")
+        protocol, port = (
+            ("https", MANAGEMENT_REST_PORT_TLS)
+            if is_tls
+            else ("http", MANAGEMENT_REST_PORT_PLAIN)
+        )
+        verify_ssl = determine_ssl_verification(
+            connection_string, settings.get("ca_cert_path")
+        )
+        hosts = [
+            f"[{host}]" if ":" in host else host
+            for host in extract_hosts_from_connection_string(connection_string)
+        ]
+        if not hosts:
+            raise ValueError(
+                f"No hosts found in connection_string: {connection_string!r}"
+            )
+
+        # Failover, not fan-out: tasks are tracked by the orchestrator and every node
+        # relays its view, so any one node returns the whole cluster's answer. The first
+        # host that responds is therefore complete — the rest are only tried if it is
+        # unreachable. (Contrast fetch_index_stats_from_rest_api, which must visit every
+        # index node because each one knows only its own indexes.)
+        last_error: Exception | None = None
+        with httpx.Client(verify=verify_ssl, timeout=timeout) as client:
+            for host in hosts:
+                try:
+                    response = client.get(
+                        f"{protocol}://{host}:{port}/pools/default/tasks",
+                        auth=(settings["username"], settings["password"]),
+                    )
+                    response.raise_for_status()
+                    tasks = response.json()
+                    running = sum(
+                        1
+                        for task in tasks
+                        if isinstance(task, dict) and task.get("status") == "running"
+                    )
+                    logger.info(
+                        f"Retrieved {len(tasks)} cluster task(s) ({running} running) from {host}"
+                    )
+                    return tasks
+                except Exception as e:
+                    logger.warning(f"Failed to fetch cluster tasks from {host}: {e}")
+                    last_error = e
+        raise RuntimeError(f"Failed to reach any host in {hosts}: {last_error}")
+    except Exception as e:
+        logger.error(f"Error getting cluster tasks: {e}", exc_info=True)
+        raise
+
+
+def get_cluster_health_snapshot(ctx: Context, timeout: int = 30) -> dict[str, Any]:
+    """Get per-node service topology, membership, orchestrator and health in one call.
+
+    Use this to turn a symptom into a specific node and service: which node is in
+    "warning", what it runs, whether it is still in the cluster, and whether it is the
+    orchestrator — i.e. whether acting on it is disruptive. Also answers "did a topology
+    change leave us in a good state?" after a node replacement or failover.
+
+    Self-managed Couchbase Server 7.6+ only (Capella is rejected without a REST call);
+    needs the Read-Only Admin (ro_admin) role.
+
+    Reading the result:
+    - cluster.unhealthy_nodes / inactive_nodes are the fast path: a node is in
+      unhealthy_nodes when status is not "healthy", and in inactive_nodes when it is no
+      longer an "active" member (e.g. "inactiveFailed" — already failed over, which is a
+      different situation from an active node merely reporting "warning").
+    - safe_to_act_on is false only for the orchestrator, where a restart or failover is
+      disruptive in a way it is not elsewhere. When cluster.orchestrator_known is false
+      no node could be flagged, so read safe_to_act_on as "unknown", not "yes" — the
+      cluster reports no orchestrator while one is being elected.
+    - reachable_address is the address to probe next, chosen between the node's internal
+      and externally advertised addresses based on which one this server reached the
+      cluster on. Probing the other form may fail for network reasons that look like a
+      node outage; alternateAddresses keeps it as a fallback.
+    - cluster.counters holds lifetime rebalance tallies: rebalance_start above
+      rebalance_success means a rebalance began and did not finish — the signature of an
+      interrupted topology change. Pair with get_cluster_tasks for what is running now.
+    - recoveryType other than "none" means a recovery is in progress: not healthy yet,
+      rather than broken.
+
+    Returns {"cluster": {...}, "nodes": [...]}; raises on failure.
+    """
+    try:
+        settings = get_settings(ctx)
+        validate_connection_settings(settings)
+        connection_string = settings["connection_string"]
+        if is_capella_connection(connection_string):
+            raise ValueError(
+                "get_cluster_health_snapshot is not supported on Capella clusters"
+            )
+
+        protocol = (
+            "https" if connection_string.lower().startswith("couchbases://") else "http"
+        )
+        verify_ssl = determine_ssl_verification(
+            connection_string, settings.get("ca_cert_path")
+        )
+        # Ask the SDK where management actually listens rather than appending the
+        # default port to the connection string's hosts: the port it carries is a KV
+        # one, and a port-mapped or NAT'd cluster serves management elsewhere. Same
+        # resolution get_index_stats uses.
+        endpoints = resolve_management_endpoints(
+            get_cluster_connection(ctx), connection_string
+        )
+        if not endpoints:
+            raise ValueError(
+                f"No management endpoints found for connection_string: "
+                f"{connection_string!r}"
+            )
+
+        # Failover, not fan-out: every node relays the whole cluster's topology, so the
+        # first host that answers gives the complete picture and the rest are only tried
+        # if it is unreachable.
+        last_error: Exception | None = None
+        with httpx.Client(verify=verify_ssl, timeout=timeout) as client:
+            for host in endpoints:
+                try:
+                    payloads = []
+                    for path in (
+                        "/pools/default",
+                        "/pools/default/nodeServices",
+                        "/pools/default/terseClusterInfo",
+                    ):
+                        response = client.get(
+                            f"{protocol}://{host}{path}",
+                            auth=(settings["username"], settings["password"]),
+                        )
+                        response.raise_for_status()
+                        payloads.append(response.json())
+
+                    pools_default, node_services, terse_cluster_info = payloads
+                    snapshot = build_cluster_health_snapshot(
+                        pools_default,
+                        node_services,
+                        terse_cluster_info,
+                        # Which address answered decides whether this server can use the
+                        # cluster's externally advertised addresses; strip the brackets
+                        # an IPv6 literal carries in a URL, since nodeServices reports
+                        # hostnames bare.
+                        reached_host=bare_host(host),
+                    )
+                    cluster = snapshot["cluster"]
+                    logger.info(
+                        f"Retrieved cluster health snapshot from {host}: "
+                        f"{cluster['nodes_total']} node(s), "
+                        f"{len(cluster['unhealthy_nodes'])} not healthy"
+                    )
+                    return snapshot
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to fetch cluster health snapshot from {host}: {e}"
+                    )
+                    last_error = e
+        raise RuntimeError(f"Failed to reach any host in {endpoints}: {last_error}")
+    except Exception as e:
+        logger.error(f"Error getting cluster health snapshot: {e}", exc_info=True)
+        raise
