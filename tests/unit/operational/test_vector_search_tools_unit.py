@@ -74,6 +74,7 @@ class TestRunVectorSearchValidation:
             "c",
             "embedding",
             "query text",
+            distance_metric="l2_squared",
             num_probes=10,
             # rerank/top_n_scan omitted -> invalid
         )
@@ -91,7 +92,15 @@ class TestRunVectorSearchValidation:
             ),
             pytest.raises(Exception, match="cluster down"),
         ):
-            run_vector_search(ctx, "b", "s", "c", "embedding", "query text")
+            run_vector_search(
+                ctx,
+                "b",
+                "s",
+                "c",
+                "embedding",
+                "query text",
+                distance_metric="l2_squared",
+            )
 
     def test_bucket_connection_failure_propagates(self) -> None:
         """A bucket that can't be reached is the same class of problem as an
@@ -106,7 +115,15 @@ class TestRunVectorSearchValidation:
             ),
             pytest.raises(Exception, match="no bucket 'b'"),
         ):
-            run_vector_search(ctx, "b", "s", "c", "embedding", "query text")
+            run_vector_search(
+                ctx,
+                "b",
+                "s",
+                "c",
+                "embedding",
+                "query text",
+                distance_metric="l2_squared",
+            )
 
 
 class TestRunVectorSearchQueryConstruction:
@@ -133,7 +150,14 @@ class TestRunVectorSearchQueryConstruction:
             _patch_embedding(vector=[0.1, 0.2, 0.3]),
         ):
             result = run_vector_search(
-                ctx, "b", "s", "c", "embedding", "find widgets", limit=5
+                ctx,
+                "b",
+                "s",
+                "c",
+                "embedding",
+                "find widgets",
+                distance_metric="l2_squared",
+                limit=5,
             )
 
         assert result["success"] is True
@@ -173,6 +197,7 @@ class TestRunVectorSearchQueryConstruction:
                 "c",
                 "embedding",
                 "query",
+                distance_metric="l2_squared",
                 num_probes=10,
                 rerank=1,
                 top_n_scan=1000,
@@ -200,6 +225,7 @@ class TestRunVectorSearchQueryConstruction:
                 "c",
                 "embedding",
                 "query",
+                distance_metric="l2_squared",
                 where="doc.status = 'active'",
                 select_fields=["name", "status"],
             )
@@ -221,7 +247,9 @@ class TestRunVectorSearchQueryConstruction:
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
             _patch_embedding(),
         ):
-            result = run_vector_search(ctx, "b", "s", "c", "embedding", "query")
+            result = run_vector_search(
+                ctx, "b", "s", "c", "embedding", "query", distance_metric="l2_squared"
+            )
 
         assert result["success"] is True
         assert result["cluster_major_version"] == 7
@@ -241,7 +269,9 @@ class TestRunVectorSearchQueryConstruction:
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
             _patch_embedding(),
         ):
-            result = run_vector_search(ctx, "b", "s", "c", "embedding", "query")
+            result = run_vector_search(
+                ctx, "b", "s", "c", "embedding", "query", distance_metric="l2_squared"
+            )
 
         assert result["success"] is True
         assert result["total_hits"] == 1
@@ -260,7 +290,9 @@ class TestRunVectorSearchQueryConstruction:
                 )
             ),
         ):
-            result = run_vector_search(ctx, "b", "s", "c", "embedding", "query")
+            result = run_vector_search(
+                ctx, "b", "s", "c", "embedding", "query", distance_metric="l2_squared"
+            )
 
         assert result["success"] is False
         assert "EMBEDDING_PROVIDER" in result["error"]

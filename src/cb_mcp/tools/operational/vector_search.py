@@ -86,7 +86,7 @@ def run_vector_search(
     collection_name: str,
     vector_field: str,
     query_text: str,
-    distance_metric: str = "l2_squared",
+    distance_metric: str,
     limit: int = 10,
     where: str | None = None,
     select_fields: list[str] | None = None,
@@ -108,15 +108,16 @@ def run_vector_search(
     the index automatically from the vector field referenced in the query --
     there is no index_name parameter, and none is needed.
 
-    distance_metric must match the `similarity` the index was created with
-    (CREATE INDEX ... WITH {"similarity": ...}) -- Couchbase only selects the
-    Composite/Hyperscale Vector Index when the two agree; a mismatch doesn't
-    error, it silently falls back to not using the index. Defaults to
-    "l2_squared" to match Couchbase's own index-creation default when
-    `similarity` is left unset there too (valid values: cosine, dot,
-    l2/euclidean, l2_squared/euclidean_squared). This tool has no index_name
-    to look the configured similarity up from (see above), so if results seem
-    slow, check what the index was actually created with.
+    distance_metric is required, deliberately with no default: it must match
+    the `similarity` the index was created with (CREATE INDEX ... WITH
+    {"similarity": ...}), or Couchbase silently falls back to not using the
+    Composite/Hyperscale Vector Index at all (no error -- the query still
+    returns correct results, just unindexed). There is no one value that's
+    usually right, since it depends entirely on how the specific index was
+    created, and this tool has no index_name to look that up automatically
+    (see above) -- call list_indexes first and read the `similarity` value
+    out of the matching index's `definition` field (valid values: cosine,
+    dot, l2/euclidean, l2_squared/euclidean_squared).
 
     num_probes/rerank/top_n_scan are Hyperscale Vector Index tuning
     parameters (centroids to probe, rerank count, top-N scan). Pass all three

@@ -203,6 +203,7 @@ TOOL_REQUIRED_PARAMS = {
         "collection_name",
         "vector_field",
         "query_text",
+        "distance_metric",
     ],
     "run_search_vector_search": ["index_name", "vector_field", "vector_query_text"],
 }
