@@ -144,16 +144,32 @@ def process_scoped_path(
 
 
 class AuditSinkProtocol(Protocol):
-    """What the emitter needs from a sink, whatever it writes to."""
+    """What the emitter needs from a sink, whatever it writes to.
 
-    def start(self) -> None: ...
+    Each method below is bodied by its docstring alone. An ellipsis would be
+    an expression statement with no effect, which static analysis flags — and
+    rightly, since nothing distinguishes a deliberate protocol stub from a
+    line someone left unfinished. The docstring is a real body, says what an
+    implementation owes the emitter, and leaves no empty statement behind.
 
-    def emit(self, line: str) -> None: ...
+    Not ``runtime_checkable``, matching :mod:`cb_mcp.core.contracts`: such a
+    protocol checks method *names* only, never signatures, so an ``isinstance``
+    against it would be more misleading than useful. Nothing branches on a
+    sink's type — ``init_audit`` builds the set it was configured to build.
+    """
 
-    def close(self, timeout: float = DEFAULT_CLOSE_TIMEOUT) -> None: ...
+    def start(self) -> None:
+        """Begin accepting records. Idempotent; may be a no-op."""
+
+    def emit(self, line: str) -> None:
+        """Write one already-formatted JSON line. Must never raise or block."""
+
+    def close(self, timeout: float = DEFAULT_CLOSE_TIMEOUT) -> None:
+        """Flush and stop, within ``timeout`` seconds. Safe to call twice."""
 
     @property
-    def stats(self) -> dict[str, int]: ...
+    def stats(self) -> dict[str, int]:
+        """``written`` / ``dropped`` / ``write_errors`` for the status tool."""
 
 
 class ConsoleAuditSink:
