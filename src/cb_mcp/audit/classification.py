@@ -15,11 +15,15 @@ Such a record also carries ``unclassified: true`` so a reviewer is never misled
 about the category, and :func:`unclassified_tool_names` lets startup report the
 gap rather than leaving it to be discovered from an audit file months later.
 
-Entries marked ``PENDING PRD`` are classified here from the repository's own
-categorisation (the ``*_WRITE_TOOLS`` lists in :mod:`cb_mcp.tools` and the
-``readOnlyHint`` annotations) because they ship today while the PRD's
-example-tool tables have not yet been updated to name them. The classification
-is not in doubt; the PRD text is behind. Re-verify when those rows land.
+Every registered tool is classified here, whether or not the PRD's
+example-tool tables happen to name it. The PRD fixes the *id space* — the
+categories and their read/write ids — and names a few tools per category by way
+of illustration; it was never meant to be the tool inventory, and a tool list in
+a document would be stale the week after it was written. The authority for an
+individual tool is the repository itself: the ``read``/``write`` split in
+:mod:`cb_mcp.tools` and the ``readOnlyHint`` annotations, which are also what
+decide ``required_scope``. Classifying from those is what keeps the audit id and
+the scope check from ever disagreeing.
 """
 
 from __future__ import annotations
@@ -50,31 +54,36 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "get_server_configuration_status": ("cluster", "read"),
         "test_cluster_connection": ("cluster", "read"),
         "get_cluster_health_and_services": ("cluster", "read"),
-        "get_cluster_diagnostics_report": ("cluster", "read"),  # PENDING PRD
-        "get_cluster_metrics": ("cluster", "read"),  # PENDING PRD
+        "get_cluster_diagnostics_report": ("cluster", "read"),
+        "get_cluster_metrics": ("cluster", "read"),
+        # Both read the cluster's own REST endpoints (/pools/default/tasks and
+        # the node topology) and need only ro_admin, so they are cluster reads
+        # like their neighbours above.
+        "get_cluster_tasks": ("cluster", "read"),
+        "get_cluster_health_snapshot": ("cluster", "read"),
         # Reads bundled reference data rather than the cluster, so it touches
         # no keyspace and has no service of its own. Booked as a cluster read:
         # it is a server-level informational call, which is what that category
         # already covers.
-        "discover_tool_input_values": ("cluster", "read"),  # PENDING PRD
+        "discover_tool_input_values": ("cluster", "read"),
         # -- schema / discovery --------------------------------------------
         "get_buckets_in_cluster": ("schema", "read"),
         "get_scopes_in_bucket": ("schema", "read"),
         "get_collections_in_scope": ("schema", "read"),
         "get_scopes_and_collections_in_bucket": ("schema", "read"),
         "get_schema_for_collection": ("schema", "read"),
-        "create_scope": ("schema", "write"),  # PENDING PRD
-        "create_collection": ("schema", "write"),  # PENDING PRD
-        "delete_scope": ("schema", "write"),  # PENDING PRD
-        "delete_collection": ("schema", "write"),  # PENDING PRD
+        "create_scope": ("schema", "write"),
+        "create_collection": ("schema", "write"),
+        "delete_scope": ("schema", "write"),
+        "delete_collection": ("schema", "write"),
         # -- kv (document) --------------------------------------------------
         "get_document_by_id": ("kv", "read"),
-        "lookup_subdocument": ("kv", "read"),  # PENDING PRD
+        "lookup_subdocument": ("kv", "read"),
         "upsert_document_by_id": ("kv", "write"),
         "insert_document_by_id": ("kv", "write"),
         "replace_document_by_id": ("kv", "write"),
         "delete_document_by_id": ("kv", "write"),
-        "mutate_subdocument": ("kv", "write"),  # PENDING PRD
+        "mutate_subdocument": ("kv", "write"),
         # -- query (SQL++) ---------------------------------------------------
         # run_sql_plus_plus_query is re-classified per statement at invocation;
         # the entry here is the class used when the statement was not inspected.
@@ -83,10 +92,10 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # -- index -----------------------------------------------------------
         "list_indexes": ("index", "read"),
         "get_index_advisor_recommendations": ("index", "read"),
-        "get_index_stats": ("index", "read"),  # PENDING PRD
-        "create_index": ("index", "write"),  # PENDING PRD
-        "build_index": ("index", "write"),  # PENDING PRD
-        "drop_index": ("index", "write"),  # PENDING PRD
+        "get_index_stats": ("index", "read"),
+        "create_index": ("index", "write"),
+        "build_index": ("index", "write"),
+        "drop_index": ("index", "write"),
         # -- performance -----------------------------------------------------
         "get_longest_running_queries": ("performance", "read"),
         "get_most_frequent_queries": ("performance", "read"),
@@ -98,12 +107,15 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # -- search (FTS) ------------------------------------------------------
         # Its own category rather than folded into index: run_fts_query is a
         # query, so a reviewer filtering on `index read` should not get search
-        # traffic mixed in. All three tools ship read-only; the search *write*
-        # id (61528) exists in the catalogue for when FTS index management
-        # lands, so adding it will need no new id.
-        "list_fts_indexes": ("search", "read"),  # PENDING PRD
-        "get_fts_index_definition": ("search", "read"),  # PENDING PRD
-        "run_fts_query": ("search", "read"),  # PENDING PRD
+        # traffic mixed in. FTS index management has since landed and takes the
+        # search *write* id (61528) that the catalogue already reserved — the
+        # extension point working as designed: a new tool is a map entry, not a
+        # new id and not a SIEM rule change.
+        "list_fts_indexes": ("search", "read"),
+        "get_fts_index_definition": ("search", "read"),
+        "run_fts_query": ("search", "read"),
+        "upsert_fts_index": ("search", "write"),
+        "drop_fts_index": ("search", "write"),
     },
 }
 
