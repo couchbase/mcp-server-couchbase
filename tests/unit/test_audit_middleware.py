@@ -53,8 +53,10 @@ def _build_logger(tmp_path: Path, **overrides) -> AuditLogger:
     options = {
         "enabled": True,
         "file": str(tmp_path / "audit.log"),
+        "sinks": "file",
         "rotation_max_size_mb": 8.0,
-        "retention_backup_count": 2,
+        "rotation_interval": "0",
+        "max_backups": 2,
         "tool_args": False,
         "disabled_events": None,
     }
@@ -63,7 +65,8 @@ def _build_logger(tmp_path: Path, **overrides) -> AuditLogger:
     sink = AuditSink(
         config.file,
         max_bytes=config.max_bytes,
-        backup_count=config.retention_backup_count,
+        max_backups=config.max_backups,
+        interval_seconds=config.rotation_interval_seconds,
     )
     sink.start()
     return AuditLogger(config, sink)
@@ -410,7 +413,7 @@ async def test_inactive_logger_writes_nothing_and_does_not_break_calls(tmp_path)
         enabled=False,
         file=None,
         rotation_max_size_mb=None,
-        retention_backup_count=None,
+        max_backups=None,
         tool_args=None,
         disabled_events=None,
     )

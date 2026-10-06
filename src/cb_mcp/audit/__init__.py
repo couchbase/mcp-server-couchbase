@@ -25,7 +25,7 @@ Layout:
 * :mod:`~cb_mcp.audit.identity` — ``real_userid`` resolution
 * :mod:`~cb_mcp.audit.middleware` — the FastMCP middleware
 * :mod:`~cb_mcp.audit.record` — the record and its serialisation
-* :mod:`~cb_mcp.audit.sink` — the per-process file writer
+* :mod:`~cb_mcp.audit.sink` — the per-process file writer and the console sink
 * :mod:`~cb_mcp.audit.state` — per-request refusal channel
 """
 
@@ -36,7 +36,12 @@ from .classification import (
     resolve_tool_call_event,
     unclassified_tool_names,
 )
-from .config import ResolvedAuditConfig, resolve_audit_config
+from .config import (
+    ResolvedAuditConfig,
+    parse_audit_sinks,
+    parse_rotation_interval,
+    resolve_audit_config,
+)
 from .emitter import AuditLogger, get_audit_logger, init_audit, shutdown_audit
 from .exceptions import (
     AuditableRefusalError,
@@ -54,7 +59,13 @@ from .record import (
     OUTCOME_SUCCESS,
     AuditRecord,
 )
-from .sink import AuditSink, process_scoped_path
+from .sink import (
+    AuditSink,
+    AuditSinkProtocol,
+    CompositeAuditSink,
+    ConsoleAuditSink,
+    process_scoped_path,
+)
 
 __all__ = [
     "OUTCOME_BLOCKED",
@@ -68,8 +79,11 @@ __all__ = [
     "AuditMiddleware",
     "AuditRecord",
     "AuditSink",
+    "AuditSinkProtocol",
     "AuditableRefusalError",
+    "CompositeAuditSink",
     "ConfirmationDeclinedError",
+    "ConsoleAuditSink",
     "ReadOnlyWriteBlockedError",
     "ResolvedAuditConfig",
     "ScopeDeniedError",
@@ -78,6 +92,8 @@ __all__ = [
     "classify_tool",
     "get_audit_logger",
     "init_audit",
+    "parse_audit_sinks",
+    "parse_rotation_interval",
     "process_scoped_path",
     "resolve_audit_config",
     "resolve_real_userid",

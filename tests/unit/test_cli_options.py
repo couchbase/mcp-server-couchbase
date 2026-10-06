@@ -261,22 +261,29 @@ class TestAuditOptions:
             [
                 "--audit-log-enabled",
                 "true",
-                "--audit-file",
+                "--audit-log-sinks",
+                "console,file",
+                "--audit-log-file-path",
                 str(tmp_path / "audit.log"),
-                "--audit-rotation-max-size-mb",
+                "--audit-log-rotation-max-size-mb",
                 "4",
-                "--audit-retention-backup-count",
+                "--audit-log-rotation-interval",
+                "2w",
+                "--audit-log-retention-max-backups",
                 "7",
-                "--audit-tool-args",
+                "--audit-log-tool-args",
                 "true",
-                "--audit-disabled-events",
+                "--audit-log-disabled-events",
                 "61490,61491",
             ]
         )
         assert config.enabled is True
+        assert config.sinks == ("console", "file")
         assert config.file == str(tmp_path / "audit.log")
         assert config.rotation_max_size_mb == 4.0
-        assert config.retention_backup_count == 7
+        assert config.rotation_interval == "2w"
+        assert config.rotation_interval_seconds == 2 * 604_800
+        assert config.max_backups == 7
         assert config.tool_args is True
         assert config.disabled_events == (61490, 61491)
         # The process-scoped path is resolved once, here, so startup can log
@@ -288,18 +295,33 @@ class TestAuditOptions:
             [],
             env={
                 "CB_MCP_AUDIT_LOG_ENABLED": "true",
-                "CB_MCP_AUDIT_FILE": str(tmp_path / "from-env.log"),
-                "CB_MCP_AUDIT_TOOL_ARGS": "true",
+                "CB_MCP_AUDIT_LOG_SINKS": "file",
+                "CB_MCP_AUDIT_LOG_FILE_PATH": str(tmp_path / "from-env.log"),
+                "CB_MCP_AUDIT_LOG_ROTATION_INTERVAL": "30d",
+                "CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS": "3",
+                "CB_MCP_AUDIT_LOG_TOOL_ARGS": "true",
             },
         )
         assert config.enabled is True
+        assert config.sinks == ("file",)
         assert config.file == str(tmp_path / "from-env.log")
+        assert config.rotation_interval == "30d"
+        assert config.max_backups == 3
         assert config.tool_args is True
 
-    def test_enabling_without_a_file_starts_the_server_with_auditing_off(self):
+    def test_enabling_the_file_sink_without_a_path_still_starts_the_server(self):
         """Per the PRD this is reported, not fatal: the server still starts."""
-        config = self._resolved(["--audit-log-enabled", "true"])
+        config = self._resolved(
+            ["--audit-log-enabled", "true", "--audit-log-sinks", "file"]
+        )
         assert config.enabled is False
+
+    def test_enabling_without_a_file_defaults_to_the_console_sink(self):
+        """The default sink needs no path, so this is a working configuration."""
+        config = self._resolved(["--audit-log-enabled", "true"])
+        assert config.enabled is True
+        assert config.sinks == ("console",)
+        assert config.writes_file is False
 
     def test_both_subcommands_accept_the_audit_flags(self):
         for command in ("operational", "operational-insights"):
@@ -309,10 +331,12 @@ class TestAuditOptions:
             assert result.exit_code == 0
             for flag in (
                 "--audit-log-enabled",
-                "--audit-file",
-                "--audit-rotation-max-size-mb",
-                "--audit-retention-backup-count",
-                "--audit-tool-args",
-                "--audit-disabled-events",
+                "--audit-log-sinks",
+                "--audit-log-file-path",
+                "--audit-log-rotation-max-size-mb",
+                "--audit-log-rotation-interval",
+                "--audit-log-retention-max-backups",
+                "--audit-log-tool-args",
+                "--audit-log-disabled-events",
             ):
                 assert flag in result.output, f"{flag} missing from {command} --help"

@@ -73,23 +73,42 @@ FALLBACK_LOG_FILE = "mcp_server.log"
 # Audit Logging Configuration
 # Audit is a separate sink from the CB_MCP_LOG_* operational logs: it
 # guarantees a stable schema, completeness for non-filterable events, and is
-# sensitive by default. Opt-in — an operator must both enable it and name a
-# file. Retention is expressed in bytes (rotation size x backup count), matching
-# the operational log configuration.
+# sensitive by default. Opt-in — an operator must enable it, and name a file if
+# the file sink is selected.
 DEFAULT_AUDIT_ENABLED = False
-# No default path: enabling audit without naming a file is a configuration
-# error that is reported at startup, leaving audit off rather than aborting.
+# Where audit records go. Comma-separated, same shape as CB_MCP_LOG_SINKS.
+# "console" is the default because it needs no configuration and makes an
+# enabled audit visible immediately; "file" is what a real deployment uses.
+#
+# "console" writes to **stderr**, never stdout: under the stdio transport
+# stdout carries the JSON-RPC protocol, and a single audit line written there
+# would corrupt the client's stream. The name follows the PRD; the stream
+# follows the protocol.
+ALLOWED_AUDIT_SINKS = ("console", "file")
+DEFAULT_AUDIT_SINKS = "console"
+# No default path: selecting the file sink without naming a file is a
+# configuration error that is reported at startup, leaving the file sink off
+# rather than aborting.
 DEFAULT_AUDIT_FILE = None
-# Rotation size per audit file, in MB.
-DEFAULT_AUDIT_ROTATION_MAX_SIZE_MB = 1.0
-# Rotated backups retained per audit file, excluding the live file. Much larger
-# than the operational-log default because audits are reviewed on a quarterly
-# or annual cadence, not for day-to-day triage.
-DEFAULT_AUDIT_BACKUP_COUNT = 1000
+# Rotation size per audit file, in MB. 0 is valid and turns size-based rotation
+# off entirely.
+DEFAULT_AUDIT_ROTATION_MAX_SIZE_MB = 10.0
+# Age the live audit file may reach before it rotates, as <value><unit> where
+# the unit is "d" (24 hours) or "w" (7 days). 0 is valid and turns
+# interval-based rotation off entirely. Size and interval rotation are
+# independent: either, both, or neither may be active.
+DEFAULT_AUDIT_ROTATION_INTERVAL = "1d"
+# Rotated backups retained per audit file, excluding the live file. 0 is valid
+# and keeps only the live file.
+DEFAULT_AUDIT_MAX_BACKUPS = 10
 # Tool argument values are sensitive: document-write tools carry entire
 # document bodies. There is no redaction capability in this release, so the
 # default is off and enabling it emits a startup warning.
 DEFAULT_AUDIT_TOOL_ARGS = False
+# Seconds per interval unit. "d" is 24 hours and "w" is 7 days, exactly as the
+# PRD defines them; no month or year unit exists, because neither has a fixed
+# length and an audit retention window must be arithmetic, not calendrical.
+AUDIT_INTERVAL_UNIT_SECONDS = {"d": 86_400, "w": 604_800}
 
 # OAuth Scopes
 # Tokens carrying SCOPE_READ may call read-only tools (including SQL++ query,

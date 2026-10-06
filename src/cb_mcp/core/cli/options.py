@@ -27,6 +27,7 @@ from ...utils.constants import (
     ALLOWED_TRANSPORTS,
     DEFAULT_AUDIT_ENABLED,
     DEFAULT_AUDIT_FILE,
+    DEFAULT_AUDIT_SINKS,
     DEFAULT_AUDIT_TOOL_ARGS,
     DEFAULT_HOST,
     DEFAULT_LOG_BACKUP_COUNT,
@@ -405,47 +406,70 @@ audit_options = compose(
         default=DEFAULT_AUDIT_ENABLED,
         help="Enable audit logging. Applies to both stdio and http transports; the "
         "set of applicable events differs by transport (authorization events are "
-        "http-only). Requires --audit-file. Audit output is a separate sink from "
-        "the --log-* operational logs, with a stable schema and its own retention. "
-        "Honored only by servers that declare an audit package; on a server that "
-        "does not, the flag resolves and is reported but nothing is recorded.",
+        "http-only). Audit output is a separate sink from the --log-* operational "
+        "logs, with a stable schema and its own retention. Honored only by servers "
+        "that declare an audit package; on a server that does not, the flag "
+        "resolves and is reported but nothing is recorded.",
     ),
     click.option(
-        "--audit-file",
-        "audit_file",
-        envvar="CB_MCP_AUDIT_FILE",
+        "--audit-log-sinks",
+        "audit_log_sinks",
+        envvar="CB_MCP_AUDIT_LOG_SINKS",
+        default=DEFAULT_AUDIT_SINKS,
+        help="Comma-separated list of audit sinks. Allowed values: console, file. "
+        "Default is console. 'console' writes to stderr — never stdout, which "
+        "carries the JSON-RPC protocol under the stdio transport. Include 'file' "
+        "with --audit-log-file-path for a deployment that retains records.",
+    ),
+    click.option(
+        "--audit-log-file-path",
+        "audit_log_file_path",
+        envvar="CB_MCP_AUDIT_LOG_FILE_PATH",
         default=DEFAULT_AUDIT_FILE,
-        help="Path to the audit log file. Required when --audit-log-enabled is "
-        "true; if it is missing the server still starts, with auditing disabled and "
-        "an error recorded. Each server process writes its own file with the "
-        "process id inserted before the extension (audit.log -> audit.1234.log), "
-        "because a single stdio deployment runs one server process per client and "
-        "sharing one file between them would corrupt records.",
+        help="Path to the audit log file. Required when 'file' is in "
+        "--audit-log-sinks; if it is missing the server still starts, with the "
+        "file sink dropped and an error recorded. Each server process writes its "
+        "own file with the host and process id inserted before the extension "
+        "(audit.log -> audit.myhost.1234.log), because a single stdio deployment "
+        "runs one server process per client and sharing one file between them "
+        "would corrupt records.",
     ),
     click.option(
-        "--audit-rotation-max-size-mb",
-        "audit_rotation_max_size_mb",
-        envvar="CB_MCP_AUDIT_ROTATION_MAX_SIZE_MB",
+        "--audit-log-rotation-max-size-mb",
+        "audit_log_rotation_max_size_mb",
+        envvar="CB_MCP_AUDIT_LOG_ROTATION_MAX_SIZE_MB",
         type=click.FloatRange(min=0),
         default=None,
-        help="Maximum size in MB an audit file may reach before it rotates. "
-        "Default is 1 MB. 0 is invalid and falls back to the default with a "
-        "startup warning.",
+        help="Maximum size in MB the live audit file may reach before it rotates. "
+        "Default is 10 MB. 0 turns size-based rotation off; combined with an "
+        "interval of 0 that gives a single unbounded file.",
     ),
     click.option(
-        "--audit-retention-backup-count",
-        "audit_retention_backup_count",
-        envvar="CB_MCP_AUDIT_RETENTION_BACKUP_COUNT",
+        "--audit-log-rotation-interval",
+        "audit_log_rotation_interval",
+        envvar="CB_MCP_AUDIT_LOG_ROTATION_INTERVAL",
+        default=None,
+        help="Age the live audit file may reach before it rotates, as "
+        "<value><unit> where the unit is 'd' (24 hours) or 'w' (7 days) — e.g. "
+        "1d, 30d, 1w, 8w. Default is 1d. 0 turns interval-based rotation off. "
+        "Size and interval are independent: whichever falls due first rotates "
+        "the file.",
+    ),
+    click.option(
+        "--audit-log-retention-max-backups",
+        "audit_log_retention_max_backups",
+        envvar="CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS",
         type=click.IntRange(min=0),
         default=None,
         help="Number of rotated audit files retained, excluding the live file. "
-        "Default is 1000. Set to 0 to keep only the live file, which stays bounded "
-        "by the rotation size.",
+        "Default is 10. Rotated files are gzipped and named with the UTC rotation "
+        "time. Set to 0 to keep no backups at all: the live file is truncated at "
+        "each rotation, so it stays bounded and nothing older is kept.",
     ),
     click.option(
-        "--audit-tool-args",
-        "audit_tool_args",
-        envvar="CB_MCP_AUDIT_TOOL_ARGS",
+        "--audit-log-tool-args",
+        "audit_log_tool_args",
+        envvar="CB_MCP_AUDIT_LOG_TOOL_ARGS",
         type=bool,
         default=DEFAULT_AUDIT_TOOL_ARGS,
         help="Record tool argument values in the audit log. Off by default: there "
@@ -455,9 +479,9 @@ audit_options = compose(
         "controls before enabling it.",
     ),
     click.option(
-        "--audit-disabled-events",
-        "audit_disabled_events",
-        envvar="CB_MCP_AUDIT_DISABLED_EVENTS",
+        "--audit-log-disabled-events",
+        "audit_log_disabled_events",
+        envvar="CB_MCP_AUDIT_LOG_DISABLED_EVENTS",
         default=None,
         help="Audit events to suppress. Accepts comma-separated numeric event "
         "ids (e.g. '61490,61491'), or a file path with one id per line. Ids are "

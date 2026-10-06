@@ -250,41 +250,55 @@
         },
         {
           "name": "CB_MCP_AUDIT_LOG_ENABLED",
-          "description": "Enable audit logging. Audit output is a separate sink from the CB_MCP_LOG_* operational logs, with a stable schema, its own retention, and events that cannot be filtered out. Requires CB_MCP_AUDIT_FILE. Default is false.",
+          "description": "Enable audit logging. Audit output is a separate sink from the CB_MCP_LOG_* operational logs, with a stable schema, its own retention, and events that cannot be filtered out. Default is false.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_AUDIT_FILE",
-          "description": "Path to the audit log file, required when CB_MCP_AUDIT_LOG_ENABLED is true. Each server process writes its own file with the process id inserted before the extension (audit.log becomes audit.1234.log), because a stdio deployment runs one process per client. If the path is missing the server still starts, with auditing disabled and an error recorded.",
+          "name": "CB_MCP_AUDIT_LOG_SINKS",
+          "description": "Comma-separated audit destinations: console, file, or both. 'console' writes to stderr, never stdout, because stdout carries the JSON-RPC protocol under the stdio transport. Default is console.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_AUDIT_LOG_FILE_PATH",
+          "description": "Path to the audit log file, required when 'file' is in CB_MCP_AUDIT_LOG_SINKS. Each server process writes its own file with the host and process id inserted before the extension (audit.log becomes audit.myhost.1234.log), because a stdio deployment runs one process per client. If the path is missing the server still starts, with the file sink dropped and an error recorded.",
           "isRequired": false,
           "format": "filepath",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_AUDIT_ROTATION_MAX_SIZE_MB",
-          "description": "Maximum size in MB an audit file may reach before it rotates. 0 is invalid and falls back to the default with a startup warning. Default is 1 MB.",
+          "name": "CB_MCP_AUDIT_LOG_ROTATION_MAX_SIZE_MB",
+          "description": "Maximum size in MB the live audit file may reach before it rotates. 0 turns size-based rotation off. Default is 10 MB.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_AUDIT_RETENTION_BACKUP_COUNT",
-          "description": "Number of rotated audit files retained, excluding the live file. Much larger than the operational-log default because audit records are reviewed on a quarterly or annual cadence. Set to 0 to keep only the live file. Default is 1000.",
+          "name": "CB_MCP_AUDIT_LOG_ROTATION_INTERVAL",
+          "description": "Age the live audit file may reach before it rotates, as <value><unit> where the unit is 'd' (24 hours) or 'w' (7 days) - for example 1d, 30d, 1w, 8w. 0 turns interval-based rotation off. Size and interval are independent: whichever falls due first rotates the file. Default is 1d.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS",
+          "description": "Number of rotated audit files retained, excluding the live file. Rotated files are gzipped and named with the UTC rotation time. Set to 0 to keep no backups: the live file is truncated at each rotation. Default is 10.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_AUDIT_TOOL_ARGS",
+          "name": "CB_MCP_AUDIT_LOG_TOOL_ARGS",
           "description": "Record tool argument values in the audit log. Off by default: there is no redaction in this release, so enabling this writes arguments verbatim, including the full document bodies passed to document-write tools. Review the audit file's retention and access controls before enabling it.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_AUDIT_DISABLED_EVENTS",
+          "name": "CB_MCP_AUDIT_LOG_DISABLED_EVENTS",
           "description": "Audit events to suppress, as comma-separated numeric event ids (for example '61490,61491'), or a path to a file with one id per line. Ids are listed in the audit descriptor shipped with the package. Only filterable events can be suppressed: write and security events are always recorded, and an attempt to disable one is refused with a warning.",
           "isRequired": false,
           "format": "string",
@@ -1343,41 +1357,55 @@
         },
         {
           "name": "CB_MCP_AUDIT_LOG_ENABLED",
-          "description": "Enable audit logging. Audit output is a separate sink from the CB_MCP_LOG_* operational logs, with a stable schema, its own retention, and events that cannot be filtered out. Requires CB_MCP_AUDIT_FILE. Default is false.",
+          "description": "Enable audit logging. Audit output is a separate sink from the CB_MCP_LOG_* operational logs, with a stable schema, its own retention, and events that cannot be filtered out. Default is false.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_AUDIT_FILE",
-          "description": "Path to the audit log file, required when CB_MCP_AUDIT_LOG_ENABLED is true. Each server process writes its own file with the process id inserted before the extension (audit.log becomes audit.1234.log), because a stdio deployment runs one process per client. If the path is missing the server still starts, with auditing disabled and an error recorded.",
+          "name": "CB_MCP_AUDIT_LOG_SINKS",
+          "description": "Comma-separated audit destinations: console, file, or both. 'console' writes to stderr, never stdout, because stdout carries the JSON-RPC protocol under the stdio transport. Default is console.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_AUDIT_LOG_FILE_PATH",
+          "description": "Path to the audit log file, required when 'file' is in CB_MCP_AUDIT_LOG_SINKS. Each server process writes its own file with the host and process id inserted before the extension (audit.log becomes audit.myhost.1234.log), because a stdio deployment runs one process per client. If the path is missing the server still starts, with the file sink dropped and an error recorded.",
           "isRequired": false,
           "format": "filepath",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_AUDIT_ROTATION_MAX_SIZE_MB",
-          "description": "Maximum size in MB an audit file may reach before it rotates. 0 is invalid and falls back to the default with a startup warning. Default is 1 MB.",
+          "name": "CB_MCP_AUDIT_LOG_ROTATION_MAX_SIZE_MB",
+          "description": "Maximum size in MB the live audit file may reach before it rotates. 0 turns size-based rotation off. Default is 10 MB.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_AUDIT_RETENTION_BACKUP_COUNT",
-          "description": "Number of rotated audit files retained, excluding the live file. Much larger than the operational-log default because audit records are reviewed on a quarterly or annual cadence. Set to 0 to keep only the live file. Default is 1000.",
+          "name": "CB_MCP_AUDIT_LOG_ROTATION_INTERVAL",
+          "description": "Age the live audit file may reach before it rotates, as <value><unit> where the unit is 'd' (24 hours) or 'w' (7 days) - for example 1d, 30d, 1w, 8w. 0 turns interval-based rotation off. Size and interval are independent: whichever falls due first rotates the file. Default is 1d.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS",
+          "description": "Number of rotated audit files retained, excluding the live file. Rotated files are gzipped and named with the UTC rotation time. Set to 0 to keep no backups: the live file is truncated at each rotation. Default is 10.",
           "isRequired": false,
           "format": "number",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_AUDIT_TOOL_ARGS",
+          "name": "CB_MCP_AUDIT_LOG_TOOL_ARGS",
           "description": "Record tool argument values in the audit log. Off by default: there is no redaction in this release, so enabling this writes arguments verbatim, including the full document bodies passed to document-write tools. Review the audit file's retention and access controls before enabling it.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
         },
         {
-          "name": "CB_MCP_AUDIT_DISABLED_EVENTS",
+          "name": "CB_MCP_AUDIT_LOG_DISABLED_EVENTS",
           "description": "Audit events to suppress, as comma-separated numeric event ids (for example '61490,61491'), or a path to a file with one id per line. Ids are listed in the audit descriptor shipped with the package. Only filterable events can be suppressed: write and security events are always recorded, and an attempt to disable one is refused with a warning.",
           "isRequired": false,
           "format": "string",

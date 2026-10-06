@@ -547,9 +547,10 @@ def test_audit_is_shut_down_when_provider_startup_fails(tmp_path):
     """
     audit_config = resolve_audit_config(
         enabled=True,
+        sinks="file",
         file=str(tmp_path / "audit.log"),
         rotation_max_size_mb=None,
-        retention_backup_count=None,
+        max_backups=None,
         tool_args=None,
         disabled_events=None,
     )

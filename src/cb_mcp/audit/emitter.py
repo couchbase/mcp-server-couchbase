@@ -14,13 +14,19 @@ from __future__ import annotations
 
 import atexit
 import logging
+from dataclasses import replace
 from typing import Any
 
 from ..utils.constants import LOGGER_NAMESPACE
 from .catalog import SERVICE_PACKAGE, AuditEvent, ToolCallEvent
-from .config import ResolvedAuditConfig
+from .config import SINK_FILE, ResolvedAuditConfig
 from .record import AuditRecord, ServerContext
-from .sink import AuditSink
+from .sink import (
+    AuditSink,
+    AuditSinkProtocol,
+    CompositeAuditSink,
+    ConsoleAuditSink,
+)
 
 logger = logging.getLogger(f"{LOGGER_NAMESPACE}.audit")
 
@@ -28,7 +34,9 @@ logger = logging.getLogger(f"{LOGGER_NAMESPACE}.audit")
 class AuditLogger:
     """Formats catalogue events into records and hands them to the sink."""
 
-    def __init__(self, config: ResolvedAuditConfig, sink: AuditSink | None) -> None:
+    def __init__(
+        self, config: ResolvedAuditConfig, sink: AuditSinkProtocol | None
+    ) -> None:
         self.config = config
         self._sink = sink
         self._server = ServerContext.detect()
@@ -121,11 +129,14 @@ class AuditLogger:
 _DISABLED = AuditLogger(
     ResolvedAuditConfig(
         enabled=False,
+        sinks=(),
         file=None,
         process_file=None,
         rotation_max_size_mb=0.0,
         max_bytes=0,
-        retention_backup_count=0,
+        rotation_interval="0",
+        rotation_interval_seconds=0,
+        max_backups=0,
         tool_args=False,
         disabled_events=(),
     ),
@@ -140,46 +151,92 @@ def get_audit_logger() -> AuditLogger:
     return _active
 
 
-def init_audit(config: ResolvedAuditConfig) -> AuditLogger:
-    """Build and install the audit logger for this process.
+def _open_file_sink(config: ResolvedAuditConfig) -> AuditSink | None:
+    """Open the file sink, or report why it could not be opened.
 
-    A sink that cannot be opened is reported as an error and auditing is left
-    off — per the PRD, a bad audit path must not prevent the server starting.
+    A sink that cannot be opened is reported as an error and left out — per the
+    PRD, a bad audit path must not prevent the server starting. Any console
+    sink the operator also selected still runs, so the records go somewhere.
     """
-    global _active  # noqa: PLW0603
-
-    if not config.enabled or config.file is None:
-        _active = AuditLogger(config, sink=None)
-        return _active
-
+    if config.file is None:
+        return None
     try:
         sink = AuditSink(
             config.file,
             max_bytes=config.max_bytes,
-            backup_count=config.retention_backup_count,
+            max_backups=config.max_backups,
+            interval_seconds=config.rotation_interval_seconds,
         )
-        sink.start()
     except (OSError, ValueError) as exc:
         logger.error(
-            "Failed to open the audit file %r: %s. The server will start with "
-            "audit logging disabled.",
+            "Failed to open the audit file %r: %s. The server will start "
+            "without the file audit sink.",
             config.file,
             exc,
         )
+        return None
+    return sink
+
+
+def _describe_rotation(config: ResolvedAuditConfig) -> str:
+    """How the live file will roll over, in the operator's own vocabulary."""
+    triggers = []
+    if config.max_bytes > 0:
+        triggers.append(f"size>{config.rotation_max_size_mb:g}MB")
+    if config.rotation_interval_seconds > 0:
+        triggers.append(f"age>{config.rotation_interval}")
+    if not triggers:
+        return "never (both size and interval rotation are off)"
+    return " or ".join(triggers)
+
+
+def init_audit(config: ResolvedAuditConfig) -> AuditLogger:
+    """Build and install the audit logger for this process."""
+    global _active  # noqa: PLW0603
+
+    if not config.enabled or not config.sinks:
         _active = AuditLogger(config, sink=None)
         return _active
 
+    sinks: list[AuditSinkProtocol] = []
+    file_sink: AuditSink | None = None
+    if config.writes_console:
+        sinks.append(ConsoleAuditSink())
+    if config.writes_file:
+        file_sink = _open_file_sink(config)
+        if file_sink is not None:
+            sinks.append(file_sink)
+        else:
+            # The snapshot is not cosmetic: it is reported by
+            # ``get_server_configuration_status`` and written into the ``audit
+            # configuration changed`` record, where it is permanent. A config
+            # still claiming a file sink that failed to open would tell an
+            # auditor records were being kept on disk when they were not.
+            config = replace(
+                config,
+                sinks=tuple(name for name in config.sinks if name != SINK_FILE),
+                process_file=None,
+            )
+
+    if not sinks:
+        _active = AuditLogger(replace(config, enabled=False), sink=None)
+        return _active
+
+    sink: AuditSinkProtocol = sinks[0] if len(sinks) == 1 else CompositeAuditSink(sinks)
+    sink.start()
     _active = AuditLogger(config, sink=sink)
+
     logger.info(
-        "Audit logging enabled. Writing to %s (service_package=%s, "
-        "max_bytes=%d, backups=%d, tool_args=%s, disabled_events=%s). "
-        "Each server process writes its own file; the configured path has the "
-        "process id inserted so concurrent stdio servers cannot corrupt one "
-        "another's records.",
-        sink.path,
+        "Audit logging enabled. sinks=%s, service_package=%s, file=%s, "
+        "rotates=%s, max_backups=%d, backups_compressed=yes, tool_args=%s, "
+        "disabled_events=%s. Each server process writes its own file; the "
+        "configured path has the host and process id inserted so concurrent "
+        "stdio servers cannot corrupt one another's records.",
+        ",".join(config.sinks),
         SERVICE_PACKAGE,
-        config.max_bytes,
-        config.retention_backup_count,
+        file_sink.path if file_sink is not None else "none",
+        _describe_rotation(config),
+        config.max_backups,
         config.tool_args,
         list(config.disabled_events) or "none",
     )

@@ -1,28 +1,37 @@
-"""Tests for the audit sink.
+"""Tests for the audit sinks.
 
-The sink deliberately does not use ``logging.handlers.RotatingFileHandler``.
+The file sink deliberately does not use ``logging.handlers.RotatingFileHandler``.
 A single stdio deployment runs one server process per MCP client, and they all
-read the same ``CB_MCP_AUDIT_FILE``; sharing one rotating file between them
-produces interleaved partial lines and rotation races. Each process therefore
-writes its own file, with the pid inserted before the extension.
+read the same ``CB_MCP_AUDIT_LOG_FILE_PATH``; sharing one rotating file between
+them produces interleaved partial lines and rotation races. Each process
+therefore writes its own file, with the host and pid inserted before the
+extension. Owning the rotation is also what lets the size and interval triggers
+both be live at once, which the stdlib handlers cannot do.
 
 Coverage map:
 - per-process filename derivation, with and without a suffix
 - lines are written and flushed by the background thread
-- rotation at the size threshold, and backup shifting
-- backup_count=0 truncates rather than growing without limit
-- retention: files beyond backup_count are removed
+- rotation on size, on interval, on both, and on neither
+- the interval clock is anchored to the live file, not to startup
+- an idle server still rotates on the interval
+- backups are timestamped, gzipped and pruned to max_backups
+- a compression failure keeps the uncompressed backup
+- max_backups=0 truncates rather than growing without limit
 - an oversized single line is written rather than lost
-- constructor validation
+- constructor validation: zero is accepted, negatives are not
 - drop counter when the queue is full
 - close() is idempotent and drains
 - two concurrent sinks never share a file
+- the console sink writes to stderr, and the composite fans out
 """
 
 from __future__ import annotations
 
+import gzip
+import io
 import json
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -30,7 +39,13 @@ from unittest.mock import patch
 
 import pytest
 
-from cb_mcp.audit.sink import AuditSink, process_scoped_path
+from cb_mcp.audit.sink import (
+    _SENTINEL,
+    AuditSink,
+    CompositeAuditSink,
+    ConsoleAuditSink,
+    process_scoped_path,
+)
 
 
 def _drain(sink: AuditSink) -> None:
@@ -94,7 +109,7 @@ def test_host_token_is_filename_safe():
 
 
 def test_sink_writes_to_the_process_scoped_path(tmp_path):
-    sink = AuditSink(tmp_path / "audit.log", max_bytes=4096, backup_count=1)
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=4096, max_backups=1)
     try:
         assert sink.path == process_scoped_path(tmp_path / "audit.log")
         assert sink.path.exists()
@@ -108,7 +123,7 @@ def test_sink_writes_to_the_process_scoped_path(tmp_path):
 
 
 def test_lines_are_written_and_flushed(tmp_path):
-    sink = AuditSink(tmp_path / "audit.log", max_bytes=1_000_000, backup_count=1)
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=1_000_000, max_backups=1)
     sink.start()
     for index in range(50):
         sink.emit(json.dumps({"n": index}) + "\n")
@@ -126,7 +141,7 @@ def test_existing_file_is_appended_not_truncated(tmp_path):
     path = process_scoped_path(tmp_path / "audit.log")
     path.write_text('{"pre":true}\n', encoding="utf-8")
 
-    sink = AuditSink(tmp_path / "audit.log", max_bytes=1_000_000, backup_count=1)
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=1_000_000, max_backups=1)
     sink.start()
     sink.emit('{"post":true}\n')
     _drain(sink)
@@ -141,32 +156,91 @@ def test_existing_file_is_appended_not_truncated(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_rotation_shifts_backups_and_honours_retention(tmp_path):
+def _backups(sink: AuditSink) -> list[Path]:
+    """Rotated files beside the live one, oldest first."""
+    return sorted(
+        path
+        for path in sink.path.parent.iterdir()
+        if path.name.startswith(sink.path.name + ".")
+    )
+
+
+def _all_records(sink: AuditSink) -> str:
+    """Everything the sink has written, live file and backups, decompressed."""
+    text = sink.path.read_text(encoding="utf-8")
+    for path in _backups(sink):
+        if path.suffix == ".gz":
+            with gzip.open(path, "rt", encoding="utf-8") as handle:
+                text += handle.read()
+        else:
+            text += path.read_text(encoding="utf-8")
+    return text
+
+
+def test_rotation_names_backups_by_time_and_honours_retention(tmp_path):
     line = json.dumps({"payload": "x" * 80}) + "\n"
     # Room for roughly two lines before rotating.
-    sink = AuditSink(tmp_path / "audit.log", max_bytes=len(line) * 2, backup_count=2)
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=len(line) * 2, max_backups=2)
     sink.start()
     for _ in range(12):
         sink.emit(line)
     _drain(sink)
 
-    live = sink.path
-    first = live.with_name(live.name + ".1")
-    second = live.with_name(live.name + ".2")
-    third = live.with_name(live.name + ".3")
+    backups = _backups(sink)
+    assert sink.path.exists()
+    # Retention is two backups, so a third must never survive.
+    assert len(backups) == 2, [p.name for p in backups]
+    for path in backups:
+        # <live name>.<UTC timestamp>[-N].gz — readable without opening the file,
+        # and sortable because the timestamp is fixed-width.
+        assert re.fullmatch(
+            re.escape(sink.path.name) + r"\.\d{8}T\d{12}Z(-\d+)?\.gz", path.name
+        ), path.name
+    assert sink.path.stat().st_size <= len(line) * 2
 
-    assert live.exists()
-    assert first.exists()
-    assert second.exists()
-    # Retention is two backups, so a third must never appear.
-    assert not third.exists()
-    for candidate in (live, first, second):
-        assert candidate.stat().st_size <= len(line) * 2
+
+def test_rotated_backups_are_gzipped_and_still_readable(tmp_path):
+    line = json.dumps({"payload": "compress me"}) + "\n"
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=len(line) * 2, max_backups=5)
+    sink.start()
+    for _ in range(6):
+        sink.emit(line)
+    _drain(sink)
+
+    backups = _backups(sink)
+    assert backups, "nothing rotated"
+    for path in backups:
+        assert path.suffix == ".gz"
+        # Real gzip, not a renamed plain file: decompression must round-trip.
+        with gzip.open(path, "rt", encoding="utf-8") as handle:
+            assert "compress me" in handle.read()
+    # The live file stays plain text. tail -f and grep on the current file are
+    # how an incident is actually investigated.
+    assert "compress me" in sink.path.read_text(encoding="utf-8")
 
 
-def test_backup_count_zero_truncates_the_live_file(tmp_path):
+def test_compression_failure_keeps_the_uncompressed_backup(tmp_path):
+    """Losing an audit file to save space would invert the whole point."""
+    line = json.dumps({"payload": "k" * 60}) + "\n"
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=len(line) * 2, max_backups=3)
+    sink.start()
+    with patch(
+        "cb_mcp.audit.sink.gzip.open", side_effect=OSError("no space for the gzip")
+    ):
+        for _ in range(4):
+            sink.emit(line)
+        _settle(sink)
+    _drain(sink)
+
+    backups = _backups(sink)
+    assert backups, "the rotation did not keep the retired file"
+    assert all(path.suffix != ".gz" for path in backups)
+    assert "k" * 60 in _all_records(sink)
+
+
+def test_max_backups_zero_truncates_the_live_file(tmp_path):
     line = json.dumps({"payload": "y" * 80}) + "\n"
-    sink = AuditSink(tmp_path / "audit.log", max_bytes=len(line) * 2, backup_count=0)
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=len(line) * 2, max_backups=0)
     sink.start()
     for _ in range(20):
         sink.emit(line)
@@ -174,24 +248,155 @@ def test_backup_count_zero_truncates_the_live_file(tmp_path):
 
     # Retention of zero still means the rotation size caps the live file.
     assert sink.path.stat().st_size <= len(line) * 2
-    assert not sink.path.with_name(sink.path.name + ".1").exists()
+    assert _backups(sink) == []
 
 
 def test_a_single_oversized_line_is_written_not_dropped(tmp_path):
-    sink = AuditSink(tmp_path / "audit.log", max_bytes=64, backup_count=1)
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=64, max_backups=1)
     sink.start()
     huge = json.dumps({"payload": "z" * 500}) + "\n"
     sink.emit(huge)
     _drain(sink)
 
-    written = sink.path.read_text(encoding="utf-8") + "".join(
-        p.read_text(encoding="utf-8")
-        for p in tmp_path.iterdir()
-        if p.name.startswith(sink.path.name + ".")
-    )
     # Losing the record would be worse than briefly exceeding the size cap.
-    assert "z" * 500 in written
+    assert "z" * 500 in _all_records(sink)
     assert sink.stats["dropped"] == 0
+
+
+# ---------------------------------------------------------------------------
+# rotation triggers: size, interval, both, neither
+# ---------------------------------------------------------------------------
+
+
+def test_zero_max_bytes_never_rotates_on_size(tmp_path):
+    """PRD case 2: 'I don't care about the size, store them all.'"""
+    line = json.dumps({"payload": "q" * 200}) + "\n"
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=0, max_backups=5)
+    sink.start()
+    for _ in range(50):
+        sink.emit(line)
+    _drain(sink)
+
+    assert _backups(sink) == [], "size rotation fired with the size trigger off"
+    assert len(sink.path.read_text(encoding="utf-8").splitlines()) == 50
+
+
+def test_interval_rotation_fires_when_the_file_is_old_enough(tmp_path):
+    sink = AuditSink(
+        tmp_path / "audit.log", max_bytes=0, max_backups=3, interval_seconds=86_400
+    )
+    sink.start()
+    sink.emit('{"before":true}\n')
+    _settle(sink)
+    assert _backups(sink) == [], "rotated before the interval fell due"
+
+    # Bring the deadline into the past rather than waiting a day for it.
+    sink._rotate_at = time.time() - 1
+    sink.emit('{"after":true}\n')
+    _settle(sink)
+    _drain(sink)
+
+    backups = _backups(sink)
+    assert len(backups) == 1, [p.name for p in backups]
+    with gzip.open(backups[0], "rt", encoding="utf-8") as handle:
+        assert "before" in handle.read()
+    assert "after" in sink.path.read_text(encoding="utf-8")
+
+
+def test_an_idle_server_still_rotates_on_the_interval(tmp_path):
+    """The reason the writer checks the clock on an empty queue.
+
+    A quiet deployment writes nothing for hours. Rotating only when the next
+    record arrives would put a day's worth of records in a file stamped for the
+    previous period, which is precisely what a daily-rotation operator is
+    trying to avoid.
+    """
+    sink = AuditSink(
+        tmp_path / "audit.log", max_bytes=0, max_backups=3, interval_seconds=86_400
+    )
+    sink.start()
+    sink.emit('{"only":true}\n')
+    _settle(sink)
+
+    sink._rotate_at = time.time() - 1
+    # No further records: the rotation must come from the idle poll alone.
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline and not _backups(sink):
+        time.sleep(0.05)
+    _drain(sink)
+
+    assert len(_backups(sink)) == 1, "an idle sink never rotated"
+    assert sink.path.stat().st_size == 0
+
+
+def test_both_triggers_are_live_at_once(tmp_path):
+    """Whichever falls due first rotates: stdlib cannot do this, so we do."""
+    line = json.dumps({"payload": "b" * 80}) + "\n"
+    sink = AuditSink(
+        tmp_path / "audit.log",
+        max_bytes=len(line) * 2,
+        max_backups=10,
+        interval_seconds=86_400,
+    )
+    sink.start()
+    # Size alone, with the interval deadline far in the future.
+    for _ in range(6):
+        sink.emit(line)
+    _settle(sink)
+    after_size = len(_backups(sink))
+    assert after_size >= 2, "the size trigger did not fire while an interval was set"
+
+    # Now the interval, with the file nowhere near the size cap.
+    sink._rotate_at = time.time() - 1
+    sink.emit(line)
+    _settle(sink)
+    _drain(sink)
+    assert len(_backups(sink)) > after_size, "the interval trigger never fired"
+
+
+def test_neither_trigger_means_one_unbounded_file(tmp_path):
+    sink = AuditSink(
+        tmp_path / "audit.log", max_bytes=0, max_backups=0, interval_seconds=0
+    )
+    sink.start()
+    sink._rotate_at = time.time() - 1  # would rotate if the interval were live
+    for index in range(100):
+        sink.emit(json.dumps({"n": index}) + "\n")
+    _drain(sink)
+
+    assert _backups(sink) == []
+    assert len(sink.path.read_text(encoding="utf-8").splitlines()) == 100
+
+
+def test_the_interval_clock_is_anchored_to_the_live_file_not_to_startup(tmp_path):
+    """A restart must not hand a stale file a fresh interval it has not earned.
+
+    An operator asking for daily files, whose server was down for a week, wants
+    the week-old file rolled away — not another day of records appended to it.
+    """
+    path = process_scoped_path(tmp_path / "audit.log")
+    path.write_text('{"old":true}\n', encoding="utf-8")
+    week_ago = time.time() - 7 * 86_400
+    os.utime(path, (week_ago, week_ago))
+
+    sink = AuditSink(
+        tmp_path / "audit.log", max_bytes=0, max_backups=2, interval_seconds=86_400
+    )
+    try:
+        assert sink._rotate_at < time.time(), (
+            "a file older than the interval was given a fresh deadline"
+        )
+    finally:
+        _drain(sink)
+
+    # ... while a file that did not exist a moment ago gets its full interval.
+    fresh = AuditSink(
+        tmp_path / "fresh.log", max_bytes=0, max_backups=2, interval_seconds=86_400
+    )
+    try:
+        assert fresh._rotate_at > time.time() + 86_000
+    finally:
+        _drain(fresh)
 
 
 # ---------------------------------------------------------------------------
@@ -200,23 +405,33 @@ def test_a_single_oversized_line_is_written_not_dropped(tmp_path):
 
 
 @pytest.mark.parametrize(
-    ("max_bytes", "backup_count", "match"),
+    ("kwargs", "match"),
     [
-        (0, 1, "max_bytes must be positive"),
-        (-1, 1, "max_bytes must be positive"),
-        (10, -1, "backup_count must not be negative"),
+        ({"max_bytes": -1, "max_backups": 1}, "max_bytes must not be negative"),
+        ({"max_bytes": 10, "max_backups": -1}, "max_backups must not be negative"),
+        (
+            {"max_bytes": 10, "max_backups": 1, "interval_seconds": -1},
+            "interval_seconds must not be negative",
+        ),
     ],
 )
-def test_constructor_validates_its_arguments(tmp_path, max_bytes, backup_count, match):
+def test_constructor_rejects_negatives_but_not_zero(tmp_path, kwargs, match):
+    """Zero is an instruction — 'this trigger is off' — and a typo is not."""
     with pytest.raises(ValueError, match=match):
+        AuditSink(tmp_path / "audit.log", **kwargs)
+
+    # The zero the PRD requires to be accepted, in the same test so a future
+    # tightening of the validation cannot pass by rejecting both.
+    _drain(
         AuditSink(
-            tmp_path / "audit.log", max_bytes=max_bytes, backup_count=backup_count
+            tmp_path / "audit.log", max_bytes=0, max_backups=0, interval_seconds=0
         )
+    )
 
 
 def test_parent_directories_are_created(tmp_path):
     nested = tmp_path / "deep" / "deeper" / "audit.log"
-    sink = AuditSink(nested, max_bytes=4096, backup_count=1)
+    sink = AuditSink(nested, max_bytes=4096, max_backups=1)
     try:
         assert sink.path.parent.is_dir()
     finally:
@@ -229,13 +444,13 @@ def test_unwritable_path_raises_so_startup_can_report_it(tmp_path):
     collision = process_scoped_path(tmp_path / "audit.log")
     collision.mkdir()
     with pytest.raises(OSError):
-        AuditSink(tmp_path / "audit.log", max_bytes=4096, backup_count=1)
+        AuditSink(tmp_path / "audit.log", max_bytes=4096, max_backups=1)
 
 
 def test_full_queue_drops_and_counts_rather_than_blocking(tmp_path):
     # No writer thread started, so nothing drains the queue.
     sink = AuditSink(
-        tmp_path / "audit.log", max_bytes=1_000_000, backup_count=1, queue_size=4
+        tmp_path / "audit.log", max_bytes=1_000_000, max_backups=1, queue_size=4
     )
     for _ in range(10):
         sink.emit('{"x":1}\n')
@@ -244,7 +459,7 @@ def test_full_queue_drops_and_counts_rather_than_blocking(tmp_path):
 
 
 def test_emit_after_close_is_counted_not_raised(tmp_path):
-    sink = AuditSink(tmp_path / "audit.log", max_bytes=4096, backup_count=1)
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=4096, max_backups=1)
     sink.start()
     _drain(sink)
     sink.emit('{"late":true}\n')
@@ -252,14 +467,14 @@ def test_emit_after_close_is_counted_not_raised(tmp_path):
 
 
 def test_close_is_idempotent(tmp_path):
-    sink = AuditSink(tmp_path / "audit.log", max_bytes=4096, backup_count=1)
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=4096, max_backups=1)
     sink.start()
     sink.close()
     sink.close()  # must not raise
 
 
 def test_start_is_idempotent(tmp_path):
-    sink = AuditSink(tmp_path / "audit.log", max_bytes=4096, backup_count=1)
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=4096, max_backups=1)
     sink.start()
     sink.start()
     try:
@@ -271,7 +486,7 @@ def test_start_is_idempotent(tmp_path):
 
 def test_emit_from_many_threads_loses_nothing(tmp_path):
     """The producer side must be safe to call from any thread."""
-    sink = AuditSink(tmp_path / "audit.log", max_bytes=10_000_000, backup_count=1)
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=10_000_000, max_backups=1)
     sink.start()
 
     def worker(worker_id: int) -> None:
@@ -300,7 +515,7 @@ def test_sink_recovers_after_a_failed_rotation(tmp_path):
     a closed handle and never wrote again, even after the condition cleared.
     Silent and permanent is the worst failure mode an audit log can have.
     """
-    sink = AuditSink(tmp_path / "a.log", max_bytes=200, backup_count=0)
+    sink = AuditSink(tmp_path / "a.log", max_bytes=200, max_backups=0)
     sink.start()
     line = '{"pad":"' + "x" * 80 + '"}\n'
 
@@ -356,7 +571,7 @@ def test_writer_exits_when_the_queue_is_full_at_close(tmp_path):
     shut down faster, so the writer polls the closed flag instead. Before that,
     it blocked on an empty get() forever and the thread leaked.
     """
-    sink = AuditSink(tmp_path / "b.log", max_bytes=10_000, backup_count=1, queue_size=4)
+    sink = AuditSink(tmp_path / "b.log", max_bytes=10_000, max_backups=1, queue_size=4)
     sink.start()
     time.sleep(0.05)
 
@@ -385,7 +600,7 @@ def test_a_draining_writer_does_not_reopen_the_file_after_close(tmp_path):
     timeout exists for — would otherwise reopen a handle nobody closes again,
     and append records dated after "server stopped". It must drop them instead.
     """
-    sink = AuditSink(tmp_path / "c.log", max_bytes=100_000, backup_count=1)
+    sink = AuditSink(tmp_path / "c.log", max_bytes=100_000, max_backups=1)
     sink.start()
     released = threading.Event()
     real_write = sink._write_batch
@@ -403,3 +618,252 @@ def test_a_draining_writer_does_not_reopen_the_file_after_close(tmp_path):
         time.sleep(0.4)
 
     assert sink._stream.closed, "the writer reopened the stream after close"
+
+
+# ---------------------------------------------------------------------------
+# console and composite sinks
+# ---------------------------------------------------------------------------
+
+
+def test_console_sink_writes_lines_to_its_stream():
+    stream = io.StringIO()
+    sink = ConsoleAuditSink(stream)
+    sink.start()
+    sink.emit('{"a":1}\n')
+    sink.emit('{"b":2}\n')
+
+    assert stream.getvalue() == '{"a":1}\n{"b":2}\n'
+    assert sink.stats == {"written": 2, "dropped": 0, "write_errors": 0}
+
+
+def test_console_sink_defaults_to_stderr_never_stdout(capsys):
+    """stdout carries the JSON-RPC protocol under the stdio transport.
+
+    One audit line written there corrupts the client's stream and takes the
+    session down, so the default stream is not merely a preference.
+    """
+    sink = ConsoleAuditSink()
+    sink.start()
+    sink.emit('{"audited":true}\n')
+
+    captured = capsys.readouterr()
+    assert captured.err == '{"audited":true}\n'
+    assert captured.out == ""
+
+
+def test_console_sink_counts_a_broken_stream_rather_than_raising():
+    class Broken(io.StringIO):
+        def write(self, _text):
+            raise OSError("stream is gone")
+
+    sink = ConsoleAuditSink(Broken())
+    sink.emit('{"x":1}\n')
+
+    assert sink.stats["dropped"] == 1
+    assert sink.stats["write_errors"] == 1
+
+
+def test_console_sink_emits_whole_lines_under_concurrency():
+    stream = io.StringIO()
+    sink = ConsoleAuditSink(stream)
+
+    def worker(worker_id: int) -> None:
+        for index in range(50):
+            sink.emit(json.dumps({"w": worker_id, "i": index}) + "\n")
+
+    threads = [threading.Thread(target=worker, args=(w,)) for w in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    lines = stream.getvalue().splitlines()
+    assert len(lines) == 300
+    # Every line must be complete JSON: no record split by another thread.
+    assert (
+        len({(json.loads(line)["w"], json.loads(line)["i"]) for line in lines}) == 300
+    )
+
+
+def test_composite_writes_to_every_sink_and_sums_their_stats(tmp_path):
+    stream = io.StringIO()
+    console = ConsoleAuditSink(stream)
+    file_sink = AuditSink(tmp_path / "audit.log", max_bytes=0, max_backups=0)
+    composite = CompositeAuditSink([console, file_sink])
+    composite.start()
+    composite.emit('{"both":true}\n')
+    composite.close(timeout=10.0)
+
+    assert stream.getvalue() == '{"both":true}\n'
+    assert file_sink.path.read_text(encoding="utf-8") == '{"both":true}\n'
+    assert composite.stats["written"] == 2
+
+
+def test_one_failing_sink_does_not_stop_the_others(tmp_path):
+    """A full disk must not also cost the operator their console records."""
+
+    class Broken(io.StringIO):
+        def write(self, _text):
+            raise OSError("stream is gone")
+
+    file_sink = AuditSink(tmp_path / "audit.log", max_bytes=0, max_backups=0)
+    composite = CompositeAuditSink([ConsoleAuditSink(Broken()), file_sink])
+    composite.start()
+    composite.emit('{"survives":true}\n')
+    composite.close(timeout=10.0)
+
+    assert file_sink.path.read_text(encoding="utf-8") == '{"survives":true}\n'
+    assert composite.stats["written"] == 1
+    assert composite.stats["dropped"] == 1
+
+
+# ---------------------------------------------------------------------------
+# retention keeps the newest, end to end
+# ---------------------------------------------------------------------------
+
+
+def _numbered(sink: AuditSink) -> list[int]:
+    """Every surviving record's ``n``, across backups and the live file."""
+    numbers: list[int] = []
+    for path in [*_backups(sink), sink.path]:
+        if path.suffix == ".gz":
+            with gzip.open(path, "rt", encoding="utf-8") as handle:
+                text = handle.read()
+        else:
+            text = path.read_text(encoding="utf-8")
+        numbers += [json.loads(line)["n"] for line in text.splitlines() if line.strip()]
+    return sorted(numbers)
+
+
+def test_retention_discards_the_oldest_records_not_the_newest(tmp_path):
+    """Counting the backups is not enough: *which* ones survive is the point.
+
+    Every retention case in the PRD — 100 MB across ten files, 90 days of daily
+    logs — means a sliding window over the most recent history. An earlier
+    version of this sink ordered backups by filename, and because ``-`` sorts
+    before ``.`` the same-second disambiguator inverted the order: it deleted
+    the newest backups and kept the oldest, while still reporting exactly
+    ``max_backups`` files. The count was right and the contents were useless.
+    """
+    line = json.dumps({"n": 0}) + "\n"
+    # Two records a file, many rotations, several of them inside one second.
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=len(line) * 2, max_backups=9)
+    sink.start()
+    for index in range(60):
+        sink.emit(json.dumps({"n": index}) + "\n")
+    _drain(sink)
+
+    survivors = _numbered(sink)
+    assert len(_backups(sink)) == 9
+    # The window is the tail of the sequence: contiguous, and ending at the
+    # last record written.
+    assert survivors[-1] == 59
+    assert survivors == list(range(survivors[0], 60)), survivors
+    # Ten files of two records each; nothing older may have been kept.
+    assert survivors[0] >= 40, f"stale records survived: {survivors}"
+
+
+def test_backups_are_ordered_chronologically_not_alphabetically(tmp_path):
+    """The ordering itself, isolated from the rotation that produces it."""
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=0, max_backups=5)
+    try:
+        # Written out of order, and spanning the disambiguators that broke a
+        # naive name sort: '-' < '.', and '-10' < '-2' as strings.
+        stamps = [
+            "20261006T120000000000Z-2",
+            "20261006T120000000000Z",
+            "20261006T120000000000Z-10",
+            "20261006T120000000000Z-1",
+            "20261006T115959000000Z",
+        ]
+        for stamp in stamps:
+            sink.path.with_name(f"{sink.path.name}.{stamp}.gz").write_bytes(b"")
+        ordered = [path.name for path in sink._existing_backups()]
+    finally:
+        _drain(sink)
+
+    assert ordered == [
+        f"{sink.path.name}.20261006T115959000000Z.gz",
+        f"{sink.path.name}.20261006T120000000000Z.gz",
+        f"{sink.path.name}.20261006T120000000000Z-1.gz",
+        f"{sink.path.name}.20261006T120000000000Z-2.gz",
+        f"{sink.path.name}.20261006T120000000000Z-10.gz",
+    ], ordered
+
+
+def test_an_idle_period_does_not_cost_a_record_or_a_retention_slot(tmp_path):
+    """A deadline that passed while the file was empty must move on.
+
+    Left in the past, it makes the first record after a quiet spell arrive
+    already overdue: it is split into a backup of its own, and with
+    ``max_backups=0`` the next record truncates it away — written, counted, and
+    gone. That is the one failure an audit sink may not have.
+    """
+    sink = AuditSink(
+        tmp_path / "audit.log", max_bytes=0, max_backups=0, interval_seconds=86_400
+    )
+    sink.start()
+    # A deadline that fell due while nothing was being written.
+    sink._rotate_at = time.time() - 1
+    time.sleep(0.4)  # let the idle poll see it
+
+    for index in range(3):
+        sink.emit(json.dumps({"n": index}) + "\n")
+    _drain(sink)
+
+    assert _numbered(sink) == [0, 1, 2]
+    assert sink.stats["written"] == 3
+    assert sink.stats["dropped"] == 0
+
+
+def test_a_record_queued_as_the_sink_closes_is_still_written(tmp_path):
+    """``emit`` can land behind the sentinel; the writer must still drain it."""
+    sink = AuditSink(tmp_path / "audit.log", max_bytes=0, max_backups=0)
+    sink.start()
+    # Post the sentinel first, then a record behind it — the ordering the
+    # emit/close race produces, without having to win the race.
+    sink._queue.put_nowait(_SENTINEL)
+    sink._queue.put_nowait(json.dumps({"n": 7}) + "\n")
+    sink.close(timeout=10.0)
+
+    assert _numbered(sink) == [7]
+
+
+@pytest.mark.parametrize(
+    ("name", "max_bytes", "interval", "max_backups", "records", "expected_files"),
+    [
+        # PRD case 4: 10 MB a file, 9 backups -> 100 MB across ten files.
+        ("case4", 2, 0, 9, 40, 10),
+        # PRD case 5 / 6 shape: interval only, retention by count.
+        ("case5", 0, 86_400, 3, 12, 4),
+    ],
+)
+def test_prd_retention_cases_end_to_end(
+    tmp_path, name, max_bytes, interval, max_backups, records, expected_files
+):
+    """The configuration cases as the sink actually behaves, not as arithmetic.
+
+    ``test_audit_config`` checks that each case resolves to the right numbers;
+    this checks that those numbers produce the right files on disk, with the
+    most recent records in them.
+    """
+    line = json.dumps({"n": 0}) + "\n"
+    sink = AuditSink(
+        tmp_path / f"{name}.log",
+        max_bytes=len(line) * max_bytes if max_bytes else 0,
+        max_backups=max_backups,
+        interval_seconds=interval,
+    )
+    sink.start()
+    for index in range(records):
+        sink.emit(json.dumps({"n": index}) + "\n")
+        if interval:
+            # Force the interval trigger rather than waiting a day for it.
+            _settle(sink, timeout=0.5)
+            sink._rotate_at = time.time() - 1
+    _drain(sink)
+
+    assert len(_backups(sink)) + 1 == expected_files
+    survivors = _numbered(sink)
+    assert survivors[-1] == records - 1, "the newest record was not retained"
+    assert survivors == list(range(survivors[0], records)), survivors

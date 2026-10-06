@@ -308,11 +308,13 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_OAUTH_SCOPE_READ_LABEL` | `--oauth-scope-read-label` | Override the OAuth scope label treated as 'read' access (advertised in PRM and matched against the token's `scope`/`scp` claim). Use when your IdP can't emit the canonical form | `couchbase-mcp:read` |
 | `CB_MCP_OAUTH_SCOPE_WRITE_LABEL` | `--oauth-scope-write-label` | Override the OAuth scope label treated as 'write' access; same semantics as the read label | `couchbase-mcp:write` |
 | `CB_MCP_AUDIT_LOG_ENABLED` | `--audit-log-enabled` | Enable audit logging — a separate sink from the `CB_MCP_LOG_*` operational logs, with a stable schema and its own retention (see [Auditing](#auditing)) | `false` |
-| `CB_MCP_AUDIT_FILE` | `--audit-file` | Path to the audit log file. Required when auditing is enabled; the hostname and process id are inserted before the extension (`audit.log` → `audit.<host>.<pid>.log`) | None |
-| `CB_MCP_AUDIT_ROTATION_MAX_SIZE_MB` | `--audit-rotation-max-size-mb` | Maximum size **in MB** an audit file may reach before it rotates. `0` is invalid and falls back to the default with a startup warning | `1` (1 MB) |
-| `CB_MCP_AUDIT_RETENTION_BACKUP_COUNT` | `--audit-retention-backup-count` | Rotated backups retained **per audit file**, excluding the live file. `0` keeps only the live file. This bounds one file, not the directory — see [Auditing](#auditing) | `1000` |
-| `CB_MCP_AUDIT_TOOL_ARGS` | `--audit-tool-args` | Record tool argument values in the audit log. **Off by default** — there is no redaction in this release, so enabling it writes arguments verbatim, including full document bodies | `false` |
-| `CB_MCP_AUDIT_DISABLED_EVENTS` | `--audit-disabled-events` | Audit events to suppress: comma-separated numeric event ids (e.g. `61490,61491`), or a file with one id per line. Only filterable events can be suppressed | None |
+| `CB_MCP_AUDIT_LOG_SINKS` | `--audit-log-sinks` | Comma-separated audit destinations: `console`, `file`, or both. `console` writes to **stderr** — never stdout, which carries the JSON-RPC protocol on stdio | `console` |
+| `CB_MCP_AUDIT_LOG_FILE_PATH` | `--audit-log-file-path` | Path to the audit log file. Required when `file` is in the sinks; the hostname and process id are inserted before the extension (`audit.log` → `audit.<host>.<pid>.log`) | None |
+| `CB_MCP_AUDIT_LOG_ROTATION_MAX_SIZE_MB` | `--audit-log-rotation-max-size-mb` | Maximum size **in MB** the live audit file may reach before it rotates. `0` turns size-based rotation **off** | `10` (10 MB) |
+| `CB_MCP_AUDIT_LOG_ROTATION_INTERVAL` | `--audit-log-rotation-interval` | Age the live audit file may reach before it rotates, as `<value><unit>` where the unit is `d` (24 hours) or `w` (7 days) — e.g. `1d`, `30d`, `8w`. `0` turns interval-based rotation **off** | `1d` |
+| `CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS` | `--audit-log-retention-max-backups` | Rotated backups retained **per audit file**, excluding the live file. Backups are gzipped. `0` keeps none. This bounds one file, not the directory — see [Auditing](#auditing) | `10` |
+| `CB_MCP_AUDIT_LOG_TOOL_ARGS` | `--audit-log-tool-args` | Record tool argument values in the audit log. **Off by default** — there is no redaction in this release, so enabling it writes arguments verbatim, including full document bodies | `false` |
+| `CB_MCP_AUDIT_LOG_DISABLED_EVENTS` | `--audit-log-disabled-events` | Audit events to suppress: comma-separated numeric event ids (e.g. `61490,61491`), or a file with one id per line. Only filterable events can be suppressed | None |
 
 #### Read-Only Mode Configuration
 
@@ -471,7 +473,7 @@ For more details, see the [documentation](https://docs.couchbase.com/mcp-server/
 
 Audit logging answers a different question from the operational logs. Logs tell you **what went wrong**; the audit log tells you **who did what, and whether it was allowed**. It exists because the MCP server is the only layer that can answer either question about an agent: every request reaches the cluster as the single `CB_USERNAME` the server connects with, so Couchbase Server's own audit log cannot tell two callers apart — and decisions such as a scope denial, a read-only block or a declined confirmation never reach the cluster at all.
 
-Auditing is **off by default**. It is enabled with `CB_MCP_AUDIT_LOG_ENABLED` and a path in `CB_MCP_AUDIT_FILE`; enabling it without a path leaves the server running with auditing disabled and an error in the log.
+Auditing is **off by default**. `CB_MCP_AUDIT_LOG_ENABLED=true` turns it on, writing to the console (stderr) unless `CB_MCP_AUDIT_LOG_SINKS` says otherwise. A deployment that keeps records sets `CB_MCP_AUDIT_LOG_SINKS=file` and a path in `CB_MCP_AUDIT_LOG_FILE_PATH`; selecting the file sink without a path leaves the server running — with the console sink if one was also selected, otherwise with auditing off — and an error in the log.
 
 Records are **JSON Lines** — one immutable record per line — using the same field vocabulary as Couchbase Server and Sync Gateway (`id`, `name`, `description`, `timestamp`, `real_userid`, `server`, `cid`, `outcome`, `reason`), so an existing audit pipeline gets one format across the estate.
 
@@ -482,22 +484,48 @@ Records are **JSON Lines** — one immutable record per line — using the same 
 - **Identity** — `real_userid` records the *caller*, in one of three domains: `oauth` (the bearer token's subject), `local` (the OS process owner, on stdio), or `anonymous` (HTTP with OAuth disabled). Enabling auditing on HTTP without OAuth warns at startup, because every record then resolves to `anonymous`.
 - **Correlation** — `cid` groups every record produced by one request, so an authorization denial, a guardrail refusal and the eventual tool result join without matching on timestamps. There is deliberately **no session identifier**: MCP is moving to a stateless model in which connection identity must not be read as session continuity. For SQL++, the same `cid` is sent as the query's `client_context_id`, which Couchbase Server records as `clientContextId` — an exact join between the two logs.
 - **Events** — a fixed catalogue on numbered ID blocks: server lifecycle and configuration, session initialize, token rejected, scope check denied, read-only write blocked, confirmation declined or skipped, and one read/write pair per tool category (cluster, schema, document, query, index, performance, search). Adding a tool needs no new ID and no change to a SIEM rule. The full catalogue ships as `descriptor.json` inside the package.
-- **Filtering** — `CB_MCP_AUDIT_DISABLED_EVENTS` turns *read* noise down, taking numeric event ids (the id is the wire contract; event names are prose and may be reworded, so they are not accepted). Write and security events are **not filterable**: an attempt to disable one is refused with a warning, so the record of who changed what cannot be switched off by configuration.
-- **Retention** — rotation size and backup count work like the operational logs, but the default retention is far larger (1000 backups) because audit records are reviewed on a quarterly or annual cadence, not for day-to-day triage.
+- **Filtering** — `CB_MCP_AUDIT_LOG_DISABLED_EVENTS` turns *read* noise down, taking numeric event ids (the id is the wire contract; event names are prose and may be reworded, so they are not accepted). Write and security events are **not filterable**: an attempt to disable one is refused with a warning, so the record of who changed what cannot be switched off by configuration.
+- **Rotation** — two independent triggers, and either may be switched off with `0`. `CB_MCP_AUDIT_LOG_ROTATION_MAX_SIZE_MB` rotates the live file when it grows past a size; `CB_MCP_AUDIT_LOG_ROTATION_INTERVAL` rotates it when it grows older than an age (`1d`, `30d`, `1w`, `8w`). Whichever falls due first rotates the file, and with both off the file simply keeps growing. The interval clock is anchored to the live file, not to startup, so a server that was down over the weekend rolls the stale file away rather than appending to it.
+- **Retention and compression** — `CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS` keeps that many rotated files beside the live one; `0` keeps none, truncating the live file at each rotation. Backups are named with the UTC rotation time (`audit.<host>.<pid>.log.20261006T091422481503Z.gz`) and **gzipped**, which matters because audit retention is measured in months — JSON Lines compresses roughly ten to one. The live file is deliberately left uncompressed so `tail -f` and `grep` still work during an incident.
 - **Per-writer files** — the hostname and process id are inserted before the extension (`audit.log` → `audit.<host>.<pid>.log`), because a stdio deployment runs one server process per client and a shared rotating file would interleave and corrupt records. The hostname matters in containers: the published image's `ENTRYPOINT` is exec form, so the server is PID 1 in every container and a pid-only name would collide across containers sharing a volume.
 - **Retention is per file** — the backup count bounds the rotated copies of *one* audit file. Every process, and so every stdio session and every restart, writes a new file with its own backups, and nothing prunes the files of processes that have exited. Total disk use therefore grows with the number of server starts; size the volume accordingly or sweep old `audit.*.log*` files.
 - **Fail-open** — if the audit file cannot be written, the server keeps serving and the records are dropped and counted rather than turning an audit outage into a server outage. `get_server_configuration_status` reports the live `written` / `dropped` / `write_errors` counters, and `dropped` is the only way to discover that records were lost.
-- **Tool arguments** — recorded only when `CB_MCP_AUDIT_TOOL_ARGS` is enabled, which warns at startup. There is no redaction in this release, so arguments are written verbatim, including the full document bodies passed to document-write tools.
+- **Tool arguments** — recorded only when `CB_MCP_AUDIT_LOG_TOOL_ARGS` is enabled, which warns at startup. There is no redaction in this release, so arguments are written verbatim, including the full document bodies passed to document-write tools.
 
 Auditing currently applies to the **operational** server. The Operational Insights server accepts the same flags and reports them, but records nothing.
 
 ```bash
-# Audit to a file, keeping the default 1000 rotated backups
-uvx couchbase-mcp-server --audit-log-enabled=true --audit-file=/var/log/cb-mcp/audit.log
+# Audit to the console (stderr) — no path needed
+uvx couchbase-mcp-server --audit-log-enabled=true
+
+# Audit to a file: daily rotation, 10 gzipped backups, both by default
+uvx couchbase-mcp-server --audit-log-enabled=true \
+  --audit-log-sinks=file --audit-log-file-path=/var/log/cb-mcp/audit.log
+
+# 90 days of daily files, with no size limit on any of them
+uvx couchbase-mcp-server --audit-log-enabled=true \
+  --audit-log-sinks=file --audit-log-file-path=/var/log/cb-mcp/audit.log \
+  --audit-log-rotation-max-size-mb=0 \
+  --audit-log-rotation-interval=1d \
+  --audit-log-retention-max-backups=90
+
+# 100 MB in total: ten 10 MB files, no interval rotation
+uvx couchbase-mcp-server --audit-log-enabled=true \
+  --audit-log-sinks=file --audit-log-file-path=/var/log/cb-mcp/audit.log \
+  --audit-log-rotation-max-size-mb=10 \
+  --audit-log-rotation-interval=0 \
+  --audit-log-retention-max-backups=9
+
+# One file, never rotated — keep everything
+uvx couchbase-mcp-server --audit-log-enabled=true \
+  --audit-log-sinks=file --audit-log-file-path=/var/log/cb-mcp/audit.log \
+  --audit-log-rotation-max-size-mb=0 --audit-log-rotation-interval=0 \
+  --audit-log-retention-max-backups=0
 
 # Turn down read noise, keeping every write and security event
-uvx couchbase-mcp-server --audit-log-enabled=true --audit-file=/var/log/cb-mcp/audit.log \
-  --audit-disabled-events="61490,61491"   # document read, query read
+uvx couchbase-mcp-server --audit-log-enabled=true \
+  --audit-log-sinks=file --audit-log-file-path=/var/log/cb-mcp/audit.log \
+  --audit-log-disabled-events="61490,61491"   # document read, query read
 ```
 
 ### Client Specific Configuration

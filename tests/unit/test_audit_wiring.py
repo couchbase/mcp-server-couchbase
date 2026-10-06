@@ -27,6 +27,7 @@ from _all_specs import ALL_SPECS
 
 from cb_mcp.audit.config import resolve_audit_config
 from cb_mcp.audit.emitter import get_audit_logger, init_audit, shutdown_audit
+from cb_mcp.audit.sink import process_scoped_path
 from cb_mcp.auth import CouchbaseJWTVerifier
 from cb_mcp.core.app import build_app
 
@@ -44,9 +45,11 @@ def _records(directory: Path) -> list[dict]:
 def _audit_config(tmp_path: Path, **overrides):
     options = {
         "enabled": True,
+        # The file sink specifically: these tests assert on what reaches disk.
+        "sinks": "file",
         "file": str(tmp_path / "audit.log"),
         "rotation_max_size_mb": None,
-        "retention_backup_count": None,
+        "max_backups": None,
         "tool_args": None,
         "disabled_events": None,
     }
@@ -218,3 +221,48 @@ async def test_an_accepted_token_emits_no_record(tmp_path):
         shutdown_audit()
 
     assert [r for r in _records(tmp_path) if r["name"] == "token rejected"] == []
+
+
+def test_a_file_sink_that_cannot_be_opened_is_removed_from_the_snapshot(tmp_path):
+    """The reported configuration must match what is actually being written.
+
+    ``init_audit`` reports an unopenable file and keeps serving — but the
+    snapshot it hands the logger is reported by
+    ``get_server_configuration_status`` *and* written into the permanent
+    ``audit configuration changed`` record. A snapshot still naming a file sink
+    that failed to open would tell an auditor, for as long as the record is
+    kept, that records were being written to disk when none were.
+    """
+    # A directory where the process-scoped file should be: the portable way to
+    # make open() fail without depending on the test user's privileges.
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    config = _audit_config(
+        blocked, sinks="console,file", file=str(blocked / "audit.log")
+    )
+    process_scoped_path(config.file).mkdir()
+
+    try:
+        audit = init_audit(config)
+        # The console sink survives, so auditing is still active...
+        assert audit.active is True
+        snapshot = audit.config.as_dict()
+        # ... but nothing claims a file is being written.
+        assert snapshot["sinks"] == ["console"]
+        assert snapshot["process_file"] is None
+    finally:
+        shutdown_audit()
+
+
+def test_auditing_reports_itself_off_when_every_sink_fails(tmp_path):
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    config = _audit_config(blocked, sinks="file", file=str(blocked / "audit.log"))
+    process_scoped_path(config.file).mkdir()
+
+    try:
+        audit = init_audit(config)
+        assert audit.active is False
+        assert audit.config.as_dict()["enabled"] is False
+    finally:
+        shutdown_audit()

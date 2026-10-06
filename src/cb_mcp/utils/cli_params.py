@@ -329,11 +329,13 @@ class CliParams:
             # sinks rather than on the last-resort handler.
             audit=resolve_audit_config(
                 enabled=params.get("audit_log_enabled"),
-                file=params.get("audit_file"),
-                rotation_max_size_mb=params.get("audit_rotation_max_size_mb"),
-                retention_backup_count=params.get("audit_retention_backup_count"),
-                tool_args=params.get("audit_tool_args"),
-                disabled_events=params.get("audit_disabled_events"),
+                sinks=params.get("audit_log_sinks"),
+                file=params.get("audit_log_file_path"),
+                rotation_max_size_mb=params.get("audit_log_rotation_max_size_mb"),
+                rotation_interval=params.get("audit_log_rotation_interval"),
+                max_backups=params.get("audit_log_retention_max_backups"),
+                tool_args=params.get("audit_log_tool_args"),
+                disabled_events=params.get("audit_log_disabled_events"),
             ),
         )
 
