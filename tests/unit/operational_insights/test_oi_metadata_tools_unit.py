@@ -12,10 +12,10 @@ from _oi_fakes import make_oi_ctx
 
 from cb_mcp.tools.operational_insights.metadata import (
     MAX_SCHEMA_SAMPLE_SIZE,
-    get_collections_in_scope,
-    get_databases_in_cluster,
-    get_schema_for_collection,
-    get_scopes_in_database,
+    oi_get_collections_in_scope,
+    oi_get_databases_in_cluster,
+    oi_get_schema_for_collection,
+    oi_get_scopes_in_database,
 )
 from cb_mcp.utils.sqlpp import safe_ident
 
@@ -27,7 +27,7 @@ class TestGetDatabasesInCluster:
             {"DatabaseName": "Default"}
         ]
 
-        result = get_databases_in_cluster(ctx)
+        result = oi_get_databases_in_cluster(ctx)
 
         assert result == [{"DatabaseName": "Default"}]
 
@@ -36,7 +36,7 @@ class TestGetDatabasesInCluster:
         cluster.execute_query.side_effect = Exception("connection refused")
 
         with pytest.raises(Exception, match="connection refused"):
-            get_databases_in_cluster(ctx)
+            oi_get_databases_in_cluster(ctx)
 
 
 class TestGetScopesInDatabase:
@@ -46,7 +46,7 @@ class TestGetScopesInDatabase:
             {"DatabaseName": "Default", "ScopeName": "Default"}
         ]
 
-        result = get_scopes_in_database(ctx, "Default")
+        result = oi_get_scopes_in_database(ctx, "Default")
 
         assert result == [{"DatabaseName": "Default", "ScopeName": "Default"}]
 
@@ -55,7 +55,7 @@ class TestGetScopesInDatabase:
         cluster.execute_query.side_effect = Exception("boom")
 
         with pytest.raises(Exception, match="boom"):
-            get_scopes_in_database(ctx, "Default")
+            oi_get_scopes_in_database(ctx, "Default")
 
 
 class TestGetCollectionsInScope:
@@ -69,7 +69,7 @@ class TestGetCollectionsInScope:
             }
         ]
 
-        result = get_collections_in_scope(ctx, "Default", "Default")
+        result = oi_get_collections_in_scope(ctx, "Default", "Default")
 
         assert result[0]["CollectionName"] == "oitest_coll"
 
@@ -78,7 +78,7 @@ class TestGetCollectionsInScope:
         cluster.execute_query.side_effect = Exception("boom")
 
         with pytest.raises(Exception, match="boom"):
-            get_collections_in_scope(ctx, "Default", "Default")
+            oi_get_collections_in_scope(ctx, "Default", "Default")
 
 
 class TestGetSchemaForCollection:
@@ -90,7 +90,7 @@ class TestGetSchemaForCollection:
         flavors = [{"properties": {"id": {"type": ["string"]}}}]
         cluster.execute_query.return_value.get_all_rows.return_value = [flavors]
 
-        result = get_schema_for_collection(ctx, "Default", "Default", "oitest_coll")
+        result = oi_get_schema_for_collection(ctx, "Default", "Default", "oitest_coll")
 
         assert result == flavors
 
@@ -99,13 +99,13 @@ class TestGetSchemaForCollection:
         cluster.execute_query.side_effect = Exception("boom")
 
         with pytest.raises(Exception, match="boom"):
-            get_schema_for_collection(ctx, "Default", "Default", "oitest_coll")
+            oi_get_schema_for_collection(ctx, "Default", "Default", "oitest_coll")
 
     def test_rejects_non_positive_sample_size(self) -> None:
         ctx, cluster = make_oi_ctx()
 
         with pytest.raises(ValueError, match="sample_size must be positive"):
-            get_schema_for_collection(
+            oi_get_schema_for_collection(
                 ctx, "Default", "Default", "oitest_coll", sample_size=0
             )
 
@@ -115,7 +115,7 @@ class TestGetSchemaForCollection:
         ctx, cluster = make_oi_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        get_schema_for_collection(
+        oi_get_schema_for_collection(
             ctx,
             "Default",
             "Default",
@@ -132,7 +132,7 @@ class TestGetSchemaForCollection:
         ctx, cluster = make_oi_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        get_schema_for_collection(ctx, "db`.`evil", "s", "c")
+        oi_get_schema_for_collection(ctx, "db`.`evil", "s", "c")
 
         query = cluster.execute_query.call_args[0][0]
         # Each embedded backtick must be doubled (escaped), not left able to
@@ -143,7 +143,7 @@ class TestGetSchemaForCollection:
         ctx, cluster = make_oi_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        get_schema_for_collection(ctx, "Default", "Default", "oitest_coll")
+        oi_get_schema_for_collection(ctx, "Default", "Default", "oitest_coll")
 
         query = cluster.execute_query.call_args[0][0]
         # num_sample_values is interpolated as a literal, not bound —
@@ -158,7 +158,7 @@ class TestGetSchemaForCollection:
         ctx, cluster = make_oi_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        get_schema_for_collection(
+        oi_get_schema_for_collection(
             ctx, "Default", "Default", "oitest_coll", num_sample_values=5
         )
 
@@ -169,7 +169,7 @@ class TestGetSchemaForCollection:
         ctx, cluster = make_oi_ctx()
 
         with pytest.raises(ValueError, match="num_sample_values must be non-negative"):
-            get_schema_for_collection(
+            oi_get_schema_for_collection(
                 ctx, "Default", "Default", "oitest_coll", num_sample_values=-1
             )
 
@@ -196,7 +196,7 @@ class TestGetSchemaForCollection:
         ]
         cluster.execute_query.return_value.get_all_rows.return_value = [flavors]
 
-        result = get_schema_for_collection(
+        result = oi_get_schema_for_collection(
             ctx, "Default", "Default", "oitest_coll", num_sample_values=0
         )
 
@@ -218,7 +218,7 @@ class TestGetSchemaForCollection:
         flavors = [{"properties": {"id": {"type": "string", "samples": ["1"]}}}]
         cluster.execute_query.return_value.get_all_rows.return_value = [flavors]
 
-        result = get_schema_for_collection(
+        result = oi_get_schema_for_collection(
             ctx, "Default", "Default", "oitest_coll", num_sample_values=1
         )
 

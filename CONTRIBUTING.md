@@ -353,11 +353,10 @@ avoids the problem entirely.
 **2. Declare the tools** in `src/cb_mcp/tools/<id>/`, exporting a `ToolSet` and a
 `TOOL_ANNOTATIONS` mapping from the package `__init__`. Tool *names* should be
 globally unique across all servers — a client connected to two servers sees one
-flat namespace, so a duplicate name is ambiguous to it. Prefer a unique name.
-If a name genuinely must be duplicated — each server having its *own*
-implementation behind it (e.g. porting an existing tool set whose names
-predate this rule, as `operational-insights`'s `get_collections_in_scope`,
-`get_schema_for_collection`, `create_index` and `list_indexes` do) — add it to
+flat namespace, so a duplicate name is ambiguous to it. Prefer a unique name,
+e.g. a short server-specific prefix (`operational-insights` prefixes every
+tool name with `oi_` for exactly this reason). If a name genuinely must be
+duplicated — each server having its *own* implementation behind it — add it to
 `KNOWN_DUPLICATE_TOOL_NAMES` in `tests/unit/test_server_specs.py` with a
 one-line reason. The test still fails on any *new*, undocumented collision.
 
