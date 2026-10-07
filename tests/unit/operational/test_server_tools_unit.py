@@ -1360,22 +1360,38 @@ class TestGetClusterSystemEvents:
             "2026-10-05",  # bare date
             "2026-10-05T09:12:04",  # naive, no offset
             "2026-10-05T09:12:04+05:30",  # non-UTC offset
+            "2026-10-05T09:12:04-00:00",  # zero offset, wrong spelling
+            # The endpoint rejects "+00:00" as well, even though it is the same
+            # instant as "Z".
+            "2026-10-05T09:12:04+00:00",
+            # Basic format and "+0000" parse on Python 3.11+ but not 3.10;
+            # validation must not depend on the interpreter.
+            "20261005T091204Z",
+            "2026-10-05T09:12:04+0000",
+            "yesterday",
         ],
     )
-    def test_rejects_since_time_that_is_not_explicit_utc(self, since_time):
-        """The endpoint 400s on each of these, so reject them locally instead."""
+    def test_rejects_since_time_the_endpoint_would_reject(self, since_time):
+        """Every one of these is a 400 from /events, so reject it locally.
+
+        Checked against a pattern rather than datetime.fromisoformat, whose
+        grammar widened in 3.11 — otherwise the basic-format and "+0000" cases
+        would pass on 3.11+ and fail on 3.10.
+        """
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         with (
             patch("httpx.Client") as mock_cls,
-            pytest.raises(ValueError, match="must be in UTC"),
+            pytest.raises(ValueError, match="ISO-8601 UTC timestamp"),
         ):
             get_cluster_system_events(ctx, since_time=since_time)
         mock_cls.assert_not_called()
 
     @pytest.mark.parametrize(
-        "since_time", ["2026-10-05T09:12:04Z", "2026-10-05T09:12:04+00:00"]
+        "since_time",
+        ["2026-10-05T09:12:04Z", "2026-10-05T09:12:04.579Z"],
     )
-    def test_accepts_explicit_utc_since_time(self, since_time):
+    def test_accepts_the_timestamp_shape_the_endpoint_takes(self, since_time):
+        """Seconds precision and fractional seconds, both ending in Z."""
         _, client = self._call(since_time=since_time)
         assert client.get.call_args.kwargs["params"]["sinceTime"] == since_time
 

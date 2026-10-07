@@ -11,8 +11,8 @@ in this module needs a Couchbase ``Cluster``.
 
 import json
 import logging
+import re
 from collections import Counter
-from datetime import datetime
 from typing import Any
 
 import httpx
@@ -50,6 +50,12 @@ SYSTEM_EVENTS_DEFAULT_LIMIT = 50
 SYSTEM_EVENTS_MAX_LIMIT = 500
 
 EVENTS_ORDERING = "ascending_oldest_first"
+
+# YYYY-MM-DDThh:mm:ss[.sss]Z — the only shape /events accepts. "+00:00" is the
+# same instant but the endpoint answers it with
+# {"errors": {"sinceTime": "The value must be a valid ISO 8601 UTC"}}, so the
+# literal Z is required here too.
+_ISO_UTC_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
 
 
 def test_cluster_connection(
@@ -592,26 +598,24 @@ def _validate_system_events_limit(limit: int) -> None:
 
 
 def _validate_since_time(since_time: str) -> None:
-    """Require an ISO-8601 timestamp at an explicit zero UTC offset.
+    """Require the one timestamp shape /events accepts.
 
-    ``datetime.fromisoformat`` also accepts a bare date, a naive timestamp and a
-    non-UTC offset, all of which the endpoint answers with a 400 — so they are
-    caught here instead, where the message can name the expected form rather
-    than relaying a bare status code.
+    Matched against a pattern rather than parsed with
+    ``datetime.fromisoformat``, whose accepted grammar widened in Python 3.11:
+    on 3.11+ it takes ``20261005T091204Z`` and ``+0000``, which the endpoint
+    answers with a 400, while 3.10 rejects them here. That made validation
+    depend on the interpreter. The pattern behaves the same on every supported
+    version and admits only what the endpoint documents: an ISO-8601 UTC
+    timestamp with dashes and colons, optional fractional seconds, and a
+    literal ``Z``. ``+00:00`` is the same instant but the endpoint rejects it,
+    so it is not accepted here either.
     """
-    try:
-        parsed = datetime.fromisoformat(since_time.replace("Z", "+00:00"))
-        offset = parsed.utcoffset()
-    except (ValueError, AttributeError) as e:
+    if not isinstance(since_time, str) or not _ISO_UTC_TIMESTAMP.fullmatch(since_time):
         raise ValueError(
-            f"since_time must be an ISO-8601 UTC timestamp such as "
-            f"'2026-10-05T09:12:04Z', got {since_time!r}"
-        ) from e
-    if offset is None or offset.total_seconds() != 0:
-        raise ValueError(
-            f"since_time must be in UTC, ending in 'Z' (or '+00:00') — the "
-            f"endpoint rejects a bare date, a naive timestamp or a non-UTC "
-            f"offset. Got {since_time!r}"
+            f"since_time must be an ISO-8601 UTC timestamp ending in 'Z', "
+            f"such as '2026-10-05T09:12:04Z'. The endpoint rejects a bare "
+            f"date, a naive timestamp, a basic-format timestamp and every "
+            f"offset spelling including '+00:00'. Got {since_time!r}"
         )
 
 
