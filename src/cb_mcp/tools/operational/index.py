@@ -16,7 +16,10 @@ from ...servers.operational.constants import (
 )
 from ...utils.config import get_settings
 from ...utils.operational.connection import connect_to_bucket, format_keyspace
-from ...utils.operational.connection_string import validate_connection_settings
+from ...utils.operational.connection_string import (
+    is_capella_connection,
+    validate_connection_settings,
+)
 from ...utils.operational.context import get_cluster_connection
 from ...utils.operational.index_utils import (
     fetch_index_stats_from_rest_api,
@@ -298,6 +301,8 @@ def get_index_stats(
 
         settings = get_settings(ctx)
         validate_connection_settings(settings)
+        if is_capella_connection(settings["connection_string"]):
+            raise ValueError("get_index_stats is not supported on Capella clusters")
 
         logger.info(
             f"Fetching index stats for bucket={bucket_name}, scope={scope_name}, "
@@ -330,6 +335,11 @@ def get_index_stats(
             "nodes_failed": failures,
         }
 
+    except ValueError as e:
+        # Up-front, documented rejections (bad filters, Capella) — not a system
+        # fault, so no traceback noise in the logs.
+        logger.warning(f"Rejected get_index_stats request: {e}")
+        raise
     except Exception as e:
         logger.error(f"Error getting index stats: {e}", exc_info=True)
         raise

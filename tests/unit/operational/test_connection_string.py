@@ -5,12 +5,71 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
+from cb_mcp.core.spec import Deployment
 from cb_mcp.utils.operational.connection_string import (
     _get_capella_root_ca_path,
     determine_ssl_verification,
     extract_hosts_from_connection_string,
     is_capella_connection,
+    resolve_deployment,
 )
+
+
+class TestResolveDeployment:
+    """What the connection string alone can say about where the cluster runs."""
+
+    def test_capella_host(self) -> None:
+        assert (
+            resolve_deployment("couchbases://cb.abc123.cloud.couchbase.com")
+            is Deployment.CAPELLA
+        )
+
+    def test_private_endpoint_is_still_capella(self) -> None:
+        """A Capella private endpoint keeps the cloud.couchbase.com domain.
+
+        Confirmed with the Capella team: every private endpoint carries it, so
+        a private-link cluster must be recognised exactly like a public one —
+        otherwise it would be offered the Management REST tools it cannot run.
+        """
+        for connection_string in (
+            "couchbases://private-endpoint.abc123.cloud.couchbase.com",
+            "couchbases://cb.abc123.private.cloud.couchbase.com",
+        ):
+            assert resolve_deployment(connection_string) is Deployment.CAPELLA
+
+    def test_self_managed_host(self) -> None:
+        assert resolve_deployment("couchbase://localhost") is Deployment.ON_PREM
+
+    def test_lookalike_domain_is_not_capella(self) -> None:
+        """The suffix must be a whole label, not a substring of the host."""
+        assert (
+            resolve_deployment("couchbases://notcloud.couchbase.com.evil.test")
+            is Deployment.ON_PREM
+        )
+
+    def test_ipv6_host_is_self_managed(self) -> None:
+        assert resolve_deployment("couchbases://[::1]:11207") is Deployment.ON_PREM
+
+    def test_mixed_hosts_are_not_capella(self) -> None:
+        """``is_capella_connection`` requires *every* host; so does this.
+
+        A list with one non-Capella host cannot be served by Capella's control
+        plane, so the Capella-only answer would be wrong.
+        """
+        assert (
+            resolve_deployment("couchbases://a.cloud.couchbase.com,b.corp.local")
+            is Deployment.ON_PREM
+        )
+
+    def test_none_when_no_hosts(self) -> None:
+        """Nothing parseable means "cannot tell", never a default.
+
+        Returning ON_PREM here would withhold any Capella-only tool on the
+        strength of a malformed string.
+        """
+        assert resolve_deployment("") is None
+        assert resolve_deployment(None) is None
+        assert resolve_deployment("couchbase://") is None
 
 
 class TestExtractHostsFromConnectionString:

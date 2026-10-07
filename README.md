@@ -328,6 +328,23 @@ This is the recommended safe default to prevent inadvertent data modifications b
 
 You can disable specific tools to prevent them from being loaded and exposed to the MCP client. Disabled tools will not appear in the tool discovery and cannot be invoked by the LLM.
 
+#### Tools disabled automatically by deployment
+
+A few tools reach Couchbase through REST endpoints that Couchbase Capella does not expose. The server works out which kind of cluster `CB_CONNECTION_STRING` points at — Capella when every host ends in `.cloud.couchbase.com`, self-managed otherwise — and does not register the tools that cannot work there. They are reported alongside your own disabled tools by `get_server_configuration_status`, and listed in the startup log.
+
+Today this affects the four tools that reach Couchbase through an admin REST endpoint rather than the SDK, none of which are registered on a Capella connection:
+
+| Tool | Endpoint it needs |
+| --- | --- |
+| `get_cluster_metrics` | Management REST (`/pools/default/stats/range`) |
+| `get_cluster_tasks` | Management REST (`/pools/default/tasks`) |
+| `get_cluster_health_snapshot` | Management REST, plus per-node endpoints |
+| `get_index_stats` | Index Service REST (each indexer's `/api/v1/stats`) |
+
+Tools that go through the Couchbase SDK are unaffected and stay available on Capella — `get_cluster_health_and_services` (ping) and `get_cluster_diagnostics_report` (diagnostics) among them.
+
+Capella private endpoints keep the `cloud.couchbase.com` domain, so they are recognised as Capella like any other Capella cluster. Nothing is withheld when the connection string has no parseable host, and each tool above still refuses a Capella cluster at call time, so a deployment the hostname check cannot recognise gets a clear error rather than a silently missing tool.
+
 #### Supported Formats
 
 **Comma-separated list:**

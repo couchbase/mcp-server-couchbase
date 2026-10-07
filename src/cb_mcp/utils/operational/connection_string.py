@@ -7,6 +7,7 @@ from importlib.resources import files
 from typing import Any
 from urllib.parse import urlparse
 
+from ...core.spec import Deployment
 from ..constants import LOGGER_NAMESPACE
 
 logger = logging.getLogger(f"{LOGGER_NAMESPACE}.utils.connection_string")
@@ -41,6 +42,39 @@ def is_capella_connection(connection_string: str) -> bool:
     hosts = extract_hosts_from_connection_string(connection_string)
     return bool(hosts) and all(
         host.lower().endswith(".cloud.couchbase.com") for host in hosts
+    )
+
+
+def resolve_deployment(connection_string: str | None) -> Deployment | None:
+    """Which deployment *connection_string* names, or ``None`` if it has no hosts.
+
+    Recognition is by hostname, which makes the two answers unequally strong
+    and that asymmetry is worth stating plainly:
+
+    * ``CAPELLA`` is positive evidence — every host ends in
+      ``.cloud.couchbase.com``, which nothing else does.
+    * ``ON_PREM`` is the absence of that evidence. A Capella cluster reached
+      through a private endpoint, a CNAME or a custom DNS name is read as
+      on-prem here, because nothing in the connection string says otherwise.
+
+    So this is a registration-time *affordance* — it keeps an agent from being
+    offered a tool that cannot work — and never a correctness guarantee. A
+    tool that must not run on the wrong deployment keeps its own runtime check
+    (see ``get_cluster_metrics``), which is what actually holds when detection
+    guesses wrong or when an embedding host resolves no deployment at all.
+
+    Returns ``None`` when no host can be parsed out of the string, so a
+    malformed or empty value withholds nothing rather than silently claiming
+    one deployment or the other.
+    """
+    if not connection_string:
+        return None
+    if not extract_hosts_from_connection_string(connection_string):
+        return None
+    return (
+        Deployment.CAPELLA
+        if is_capella_connection(connection_string)
+        else Deployment.ON_PREM
     )
 
 

@@ -12,7 +12,7 @@ from collections.abc import Callable
 
 from mcp.types import ToolAnnotations
 
-from ...core.spec import ToolSet
+from ...core.spec import Deployment, ToolSet
 from ...utils.constants import SCOPE_READ, SCOPE_WRITE
 
 # Shared with every other server, and registered by them too — the same
@@ -221,6 +221,37 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "drop_fts_index": ToolAnnotations(destructiveHint=True),
 }
 
+# Tools that only work on one kind of deployment, reaching the gating layer
+# via ``ServerSpec.deployment_requirements``. Only exceptions are listed: a
+# tool absent from this mapping works on Capella and self-managed alike, which
+# is every tool that speaks only to the SDK.
+#
+# The dividing line is not features but REST ports. Capella does not expose
+# the Management or Index service REST endpoints, so a tool that calls one
+# cannot work there however the cluster is configured.
+#
+# Withholding a tool here is an affordance, not an enforcement boundary — the
+# deployment is inferred from a hostname and an embedding host may resolve no
+# deployment at all. A tool listed here keeps whatever runtime check it
+# already has; ``get_cluster_metrics`` still rejects a Capella connection on
+# its own, and that check is what holds when detection is wrong.
+#
+# The bar for an entry: the tool already documents the restriction and already
+# rejects the wrong deployment at call time. That keeps this mapping a
+# statement of known behaviour rather than a guess about which endpoints
+# Capella happens to expose.
+TOOL_DEPLOYMENT_REQUIREMENTS: dict[str, Deployment] = {
+    # POST /pools/default/stats/range on the Management REST port (8091/18091).
+    "get_cluster_metrics": Deployment.ON_PREM,
+    # GET /pools/default/tasks, same port.
+    "get_cluster_tasks": Deployment.ON_PREM,
+    # Management REST, plus the per-node endpoints it fans out to.
+    "get_cluster_health_snapshot": Deployment.ON_PREM,
+    # Index Service REST: /pools/default/nodeServices to find the indexers,
+    # then each indexer's /api/v1/stats (9102/19102).
+    "get_index_stats": Deployment.ON_PREM,
+}
+
 # Per-tool explanations appended to a scope-denial error, reaching the
 # enforcement layer via ``ServerSpec.scope_hints``. Use these where the
 # literal "missing X" line under-explains *why* a tool needs the scope it
@@ -295,6 +326,7 @@ __all__ = [
     "discover_tool_input_values",
     # Tool inventory
     "TOOL_SET",
+    "TOOL_DEPLOYMENT_REQUIREMENTS",
     # Tool categories
     "READ_ONLY_TOOLS",
     "WRITE_TOOLS",

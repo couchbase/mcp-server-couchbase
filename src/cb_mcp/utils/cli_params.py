@@ -36,6 +36,7 @@ Deliberately not here: anything a reader needs in order to understand *what
 the servers are*. That story stays in ``mcp_server.py``.
 """
 
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, NamedTuple
@@ -53,15 +54,18 @@ from ..core.cli.options import (
     tool_gating_options,
     transport_options,
 )
-from ..core.spec import ServerSpec
+from ..core.spec import Deployment, ServerSpec
 from ..servers.operational_insights.cli import oi_credential_options
 from ..tool_registration import prepare_tools_for_registration
+from .constants import LOGGER_NAMESPACE
 from .logging import (
     ParsedLogLevel,
     ParsedLogSinks,
     configure_logging,
     get_resolved_logging_config,
 )
+
+logger = logging.getLogger(f"{LOGGER_NAMESPACE}.utils.cli_params")
 
 __all__ = [
     "CLUSTER_CREDENTIALS",
@@ -71,6 +75,7 @@ __all__ = [
     "GatedTools",
     "build_settings",
     "gate_tools",
+    "resolve_deployment_for",
     "resolved_logging_snapshot",
     "server_options",
 ]
@@ -358,10 +363,37 @@ class GatedTools(NamedTuple):
     disabled: set[str]
 
 
+def resolve_deployment_for(
+    spec: ServerSpec, credentials: Mapping[str, Any]
+) -> Deployment | None:
+    """Which deployment this run is pointed at, as far as the spec can tell.
+
+    The host does not know what a deployment looks like for any particular
+    service — it asks the spec, which names a resolver only if its service has
+    tools that care. Servers without one, and connection strings a resolver
+    cannot place, both come back ``None`` and gate nothing.
+    """
+    if spec.deployment_resolver is None:
+        return None
+    deployment = spec.deployment_resolver(credentials.get("connection_string"))
+    if deployment is not None:
+        logger.info("Resolved deployment from connection string: %s", deployment.value)
+    return deployment
+
+
 def gate_tools(
-    spec: ServerSpec, gating: GatingParams, *, enforce_scopes: bool
+    spec: ServerSpec,
+    gating: GatingParams,
+    *,
+    enforce_scopes: bool,
+    deployment: Deployment | None = None,
 ) -> GatedTools:
-    """Apply read-only mode and the operator's opt-out lists to the spec's tools."""
+    """Apply read-only mode, the operator's opt-out lists, and the deployment.
+
+    ``deployment`` defaults to ``None`` — "gate nothing on this axis" — so a
+    caller that has not resolved one, or a server with no deployment-specific
+    tools, behaves exactly as before this gate existed.
+    """
     return GatedTools(
         *prepare_tools_for_registration(
             spec,
@@ -369,6 +401,7 @@ def gate_tools(
             disabled_tools=gating.disabled_tools,
             confirmation_required_tools=gating.confirmation_required_tools,
             enforce_scopes=enforce_scopes,
+            deployment=deployment,
         )
     )
 
