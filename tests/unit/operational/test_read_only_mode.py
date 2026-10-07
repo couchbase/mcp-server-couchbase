@@ -38,7 +38,7 @@ WRITE_TOOL_NAMES = {
     "drop_fts_index",
 }
 
-# Read-only tool names that should always be available (31 tools)
+# Read-only tool names that should always be available (33 tools)
 READ_ONLY_TOOL_NAMES = {
     # Server/Cluster management tools (12)
     "get_buckets_in_cluster",
@@ -68,6 +68,9 @@ READ_ONLY_TOOL_NAMES = {
     "list_fts_indexes",
     "get_fts_index_definition",
     "run_fts_query",
+    # Vector search tools (2)
+    "run_vector_search",
+    "run_search_vector_search",
     # Query performance analysis tools (7)
     "get_queries_not_selective",
     "get_queries_not_using_covering_index",
@@ -183,14 +186,14 @@ class TestToolCounts:
         """Verify correct number of tools in read-only mode."""
         tools = get_tools(read_only_mode=True)
         assert len(tools) == len(READ_ONLY_TOOLS)
-        assert len(tools) == 31  # Expected count of read-only tools
+        assert len(tools) == 33  # Expected count of read-only tools
 
     def test_all_tools_mode_tool_count(self):
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (31 read-only + 14 write)
-        assert len(tools) == 45
+        # Expected total count (33 read-only + 14 write)
+        assert len(tools) == 47
 
     def test_write_tools_count(self):
         """Verify exactly 14 write tools exist."""

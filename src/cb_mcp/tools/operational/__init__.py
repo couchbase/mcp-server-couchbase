@@ -91,6 +91,12 @@ from .server import (
     test_cluster_connection,
 )
 
+# Vector search tools
+from .vector_search import (
+    run_search_vector_search,
+    run_vector_search,
+)
+
 # The operational server's tool inventory, and the single source of truth for
 # it. The module-level lists below are derived from this; prefer TOOL_SET in
 # new code, and see cb_mcp.core.spec for why the inventory is declared as data.
@@ -125,6 +131,9 @@ TOOL_SET = ToolSet(
         list_fts_indexes,
         get_fts_index_definition,
         run_fts_query,
+        # Vector search tools
+        run_vector_search,
+        run_search_vector_search,
         # Query performance analysis tools
         get_queries_not_selective,
         get_queries_not_using_covering_index,
@@ -194,6 +203,9 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "list_fts_indexes": ToolAnnotations(readOnlyHint=True),
     "get_fts_index_definition": ToolAnnotations(readOnlyHint=True),
     "run_fts_query": ToolAnnotations(readOnlyHint=True),
+    # Vector search tools (read-only)
+    "run_vector_search": ToolAnnotations(readOnlyHint=True),
+    "run_search_vector_search": ToolAnnotations(readOnlyHint=True),
     # Query performance analysis tools (read-only)
     "get_longest_running_queries": ToolAnnotations(readOnlyHint=True),
     "get_most_frequent_queries": ToolAnnotations(readOnlyHint=True),
@@ -283,6 +295,8 @@ __all__ = [
     "run_fts_query",
     "upsert_fts_index",
     "drop_fts_index",
+    "run_vector_search",
+    "run_search_vector_search",
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
     "get_cluster_metrics",
