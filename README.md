@@ -116,7 +116,7 @@ the `couchbase-operational-insights` SDK.
 
 ### Full-text search (FTS) tools
 
-Requires Couchbase Server 7.6+ and the Search service. Vector search is not supported by these tools (see the separate vector search tooling).
+Requires Couchbase Server 7.6+ and the Search service. Vector search is not supported by these tools (see [Vector search tools](#vector-search-tools) below).
 
 | Tool Name | Description |
 | --------- | ----------- |
@@ -125,6 +125,15 @@ Requires Couchbase Server 7.6+ and the Search service. Vector search is not supp
 | `run_fts_query` | Run an FTS query against a Search index, or fetch its execution plan. `query` is the raw FTS query JSON body, supporting any non-vector query type (match, match_phrase, term, conjuncts, disjuncts, geo, date/numeric range, query_string, ...). Pass `explain=true` to fetch the execution plan instead of results — this still executes the query (`limit` defaulting to 1) since the Search service only exposes the plan per matched hit, not as a separate dry-run call. |
 | `upsert_fts_index` | Create or update a Search (FTS) index definition (mappings, analyzers, plan params). Works with both scope-level (scoped) and cluster-level (legacy) indexes. Pass `bucket_name` and `scope_name` together to target a scope-level index, or omit both for a cluster-level (legacy) index. Updating an existing index triggers a full rebuild — fetch the current definition with `get_fts_index_definition` first and pass its `uuid` back to avoid clobbering concurrent changes. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `drop_fts_index` | Drop a Search (FTS) index. Works with both scope-level (scoped) and cluster-level (legacy) indexes. Pass `bucket_name` and `scope_name` together for a scope-level index, or omit both for a cluster-level (legacy) index. This permanently removes the index and cannot be undone — confirm the exact name and location with `list_fts_indexes` first. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+
+### Vector search tools
+
+Both tools embed query text using the model configured via [Embedding Provider Configuration](#embedding-provider-configuration) — the caller passes plain text, never a raw vector. `run_vector_search` targets Couchbase Server 8.0+'s GSI vector indexes (Composite Vector Index / Hyperscale Vector Index) via SQL++; `run_search_vector_search` targets the Search service's vector search on Couchbase Server 7.6+. Available on both self-managed Couchbase Server and Capella.
+
+| Tool Name | Description |
+| --------- | ----------- |
+| `run_vector_search` | Embed a query and run a vector similarity search against a GSI vector index (Couchbase Server 8.0+), via SQL++'s `APPROX_VECTOR_DISTANCE()`. Unlike Search-service vector search, GSI selects the index automatically from the vector field referenced in the query — there is no `index_name` parameter. Returns full documents (or `select_fields`, if given); supports an optional raw SQL++ `where` prefilter and Hyperscale Vector Index tuning (`num_probes`/`rerank`/`top_n_scan`). |
+| `run_search_vector_search` | Run the Search service's vector search (Couchbase Server 7.6+) against a *named* Search index. Two independent, combinable options each take the same raw FTS query JSON body `run_fts_query` accepts: `scalar_query` makes this a genuinely hybrid search (relevance-scored full-text matching and vector similarity both contribute to ranking), while `prefilter` narrows which documents the vector search is even allowed to consider as candidates before it runs — the Search-service equivalent of `run_vector_search`'s `where` prefilter. Returns index-stored fields per hit, same as `run_fts_query` (not full documents — follow up with `get_document_by_id` for those). |
 
 ### Query performance analysis tools
 
@@ -305,6 +314,13 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_OAUTH_MCP_BASE_URL` | `--oauth-mcp-base-url` | Public base URL of this server. When set, publishes RFC 9728 Protected Resource Metadata so PRM-aware clients can discover the IdP | None |
 | `CB_MCP_OAUTH_SCOPE_READ_LABEL` | `--oauth-scope-read-label` | Override the OAuth scope label treated as 'read' access (advertised in PRM and matched against the token's `scope`/`scp` claim). Use when your IdP can't emit the canonical form | `couchbase-mcp:read` |
 | `CB_MCP_OAUTH_SCOPE_WRITE_LABEL` | `--oauth-scope-write-label` | Override the OAuth scope label treated as 'write' access; same semantics as the read label | `couchbase-mcp:write` |
+| `EMBEDDING_PROVIDER` | `--embedding-provider` | Embedding provider for `run_vector_search` / `run_search_vector_search`: one of `couchbase`, `openai`, `cohere`, `voyage`, `bedrock`. Unset disables both tools' embedding step until configured — see [Embedding Provider Configuration](#embedding-provider-configuration) | None |
+| `EMBEDDING_MODEL` | `--embedding-model` | Model name/ID for the configured embedding provider | None |
+| `EMBEDDING_API_KEY` | `--embedding-api-key` | API key for the configured provider. Not used by `bedrock` (uses the AWS credential chain / `EMBEDDING_AWS_*` instead) | None |
+| `EMBEDDING_ENDPOINT` | `--embedding-endpoint` | Base URL override (an OpenAI-compatible local server, or a Couchbase Model Service deployment's own URL — **required** when `EMBEDDING_PROVIDER=couchbase`) | None |
+| `EMBEDDING_AWS_ACCESS_KEY_ID` | `--embedding-aws-access-key-id` | AWS access key ID, `bedrock` provider only. Omit to use the default AWS credential chain | None |
+| `EMBEDDING_AWS_SECRET_ACCESS_KEY` | `--embedding-aws-secret-access-key` | AWS secret access key, `bedrock` provider only | None |
+| `EMBEDDING_AWS_REGION` | `--embedding-aws-region` | AWS region, `bedrock` provider only. Falls back to the AWS SDK's own region resolution if unset | None |
 
 #### Read-Only Mode Configuration
 
@@ -317,6 +333,39 @@ This is the recommended safe default to prevent inadvertent data modifications b
 
 > Note: For authentication, you need either the Username and Password or the Client Certificate and key paths. Optionally, you can specify the CA root certificate path that will be used to validate the server certificates.
 > If both the Client Certificate & key path and the username and password are specified, the client certificates will be used for authentication.
+
+#### Embedding Provider Configuration
+
+`EMBEDDING_PROVIDER` selects which model backend `run_vector_search` and `run_search_vector_search` embed query text with. It's entirely optional — the server starts fine with none of the `EMBEDDING_*` variables set, and both tools stay registered; calling either without a provider configured returns an error explaining what to set, rather than failing at startup or disappearing from tool discovery. Each provider needs a different subset of the `EMBEDDING_*` variables:
+
+| `EMBEDDING_PROVIDER` | Required | Optional | Notes |
+| --------------------- | -------- | -------- | ----- |
+| `couchbase` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL`, `EMBEDDING_ENDPOINT` | — | Couchbase's own Model Service (Provisioned/Serverless). `EMBEDDING_ENDPOINT` is this deployment's own base URL (e.g. `https://<id>.ai.couchbase.com`) — get it from Capella's AI Data Plane > Models UI. There is no shared default domain. |
+| `openai` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL` | `EMBEDDING_ENDPOINT` | Defaults to `api.openai.com`. Set `EMBEDDING_ENDPOINT` to point at an OpenAI-compatible local server (Ollama, vLLM, LM Studio) instead. |
+| `cohere` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL` | `EMBEDDING_ENDPOINT` | Defaults to `api.cohere.com`. |
+| `voyage` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL` | `EMBEDDING_ENDPOINT` | Defaults to `api.voyageai.com`. |
+| `bedrock` | `EMBEDDING_MODEL` | `EMBEDDING_AWS_ACCESS_KEY_ID`, `EMBEDDING_AWS_SECRET_ACCESS_KEY`, `EMBEDDING_AWS_REGION` | Titan embedding models only (e.g. `amazon.titan-embed-text-v2:0`). Omit the AWS credential fields to use the default AWS credential chain (env vars, `~/.aws/credentials`, instance role). Requires the `bedrock-embeddings` extra: `pip install couchbase-mcp-server[bedrock-embeddings]` (or `uv sync --extra bedrock-embeddings` from source). |
+
+Example (OpenAI):
+
+```json
+{
+  "mcpServers": {
+    "couchbase": {
+      "command": "uvx",
+      "args": ["couchbase-mcp-server"],
+      "env": {
+        "CB_CONNECTION_STRING": "couchbases://connection-string",
+        "CB_USERNAME": "username",
+        "CB_PASSWORD": "password",
+        "EMBEDDING_PROVIDER": "openai",
+        "EMBEDDING_MODEL": "text-embedding-3-small",
+        "EMBEDDING_API_KEY": "sk-..."
+      }
+    }
+  }
+}
+```
 
 ### Disabling Tools
 

@@ -44,7 +44,21 @@ SERVERS = [
 # somebody wrote down, rather than an oversight. Keyed by server id.
 DELIBERATELY_UNREPORTED: dict[str, set[str]] = {
     "operational": set(),
-    "operational-insights": set(),
+    # embedding_options is composed into every server's CLI (server-agnostic,
+    # like oauth_options) even though only the operational server's tools
+    # (run_vector_search / run_search_vector_search) read the resulting
+    # settings — see core/cli/options.py's embedding_options docstring and
+    # servers/operational/spec.py's safe/secret key comment. OI's ServerSpec
+    # correctly doesn't classify them, since it never reads them.
+    "operational-insights": {
+        "embedding_provider",
+        "embedding_model",
+        "embedding_api_key",
+        "embedding_endpoint",
+        "embedding_aws_access_key_id",
+        "embedding_aws_secret_access_key",
+        "embedding_aws_region",
+    },
 }
 
 
