@@ -1,18 +1,18 @@
 """Query execution tools for Operational Insights.
 
-``run_query_sync`` can carry DDL/DML, so — unlike the metadata tools in this
-package — it follows the operational server's write-tool convention: catch
-Exception, log, and return a ``{"success": False, "error": ...}`` envelope
-instead of raising.
+``oi_run_query_sync`` can carry DDL/DML, so — unlike the metadata tools in
+this package — it follows the operational server's write-tool convention:
+catch Exception, log, and return a ``{"success": False, "error": ...}``
+envelope instead of raising.
 
-``explain_query`` follows the same envelope convention.
+``oi_explain_query`` follows the same envelope convention.
 
-The Server Async Request API tools (``run_query_async``,
-``get_async_query_results``, ``discard_async_query_results``,
-``cancel_async_query``) expose the SDK's handle-based flow for long-running
+The Server Async Request API tools (``oi_run_query_async``,
+``oi_get_async_query_results``, ``oi_discard_async_query_results``,
+``oi_cancel_async_query``) expose the SDK's handle-based flow for long-running
 queries: start -> check/fetch -> discard, or cancel.
-``get_async_query_results`` does double duty as the readiness check, so there
-is no separate status tool.
+``oi_get_async_query_results`` does double duty as the readiness check, so
+there is no separate status tool.
 
 Design notes (kept out of the tool docstrings, which are sent to the model as
 tool descriptions and are deliberately short):
@@ -23,7 +23,7 @@ tool descriptions and are deliberately short):
   ``utils/operational_insights/handle_registry.py`` for the design and its
   single-process caveat.
 * Fetching results does NOT free them: the server serves the same buffers on
-  repeated fetches. So a token stays valid after ``get_async_query_results``;
+  repeated fetches. So a token stays valid after ``oi_get_async_query_results``;
   only discard and cancel evict it. Callers that never discard leave buffers
   allocated until the server times them out.
 * Tools are plain ``def`` (not ``async def``): the SDK's handle calls are
@@ -85,7 +85,7 @@ def _is_copy_to_statement(statement: str) -> bool:
     return re.match(r"^COPY\s", normalized) is not None
 
 
-def run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
+def oi_run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
     """Run a SQL++ statement and buffer all result rows in memory.
 
     Can carry SELECT, DML, or DDL statements. Buffers the entire result set
@@ -151,7 +151,7 @@ def run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
         return tool_error(e, statement=statement)
 
 
-def explain_query(ctx: Context, statement: str) -> dict[str, Any]:
+def oi_explain_query(ctx: Context, statement: str) -> dict[str, Any]:
     """Generate the query plan for a SQL++ statement using EXPLAIN, without executing it.
 
     Whether the plan is cost-based or rule-based depends on whether the
@@ -228,22 +228,22 @@ def _extract_metadata(result: Any, query_handle: str) -> dict[str, Any]:
     return metadata
 
 
-def run_query_async(ctx: Context, statement: str) -> dict[str, Any]:
+def oi_run_query_async(ctx: Context, statement: str) -> dict[str, Any]:
     """Start a SQL++ query without waiting for it to finish.
 
     Use for queries expected to take a while. Returns right away with a
     query_handle; it does not return rows. Keep that query_handle: it is
     needed for every follow-up call, and the query holds resources on the
-    server until you finish with discard_async_query_results or
-    cancel_async_query.
+    server until you finish with oi_discard_async_query_results or
+    oi_cancel_async_query.
 
-    Usual sequence: get_async_query_results until it reports ready, then
-    discard_async_query_results. For quick queries use run_query_sync
+    Usual sequence: oi_get_async_query_results until it reports ready, then
+    oi_discard_async_query_results. For quick queries use oi_run_query_sync
     instead, which returns rows directly.
 
     When the server is in read-only mode, or the caller's token lacks the
     write scope, the query is started with ``QueryOptions(readonly=True)`` —
-    same enforcement as run_query_sync, including the client-side
+    same enforcement as oi_run_query_sync, including the client-side
     ``COPY ... TO`` block, since the same read-only guarantee applies to
     async queries.
 
@@ -285,7 +285,7 @@ def run_query_async(ctx: Context, statement: str) -> dict[str, Any]:
         return tool_success(
             query_handle=query_handle,
             message=(
-                "Query submitted. Call get_async_query_results with this "
+                "Query submitted. Call oi_get_async_query_results with this "
                 "query_handle to check whether it has finished and retrieve "
                 "the rows."
             ),
@@ -295,7 +295,7 @@ def run_query_async(ctx: Context, statement: str) -> dict[str, Any]:
         return tool_error(e, statement=statement)
 
 
-def get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
+def oi_get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
     """Check the status of an async query and get its results once it has finished.
 
     This both reports progress and returns results. If the query is still
@@ -308,11 +308,11 @@ def get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
     over waiting indefinitely for it.
 
     Safe to call more than once after it is ready: it does not consume the
-    results. When you no longer need them, call discard_async_query_results
+    results. When you no longer need them, call oi_discard_async_query_results
     to free them on the server.
 
     Args:
-        query_handle: The query_handle returned by run_query_async.
+        query_handle: The query_handle returned by oi_run_query_async.
 
     Returns:
         {"success": True, "ready": true, "rows": [...], "row_count": N,
@@ -358,20 +358,20 @@ def get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
         return tool_error(e, query_handle=query_handle)
 
 
-def discard_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
+def oi_discard_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
     """Free the results of a finished async query on the server.
 
     Call this when done with a query's results — whether or not you fetched
     them, since fetching does not free them. This is the normal cleanup step
-    after get_async_query_results, and the rows cannot be retrieved
+    after oi_get_async_query_results, and the rows cannot be retrieved
     afterwards.
 
     If the query is still running there is nothing to discard: this returns
     discarded: false and the query_handle stays usable, so use
-    cancel_async_query to stop it instead.
+    oi_cancel_async_query to stop it instead.
 
     Args:
-        query_handle: The query_handle returned by run_query_async.
+        query_handle: The query_handle returned by oi_run_query_async.
 
     Returns:
         {"success": True, "query_handle": "...", "discarded": true}; or
@@ -389,7 +389,7 @@ def discard_async_query_results(ctx: Context, query_handle: str) -> dict[str, An
                 ready=False,
                 message=(
                     "Results are not ready yet; nothing to discard. Cancel "
-                    "the query with cancel_async_query to stop it."
+                    "the query with oi_cancel_async_query to stop it."
                 ),
             )
 
@@ -402,7 +402,7 @@ def discard_async_query_results(ctx: Context, query_handle: str) -> dict[str, An
         return tool_error(e, query_handle=query_handle)
 
 
-def cancel_async_query(ctx: Context, query_handle: str) -> dict[str, Any]:
+def oi_cancel_async_query(ctx: Context, query_handle: str) -> dict[str, Any]:
     """Stop an async query that is still running.
 
     Use this to abandon a query you no longer want to wait for. On success the
@@ -410,10 +410,10 @@ def cancel_async_query(ctx: Context, query_handle: str) -> dict[str, Any]:
 
     A query that has already finished cannot be cancelled: this returns
     cancelled: false and the query_handle stays usable, so call
-    discard_async_query_results to free its results.
+    oi_discard_async_query_results to free its results.
 
     Args:
-        query_handle: The query_handle returned by run_query_async.
+        query_handle: The query_handle returned by oi_run_query_async.
 
     Returns:
         {"success": True, "query_handle": "...", "cancelled": true}, or
@@ -440,7 +440,7 @@ def cancel_async_query(ctx: Context, query_handle: str) -> dict[str, Any]:
                 cancelled=False,
                 message=(
                     "Query has already completed, so it cannot be cancelled. "
-                    "Call discard_async_query_results to free its results."
+                    "Call oi_discard_async_query_results to free its results."
                 ),
             )
 
