@@ -14,7 +14,7 @@ forwarded to the server to reject.
 import pytest
 from _oi_fakes import make_oi_ctx
 
-from cb_mcp.tools.operational_insights.index import create_index, list_indexes
+from cb_mcp.tools.operational_insights.index import oi_create_index, oi_list_indexes
 from cb_mcp.utils.sqlpp import safe_field_path
 
 
@@ -37,7 +37,7 @@ class TestSafeFieldPath:
 
 
 def _create(ctx, cluster, **overrides):
-    """Call create_index with sensible defaults."""
+    """Call oi_create_index with sensible defaults."""
     kwargs = {
         "database_name": "music",
         "scope_name": "myPlaylist",
@@ -46,7 +46,7 @@ def _create(ctx, cluster, **overrides):
         "fields": [{"name": "title", "type": "string"}],
     }
     kwargs.update(overrides)
-    return create_index(ctx, **kwargs)
+    return oi_create_index(ctx, **kwargs)
 
 
 class TestCreateIndex:
@@ -393,7 +393,7 @@ class TestListIndexes:
             }
         ]
 
-        result = list_indexes(ctx)
+        result = oi_list_indexes(ctx)
 
         assert result[0]["IndexName"] == "name_idx"
         # Field paths are returned as the catalog stores them: an array of
@@ -406,13 +406,13 @@ class TestListIndexes:
         cluster.execute_query.side_effect = Exception("boom")
 
         with pytest.raises(Exception, match="boom"):
-            list_indexes(ctx)
+            oi_list_indexes(ctx)
 
     def test_excludes_system_primary_and_sample_indexes(self) -> None:
         ctx, cluster = make_oi_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        list_indexes(ctx)
+        oi_list_indexes(ctx)
 
         query = cluster.execute_query.call_args[0][0]
         # A primary index is the collection itself, and SAMPLE rows are
@@ -425,7 +425,7 @@ class TestListIndexes:
         ctx, cluster = make_oi_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        list_indexes(ctx, "travel-sample", "inventory", "airline")
+        oi_list_indexes(ctx, "travel-sample", "inventory", "airline")
 
         query = cluster.execute_query.call_args[0][0]
         query_options = cluster.execute_query.call_args[0][1]
@@ -442,7 +442,7 @@ class TestListIndexes:
         ctx, cluster = make_oi_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        list_indexes(ctx, database_name="travel-sample")
+        oi_list_indexes(ctx, database_name="travel-sample")
 
         query = cluster.execute_query.call_args[0][0]
         query_options = cluster.execute_query.call_args[0][1]
@@ -466,7 +466,7 @@ class TestListIndexes:
             }
         ]
 
-        result = list_indexes(ctx)
+        result = oi_list_indexes(ctx)
 
         assert result[0]["SearchKey"] == []
         assert result[0]["SearchKeyElements"] == elements
@@ -475,7 +475,7 @@ class TestListIndexes:
         ctx, cluster = make_oi_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        list_indexes(ctx)
+        oi_list_indexes(ctx)
 
         query = cluster.execute_query.call_args[0][0]
         # Selecting only SearchKey would report array indexes as fieldless.

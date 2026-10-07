@@ -101,34 +101,30 @@ append `operational-insights` to the container's command to select it
 instead of the default `operational` server (see [Configuration](#configuration)
 below).
 
+Every tool name below is prefixed with `oi_` (`get_server_configuration_status`
+excepted) so none can collide with the operational server's tool names, even
+if a single MCP client registers both servers at once.
+
 | Tool Name | Description |
 | --------- | ----------- |
 | `get_server_configuration_status` | Get this server's status and configuration without connecting to a cluster — read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration. Shared with the operational server: the same tool, registered by both. |
-| `get_databases_in_cluster` | List all databases in the Operational Insights cluster. |
-| `get_scopes_in_database` | List all scopes in a database. |
-| `get_collections_in_scope` | List all collections (datasets) in a scope. Shares its name with the operational server's tool of the same name — see the note below. |
-| `get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. Shares its name with the operational server's tool of the same name — see the note below. |
-| `list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog. Shares its name with the operational server's tool of the same name — see the note below. |
-| `run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return all result rows. Enforces read-only mode server-side; there is no client-side SQL++ parser. |
-| `explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
-| `create_index` | Create a secondary index via `CREATE INDEX`. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** Shares its name with the operational server's tool of the same name — see the note below. |
-| `run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Same read-only enforcement as `run_query_sync`. |
-| `get_async_query_results` | Check whether an async query has finished and, if so, return its rows. |
-| `discard_async_query_results` | Free a finished async query's result buffers on the server. |
-| `cancel_async_query` | Stop an async query that is still running. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `oi_get_databases_in_cluster` | List all databases in the Operational Insights cluster. |
+| `oi_get_scopes_in_database` | List all scopes in a database. |
+| `oi_get_collections_in_scope` | List all collections (datasets) in a scope. |
+| `oi_get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. |
+| `oi_list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog. |
+| `oi_run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return all result rows. Enforces read-only mode server-side; there is no client-side SQL++ parser. |
+| `oi_explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
+| `oi_create_index` | Create a secondary index via `CREATE INDEX`. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `oi_run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Same read-only enforcement as `oi_run_query_sync`. |
+| `oi_get_async_query_results` | Check whether an async query has finished and, if so, return its rows. |
+| `oi_discard_async_query_results` | Free a finished async query's result buffers on the server. |
+| `oi_cancel_async_query` | Stop an async query that is still running. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 
 The Server Async Request API tools form a start → poll → discard-or-cancel
-flow: `run_query_async` returns a `query_handle`, `get_async_query_results` is
-polled until ready, then `discard_async_query_results` frees the results or
-`cancel_async_query` stops a still-running query.
-
-> **Note:** `get_collections_in_scope`, `get_schema_for_collection`,
-> `create_index` and `list_indexes` exist, with different behavior, on both
-> servers — each runs as a separate container/process, so this only matters
-> if one MCP client registers both simultaneously.
-> (`get_server_configuration_status` also appears on both, but it is
-> deliberately *one* shared tool — same implementation, same result shape —
-> so it needs no disambiguation.)
+flow: `oi_run_query_async` returns a `query_handle`, `oi_get_async_query_results` is
+polled until ready, then `oi_discard_async_query_results` frees the results or
+`oi_cancel_async_query` stops a still-running query.
 
 ## Usage
 

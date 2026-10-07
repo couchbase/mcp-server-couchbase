@@ -687,7 +687,7 @@
         },
         {
           "name": "CB_MCP_READ_ONLY_MODE",
-          "description": "Operational Insights read only mode. Set to true to disable write operations: the create_index and cancel_async_query tools are not loaded, and queries that modify data are blocked. Set to false to allow them. Default is true.",
+          "description": "Operational Insights read only mode. Set to true to disable write operations: the oi_create_index and oi_cancel_async_query tools are not loaded, and queries that modify data are blocked. Set to false to allow them. Default is true.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
@@ -942,7 +942,7 @@
         {
           "type": "named",
           "name": "--read-only-mode",
-          "description": "Operational Insights read only mode. Set to true to disable write operations: the create_index and cancel_async_query tools are not loaded, and queries that modify data are blocked. Set to false to allow them. Default is true.",
+          "description": "Operational Insights read only mode. Set to true to disable write operations: the oi_create_index and oi_cancel_async_query tools are not loaded, and queries that modify data are blocked. Set to false to allow them. Default is true.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
@@ -1522,7 +1522,7 @@
         },
         {
           "name": "CB_MCP_READ_ONLY_MODE",
-          "description": "Operational Insights read only mode. Set to true to disable write operations: the create_index and cancel_async_query tools are not loaded, and queries that modify data are blocked. Set to false to allow them. Default is true.",
+          "description": "Operational Insights read only mode. Set to true to disable write operations: the oi_create_index and oi_cancel_async_query tools are not loaded, and queries that modify data are blocked. Set to false to allow them. Default is true.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
