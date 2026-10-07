@@ -12,6 +12,7 @@ from cb_mcp.core.spec import Deployment
 from cb_mcp.servers.operational.spec import SPEC as OPERATIONAL_SPEC
 from cb_mcp.tool_registration import prepare_tools_for_registration as _prepare
 from cb_mcp.tool_registration import unsupported_for_deployment
+from cb_mcp.tools.operational import TOOL_DEPLOYMENT_REQUIREMENTS
 from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
 
 
@@ -200,6 +201,23 @@ class TestDisabledAndConfirmationOverlap:
         assert "delete_document_by_id" in tool_names  # still registered
         assert "upsert_document_by_id" in disabled
         assert "delete_document_by_id" in confirmed
+
+
+def test_spec_wires_the_declared_deployment_requirements():
+    """The mapping must actually reach the spec, as the same object.
+
+    Declaring ``TOOL_DEPLOYMENT_REQUIREMENTS`` and wiring it into ``SPEC`` are
+    two edits in two files, and the gate is silent when only the first is
+    present: an unwired spec has empty requirements, so every invariant about
+    them passes vacuously and every tool registers. A merge that touches
+    ``servers/operational/spec.py`` is exactly where that loss would happen,
+    which is why this asserts identity rather than equality.
+    """
+    assert OPERATIONAL_SPEC.deployment_requirements is TOOL_DEPLOYMENT_REQUIREMENTS
+    assert OPERATIONAL_SPEC.deployment_resolver is not None
+    assert TOOL_DEPLOYMENT_REQUIREMENTS, (
+        "No tool declares a deployment requirement; the gate can never fire."
+    )
 
 
 #: Derived from the spec rather than spelled out, so adding a tool to
