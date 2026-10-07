@@ -231,6 +231,19 @@ async def test_create_query_index_composite_vector_key_position() -> None:
     index_name = f"test_cqi_comp_{uuid.uuid4().hex[:8]}"
     vector_field = "test_cqi_embedding"
 
+    # Unlike the Hyperscale/dimension-mismatch tests, this one has no other
+    # reason to open a direct SDK connection -- but it still needs one for
+    # the version check, since a pre-8.0 cluster's SQL++ parser doesn't even
+    # recognize VECTOR as a keyword (a syntax error, not a clean tool_error
+    # from a version-aware check) -- confirmed by this test failing exactly
+    # that way in CI before this guard was added.
+    cluster = _direct_cluster()
+    try:
+        _skip_if_cluster_below(cluster, 8, feature="Composite Vector Indexes")
+    finally:
+        with contextlib.suppress(Exception):
+            cluster.close()
+
     async with create_mcp_session() as session:
         try:
             response = await session.call_tool(
