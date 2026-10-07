@@ -89,6 +89,9 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # the entry here is the class used when the statement was not inspected.
         "run_sql_plus_plus_query": ("query", "read"),
         "explain_sql_plus_plus_query": ("query", "read"),
+        # Embeds the query text, then runs a SELECT with APPROX_VECTOR_DISTANCE
+        # against a GSI vector index: a Query-service read like its neighbours.
+        "run_vector_search": ("query", "read"),
         # -- index -----------------------------------------------------------
         "list_indexes": ("index", "read"),
         "get_index_advisor_recommendations": ("index", "read"),
@@ -114,6 +117,9 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "list_fts_indexes": ("search", "read"),
         "get_fts_index_definition": ("search", "read"),
         "run_fts_query": ("search", "read"),
+        # Goes through the Search service, so it books against search rather
+        # than query even though run_vector_search is the GSI counterpart.
+        "run_search_vector_search": ("search", "read"),
         "upsert_fts_index": ("search", "write"),
         "drop_fts_index": ("search", "write"),
     },

@@ -72,11 +72,19 @@ def test_secret_paths_redacted_to_presence_booleans():
         "oauth_mcp_base_url": None,
         "oauth_scope_read_label": None,
         "oauth_scope_write_label": None,
+        # embedding config: safe keys absent in input → None
+        "embedding_provider": None,
+        "embedding_model": None,
+        "embedding_endpoint": None,
+        "embedding_aws_region": None,
         # presence-only keys: values redacted to booleans
         "password_configured": True,
         "ca_cert_path_configured": True,
         "client_cert_path_configured": True,
         "client_key_path_configured": True,
+        "embedding_api_key_configured": False,
+        "embedding_aws_access_key_id_configured": False,
+        "embedding_aws_secret_access_key_configured": False,
     }
 
 

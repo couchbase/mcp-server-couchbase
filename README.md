@@ -116,7 +116,7 @@ the `couchbase-operational-insights` SDK.
 
 ### Full-text search (FTS) tools
 
-Requires Couchbase Server 7.6+ and the Search service. Vector search is not supported by these tools (see the separate vector search tooling).
+Requires Couchbase Server 7.6+ and the Search service. Vector search is not supported by these tools (see [Vector search tools](#vector-search-tools) below).
 
 | Tool Name | Description |
 | --------- | ----------- |
@@ -125,6 +125,15 @@ Requires Couchbase Server 7.6+ and the Search service. Vector search is not supp
 | `run_fts_query` | Run an FTS query against a Search index, or fetch its execution plan. `query` is the raw FTS query JSON body, supporting any non-vector query type (match, match_phrase, term, conjuncts, disjuncts, geo, date/numeric range, query_string, ...). Pass `explain=true` to fetch the execution plan instead of results — this still executes the query (`limit` defaulting to 1) since the Search service only exposes the plan per matched hit, not as a separate dry-run call. |
 | `upsert_fts_index` | Create or update a Search (FTS) index definition (mappings, analyzers, plan params). Works with both scope-level (scoped) and cluster-level (legacy) indexes. Pass `bucket_name` and `scope_name` together to target a scope-level index, or omit both for a cluster-level (legacy) index. Updating an existing index triggers a full rebuild — fetch the current definition with `get_fts_index_definition` first and pass its `uuid` back to avoid clobbering concurrent changes. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `drop_fts_index` | Drop a Search (FTS) index. Works with both scope-level (scoped) and cluster-level (legacy) indexes. Pass `bucket_name` and `scope_name` together for a scope-level index, or omit both for a cluster-level (legacy) index. This permanently removes the index and cannot be undone — confirm the exact name and location with `list_fts_indexes` first. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+
+### Vector search tools
+
+Both tools embed query text using the model configured via [Embedding Provider Configuration](#embedding-provider-configuration) — the caller passes plain text, never a raw vector. `run_vector_search` targets Couchbase Server 8.0+'s GSI vector indexes (Composite Vector Index / Hyperscale Vector Index) via SQL++; `run_search_vector_search` targets the Search service's vector search on Couchbase Server 7.6+. Available on both self-managed Couchbase Server and Capella.
+
+| Tool Name | Description |
+| --------- | ----------- |
+| `run_vector_search` | Embed a query and run a vector similarity search against a GSI vector index (Couchbase Server 8.0+), via SQL++'s `APPROX_VECTOR_DISTANCE()`. Unlike Search-service vector search, GSI selects the index automatically from the vector field referenced in the query — there is no `index_name` parameter. Returns full documents (or `select_fields`, if given); supports an optional raw SQL++ `where` prefilter and Hyperscale Vector Index tuning (`num_probes`/`rerank`/`top_n_scan`). |
+| `run_search_vector_search` | Run the Search service's vector search (Couchbase Server 7.6+) against a *named* Search index. Two independent, combinable options each take the same raw FTS query JSON body `run_fts_query` accepts: `scalar_query` makes this a genuinely hybrid search (relevance-scored full-text matching and vector similarity both contribute to ranking), while `prefilter` narrows which documents the vector search is even allowed to consider as candidates before it runs — the Search-service equivalent of `run_vector_search`'s `where` prefilter. Returns index-stored fields per hit, same as `run_fts_query` (not full documents — follow up with `get_document_by_id` for those). |
 
 ### Query performance analysis tools
 
@@ -144,37 +153,31 @@ Registered by the separate `operational-insights` server (see
 [Operational Insights Server](#operational-insights-server) below), not the
 default `operational` one.
 
+Every tool name below is prefixed with `oi_` (`get_server_configuration_status`
+excepted) so none can collide with the operational server's tool names, even
+if a single MCP client registers both servers at once.
+
 | Tool Name | Description |
 | --------- | ----------- |
 | `get_server_configuration_status` | Get this server's status and configuration without connecting to a cluster — read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration. Shared with the operational server: the same tool, registered by both. |
-| `get_databases_in_cluster` | List all databases in the Operational Insights cluster. |
-| `get_scopes_in_database` | List all scopes in a database. |
-| `get_collections_in_scope` | List all collections (datasets) in a scope. Shares its name with the operational server's tool of the same name — see the note below. |
-| `get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. Shares its name with the operational server's tool of the same name — see the note below. |
-| `list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog (the SDK has no index manager). Shares its name with the operational server's tool of the same name — see the note below. |
-| `run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return all result rows. Enforces read-only mode server-side via `QueryOptions(readonly=True)` — there is no client-side SQL++ parser here. |
-| `explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
-| `create_index` | Create a secondary index via `CREATE INDEX` (the SDK has no index manager). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** Shares its name with the operational server's tool of the same name — see the note below. |
-| `run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Same read-only enforcement as `run_query_sync`. |
-| `get_async_query_results` | Check whether an async query has finished and, if so, return its rows. Doubles as the status check — call again later if not yet ready. |
-| `discard_async_query_results` | Free a finished async query's result buffers on the server. Normal cleanup step after `get_async_query_results`. |
-| `cancel_async_query` | Stop an async query that is still running. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** A finished query cannot be cancelled — discard its results instead. |
+| `oi_get_databases_in_cluster` | List all databases in the Operational Insights cluster. |
+| `oi_get_scopes_in_database` | List all scopes in a database. |
+| `oi_get_collections_in_scope` | List all collections (datasets) in a scope. |
+| `oi_get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. |
+| `oi_list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog (the SDK has no index manager). |
+| `oi_run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return all result rows. Enforces read-only mode server-side via `QueryOptions(readonly=True)` — there is no client-side SQL++ parser here. |
+| `oi_explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
+| `oi_create_index` | Create a secondary index via `CREATE INDEX` (the SDK has no index manager). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `oi_run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Same read-only enforcement as `oi_run_query_sync`. |
+| `oi_get_async_query_results` | Check whether an async query has finished and, if so, return its rows. Doubles as the status check — call again later if not yet ready. |
+| `oi_discard_async_query_results` | Free a finished async query's result buffers on the server. Normal cleanup step after `oi_get_async_query_results`. |
+| `oi_cancel_async_query` | Stop an async query that is still running. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** A finished query cannot be cancelled — discard its results instead. |
 
 The Server Async Request API tools form a start → poll → discard-or-cancel
-flow for long-running queries: `run_query_async` returns a `query_handle`,
-`get_async_query_results` is polled until it reports readiness (and returns
-the rows), then either `discard_async_query_results` frees the results or,
-for a query still running, `cancel_async_query` stops it.
-
-> **Note:** `get_collections_in_scope`, `get_schema_for_collection`,
-> `create_index` and `list_indexes` exist, with different behavior, on both
-> servers. (`get_server_configuration_status` also appears on both, but it is
-> deliberately *one* shared tool — same implementation, same result shape —
-> so it needs no disambiguation.) Each server is a separate process, so this is only a concern if a
-> single MCP client registers both `operational` and `operational-insights`
-> simultaneously — in that case, disambiguate at the client configuration
-> layer (e.g. by giving the two server entries distinct names in the
-> client's own config).
+flow for long-running queries: `oi_run_query_async` returns a `query_handle`,
+`oi_get_async_query_results` is polled until it reports readiness (and returns
+the rows), then either `oi_discard_async_query_results` frees the results or,
+for a query still running, `oi_cancel_async_query` stops it.
 
 ## Prerequisites
 
@@ -319,6 +322,13 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS` | `--audit-log-retention-max-backups` | Rotated backups retained **per audit file**, excluding the live file. Backups are gzipped. `0` keeps none. This bounds one file, not the directory — see [Auditing](#auditing) | `10` |
 | `CB_MCP_AUDIT_LOG_TOOL_ARGS` | `--audit-log-tool-args` | Record tool argument values in the audit log. **Off by default** — there is no redaction in this release, so enabling it writes arguments verbatim, including full document bodies | `false` |
 | `CB_MCP_AUDIT_LOG_DISABLED_EVENTS` | `--audit-log-disabled-events` | Audit events to suppress: comma-separated numeric event ids (e.g. `61490,61491`), or a file with one id per line. Only filterable events can be suppressed | None |
+| `EMBEDDING_PROVIDER` | `--embedding-provider` | Embedding provider for `run_vector_search` / `run_search_vector_search`: one of `couchbase`, `openai`, `cohere`, `voyage`, `bedrock`. Unset disables both tools' embedding step until configured — see [Embedding Provider Configuration](#embedding-provider-configuration) | None |
+| `EMBEDDING_MODEL` | `--embedding-model` | Model name/ID for the configured embedding provider | None |
+| `EMBEDDING_API_KEY` | `--embedding-api-key` | API key for the configured provider. Not used by `bedrock` (uses the AWS credential chain / `EMBEDDING_AWS_*` instead) | None |
+| `EMBEDDING_ENDPOINT` | `--embedding-endpoint` | Base URL override (an OpenAI-compatible local server, or a Couchbase Model Service deployment's own URL — **required** when `EMBEDDING_PROVIDER=couchbase`) | None |
+| `EMBEDDING_AWS_ACCESS_KEY_ID` | `--embedding-aws-access-key-id` | AWS access key ID, `bedrock` provider only. Omit to use the default AWS credential chain | None |
+| `EMBEDDING_AWS_SECRET_ACCESS_KEY` | `--embedding-aws-secret-access-key` | AWS secret access key, `bedrock` provider only | None |
+| `EMBEDDING_AWS_REGION` | `--embedding-aws-region` | AWS region, `bedrock` provider only. Falls back to the AWS SDK's own region resolution if unset | None |
 
 #### Read-Only Mode Configuration
 
@@ -331,6 +341,39 @@ This is the recommended safe default to prevent inadvertent data modifications b
 
 > Note: For authentication, you need either the Username and Password or the Client Certificate and key paths. Optionally, you can specify the CA root certificate path that will be used to validate the server certificates.
 > If both the Client Certificate & key path and the username and password are specified, the client certificates will be used for authentication.
+
+#### Embedding Provider Configuration
+
+`EMBEDDING_PROVIDER` selects which model backend `run_vector_search` and `run_search_vector_search` embed query text with. It's entirely optional — the server starts fine with none of the `EMBEDDING_*` variables set, and both tools stay registered; calling either without a provider configured returns an error explaining what to set, rather than failing at startup or disappearing from tool discovery. Each provider needs a different subset of the `EMBEDDING_*` variables:
+
+| `EMBEDDING_PROVIDER` | Required | Optional | Notes |
+| --------------------- | -------- | -------- | ----- |
+| `couchbase` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL`, `EMBEDDING_ENDPOINT` | — | Couchbase's own Model Service (Provisioned/Serverless). `EMBEDDING_ENDPOINT` is this deployment's own base URL (e.g. `https://<id>.ai.couchbase.com`) — get it from Capella's AI Data Plane > Models UI. There is no shared default domain. |
+| `openai` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL` | `EMBEDDING_ENDPOINT` | Defaults to `api.openai.com`. Set `EMBEDDING_ENDPOINT` to point at an OpenAI-compatible local server (Ollama, vLLM, LM Studio) instead. |
+| `cohere` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL` | `EMBEDDING_ENDPOINT` | Defaults to `api.cohere.com`. |
+| `voyage` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL` | `EMBEDDING_ENDPOINT` | Defaults to `api.voyageai.com`. |
+| `bedrock` | `EMBEDDING_MODEL` | `EMBEDDING_AWS_ACCESS_KEY_ID`, `EMBEDDING_AWS_SECRET_ACCESS_KEY`, `EMBEDDING_AWS_REGION` | Titan embedding models only (e.g. `amazon.titan-embed-text-v2:0`). Omit the AWS credential fields to use the default AWS credential chain (env vars, `~/.aws/credentials`, instance role). Requires the `bedrock-embeddings` extra: `pip install couchbase-mcp-server[bedrock-embeddings]` (or `uv sync --extra bedrock-embeddings` from source). |
+
+Example (OpenAI):
+
+```json
+{
+  "mcpServers": {
+    "couchbase": {
+      "command": "uvx",
+      "args": ["couchbase-mcp-server"],
+      "env": {
+        "CB_CONNECTION_STRING": "couchbases://connection-string",
+        "CB_USERNAME": "username",
+        "CB_PASSWORD": "password",
+        "EMBEDDING_PROVIDER": "openai",
+        "EMBEDDING_MODEL": "text-embedding-3-small",
+        "EMBEDDING_API_KEY": "sk-..."
+      }
+    }
+  }
+}
+```
 
 ### Disabling Tools
 
