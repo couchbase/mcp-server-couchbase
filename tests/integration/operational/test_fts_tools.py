@@ -709,6 +709,115 @@ async def test_upsert_and_drop_fts_index_scope_level_round_trip() -> None:
                 cluster.close()
 
 
+def _minimal_scope_level_vector_fts_index_params(
+    scope_name: str, collection_name: str
+) -> dict:
+    """Same shape as _minimal_scope_level_fts_index_params, but with a vector
+    field mapped on "embedding" -- upsert_fts_index needs no code change to
+    support this (confirmed live against Couchbase Server 8.0.1): params is
+    passed through to the SDK's SearchIndex untouched."""
+    return {
+        "doc_config": {"mode": "scope.collection.type_field", "type_field": "type"},
+        "mapping": {
+            "default_mapping": {"enabled": False},
+            "types": {
+                f"{scope_name}.{collection_name}": {
+                    "enabled": True,
+                    "dynamic": False,
+                    "properties": {
+                        "embedding": {
+                            "enabled": True,
+                            "dynamic": False,
+                            "fields": [
+                                {
+                                    "name": "embedding",
+                                    "type": "vector",
+                                    "dims": 4,
+                                    "similarity": "dot_product",
+                                    "index": True,
+                                }
+                            ],
+                        }
+                    },
+                }
+            },
+            "default_analyzer": "standard",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_upsert_fts_index_with_vector_field_round_trip() -> None:
+    """upsert_fts_index already supports creating a Search (FTS) vector
+    index -- no code change was needed, only docstring/disclaimer
+    corrections (see fts.py's module docstring). This confirms the vector
+    field mapping survives the round trip through get_fts_index_definition
+    exactly as submitted (the Search service fills in its own defaults
+    around it, same as it would for any non-vector index)."""
+    bucket_name = require_test_bucket()
+    scope_name = get_test_scope()
+    collection_name = get_test_collection()
+    index_name = f"test_fts_upsert_vector_idx_{uuid.uuid4().hex[:8]}"
+    vector_field = {
+        "name": "embedding",
+        "type": "vector",
+        "dims": 4,
+        "similarity": "dot_product",
+        "index": True,
+    }
+
+    try:
+        async with create_mcp_session() as session:
+            upsert_response = await session.call_tool(
+                "upsert_fts_index",
+                arguments={
+                    "index_name": index_name,
+                    "source_name": bucket_name,
+                    "bucket_name": bucket_name,
+                    "scope_name": scope_name,
+                    "params": _minimal_scope_level_vector_fts_index_params(
+                        scope_name, collection_name
+                    ),
+                },
+            )
+            upsert_payload = extract_payload(upsert_response)
+            assert upsert_payload["success"] is True, upsert_payload.get("error")
+
+            get_response = await session.call_tool(
+                "get_fts_index_definition",
+                arguments={
+                    "index_name": index_name,
+                    "bucket_name": bucket_name,
+                    "scope_name": scope_name,
+                },
+            )
+            get_payload = extract_payload(get_response)
+            properties = get_payload["params"]["mapping"]["types"][
+                f"{scope_name}.{collection_name}"
+            ]["properties"]
+            assert properties["embedding"]["fields"] == [vector_field]
+
+            drop_response = await session.call_tool(
+                "drop_fts_index",
+                arguments={
+                    "index_name": index_name,
+                    "bucket_name": bucket_name,
+                    "scope_name": scope_name,
+                },
+            )
+            drop_payload = extract_payload(drop_response)
+            assert drop_payload["success"] is True, drop_payload.get("error")
+    finally:
+        cluster = _direct_cluster()
+        try:
+            bucket = cluster.bucket(bucket_name)
+            with contextlib.suppress(Exception):
+                bucket.scope(scope_name).search_indexes().drop_index(index_name)
+        finally:
+            with contextlib.suppress(Exception):
+                cluster.close()
+
+
 @pytest.mark.asyncio
 async def test_upsert_fts_index_updates_existing_index() -> None:
     """Calling upsert_fts_index a second time with the same name updates the

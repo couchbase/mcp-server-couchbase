@@ -583,6 +583,60 @@ class TestUpsertFtsIndex:
             "scope": None,
         }
 
+    def test_vector_field_mapping_passes_through_unmodified(self) -> None:
+        """A vector field mapping in params reaches SearchIndex() untouched --
+        this tool does no mapping validation/transformation of its own."""
+        ctx, cluster, cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
+        vector_params = {
+            "mapping": {
+                "types": {
+                    "_default._default": {
+                        "properties": {
+                            "embedding": {
+                                "fields": [
+                                    {
+                                        "type": "vector",
+                                        "dims": 1536,
+                                        "similarity": "dot_product",
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        with (
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
+            patch("cb_mcp.tools.operational.fts.SearchIndex") as mock_search_index,
+        ):
+            result = upsert_fts_index(
+                ctx,
+                "idx_vec",
+                source_name="b",
+                params=vector_params,
+            )
+
+        mock_search_index.assert_called_once_with(
+            name="idx_vec",
+            source_type="couchbase",
+            idx_type="fulltext-index",
+            source_name="b",
+            uuid=None,
+            params=vector_params,
+            source_uuid=None,
+            source_params={},
+            plan_params={},
+        )
+        cluster_index_manager.upsert_index.assert_called_once_with(
+            mock_search_index.return_value
+        )
+        assert result["success"] is True
+
     def test_scope_level_upsert_targets_scope_manager(self) -> None:
         ctx, cluster, _cluster_index_manager, bucket = _make_ctx_with_fts_managers()
         scope_mgr = MagicMock()
