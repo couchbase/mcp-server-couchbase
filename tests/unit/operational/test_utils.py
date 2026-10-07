@@ -353,15 +353,56 @@ class TestIndexUtilsFunctions:
         assert result is not None
         assert result["isPrimary"] is True
 
-    def test_classify_vector_index(self) -> None:
-        assert classify_vector_index(["`embedding` VECTOR"]) == (True, "hyperscale")
-        assert classify_vector_index(["`type`", "`embedding` VECTOR"]) == (
+    def test_classify_vector_index_hyperscale(self) -> None:
+        definition = "CREATE VECTOR INDEX `idx` ON `b`(`embedding` VECTOR) WITH {}"
+        assert classify_vector_index(["`embedding` VECTOR"], definition) == (
+            True,
+            "hyperscale",
+        )
+
+    def test_classify_vector_index_composite_with_scalar_keys(self) -> None:
+        definition = "CREATE INDEX `idx` ON `b`(`type`,`embedding` VECTOR) WITH {}"
+        assert classify_vector_index(["`type`", "`embedding` VECTOR"], definition) == (
             True,
             "composite",
         )
-        assert classify_vector_index(["`type`", "`category`"]) == (False, None)
-        assert classify_vector_index([]) == (False, None)
-        assert classify_vector_index(None) == (False, None)
+
+    def test_classify_vector_index_composite_with_zero_scalar_keys(self) -> None:
+        """Regression test (flagged in PR review): a Composite Vector Index
+        created with zero scalar keys has exactly one index_key entry, the
+        vector key alone -- identical in shape to Hyperscale's index_key.
+        Key count alone would misclassify this as hyperscale; the
+        definition's leading keyword ("CREATE INDEX", not "CREATE VECTOR
+        INDEX") is what actually disambiguates it, confirmed live."""
+        definition = "CREATE INDEX `idx` ON `b`(`embedding` VECTOR) USING GSI WITH {}"
+        assert classify_vector_index(["`embedding` VECTOR"], definition) == (
+            True,
+            "composite",
+        )
+
+    def test_classify_vector_index_is_case_insensitive(self) -> None:
+        """Couchbase reformats some casing when it echoes a definition back
+        (e.g. ON -> on) -- confirmed live -- so the check must not assume
+        the submitted casing survives verbatim."""
+        definition = "create vector index `idx` on `b`(`embedding` VECTOR) with {}"
+        assert classify_vector_index(["`embedding` VECTOR"], definition) == (
+            True,
+            "hyperscale",
+        )
+
+    def test_classify_vector_index_non_vector(self) -> None:
+        definition = "CREATE INDEX `idx` ON `b`(`type`,`category`) WITH {}"
+        assert classify_vector_index(["`type`", "`category`"], definition) == (
+            False,
+            None,
+        )
+
+    def test_classify_vector_index_empty_or_missing_key(self) -> None:
+        assert classify_vector_index([], "CREATE INDEX `idx` ON `b`() WITH {}") == (
+            False,
+            None,
+        )
+        assert classify_vector_index(None, None) == (False, None)
 
     def test_process_index_data_from_query_detects_hyperscale_vector(self) -> None:
         """A single-entry index_key (the vector key alone) resolves to
@@ -397,6 +438,31 @@ class TestIndexUtilsFunctions:
             "index_key": ["`type`", "`embedding` VECTOR"],
             "metadata": {
                 "definition": "CREATE INDEX `idx_vec` ON `b`.`s`.`c` (`type`, `embedding` VECTOR) USING GSI WITH {}",
+                "last_scan_time": None,
+            },
+        }
+
+        result = process_index_data_from_query(idx)
+
+        assert result["is_vector"] is True
+        assert result["vector_type"] == "composite"
+
+    def test_process_index_data_from_query_composite_with_zero_scalar_keys(
+        self,
+    ) -> None:
+        """Regression test (flagged in PR review): create_query_index allows
+        a Composite Vector Index with zero scalar keys, which has the same
+        single-entry index_key as Hyperscale -- must still classify as
+        "composite" via the definition's leading keyword, not "hyperscale"."""
+        idx = {
+            "name": "idx_vec",
+            "bucket": "b",
+            "scope": "s",
+            "collection": "c",
+            "state": "online",
+            "index_key": ["`embedding` VECTOR"],
+            "metadata": {
+                "definition": "CREATE INDEX `idx_vec` ON `b`.`s`.`c` (`embedding` VECTOR) USING GSI WITH {}",
                 "last_scan_time": None,
             },
         }

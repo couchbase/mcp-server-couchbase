@@ -54,20 +54,26 @@ def clean_index_definition(definition: Any) -> str:
     return ""
 
 
-def classify_vector_index(index_key: list[Any] | None) -> tuple[bool, str | None]:
-    """Classify a ``system:indexes`` row's ``index_key`` array as vector or
-    not, and if vector, as "hyperscale" or "composite" -- with zero extra
-    round trips, unlike the REST-only path's getIndexStatus fields.
+def classify_vector_index(
+    index_key: list[Any] | None, definition: str | None
+) -> tuple[bool, str | None]:
+    """Classify a ``system:indexes`` row as vector or not, and if vector, as
+    "hyperscale" or "composite" -- with zero extra round trips, unlike the
+    REST-only path's getIndexStatus fields.
 
-    Confirmed against a live Couchbase Server 8.0.1 cluster: a Hyperscale
-    Vector Index's ``index_key`` has exactly one entry (the vector key, e.g.
-    ``"`field` VECTOR"``) -- Hyperscale allows no other keys. A Composite
-    Vector Index's ``index_key`` has the vector key alongside one or more
-    scalar keys. This holds except for a degenerate Composite index created
-    with zero scalar keys, which is indistinguishable from Hyperscale by this
-    field alone -- a self-defeating configuration (it gains nothing over
-    Hyperscale) rather than a realistic case, so it's accepted as a known
-    limitation rather than worth a REST round trip to resolve.
+    ``index_key`` alone is NOT enough to distinguish Hyperscale from
+    Composite: a Composite Vector Index created with zero scalar keys has
+    exactly one entry (the vector key alone), identical in shape to a
+    Hyperscale index's ``index_key`` -- confirmed live against Couchbase
+    Server 8.0.1. The reliable signal is ``definition``'s leading keyword
+    instead: a Hyperscale index is always created via the dedicated
+    ``CREATE VECTOR INDEX ...`` statement, a Composite index always via
+    ``CREATE INDEX ... VECTOR ... USING GSI`` -- which statement form was
+    used is definitionally what selects the type (there is no ``USING
+    HYPERSCALE`` clause), so this holds for every case, not just the common
+    one. (Couchbase reformats some casing when it echoes the definition back
+    -- e.g. ``ON`` becomes lowercase ``on`` -- so the check is
+    case-insensitive.)
 
     Returns ``(is_vector, vector_type)`` -- ``vector_type`` is None when not
     a vector index.
@@ -75,7 +81,10 @@ def classify_vector_index(index_key: list[Any] | None) -> tuple[bool, str | None
     keys = [str(key) for key in (index_key or [])]
     if not any(key.rstrip().upper().endswith("VECTOR") for key in keys):
         return False, None
-    return True, ("hyperscale" if len(keys) == 1 else "composite")
+    is_hyperscale = bool(definition) and definition.strip().lower().startswith(
+        "create vector index"
+    )
+    return True, ("hyperscale" if is_hyperscale else "composite")
 
 
 def normalize_vector_type(index_type: str | None) -> str:
@@ -225,7 +234,9 @@ def process_index_data_from_query(
         return _raw_fallback(idx, warning)
 
     metadata = idx["metadata"]
-    is_vector, vector_type = classify_vector_index(idx.get("index_key"))
+    is_vector, vector_type = classify_vector_index(
+        idx.get("index_key"), metadata["definition"]
+    )
 
     index_info: dict[str, Any] = {
         "name": idx["name"],
