@@ -840,6 +840,9 @@ def get_cluster_system_events(
                     )
                     last_error = e
         raise RuntimeError(f"Failed to reach any host in {endpoints}: {last_error}")
+    except ValueError as e:
+        logger.warning(f"Rejected get_cluster_system_events request: {e}")
+        raise
     except Exception as e:
         logger.error(f"Error getting cluster system events: {e}", exc_info=True)
         raise
