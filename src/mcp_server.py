@@ -26,6 +26,7 @@ from cb_mcp.utils import (
     ALLOWED_TRANSPORTS,
     DEFAULT_DISABLE_STRUCTURED_OUTPUT,
     DEFAULT_HOST,
+    DEFAULT_JSON_RESPONSE,
     DEFAULT_LOG_BACKUP_COUNT,
     DEFAULT_LOG_FILE,
     DEFAULT_LOG_LEVEL,
@@ -198,6 +199,9 @@ def build_mcp_server(params: Mapping[str, Any]) -> FastMCP:
         # carry text content only. Reported because it changes the shape of
         # every tool response a client sees.
         "disable_structured_output": disable_structured_output,
+        # Whether results are framed as SSE events or returned as a plain
+        # JSON body. Reported because it changes the shape of every response.
+        "json_response": params.get("json_response", DEFAULT_JSON_RESPONSE),
         # OAuth resource-server config (non-secret IdP coordinates), captured
         # for the env-info diagnostic and get_server_configuration_status.
         # ``oauth_enabled`` is whether OAuth is active: resolve_oauth returns
@@ -318,7 +322,10 @@ def create_app() -> StarletteWithLifespan:
     # Session state cannot be shared between processes, so multi-worker mode is
     # always stateless; resolve_worker_settings has already rejected any
     # combination that says otherwise.
-    return mcp.http_app(stateless_http=True)
+    return mcp.http_app(
+        stateless_http=True,
+        json_response=params.get("json_response", DEFAULT_JSON_RESPONSE),
+    )
 
 
 def run_workers(params: Mapping[str, Any]) -> None:
@@ -457,6 +464,17 @@ def run_workers(params: Mapping[str, Any]) -> None:
     "content. Use this with clients that mishandle or reject a tool's "
     "structured output, or to avoid sending each result twice. Applies to all "
     "tools; it cannot be set per tool.",
+)
+@click.option(
+    "--json-response",
+    "json_response",
+    envvar="CB_MCP_JSON_RESPONSE",
+    type=bool,
+    default=DEFAULT_JSON_RESPONSE,
+    help="Return each tool result as a plain JSON response body instead of a "
+    "single-event SSE stream. Both forms are valid for streamable HTTP; the "
+    "JSON form avoids the per-response stream framing and suits clients that "
+    "do not consume the event stream. Only honored with --transport=http.",
 )
 @click.option(
     "--disabled-tools",
@@ -684,6 +702,7 @@ def main(
     thread_pool_size,
     stateless_http,
     disable_structured_output,
+    json_response,
     disabled_tools,
     confirmation_required_tools,
     oauth_jwks_uri,
@@ -777,6 +796,7 @@ def main(
             "host": host,
             "port": port,
             "stateless_http": stateless_http,
+            "json_response": json_response,
         }
     mcp.run(transport=sdk_transport, show_banner=False, **run_kwargs)  # type: ignore
 

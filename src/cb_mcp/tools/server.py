@@ -48,6 +48,10 @@ def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
         # carry text content only. Defaults to False for hosts that don't
         # populate the key, matching FastMCP's own inferred-schema behaviour.
         "disable_structured_output": settings.get("disable_structured_output", False),
+        # True when HTTP responses are returned as a plain JSON body rather
+        # than a single-event SSE stream. Defaults to False for hosts that
+        # don't populate the key, matching the server default.
+        "json_response": settings.get("json_response", False),
         "disabled_tools": sorted(settings.get("disabled_tools", set())),
         "confirmation_required_tools": sorted(
             settings.get("confirmation_required_tools", set())

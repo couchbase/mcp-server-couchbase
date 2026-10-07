@@ -53,6 +53,9 @@ _SAFE_SETTINGS_KEYS = (
     # Whether tool results carry structured content, which changes the response
     # shape a client sees for every tool call.
     "disable_structured_output",
+    # Whether HTTP responses are framed as SSE or returned as a plain JSON
+    # body. Same reason: it changes what a client receives for every call.
+    "json_response",
     "disabled_tools",
     "confirmation_required_tools",
     "connection_string",
