@@ -290,6 +290,7 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_PORT` | `--port` | Port for HTTP/SSE transport modes | `8000` |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Elicitation/Confirmation Required Tools](#elicitationconfirmation-for-tool-calls)) | None |
+| `CB_MCP_MAX_QUERY_RESULT_SIZE` | `--max-query-result-size` | Maximum size **in bytes** of a query tool's result. Rows are streamed from the cluster and reading stops once the budget is reached; the response then reports `truncated: true` along with a `truncation` object explaining what happened. Applies to `run_sql_plus_plus_query`, `run_query_sync` and `get_async_query_results`. Values above `1048576` (1 MB) or below `1024` (1 kB) are clamped with a startup warning | `15360` (15 kB) |
 | `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
 | `CB_MCP_LOG_SINKS` | `--log-sinks` | Comma-separated log destinations: `stderr`, `file`, or both (see [Logging](#logging)) | `stderr` |
 | `CB_MCP_LOG_FILE` | `--log-file` | Base path for per-level log files (only used when the `file` sink is enabled) | `mcp_server.log` |
