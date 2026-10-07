@@ -15,7 +15,11 @@ from ...servers.operational.constants import (
     QUERY_SERVICE_LIST_INDEXES_MIN_MAJOR_VERSION,
 )
 from ...utils.config import get_settings
-from ...utils.operational.connection import connect_to_bucket, format_keyspace
+from ...utils.operational.connection import (
+    connect_to_bucket,
+    format_keyspace,
+    resolve_cluster_major_version,
+)
 from ...utils.operational.connection_string import (
     is_capella_connection,
     validate_connection_settings,
@@ -27,7 +31,6 @@ from ...utils.operational.index_utils import (
     parse_index_stats_key,
     process_index_data_from_query,
     process_index_data_from_rest_api,
-    resolve_cluster_major_version,
     validate_filter_params,
 )
 from ...utils.responses import tool_error, tool_success

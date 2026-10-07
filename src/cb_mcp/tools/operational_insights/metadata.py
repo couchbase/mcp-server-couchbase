@@ -23,7 +23,7 @@ logger = logging.getLogger(f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.tools.metad
 MAX_SCHEMA_SAMPLE_SIZE = 10_000
 
 
-def get_databases_in_cluster(ctx: Context) -> list[dict[str, Any]]:
+def oi_get_databases_in_cluster(ctx: Context) -> list[dict[str, Any]]:
     """List all databases in the Operational Insights cluster.
 
     Returns a list of rows, each with a DatabaseName field.
@@ -45,7 +45,7 @@ def get_databases_in_cluster(ctx: Context) -> list[dict[str, Any]]:
         raise
 
 
-def get_scopes_in_database(ctx: Context, database_name: str) -> list[dict[str, Any]]:
+def oi_get_scopes_in_database(ctx: Context, database_name: str) -> list[dict[str, Any]]:
     """List all scopes in a database.
 
     Returns a list of rows, each with DatabaseName and ScopeName fields.
@@ -71,7 +71,7 @@ def get_scopes_in_database(ctx: Context, database_name: str) -> list[dict[str, A
         raise
 
 
-def get_collections_in_scope(
+def oi_get_collections_in_scope(
     ctx: Context, database_name: str, scope_name: str
 ) -> list[dict[str, Any]]:
     """List all collections (datasets) in a scope.
@@ -80,11 +80,6 @@ def get_collections_in_scope(
     CollectionName, and Type fields. Type is the collection's DatasetType
     (INTERNAL, EXTERNAL, or VIEW) — callers that only want stored/linked
     collections should filter out Type == "VIEW" themselves.
-
-    Note: this server and the operational server both expose a tool named
-    ``get_collections_in_scope``. They run as separate processes/servers, so
-    this is only a concern for a client that registers both simultaneously —
-    see CONTRIBUTING.md's tool-naming section.
     """
     query = (
         "SELECT d.DatabaseName, d.DataverseName AS ScopeName, "
@@ -133,7 +128,7 @@ def _strip_samples(node: Any) -> Any:
     return node
 
 
-def get_schema_for_collection(
+def oi_get_schema_for_collection(
     ctx: Context,
     database_name: str,
     scope_name: str,
@@ -162,11 +157,6 @@ def get_schema_for_collection(
     out in Python afterward, rather than trusting the server to honor 0.
 
     Returns a list of JSON-Schema-shaped objects, one per detected flavor.
-
-    Note: this server and the operational server both expose a tool named
-    ``get_schema_for_collection``. They run as separate processes/servers, so
-    this is only a concern for a client that registers both simultaneously —
-    see CONTRIBUTING.md's tool-naming section.
     """
     if sample_size <= 0:
         raise ValueError(f"sample_size must be positive, got {sample_size}")
@@ -209,8 +199,8 @@ def get_schema_for_collection(
 
 __all__ = [
     "MAX_SCHEMA_SAMPLE_SIZE",
-    "get_collections_in_scope",
-    "get_databases_in_cluster",
-    "get_schema_for_collection",
-    "get_scopes_in_database",
+    "oi_get_collections_in_scope",
+    "oi_get_databases_in_cluster",
+    "oi_get_schema_for_collection",
+    "oi_get_scopes_in_database",
 ]

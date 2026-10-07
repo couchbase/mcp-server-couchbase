@@ -18,7 +18,7 @@ from .conftest import create_oi_mcp_session
 async def test_run_query_sync_select_one():
     async with create_oi_mcp_session() as session:
         response = await session.call_tool(
-            "run_query_sync", {"statement": "SELECT 1 AS one"}
+            "oi_run_query_sync", {"statement": "SELECT 1 AS one"}
         )
         payload = extract_payload(response)
 
@@ -31,7 +31,7 @@ async def test_run_query_sync_select_one():
 async def test_run_query_sync_invalid_statement_returns_error_envelope():
     async with create_oi_mcp_session() as session:
         response = await session.call_tool(
-            "run_query_sync", {"statement": "SELECT bad("}
+            "oi_run_query_sync", {"statement": "SELECT bad("}
         )
         payload = extract_payload(response)
 
@@ -43,7 +43,7 @@ async def test_run_query_sync_invalid_statement_returns_error_envelope():
 async def test_explain_query_returns_a_plan():
     async with create_oi_mcp_session() as session:
         response = await session.call_tool(
-            "explain_query", {"statement": "SELECT 1 AS one"}
+            "oi_explain_query", {"statement": "SELECT 1 AS one"}
         )
         payload = extract_payload(response)
 
@@ -57,7 +57,7 @@ async def test_explain_query_does_not_execute_the_statement():
     would only fail if the statement were actually executed."""
     async with create_oi_mcp_session() as session:
         response = await session.call_tool(
-            "explain_query", {"statement": "SELECT 1 / 0 AS boom"}
+            "oi_explain_query", {"statement": "SELECT 1 / 0 AS boom"}
         )
         payload = extract_payload(response)
 
@@ -68,7 +68,7 @@ async def test_explain_query_does_not_execute_the_statement():
 async def test_explain_query_invalid_statement_returns_error_envelope():
     async with create_oi_mcp_session() as session:
         response = await session.call_tool(
-            "explain_query", {"statement": "SELECT bad("}
+            "oi_explain_query", {"statement": "SELECT bad("}
         )
         payload = extract_payload(response)
 

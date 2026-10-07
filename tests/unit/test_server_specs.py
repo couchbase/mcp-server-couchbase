@@ -23,20 +23,16 @@ from cb_mcp.utils.constants import LOGGER_NAMESPACE
 SHARED_TOOL_NAMES = frozenset({"get_server_configuration_status"})
 
 # KNOWN_DUPLICATE: same name, *different* implementations per server. A real
-# collision, grandfathered. Per CONTRIBUTING.md's tool-naming section: each
-# server runs as an independent process, so this only matters to a client
-# that registers both simultaneously. Renaming was considered and declined —
-# these are the ported prototype's original names. This allow-list exists so
-# a *new*, unintended collision still fails the build; it does not silence
-# these.
-KNOWN_DUPLICATE_TOOL_NAMES = frozenset(
-    {
-        "get_collections_in_scope",
-        "get_schema_for_collection",
-        "create_index",
-        "list_indexes",
-    }
-)
+# collision. Per CONTRIBUTING.md's tool-naming section: each server runs as
+# an independent process, so this only matters to a client that registers
+# both simultaneously. This allow-list exists so a *new*, unintended
+# collision still fails the build; it does not silence existing ones.
+#
+# Empty today: the Operational Insights server's tool names that used to
+# collide with the operational server's (get_collections_in_scope,
+# get_schema_for_collection, create_index, list_indexes — the ported
+# prototype's original names) were all prefixed with ``oi_`` instead.
+KNOWN_DUPLICATE_TOOL_NAMES: frozenset[str] = frozenset()
 
 #: Both kinds are permitted to appear on more than one server; only the
 #: reason differs.
