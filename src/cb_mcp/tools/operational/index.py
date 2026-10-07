@@ -189,7 +189,9 @@ def list_indexes(
     Filters must be provided hierarchically: scope requires bucket, collection requires both, index requires all three.
     Set ``return_raw_index_stats=True`` to get the unprocessed source row for each index.
 
-    Each result contains: name, definition (CREATE INDEX statement), status, isPrimary, bucket, scope, collection, lastScanTime.
+    Each result contains: name, definition (CREATE INDEX statement), status, isPrimary, bucket, scope, collection, lastScanTime,
+    is_vector (True for a Hyperscale or Composite Vector Index), and, only when is_vector is True, vector_type
+    ("hyperscale" or "composite").
     If a required field is missing, the entry contains warning and raw_index_stats instead.
 
     Source depends on cluster version: v8+ queries ``system:indexes`` via the
