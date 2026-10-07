@@ -18,6 +18,7 @@ from ..utils.context import (
     get_cluster_provider,
     get_logging_config,
 )
+from ..utils.telemetry import telemetry_status
 from .query import run_cluster_query
 
 logger = logging.getLogger(f"{MCP_SERVER_NAME}.tools.server")
@@ -83,6 +84,10 @@ def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
         "configuration": configuration,
         "logging": logging_status,
         "connections": connection_status,
+        # Runtime rather than configuration: usage-telemetry delivery is
+        # best-effort, so the counters are the only way to see that events are
+        # being dropped because the collector cannot keep up.
+        "telemetry": telemetry_status(),
     }
 
 
