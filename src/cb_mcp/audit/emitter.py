@@ -257,8 +257,8 @@ def _shutdown_at_exit() -> None:
 
     A stdio client that kills the server, or an unhandled exit, would otherwise
     lose whatever is still queued. This cannot help on ``SIGKILL``; a missing
-    ``server stopped`` record therefore means "not a clean shutdown", not
-    "tampered with", and ``AUDIT.md`` says so.
+    ``server stopped`` record therefore means "not a clean shutdown" — it is
+    not evidence of tampering, and must not be read as such.
     """
     shutdown_audit()
 

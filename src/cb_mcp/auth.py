@@ -128,8 +128,10 @@ class CouchbaseJWTVerifier(JWTVerifier):
         ``token_invalid`` reason is the honest record. ``real_userid`` is
         ``anonymous`` because a rejected token establishes no identity.
 
-        A token that is *missing* entirely is refused before this method is
-        reached and is therefore not audited in this release — see ``AUDIT.md``.
+        A token that is *missing* entirely is refused by the ASGI auth layer
+        before this method is reached, so it produces no ``token rejected``
+        record in this release. An unauthenticated caller is therefore visible
+        in the audit file only as the absence of records, not as a denial.
 
         Correlation: this record carries a freshly minted ``cid``, so that
         grouping an audit file by ``cid`` works unconditionally, and carries no

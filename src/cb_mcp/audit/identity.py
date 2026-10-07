@@ -21,8 +21,7 @@ rather than trust them:
   is meant to solve. :func:`warn_on_unauthenticated_http` reports this at
   startup.
 * ``local`` inside a container resolves to the image's user (often ``root``),
-  which looks like an identity but identifies nothing. Documented in
-  ``AUDIT.md``.
+  which looks like an identity but identifies nothing.
 """
 
 from __future__ import annotations

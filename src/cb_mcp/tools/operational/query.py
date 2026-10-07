@@ -42,8 +42,9 @@ def _query_correlation_options() -> dict[str, str]:
     was before.
 
     Only the query service can do this. The KV protocol exposes no
-    client-supplied correlation field, so a document-level join stays
-    approximate — see ``AUDIT.md``.
+    client-supplied correlation field, so a document-level join between an
+    MCP record and a Couchbase Server audit record stays approximate: it has
+    to be made on timestamp and keyspace rather than on a shared id.
     """
     cid = audit_state.get_cid()
     return {"client_context_id": cid} if cid else {}
