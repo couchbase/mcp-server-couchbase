@@ -31,6 +31,7 @@ WRITE_TOOL_NAMES = {
     "delete_collection",
     # Index management write tools
     "create_index",
+    "create_query_index",
     "build_index",
     "drop_index",
     # FTS index management write tools
@@ -94,7 +95,7 @@ class TestToolCategories:
 
     def test_write_tools_defined(self):
         """Verify WRITE_TOOLS list is properly defined."""
-        assert len(WRITE_TOOLS) == 14
+        assert len(WRITE_TOOLS) == 15
         tool_names = {tool.__name__ for tool in WRITE_TOOLS}
         assert tool_names == WRITE_TOOL_NAMES
 
@@ -191,12 +192,12 @@ class TestToolCounts:
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (32 read-only + 14 write)
-        assert len(tools) == 46
+        # Expected total count (32 read-only + 15 write)
+        assert len(tools) == 47
 
     def test_write_tools_count(self):
-        """Verify exactly 14 write tools exist."""
-        assert len(WRITE_TOOLS) == 14
+        """Verify exactly 15 write tools exist."""
+        assert len(WRITE_TOOLS) == 15
 
 
 class TestReadOnlyModeToolFiltering:
