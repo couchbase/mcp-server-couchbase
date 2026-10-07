@@ -36,7 +36,6 @@ Deliberately not here: anything a reader needs in order to understand *what
 the servers are*. That story stays in ``mcp_server.py``.
 """
 
-import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, NamedTuple
@@ -58,15 +57,12 @@ from ..core.cli.options import (
 from ..core.spec import Deployment, ServerSpec
 from ..servers.operational_insights.cli import oi_credential_options
 from ..tool_registration import prepare_tools_for_registration
-from .constants import LOGGER_NAMESPACE
 from .logging import (
     ParsedLogLevel,
     ParsedLogSinks,
     configure_logging,
     get_resolved_logging_config,
 )
-
-logger = logging.getLogger(f"{LOGGER_NAMESPACE}.utils.cli_params")
 
 __all__ = [
     "CLUSTER_CREDENTIALS",
@@ -417,13 +413,15 @@ def resolve_deployment_for(
     service — it asks the spec, which names a resolver only if its service has
     tools that care. Servers without one, and connection strings a resolver
     cannot place, both come back ``None`` and gate nothing.
+
+    What was resolved is logged by ``prepare_tools_for_registration``, which
+    owns every other line about tool gating; this module stays free of a
+    logger of its own, where a stdlib ``logging`` import would sit confusingly
+    beside the relative ``.logging`` import above.
     """
     if spec.deployment_resolver is None:
         return None
-    deployment = spec.deployment_resolver(credentials.get("connection_string"))
-    if deployment is not None:
-        logger.info("Resolved deployment from connection string: %s", deployment.value)
-    return deployment
+    return spec.deployment_resolver(credentials.get("connection_string"))
 
 
 def gate_tools(

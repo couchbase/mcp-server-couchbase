@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from cb_mcp.core.spec import Deployment
 from cb_mcp.utils.operational.connection_string import (
     _get_capella_root_ca_path,
@@ -70,6 +72,20 @@ class TestResolveDeployment:
         assert resolve_deployment("") is None
         assert resolve_deployment(None) is None
         assert resolve_deployment("couchbase://") is None
+
+    @pytest.mark.parametrize(
+        "connection_string",
+        ["couchbase://[bad", "couchbases://]x[", "couchbase://[::1", "[["],
+    )
+    def test_unparseable_string_does_not_raise(self, connection_string: str) -> None:
+        """``urlparse`` raises on an unmatched "[" — this must absorb it.
+
+        This resolver runs during startup, so a raise here is the difference
+        between a server that boots and one that does not. A typo in a
+        connection string has to come back as "cannot tell" and be reported by
+        the connection attempt, not as a traceback out of tool gating.
+        """
+        assert resolve_deployment(connection_string) is None
 
 
 class TestExtractHostsFromConnectionString:

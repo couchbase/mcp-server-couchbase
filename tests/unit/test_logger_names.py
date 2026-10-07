@@ -51,7 +51,6 @@ EXPECTED_LOGGER_NAMES = {
     "cb_mcp.core.app": "couchbase.mcp.core.app",
     "cb_mcp.tool_registration": "couchbase.mcp.tool_registration",
     "cb_mcp.utils.cli": "couchbase.mcp.utils.cli",
-    "cb_mcp.utils.cli_params": "couchbase.mcp.utils.cli_params",
     "cb_mcp.utils.config": "couchbase.mcp.utils.config",
     "cb_mcp.utils.elicitation": "couchbase.mcp.utils.elicitation",
     "cb_mcp.utils.environment": "couchbase.mcp.utils.environment",

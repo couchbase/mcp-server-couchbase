@@ -99,6 +99,9 @@ def prepare_tools_for_registration(
     # gets no spurious "unknown tool" warning for naming a real one.
     disabled_tool_names = parse_tool_names(disabled_tools, loaded_tool_names)
 
+    if deployment is not None:
+        logger.info("Resolved deployment from connection string: %s", deployment.value)
+
     unsupported_tool_names = unsupported_for_deployment(
         loaded_tool_names, spec.deployment_requirements, deployment
     )

@@ -46,30 +46,50 @@ def is_capella_connection(connection_string: str) -> bool:
 
 
 def resolve_deployment(connection_string: str | None) -> Deployment | None:
-    """Which deployment *connection_string* names, or ``None`` if it has no hosts.
+    """Which deployment *connection_string* names, or ``None`` if it cannot tell.
 
     Recognition is by hostname, which makes the two answers unequally strong
     and that asymmetry is worth stating plainly:
 
     * ``CAPELLA`` is positive evidence — every host ends in
-      ``.cloud.couchbase.com``, which nothing else does.
+      ``.cloud.couchbase.com``, which nothing else does. Capella private
+      endpoints keep that domain, so private-link clusters are recognised too.
     * ``ON_PREM`` is the absence of that evidence. A Capella cluster reached
-      through a private endpoint, a CNAME or a custom DNS name is read as
-      on-prem here, because nothing in the connection string says otherwise.
+      through a CNAME or a custom DNS name is read as on-prem here, because
+      nothing in the connection string says otherwise.
 
-    So this is a registration-time *affordance* — it keeps an agent from being
-    offered a tool that cannot work — and never a correctness guarantee. A
-    tool that must not run on the wrong deployment keeps its own runtime check
-    (see ``get_cluster_metrics``), which is what actually holds when detection
-    guesses wrong or when an embedding host resolves no deployment at all.
+    That second case is a real limitation, and it is *not* covered by the
+    runtime guards inside the affected tools: those call
+    ``is_capella_connection``, the same hostname test this resolver uses. A
+    Capella alias misread here is therefore misread there as well — the tool
+    registers, runs, and fails against an endpoint Capella does not expose,
+    surfacing a connection or HTTP error rather than "not supported on
+    Capella". The guards are a backstop for a host that resolved *no*
+    deployment, not a second opinion on this one.
 
-    Returns ``None`` when no host can be parsed out of the string, so a
-    malformed or empty value withholds nothing rather than silently claiming
-    one deployment or the other.
+    Returns ``None`` when no host can be parsed out of the string, so an empty,
+    malformed or host-less value withholds nothing rather than silently
+    claiming one deployment or the other.
     """
     if not connection_string:
         return None
-    if not extract_hosts_from_connection_string(connection_string):
+    try:
+        hosts = extract_hosts_from_connection_string(connection_string)
+    except ValueError:
+        # ``urlparse`` rejects some malformed values outright — an unmatched
+        # "[" raises "Invalid IPv6 URL" rather than returning empty parts.
+        # Every other caller parses inside a tool call, where the failure
+        # becomes an error response; this one runs during startup, so letting
+        # it propagate would turn a typo in a connection string into a server
+        # that does not boot, with a traceback pointing at tool gating rather
+        # than at the typo. An unparseable string is simply a deployment we
+        # cannot name; the connection attempt that follows reports it properly.
+        logger.warning(
+            "Could not parse connection string to determine deployment; "
+            "no tools will be gated on it."
+        )
+        return None
+    if not hosts:
         return None
     return (
         Deployment.CAPELLA

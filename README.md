@@ -387,7 +387,6 @@ Today this affects the four tools that reach Couchbase through an admin REST end
 
 Tools that go through the Couchbase SDK are unaffected and stay available on Capella — `get_cluster_health_and_services` (ping) and `get_cluster_diagnostics_report` (diagnostics) among them.
 
-Capella private endpoints keep the `cloud.couchbase.com` domain, so they are recognised as Capella like any other Capella cluster. Nothing is withheld when the connection string has no parseable host, and each tool above still refuses a Capella cluster at call time, so a deployment the hostname check cannot recognise gets a clear error rather than a silently missing tool.
 
 #### Supported Formats
 
