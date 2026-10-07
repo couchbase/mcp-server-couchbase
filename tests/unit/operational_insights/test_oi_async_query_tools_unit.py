@@ -53,7 +53,13 @@ def _make_result(rows: list, result_count: int = 1, result_size: int = 42) -> Ma
     conversion to JSON-safe milliseconds is actually exercised.
     """
     result = MagicMock()
+    # The tool streams via rows(); get_all_rows is kept for any test that
+    # still asserts against the older accessor.
     result.get_all_rows.return_value = rows
+    # A fresh iterator per call, mirroring the SDK: the server keeps the
+    # result buffers after a fetch, so re-fetching a handle must yield the
+    # rows again rather than an exhausted stream.
+    result.rows.side_effect = lambda: iter(rows)
     meta = result.metadata.return_value
     meta.warnings.return_value = []
     metrics = meta.metrics.return_value

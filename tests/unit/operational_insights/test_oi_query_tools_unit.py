@@ -30,11 +30,16 @@ from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
 class TestRunQuerySync:
     def test_returns_success_envelope(self) -> None:
         ctx, cluster = make_oi_ctx()
-        cluster.execute_query.return_value.get_all_rows.return_value = [{"one": 1}]
+        cluster.execute_query.return_value.rows.return_value = iter([{"one": 1}])
 
         result = run_query_sync(ctx, "SELECT 1 AS one")
 
-        assert result == {"success": True, "rows": [{"one": 1}], "row_count": 1}
+        assert result == {
+            "success": True,
+            "rows": [{"one": 1}],
+            "row_count": 1,
+            "truncated": False,
+        }
 
     def test_returns_error_envelope_on_sdk_error(self) -> None:
         ctx, cluster = make_oi_ctx()

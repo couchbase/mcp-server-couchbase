@@ -44,6 +44,10 @@ from ...servers.operational_insights.constants import (
 )
 from ...utils.constants import SCOPE_WRITE
 from ...utils.operational_insights.context import get_oi_cluster, get_oi_handle_registry
+from ...utils.query_limits import (
+    collect_rows_within_budget,
+    max_query_result_size_for,
+)
 from ...utils.responses import tool_error, tool_success
 
 logger = logging.getLogger(f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.tools.query")
@@ -86,10 +90,11 @@ def _is_copy_to_statement(statement: str) -> bool:
 
 
 def run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
-    """Run a SQL++ statement and buffer all result rows in memory.
+    """Run a SQL++ statement and return its result rows.
 
-    Can carry SELECT, DML, or DDL statements. Buffers the entire result set
-    in client memory before returning.
+    Can carry SELECT, DML, or DDL statements. Rows are streamed from the
+    server and collected up to a configured byte budget; a result that would
+    exceed it is cut short and reported with truncated: true.
 
     When the server is in read-only mode, or the caller's token lacks the
     write scope, the statement is executed with ``QueryOptions(readonly=True)``
@@ -107,8 +112,10 @@ def run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
     full grammar parser, since read-only mode is the only thing that cares
     about the distinction.
 
-    Returns {"success": True, "rows": [...], "row_count": N} on success, or
-    {"success": False, "error": "..."} on failure.
+    Returns {"success": True, "rows": [...], "row_count": N,
+    "truncated": bool} on success, or {"success": False, "error": "..."} on
+    failure. When truncated is true the remaining rows were not read and
+    cannot be retrieved by calling again — narrow the statement instead.
     """
     cluster = get_oi_cluster(ctx)
 
@@ -143,9 +150,21 @@ def run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
             if enforce_readonly
             else cluster.execute_query(statement)
         )
-        rows = result.get_all_rows()
-        logger.info(f"Query returned {len(rows)} row(s)")
-        return tool_success(rows=rows, row_count=len(rows))
+        # result.rows() is the SDK's lazy BlockingIterator; get_all_rows()
+        # would be list() over the same stream, buffering the whole result.
+        bounded = collect_rows_within_budget(
+            result.rows(),
+            limit_bytes=max_query_result_size_for(ctx),
+            service="operational-insights sync",
+        )
+        logger.info(
+            f"Query returned {bounded.row_count} row(s) (truncated={bounded.truncated})"
+        )
+        return tool_success(
+            rows=bounded.rows,
+            row_count=bounded.row_count,
+            **bounded.as_envelope_fields(),
+        )
     except Exception as e:
         logger.error(f"Error running query: {e}", exc_info=True)
         return tool_error(e, statement=statement)
@@ -316,11 +335,13 @@ def get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
 
     Returns:
         {"success": True, "ready": true, "rows": [...], "row_count": N,
-        "metadata": {"warnings": [...], "metrics":
+        "truncated": bool, "metadata": {"warnings": [...], "metrics":
         {"elapsed_time_ms", "execution_time_ms", "result_count",
         "result_size", "processed_objects"}}}; or {"success": True,
         "ready": false} if not finished; or {"success": False,
-        "error": "..."} on failure.
+        "error": "..."} on failure. When truncated is true the rows are
+        incomplete and metadata may be empty, since the server reports it
+        only once every row has been read.
     """
     registry = get_oi_handle_registry(ctx)
     try:
@@ -337,21 +358,32 @@ def get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
             )
 
         result = status.result_handle().fetch_results()
-        rows = result.get_all_rows()
+        # fetch_results() hands back the same BlockingQueryResult type the sync
+        # path returns, so the identical streaming budget applies here.
+        bounded = collect_rows_within_budget(
+            result.rows(),
+            limit_bytes=max_query_result_size_for(ctx),
+            service="operational-insights async",
+        )
+        # Metadata is only populated once the row stream is exhausted, so a
+        # truncated read has none to report; _extract_metadata already returns
+        # {} rather than raising when it is unavailable.
         metadata = _extract_metadata(result, query_handle)
 
         # Deliberately NOT evicted: the server keeps the result buffers after
         # a fetch, so the token must stay valid for a re-fetch or an explicit
         # discard.
         logger.info(
-            f"Fetched {len(rows)} row(s) for async query (token={query_handle})"
+            f"Fetched {bounded.row_count} row(s) for async query "
+            f"(token={query_handle}, truncated={bounded.truncated})"
         )
         return tool_success(
             query_handle=query_handle,
             ready=True,
-            rows=rows,
-            row_count=len(rows),
+            rows=bounded.rows,
+            row_count=bounded.row_count,
             metadata=metadata,
+            **bounded.as_envelope_fields(),
         )
     except Exception as e:
         logger.error(f"Error fetching async query results: {e}", exc_info=True)
