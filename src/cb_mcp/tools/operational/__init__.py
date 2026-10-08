@@ -262,6 +262,8 @@ TOOL_DEPLOYMENT_REQUIREMENTS: dict[str, Deployment] = {
     "get_cluster_tasks": Deployment.ON_PREM,
     # Management REST, plus the per-node endpoints it fans out to.
     "get_cluster_health_snapshot": Deployment.ON_PREM,
+    # GET /events on the Management REST port.
+    "get_cluster_system_events": Deployment.ON_PREM,
     # Index Service REST: /pools/default/nodeServices to find the indexers,
     # then each indexer's /api/v1/stats (9102/19102).
     "get_index_stats": Deployment.ON_PREM,
