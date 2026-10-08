@@ -66,7 +66,7 @@ class HandleEntry:
     statement: str
     #: Where a ``COPY ... TO`` export writes its rows, or ``None`` for an
     #: ordinary query. Held here because it cannot be re-derived: when
-    #: ``get_async_query_results`` later reports the query finished, all it
+    #: ``oi_get_async_query_results`` later reports the query finished, all it
     #: has is the token, and a completed export comes back as zero rows —
     #: indistinguishable from a query that matched nothing unless the
     #: destination travels with the handle.

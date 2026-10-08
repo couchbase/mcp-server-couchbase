@@ -12,7 +12,7 @@ from collections.abc import Callable
 
 from mcp.types import ToolAnnotations
 
-from ...core.spec import ToolSet
+from ...core.spec import Deployment, ToolSet
 from ...utils.constants import SCOPE_READ, SCOPE_WRITE
 
 # Shared with every other server, and registered by them too — the same
@@ -83,11 +83,18 @@ from .server import (
     get_cluster_health_and_services,
     get_cluster_health_snapshot,
     get_cluster_metrics,
+    get_cluster_system_events,
     get_cluster_tasks,
     get_collections_in_scope,
     get_scopes_and_collections_in_bucket,
     get_scopes_in_bucket,
     test_cluster_connection,
+)
+
+# Vector search tools
+from .vector_search import (
+    run_search_vector_search,
+    run_vector_search,
 )
 
 # The operational server's tool inventory, and the single source of truth for
@@ -108,6 +115,7 @@ TOOL_SET = ToolSet(
         get_cluster_metrics,
         get_cluster_tasks,
         get_cluster_health_snapshot,
+        get_cluster_system_events,
         # KV read tools
         get_document_by_id,
         lookup_subdocument,
@@ -123,6 +131,9 @@ TOOL_SET = ToolSet(
         list_fts_indexes,
         get_fts_index_definition,
         run_fts_query,
+        # Vector search tools
+        run_vector_search,
+        run_search_vector_search,
         # Query performance analysis tools
         get_queries_not_selective,
         get_queries_not_using_covering_index,
@@ -176,6 +187,7 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_cluster_metrics": ToolAnnotations(readOnlyHint=True),
     "get_cluster_tasks": ToolAnnotations(readOnlyHint=True),
     "get_cluster_health_snapshot": ToolAnnotations(readOnlyHint=True),
+    "get_cluster_system_events": ToolAnnotations(readOnlyHint=True),
     # KV read tools
     "get_document_by_id": ToolAnnotations(readOnlyHint=True),
     "lookup_subdocument": ToolAnnotations(readOnlyHint=True),
@@ -191,6 +203,9 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "list_fts_indexes": ToolAnnotations(readOnlyHint=True),
     "get_fts_index_definition": ToolAnnotations(readOnlyHint=True),
     "run_fts_query": ToolAnnotations(readOnlyHint=True),
+    # Vector search tools (read-only)
+    "run_vector_search": ToolAnnotations(readOnlyHint=True),
+    "run_search_vector_search": ToolAnnotations(readOnlyHint=True),
     # Query performance analysis tools (read-only)
     "get_longest_running_queries": ToolAnnotations(readOnlyHint=True),
     "get_most_frequent_queries": ToolAnnotations(readOnlyHint=True),
@@ -219,6 +234,39 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     # FTS write tools
     "upsert_fts_index": ToolAnnotations(idempotentHint=True),
     "drop_fts_index": ToolAnnotations(destructiveHint=True),
+}
+
+# Tools that only work on one kind of deployment, reaching the gating layer
+# via ``ServerSpec.deployment_requirements``. Only exceptions are listed: a
+# tool absent from this mapping works on Capella and self-managed alike, which
+# is every tool that speaks only to the SDK.
+#
+# The dividing line is not features but REST ports. Capella does not expose
+# the Management or Index service REST endpoints, so a tool that calls one
+# cannot work there however the cluster is configured.
+#
+# Withholding a tool here is an affordance, not an enforcement boundary — the
+# deployment is inferred from a hostname and an embedding host may resolve no
+# deployment at all. A tool listed here keeps whatever runtime check it
+# already has; ``get_cluster_metrics`` still rejects a Capella connection on
+# its own, and that check is what holds when detection is wrong.
+#
+# The bar for an entry: the tool already documents the restriction and already
+# rejects the wrong deployment at call time. That keeps this mapping a
+# statement of known behaviour rather than a guess about which endpoints
+# Capella happens to expose.
+TOOL_DEPLOYMENT_REQUIREMENTS: dict[str, Deployment] = {
+    # POST /pools/default/stats/range on the Management REST port (8091/18091).
+    "get_cluster_metrics": Deployment.ON_PREM,
+    # GET /pools/default/tasks, same port.
+    "get_cluster_tasks": Deployment.ON_PREM,
+    # Management REST, plus the per-node endpoints it fans out to.
+    "get_cluster_health_snapshot": Deployment.ON_PREM,
+    # GET /events on the Management REST port.
+    "get_cluster_system_events": Deployment.ON_PREM,
+    # Index Service REST: /pools/default/nodeServices to find the indexers,
+    # then each indexer's /api/v1/stats (9102/19102).
+    "get_index_stats": Deployment.ON_PREM,
 }
 
 # Per-tool explanations appended to a scope-denial error, reaching the
@@ -280,11 +328,14 @@ __all__ = [
     "run_fts_query",
     "upsert_fts_index",
     "drop_fts_index",
+    "run_vector_search",
+    "run_search_vector_search",
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
     "get_cluster_metrics",
     "get_cluster_tasks",
     "get_cluster_health_snapshot",
+    "get_cluster_system_events",
     "get_queries_not_selective",
     "get_queries_not_using_covering_index",
     "get_queries_using_primary_index",
@@ -295,6 +346,7 @@ __all__ = [
     "discover_tool_input_values",
     # Tool inventory
     "TOOL_SET",
+    "TOOL_DEPLOYMENT_REQUIREMENTS",
     # Tool categories
     "READ_ONLY_TOOLS",
     "WRITE_TOOLS",

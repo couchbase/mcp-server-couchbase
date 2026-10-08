@@ -19,9 +19,9 @@ from _oi_fakes import make_oi_ctx
 from cb_mcp.tools.operational_insights.query import (
     CopyToError,
     build_copy_to_statement,
-    get_async_query_results,
-    run_query_async,
-    run_query_sync,
+    oi_get_async_query_results,
+    oi_run_query_async,
+    oi_run_query_sync,
 )
 
 STATEMENT = "SELECT a.name, a.country FROM `travel-sample`.inventory.airline a LIMIT 10"
@@ -129,7 +129,7 @@ class TestRunQuerySyncExport:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            return run_query_sync(ctx, STATEMENT, **kwargs)
+            return oi_run_query_sync(ctx, STATEMENT, **kwargs)
 
     def test_export_returns_confirmation_and_no_rows(self) -> None:
         """The point of exporting is to keep the result out of the context."""
@@ -229,7 +229,7 @@ class TestExportUnderReadOnlyMode:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            result = run_query_sync(ctx, STATEMENT, **DESTINATION)
+            result = oi_run_query_sync(ctx, STATEMENT, **DESTINATION)
 
         assert result["success"] is False
         assert "blocked under read-only mode" in result["error"]
@@ -242,7 +242,7 @@ class TestExportUnderReadOnlyMode:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            result = run_query_async(ctx, STATEMENT, **DESTINATION)
+            result = oi_run_query_async(ctx, STATEMENT, **DESTINATION)
 
         assert result["success"] is False
         assert "blocked under read-only mode" in result["error"]
@@ -255,7 +255,7 @@ class TestRunQueryAsyncExport:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            return run_query_async(ctx, STATEMENT, **kwargs)
+            return oi_run_query_async(ctx, STATEMENT, **kwargs)
 
     def test_export_returns_handle_and_destination(self) -> None:
         ctx, _cluster = make_oi_ctx(read_only_mode=False)
@@ -302,7 +302,7 @@ class TestAsyncExportCompletion:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            submitted = run_query_async(ctx, STATEMENT, **DESTINATION)
+            submitted = oi_run_query_async(ctx, STATEMENT, **DESTINATION)
 
         handle = cluster.start_query.return_value
         status = handle.fetch_status.return_value
@@ -315,7 +315,7 @@ class TestAsyncExportCompletion:
     def test_completion_names_the_destination(self) -> None:
         ctx, token = self._finished_export()
 
-        done = get_async_query_results(ctx, token)
+        done = oi_get_async_query_results(ctx, token)
 
         assert done["ready"] is True
         assert done["exported"] is True
@@ -326,7 +326,7 @@ class TestAsyncExportCompletion:
         """Without this the caller cannot tell an export from an empty result."""
         ctx, token = self._finished_export()
 
-        done = get_async_query_results(ctx, token)
+        done = oi_get_async_query_results(ctx, token)
 
         assert "Export complete" in done["message"]
         assert "copyto-test/run1" in done["message"]
@@ -334,7 +334,7 @@ class TestAsyncExportCompletion:
     def test_completion_returns_no_rows(self) -> None:
         ctx, token = self._finished_export()
 
-        done = get_async_query_results(ctx, token)
+        done = oi_get_async_query_results(ctx, token)
 
         assert done["row_count"] == 0
         assert "rows" not in done
@@ -346,14 +346,14 @@ class TestAsyncExportCompletion:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            submitted = run_query_async(ctx, STATEMENT)
+            submitted = oi_run_query_async(ctx, STATEMENT)
 
         status = cluster.start_query.return_value.fetch_status.return_value
         status.results_ready.return_value = True
         result = status.result_handle.return_value.fetch_results.return_value
         result.rows.side_effect = lambda: iter([{"a": 1}])
 
-        done = get_async_query_results(ctx, submitted["query_handle"])
+        done = oi_get_async_query_results(ctx, submitted["query_handle"])
 
         assert "exported" not in done
         assert "destination" not in done

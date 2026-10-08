@@ -12,8 +12,14 @@ behaviour, it does not change it.
 import couchbase
 
 from ...core.spec import ScopeSpec, ServerSpec
-from ...tools.operational import TOOL_ANNOTATIONS, TOOL_SCOPE_HINTS, TOOL_SET
+from ...tools.operational import (
+    TOOL_ANNOTATIONS,
+    TOOL_DEPLOYMENT_REQUIREMENTS,
+    TOOL_SCOPE_HINTS,
+    TOOL_SET,
+)
 from ...utils.constants import SCOPE_READ, SCOPE_WRITE
+from ...utils.operational.connection_string import resolve_deployment
 from .constants import (
     DEFAULT_OPERATIONAL_LOG_FILE,
     DEFAULT_OPERATIONAL_PORT,
@@ -49,13 +55,34 @@ SPEC = ServerSpec(
     scopes=ScopeSpec(read=SCOPE_READ, write=SCOPE_WRITE),
     annotations=TOOL_ANNOTATIONS,
     scope_hints=TOOL_SCOPE_HINTS,
+    # Capella does not expose the REST endpoints a few of these tools call, so
+    # those tools are not registered when the connection string names a Capella
+    # cluster. The resolver lives beside the connection-string helpers it uses;
+    # naming it here is what lets the generic host apply it without knowing
+    # what a ``couchbase://`` host looks like.
+    deployment_requirements=TOOL_DEPLOYMENT_REQUIREMENTS,
+    deployment_resolver=resolve_deployment,
     # This server owns the Couchbase SDK's logging. The SDK accepts this call
     # only once per process, so no other server may make it.
     sdk_log_hook=_configure_couchbase_sdk_logging,
     reported_dependencies=("couchbase", "lark"),
     # Only what is genuinely operational-specific: the shared env-info lists
     # already cover connection_string, password and ca_cert_path, which every
-    # server has. mTLS client credentials have no analytics equivalent.
-    safe_settings_keys=(),
-    secret_settings_keys=("client_cert_path", "client_key_path"),
+    # server has. mTLS client credentials have no analytics equivalent, and
+    # EMBEDDING_* (for run_vector_search / run_search_vector_search) is read
+    # only by this server's tools even though every server's CLI parses the
+    # flags (see core/cli/options.py's embedding_options docstring).
+    safe_settings_keys=(
+        "embedding_provider",
+        "embedding_model",
+        "embedding_endpoint",
+        "embedding_aws_region",
+    ),
+    secret_settings_keys=(
+        "client_cert_path",
+        "client_key_path",
+        "embedding_api_key",
+        "embedding_aws_access_key_id",
+        "embedding_aws_secret_access_key",
+    ),
 )

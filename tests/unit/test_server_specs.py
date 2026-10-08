@@ -23,20 +23,16 @@ from cb_mcp.utils.constants import LOGGER_NAMESPACE
 SHARED_TOOL_NAMES = frozenset({"get_server_configuration_status"})
 
 # KNOWN_DUPLICATE: same name, *different* implementations per server. A real
-# collision, grandfathered. Per CONTRIBUTING.md's tool-naming section: each
-# server runs as an independent process, so this only matters to a client
-# that registers both simultaneously. Renaming was considered and declined —
-# these are the ported prototype's original names. This allow-list exists so
-# a *new*, unintended collision still fails the build; it does not silence
-# these.
-KNOWN_DUPLICATE_TOOL_NAMES = frozenset(
-    {
-        "get_collections_in_scope",
-        "get_schema_for_collection",
-        "create_index",
-        "list_indexes",
-    }
-)
+# collision. Per CONTRIBUTING.md's tool-naming section: each server runs as
+# an independent process, so this only matters to a client that registers
+# both simultaneously. This allow-list exists so a *new*, unintended
+# collision still fails the build; it does not silence existing ones.
+#
+# Empty today: the Operational Insights server's tool names that used to
+# collide with the operational server's (get_collections_in_scope,
+# get_schema_for_collection, create_index, list_indexes — the ported
+# prototype's original names) were all prefixed with ``oi_`` instead.
+KNOWN_DUPLICATE_TOOL_NAMES: frozenset[str] = frozenset()
 
 #: Both kinds are permitted to appear on more than one server; only the
 #: reason differs.
@@ -201,6 +197,31 @@ def test_scope_hints_reference_real_tools():
         assert not unknown_hints, (
             f"{spec.id}: scope_hints reference unknown tool(s): {sorted(unknown_hints)}"
         )
+
+
+def test_deployment_requirements_reference_real_tools():
+    """A requirement for a removed/renamed tool is dead configuration."""
+    for spec in ALL_SPECS:
+        unknown = set(spec.deployment_requirements) - spec.tools.all_tool_names
+        assert not unknown, (
+            f"{spec.id}: deployment_requirements reference unknown tool(s): "
+            f"{sorted(unknown)}"
+        )
+
+
+def test_deployment_requirements_imply_a_resolver():
+    """Requirements without a resolver never fire — silently.
+
+    Nothing else would report it: the tools register, the server starts, and
+    the gap only shows up as a tool failing at call time on the deployment it
+    was declared not to support.
+    """
+    for spec in ALL_SPECS:
+        if spec.deployment_requirements:
+            assert spec.deployment_resolver is not None, (
+                f"{spec.id}: declares deployment_requirements but no "
+                "deployment_resolver, so they can never apply."
+            )
 
 
 def test_at_most_one_spec_owns_each_sdk_log_hook():

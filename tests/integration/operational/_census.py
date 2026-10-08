@@ -48,11 +48,15 @@ EXPECTED_TOOLS = {
     "run_fts_query",
     "upsert_fts_index",
     "drop_fts_index",
+    # Vector search tools
+    "run_vector_search",
+    "run_search_vector_search",
     "get_cluster_health_and_services",
     "get_cluster_diagnostics_report",
     "get_cluster_metrics",
     "get_cluster_tasks",
     "get_cluster_health_snapshot",
+    "get_cluster_system_events",
     # Performance analysis tools
     "get_longest_running_queries",
     "get_most_frequent_queries",
@@ -79,6 +83,7 @@ TOOLS_BY_CATEGORY = {
         "get_cluster_metrics",
         "get_cluster_tasks",
         "get_cluster_health_snapshot",
+        "get_cluster_system_events",
     },
     "kv": {
         "get_document_by_id",
@@ -108,6 +113,10 @@ TOOLS_BY_CATEGORY = {
         "run_fts_query",
         "upsert_fts_index",
         "drop_fts_index",
+    },
+    "vector_search": {
+        "run_vector_search",
+        "run_search_vector_search",
     },
     "management": {
         "create_scope",
@@ -190,4 +199,13 @@ TOOL_REQUIRED_PARAMS = {
     "run_fts_query": ["index_name", "query"],
     "upsert_fts_index": ["index_name", "source_name"],
     "drop_fts_index": ["index_name"],
+    "run_vector_search": [
+        "bucket_name",
+        "scope_name",
+        "collection_name",
+        "vector_field",
+        "query_text",
+        "distance_metric",
+    ],
+    "run_search_vector_search": ["index_name", "vector_field", "vector_query_text"],
 }

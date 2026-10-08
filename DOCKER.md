@@ -25,6 +25,7 @@ Documentation: <https://docs.couchbase.com/mcp-server/get-started/overview.html>
 | `get_cluster_metrics` | Get one or more cluster statistics over a historic time window via the Management REST API's stats-range endpoint. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
 | `get_cluster_tasks` | Get the cluster tasks running right now — rebalance, compaction, XDCR, index build — via the Management REST API's tasks endpoint. Returns the raw task array; fields vary by task type. Requires the Read-Only Admin (`ro_admin`) role. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
 | `get_cluster_health_snapshot` | Get a per-node health snapshot — service topology, membership, orchestrator and a cluster health rollup — merged from the Management REST API's `/pools/default`, `nodeServices` and `terseClusterInfo` endpoints. Isolates a symptom to a specific node/service and flags which nodes are safe to act on. Requires the Read-Only Admin (`ro_admin`) role. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
+| `get_cluster_system_events` | Get the cluster's system event log — configuration changes, failovers, rebalances and service restarts with timestamps — via the Management REST API's `/events` endpoint. Correlates a symptom with what changed and when. Returns events oldest-first with a summary of counts and time range; windowed with `since_time` and bounded (default 50 events) rather than returning the endpoint's 250. Requires the Full Admin or Cluster Admin role. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
 | `discover_tool_input_values` | Look up the exact input values another tool needs, from reference data bundled with the server — currently every Couchbase Server metric name (type, unit, version added, description) for `get_cluster_metrics`. Browse by category or fuzzy-search by keyword. Works offline, without a cluster connection. |
 
 ### Data model & schema discovery tools
@@ -54,6 +55,7 @@ Documentation: <https://docs.couchbase.com/mcp-server/get-started/overview.html>
 | Tool Name | Description |
 | --------- | ----------- |
 | `list_indexes` | List all indexes in the cluster with their definitions, with optional filtering by bucket, scope, collection and index name. Set `return_raw_index_stats=true` to return the unprocessed index information. |
+| `get_index_stats` | Get per-index statistics (size, fragmentation, scan traffic, indexing lag) from the Index Service, per node. Names which index is responsible for disk or memory pressure, and identifies unused indexes. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
 | `get_index_advisor_recommendations` | Get index recommendations from Couchbase Index Advisor for a given SQL++ query to optimize query performance |
 | `create_index` | Create a scalar (non-vector) GSI secondary index on a collection. Deferred by default — call `build_index` afterward to build it. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `build_index` | Trigger the build of all deferred indexes on a collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
@@ -63,7 +65,7 @@ Documentation: <https://docs.couchbase.com/mcp-server/get-started/overview.html>
 
 ### Full-text search (FTS) tools
 
-Requires Couchbase Server 7.6+ and the Search service. Vector search is not supported by these tools (see the separate vector search tooling).
+Requires Couchbase Server 7.6+ and the Search service. Vector search is not supported by these tools (see [Vector search tools](#vector-search-tools) below).
 
 | Tool Name | Description |
 | --------- | ----------- |
@@ -72,6 +74,15 @@ Requires Couchbase Server 7.6+ and the Search service. Vector search is not supp
 | `run_fts_query` | Run an FTS query against a Search index, or fetch its execution plan. `query` is the raw FTS query JSON body, supporting any non-vector query type (match, match_phrase, term, conjuncts, disjuncts, geo, date/numeric range, query_string, ...). Pass `explain=true` to fetch the execution plan instead of results — this still executes the query (`limit` defaulting to 1) since the Search service only exposes the plan per matched hit, not as a separate dry-run call. |
 | `upsert_fts_index` | Create or update a Search (FTS) index definition (mappings, analyzers, plan params). Works with both scope-level (scoped) and cluster-level (legacy) indexes. Pass `bucket_name` and `scope_name` together to target a scope-level index, or omit both for a cluster-level (legacy) index. Updating an existing index triggers a full rebuild — fetch the current definition with `get_fts_index_definition` first and pass its `uuid` back to avoid clobbering concurrent changes. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `drop_fts_index` | Drop a Search (FTS) index. Works with both scope-level (scoped) and cluster-level (legacy) indexes. Pass `bucket_name` and `scope_name` together for a scope-level index, or omit both for a cluster-level (legacy) index. This permanently removes the index and cannot be undone — confirm the exact name and location with `list_fts_indexes` first. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+
+### Vector search tools
+
+Both tools embed query text using the model configured via `EMBEDDING_*` environment variables (see the table below) — the caller passes plain text, never a raw vector. `run_vector_search` targets Couchbase Server 8.0+'s GSI vector indexes via SQL++; `run_search_vector_search` targets the Search service's vector search on Couchbase Server 7.6+. Available on both self-managed Couchbase Server and Capella.
+
+| Tool Name | Description |
+| --------- | ----------- |
+| `run_vector_search` | Embed a query and run a vector similarity search against a GSI vector index (Couchbase Server 8.0+), via SQL++'s `APPROX_VECTOR_DISTANCE()`. GSI selects the index automatically from the vector field referenced in the query — there is no `index_name` parameter. |
+| `run_search_vector_search` | Run the Search service's vector search (Couchbase Server 7.6+) against a *named* Search index. `scalar_query` makes this a hybrid search (full-text and vector similarity both contribute to ranking); `prefilter` narrows the vector search's candidate pool before it runs (the Search-service equivalent of `run_vector_search`'s `where` prefilter). Both take the same raw FTS query JSON body `run_fts_query` accepts, and both are optional and combinable. |
 
 ### Query performance analysis tools
 
@@ -92,34 +103,30 @@ append `operational-insights` to the container's command to select it
 instead of the default `operational` server (see [Configuration](#configuration)
 below).
 
+Every tool name below is prefixed with `oi_` (`get_server_configuration_status`
+excepted) so none can collide with the operational server's tool names, even
+if a single MCP client registers both servers at once.
+
 | Tool Name | Description |
 | --------- | ----------- |
 | `get_server_configuration_status` | Get this server's status and configuration without connecting to a cluster — read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration. Shared with the operational server: the same tool, registered by both. |
-| `get_databases_in_cluster` | List all databases in the Operational Insights cluster. |
-| `get_scopes_in_database` | List all scopes in a database. |
-| `get_collections_in_scope` | List all collections (datasets) in a scope. Shares its name with the operational server's tool of the same name — see the note below. |
-| `get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. Shares its name with the operational server's tool of the same name — see the note below. |
-| `list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog. Shares its name with the operational server's tool of the same name — see the note below. |
-| `run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return all result rows. Enforces read-only mode server-side; there is no client-side SQL++ parser. |
-| `explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
-| `create_index` | Create a secondary index via `CREATE INDEX`. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** Shares its name with the operational server's tool of the same name — see the note below. |
-| `run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Same read-only enforcement as `run_query_sync`. |
-| `get_async_query_results` | Check whether an async query has finished and, if so, return its rows. |
-| `discard_async_query_results` | Free a finished async query's result buffers on the server. |
-| `cancel_async_query` | Stop an async query that is still running. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `oi_get_databases_in_cluster` | List all databases in the Operational Insights cluster. |
+| `oi_get_scopes_in_database` | List all scopes in a database. |
+| `oi_get_collections_in_scope` | List all collections (datasets) in a scope. |
+| `oi_get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. |
+| `oi_list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog. |
+| `oi_run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return all result rows. Enforces read-only mode server-side; there is no client-side SQL++ parser. |
+| `oi_explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
+| `oi_create_index` | Create a secondary index via `CREATE INDEX`. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `oi_run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Same read-only enforcement as `oi_run_query_sync`. |
+| `oi_get_async_query_results` | Check whether an async query has finished and, if so, return its rows. |
+| `oi_discard_async_query_results` | Free a finished async query's result buffers on the server. |
+| `oi_cancel_async_query` | Stop an async query that is still running. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 
 The Server Async Request API tools form a start → poll → discard-or-cancel
-flow: `run_query_async` returns a `query_handle`, `get_async_query_results` is
-polled until ready, then `discard_async_query_results` frees the results or
-`cancel_async_query` stops a still-running query.
-
-> **Note:** `get_collections_in_scope`, `get_schema_for_collection`,
-> `create_index` and `list_indexes` exist, with different behavior, on both
-> servers — each runs as a separate container/process, so this only matters
-> if one MCP client registers both simultaneously.
-> (`get_server_configuration_status` also appears on both, but it is
-> deliberately *one* shared tool — same implementation, same result shape —
-> so it needs no disambiguation.)
+flow: `oi_run_query_async` returns a `query_handle`, `oi_get_async_query_results` is
+polled until ready, then `oi_discard_async_query_results` frees the results or
+`oi_cancel_async_query` stops a still-running query.
 
 ## Usage
 
@@ -216,6 +223,13 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_MCP_OAUTH_MCP_BASE_URL`          | Public base URL of this server. When set, publishes RFC 9728 Protected Resource Metadata for PRM-aware clients                                            | None                                                           |
 | `CB_MCP_OAUTH_SCOPE_READ_LABEL`      | Override the OAuth scope label treated as 'read' access (advertised in PRM and matched against the token `scope`/`scp` claim). Use when your IdP can't emit the canonical form | `couchbase-mcp:read`                       |
 | `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`     | Override the OAuth scope label treated as 'write' access; same semantics as the read label                                                                | `couchbase-mcp:write`                                          |
+| `EMBEDDING_PROVIDER`                 | Embedding provider for `run_vector_search` / `run_search_vector_search`: one of `couchbase`, `openai`, `cohere`, `voyage`, `bedrock`. Unset disables both tools' embedding step until configured. | None                                                           |
+| `EMBEDDING_MODEL`                    | Model name/ID for the configured embedding provider                                                                                                       | None                                                           |
+| `EMBEDDING_API_KEY`                  | API key for the configured provider. Not used by `bedrock` (uses the AWS credential chain / `EMBEDDING_AWS_*` instead)                                    | None                                                           |
+| `EMBEDDING_ENDPOINT`                 | Base URL override (an OpenAI-compatible local server, or a Couchbase Model Service deployment's own URL — **required** when `EMBEDDING_PROVIDER=couchbase`) | None                                                         |
+| `EMBEDDING_AWS_ACCESS_KEY_ID`        | AWS access key ID, `bedrock` provider only. Omit to use the default AWS credential chain                                                                  | None                                                           |
+| `EMBEDDING_AWS_SECRET_ACCESS_KEY`    | AWS secret access key, `bedrock` provider only                                                                                                             | None                                                           |
+| `EMBEDDING_AWS_REGION`               | AWS region, `bedrock` provider only. Falls back to the AWS SDK's own region resolution if unset                                                           | None                                                           |
 
 ### Disabling Tools
 

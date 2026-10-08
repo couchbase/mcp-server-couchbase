@@ -14,7 +14,7 @@ the prototype's evaluation, since they exist nowhere else):
     array index;
   - the declared type is not validated against the underlying data — e.g.
     indexing a string field as ``double`` silently indexes nothing. Use
-    ``get_schema_for_collection`` to check actual field types first.
+    ``oi_get_schema_for_collection`` to check actual field types first.
 """
 
 import logging
@@ -67,7 +67,7 @@ _VALID_INDEX_TYPES = frozenset(
 def _safe_type(field_type: str) -> str:
     """Validate a field's declared type against the documented grammar.
 
-    Raises ValueError, which create_index's caller catches and turns into a
+    Raises ValueError, which oi_create_index's caller catches and turns into a
     clean tool_error — same as any other malformed-input failure here.
     """
     if field_type not in _VALID_INDEX_TYPES:
@@ -97,7 +97,7 @@ def _format_element(field: dict[str, Any]) -> str:
     )
 
 
-def create_index(
+def oi_create_index(
     ctx: Context,
     database_name: str,
     scope_name: str,
@@ -134,11 +134,6 @@ def create_index(
     CAST (DEFAULT NULL DATE "MM/DD/YYYY"). Accepted keys: date, time, datetime.
     CAST is B-Tree only and cannot be combined with an array index.
 
-    Note: this server and the operational server both expose a tool named
-    ``create_index``. They run as separate processes/servers, so this is only
-    a concern for a client that registers both simultaneously — see
-    CONTRIBUTING.md's tool-naming section.
-
     Returns {"success": True, "index_name": ..., "keyspace": ..., "statement": ...},
     or {"success": False, "error": ...} on failure.
     """
@@ -173,7 +168,7 @@ def create_index(
         return tool_error(e, index_name=index_name, keyspace=ks)
 
 
-def list_indexes(
+def oi_list_indexes(
     ctx: Context,
     database_name: str | None = None,
     scope_name: str | None = None,
@@ -185,11 +180,6 @@ def list_indexes(
     filters; with none given, every secondary index in the cluster is listed.
     Primary indexes, optimizer samples and internal System indexes are not
     listed, as none can be acted on.
-
-    Note: this server and the operational server both expose a tool named
-    ``list_indexes``. They run as separate processes/servers, so this is only
-    a concern for a client that registers both simultaneously — see
-    CONTRIBUTING.md's tool-naming section.
 
     Returns a list of rows with DatabaseName, ScopeName, CollectionName,
     IndexName, IndexStructure and ExcludeUnknownKey. The indexed fields are

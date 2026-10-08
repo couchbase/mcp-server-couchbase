@@ -19,18 +19,18 @@ OI_EXPECTED_TOOLS = {
     # Shared with every other server — the same function object, not an OI
     # reimplementation. See cb_mcp/tools/status.py.
     "get_server_configuration_status",
-    "get_databases_in_cluster",
-    "get_scopes_in_database",
-    "get_collections_in_scope",
-    "get_schema_for_collection",
-    "list_indexes",
-    "explain_query",
-    "run_query_sync",
-    "run_query_async",
-    "get_async_query_results",
-    "discard_async_query_results",
-    "create_index",
-    "cancel_async_query",
+    "oi_get_databases_in_cluster",
+    "oi_get_scopes_in_database",
+    "oi_get_collections_in_scope",
+    "oi_get_schema_for_collection",
+    "oi_list_indexes",
+    "oi_explain_query",
+    "oi_run_query_sync",
+    "oi_run_query_async",
+    "oi_get_async_query_results",
+    "oi_discard_async_query_results",
+    "oi_create_index",
+    "oi_cancel_async_query",
 }
 
 

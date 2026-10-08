@@ -3,7 +3,7 @@ cluster (see conftest.py in this directory for connection details).
 
 Ported from the ``analytics-mcp`` prototype (branch
 ``DA-2027/Add-enterprise-tools``). Each test creates its own uniquely-named
-scope + collection via ``run_query_sync`` DDL, seeds a document, exercises
+scope + collection via ``oi_run_query_sync`` DDL, seeds a document, exercises
 the tool under test, then drops the scope in a ``finally`` block so reruns
 don't collide.
 """
@@ -43,7 +43,7 @@ def _collect_keys(obj: object) -> set[str]:
 @pytest.mark.asyncio
 async def test_get_databases_in_cluster() -> None:
     async with create_oi_mcp_session() as session:
-        response = await session.call_tool("get_databases_in_cluster", arguments={})
+        response = await session.call_tool("oi_get_databases_in_cluster", arguments={})
         payload = extract_payload(response)
 
         assert isinstance(payload, list)
@@ -54,7 +54,7 @@ async def test_get_databases_in_cluster() -> None:
 async def test_get_scopes_in_database() -> None:
     async with create_oi_mcp_session() as session:
         response = await session.call_tool(
-            "get_scopes_in_database", arguments={"database_name": DATABASE}
+            "oi_get_scopes_in_database", arguments={"database_name": DATABASE}
         )
         payload = extract_payload(response)
 
@@ -70,13 +70,13 @@ async def test_get_collections_in_scope_and_schema() -> None:
     async with create_oi_mcp_session() as session:
         try:
             await session.call_tool(
-                "run_query_sync",
+                "oi_run_query_sync",
                 arguments={
                     "statement": f"CREATE SCOPE `{DATABASE}`.`{scope_name}` IF NOT EXISTS;"
                 },
             )
             create_coll = await session.call_tool(
-                "run_query_sync",
+                "oi_run_query_sync",
                 arguments={
                     "statement": (
                         f"CREATE COLLECTION `{DATABASE}`.`{scope_name}`.`{collection_name}` "
@@ -87,7 +87,7 @@ async def test_get_collections_in_scope_and_schema() -> None:
             assert extract_payload(create_coll)["success"] is True
 
             insert = await session.call_tool(
-                "run_query_sync",
+                "oi_run_query_sync",
                 arguments={
                     "statement": (
                         f"INSERT INTO `{DATABASE}`.`{scope_name}`.`{collection_name}` "
@@ -98,7 +98,7 @@ async def test_get_collections_in_scope_and_schema() -> None:
             assert extract_payload(insert)["success"] is True
 
             collections_response = await session.call_tool(
-                "get_collections_in_scope",
+                "oi_get_collections_in_scope",
                 arguments={"database_name": DATABASE, "scope_name": scope_name},
             )
             collections = extract_payload(collections_response)
@@ -107,7 +107,7 @@ async def test_get_collections_in_scope_and_schema() -> None:
             )
 
             schema_response = await session.call_tool(
-                "get_schema_for_collection",
+                "oi_get_schema_for_collection",
                 arguments={
                     "database_name": DATABASE,
                     "scope_name": scope_name,
@@ -119,7 +119,7 @@ async def test_get_collections_in_scope_and_schema() -> None:
             assert {"id", "name", "count"} <= _collect_keys(schema)
         finally:
             await session.call_tool(
-                "run_query_sync",
+                "oi_run_query_sync",
                 arguments={
                     "statement": f"DROP SCOPE `{DATABASE}`.`{scope_name}` IF EXISTS;"
                 },

@@ -8,8 +8,11 @@ from unittest.mock import patch
 
 import pytest
 
+from cb_mcp.core.spec import Deployment
 from cb_mcp.servers.operational.spec import SPEC as OPERATIONAL_SPEC
 from cb_mcp.tool_registration import prepare_tools_for_registration as _prepare
+from cb_mcp.tool_registration import unsupported_for_deployment
+from cb_mcp.tools.operational import TOOL_DEPLOYMENT_REQUIREMENTS
 from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
 
 
@@ -198,3 +201,126 @@ class TestDisabledAndConfirmationOverlap:
         assert "delete_document_by_id" in tool_names  # still registered
         assert "upsert_document_by_id" in disabled
         assert "delete_document_by_id" in confirmed
+
+
+def test_spec_wires_the_declared_deployment_requirements():
+    """The mapping must actually reach the spec, as the same object.
+
+    Declaring ``TOOL_DEPLOYMENT_REQUIREMENTS`` and wiring it into ``SPEC`` are
+    two edits in two files, and the gate is silent when only the first is
+    present: an unwired spec has empty requirements, so every invariant about
+    them passes vacuously and every tool registers. A merge that touches
+    ``servers/operational/spec.py`` is exactly where that loss would happen,
+    which is why this asserts identity rather than equality.
+    """
+    assert OPERATIONAL_SPEC.deployment_requirements is TOOL_DEPLOYMENT_REQUIREMENTS
+    assert OPERATIONAL_SPEC.deployment_resolver is not None
+    assert TOOL_DEPLOYMENT_REQUIREMENTS, (
+        "No tool declares a deployment requirement; the gate can never fire."
+    )
+
+
+#: Derived from the spec rather than spelled out, so adding a tool to
+#: ``TOOL_DEPLOYMENT_REQUIREMENTS`` does not silently falsify these tests.
+WITHHELD_ON_CAPELLA = {
+    name
+    for name, required in OPERATIONAL_SPEC.deployment_requirements.items()
+    if required is not Deployment.CAPELLA
+}
+
+
+class TestDeploymentGating:
+    """Tools the resolved deployment cannot support are not registered.
+
+    ``get_cluster_metrics`` is the standing example: it calls the Management
+    REST stats endpoint, which Capella does not expose.
+    """
+
+    def test_capella_withholds_on_prem_only_tool(self):
+        tools, _, disabled = prepare_tools_for_registration(
+            read_only_mode=True,
+            disabled_tools=None,
+            confirmation_required_tools=None,
+            deployment=Deployment.CAPELLA,
+        )
+        assert "get_cluster_metrics" not in {t.__name__ for t in tools}
+        assert "get_cluster_metrics" in disabled
+
+    def test_on_prem_keeps_on_prem_only_tool(self):
+        tools, _, disabled = prepare_tools_for_registration(
+            read_only_mode=True,
+            disabled_tools=None,
+            confirmation_required_tools=None,
+            deployment=Deployment.ON_PREM,
+        )
+        assert "get_cluster_metrics" in {t.__name__ for t in tools}
+        assert disabled == set()
+
+    def test_unresolved_deployment_withholds_nothing(self):
+        """A host that cannot tell must not guess — the tool's own runtime
+        check is what covers that case."""
+        tools, _, disabled = prepare_tools_for_registration(
+            read_only_mode=True,
+            disabled_tools=None,
+            confirmation_required_tools=None,
+            deployment=None,
+        )
+        assert "get_cluster_metrics" in {t.__name__ for t in tools}
+        assert disabled == set()
+
+    def test_deployment_is_optional(self):
+        """Omitting the argument entirely behaves as before the gate existed."""
+        tools, _, disabled = prepare_tools_for_registration(
+            read_only_mode=True,
+            disabled_tools=None,
+            confirmation_required_tools=None,
+        )
+        assert "get_cluster_metrics" in {t.__name__ for t in tools}
+        assert disabled == set()
+
+    def test_withheld_and_operator_disabled_are_reported_together(self):
+        """Both are tools deliberately not registered; one set reports both."""
+        _tools, _, disabled = prepare_tools_for_registration(
+            read_only_mode=True,
+            disabled_tools="get_document_by_id",
+            confirmation_required_tools=None,
+            deployment=Deployment.CAPELLA,
+        )
+        assert disabled == WITHHELD_ON_CAPELLA | {"get_document_by_id"}
+
+    def test_operator_may_still_name_a_withheld_tool(self):
+        """Naming a tool the deployment also withholds is not an error, and
+        must not double-count or warn about an unknown tool."""
+        _tools, _, disabled = prepare_tools_for_registration(
+            read_only_mode=True,
+            disabled_tools="get_cluster_metrics",
+            confirmation_required_tools=None,
+            deployment=Deployment.CAPELLA,
+        )
+        assert disabled == WITHHELD_ON_CAPELLA
+
+
+class TestUnsupportedForDeployment:
+    """The filter itself, away from the registration pipeline."""
+
+    def test_none_deployment_withholds_nothing(self):
+        assert (
+            unsupported_for_deployment({"a", "b"}, {"a": Deployment.ON_PREM}, None)
+            == set()
+        )
+
+    def test_only_mismatched_requirements_are_returned(self):
+        requirements = {"a": Deployment.ON_PREM, "b": Deployment.CAPELLA}
+        assert unsupported_for_deployment(
+            {"a", "b", "c"}, requirements, Deployment.CAPELLA
+        ) == {"a"}
+
+    def test_tools_not_loaded_are_not_reported(self):
+        """A write tool already absent under read-only mode is not withheld a
+        second time under a different reason."""
+        assert (
+            unsupported_for_deployment(
+                {"b"}, {"a": Deployment.ON_PREM}, Deployment.CAPELLA
+            )
+            == set()
+        )
