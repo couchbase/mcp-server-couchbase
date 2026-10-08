@@ -199,6 +199,31 @@ def test_scope_hints_reference_real_tools():
         )
 
 
+def test_deployment_requirements_reference_real_tools():
+    """A requirement for a removed/renamed tool is dead configuration."""
+    for spec in ALL_SPECS:
+        unknown = set(spec.deployment_requirements) - spec.tools.all_tool_names
+        assert not unknown, (
+            f"{spec.id}: deployment_requirements reference unknown tool(s): "
+            f"{sorted(unknown)}"
+        )
+
+
+def test_deployment_requirements_imply_a_resolver():
+    """Requirements without a resolver never fire — silently.
+
+    Nothing else would report it: the tools register, the server starts, and
+    the gap only shows up as a tool failing at call time on the deployment it
+    was declared not to support.
+    """
+    for spec in ALL_SPECS:
+        if spec.deployment_requirements:
+            assert spec.deployment_resolver is not None, (
+                f"{spec.id}: declares deployment_requirements but no "
+                "deployment_resolver, so they can never apply."
+            )
+
+
 def test_at_most_one_spec_owns_each_sdk_log_hook():
     """``couchbase.configure_logging`` (and any SDK's equivalent) is one-shot
     per process; only one server may be the one that calls it."""
