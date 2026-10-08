@@ -64,6 +64,7 @@ from cb_mcp.utils.cli_params import (
     CredentialProfile,
     build_settings,
     gate_tools,
+    resolve_deployment_for,
     resolved_logging_snapshot,
     server_options,
 )
@@ -89,7 +90,15 @@ def _start_server(
     # First: everything after this is logged.
     cli.logging.apply(sdk_log_hook=spec.sdk_log_hook)
     auth = cli.resolve_auth(spec)
-    gated = gate_tools(spec, cli.gating, enforce_scopes=auth is not None)
+    # Resolved from the credentials this run was given, so a tool that only
+    # works on one kind of cluster is never registered against the other.
+    deployment = resolve_deployment_for(spec, cli.credentials)
+    gated = gate_tools(
+        spec,
+        cli.gating,
+        enforce_scopes=auth is not None,
+        deployment=deployment,
+    )
     settings = build_settings(cli, gated=gated, oauth_enabled=auth is not None)
 
     # CLI-resolved configuration lives on AppContext, not in a module global,
