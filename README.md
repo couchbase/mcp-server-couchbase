@@ -108,6 +108,7 @@ the `couchbase-operational-insights` SDK.
 | Tool Name | Description |
 | --------- | ----------- |
 | `list_indexes` | List all indexes in the cluster with their definitions, with optional filtering by bucket, scope, collection and index name. Set `return_raw_index_stats=true` to return the unprocessed index information. |
+| `get_index_stats` | Get per-index statistics (size, fragmentation, scan traffic, indexing lag) from the Index Service, per node. Names which index is responsible for disk or memory pressure, and identifies unused indexes. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
 | `get_index_advisor_recommendations` | Get index recommendations from Couchbase Index Advisor for a given SQL++ query to optimize query performance |
 | `create_index` | Create a scalar (non-vector) GSI secondary index on a collection. Deferred by default — call `build_index` afterward to build it. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `build_index` | Trigger the build of all deferred indexes on a collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
@@ -371,6 +372,22 @@ Example (OpenAI):
 ### Disabling Tools
 
 You can disable specific tools to prevent them from being loaded and exposed to the MCP client. Disabled tools will not appear in the tool discovery and cannot be invoked by the LLM.
+
+#### Tools disabled automatically by deployment
+
+A few tools reach Couchbase through REST endpoints that Couchbase Capella does not expose. The server works out which kind of cluster `CB_CONNECTION_STRING` points at — Capella when every host ends in `.cloud.couchbase.com`, self-managed otherwise — and does not register the tools that cannot work there. They are reported alongside your own disabled tools by `get_server_configuration_status`, and listed in the startup log.
+
+Today this affects the four tools that reach Couchbase through an admin REST endpoint rather than the SDK, none of which are registered on a Capella connection:
+
+| Tool | Endpoint it needs |
+| --- | --- |
+| `get_cluster_metrics` | Management REST (`/pools/default/stats/range`) |
+| `get_cluster_tasks` | Management REST (`/pools/default/tasks`) |
+| `get_cluster_health_snapshot` | Management REST, plus per-node endpoints |
+| `get_index_stats` | Index Service REST (each indexer's `/api/v1/stats`) |
+
+Tools that go through the Couchbase SDK are unaffected and stay available on Capella — `get_cluster_health_and_services` (ping) and `get_cluster_diagnostics_report` (diagnostics) among them.
+
 
 #### Supported Formats
 
