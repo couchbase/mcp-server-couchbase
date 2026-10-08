@@ -49,6 +49,7 @@ from ...utils.query_limits import (
     max_query_result_size_for,
 )
 from ...utils.responses import tool_error, tool_success
+from ...utils.sqlpp import quote_literal, safe_ident
 
 logger = logging.getLogger(f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.tools.query")
 
@@ -89,12 +90,159 @@ def _is_copy_to_statement(statement: str) -> bool:
     return re.match(r"^COPY\s", normalized) is not None
 
 
-def run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
-    """Run a SQL++ statement and return its result rows.
+#: Output formats the EA server accepts in ``COPY ... TO ... WITH {"format": ...}``.
+#: Validated client-side so a typo is a clear tool error naming the valid set,
+#: rather than a server error the model has to decode.
+#:
+#: The set comes from the server itself, which answers an unsupported format
+#: with "Supported formats: [csv, json, parquet]" — so ``tsv`` does not exist.
+#: ``csv`` is deliberately excluded even though the server lists it: a CSV
+#: export additionally requires a ``TYPE(...)`` clause naming the output schema
+#: ("TYPE/AS Expression is required for csv format"), which cannot be inferred
+#: from an arbitrary SELECT. Offering it would fail compilation on every call,
+#: whereas ``json`` and ``parquet`` carry their own schema and work from any
+#: statement.
+COPY_TO_FORMATS = ("json", "parquet")
+DEFAULT_COPY_TO_FORMAT = "json"
+
+
+class CopyToError(ValueError):
+    """An export was requested with an incomplete or invalid destination.
+
+    Its own type so the callers can turn it into a ``tool_error`` envelope
+    without catching — and swallowing — genuine SDK failures from the same
+    ``try`` block.
+    """
+
+
+def build_copy_to_statement(
+    statement: str,
+    *,
+    link: str,
+    bucket: str,
+    path: str,
+    output_format: str | None = None,
+) -> str:
+    """Wrap ``statement`` in a ``COPY ... TO`` that exports its rows.
+
+    Produces::
+
+        COPY ( <statement> ) AS t
+        TO `<bucket>` AT <link>
+        PATH("<path>")
+        WITH {"format": "<format>"}
+
+    Three different quoting rules apply, which is the whole reason this is a
+    function rather than an f-string at each call site:
+
+    * ``bucket`` is an identifier -> backtick-quoted via ``safe_ident``.
+    * ``path`` is a string literal -> double-quoted via ``quote_literal``.
+    * ``link`` is a *raw* identifier token. The EA grammar takes it bare after
+      ``AT``, so it cannot be backtick-quoted; it is validated against a
+      conservative character class instead, since an unquotable value
+      interpolated into a statement is an injection point.
+    """
+    if not link or not link.strip():
+        raise CopyToError("copy_to_link is required to export results.")
+    if not bucket or not bucket.strip():
+        raise CopyToError("copy_to_bucket is required to export results.")
+    if not path or not path.strip():
+        raise CopyToError("copy_to_path is required to export results.")
+
+    link = link.strip()
+    # The link name is interpolated unquoted (the grammar accepts no quoting
+    # after AT), so restrict it to characters that cannot terminate the token.
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_\-]*", link):
+        raise CopyToError(
+            f"copy_to_link {link!r} is not a valid link name: expected letters, "
+            f"digits, underscore or hyphen, starting with a letter or underscore."
+        )
+
+    fmt = (output_format or DEFAULT_COPY_TO_FORMAT).strip().lower()
+    if fmt not in COPY_TO_FORMATS:
+        raise CopyToError(
+            f"copy_to_format {output_format!r} is not supported; "
+            f"expected one of {', '.join(COPY_TO_FORMATS)}."
+        )
+
+    inner = statement.strip().rstrip(";")
+    return (
+        f"COPY (\n{inner}\n) AS t\n"
+        f"TO {safe_ident(bucket.strip())} AT {link}\n"
+        f"PATH({quote_literal(path.strip())})\n"
+        f'WITH {{"format": {quote_literal(fmt)}}}'
+    )
+
+
+def _resolve_copy_to(
+    statement: str,
+    *,
+    link: str | None,
+    bucket: str | None,
+    path: str | None,
+    output_format: str | None,
+) -> tuple[str, dict[str, Any] | None]:
+    """Decide whether this call is an export, and build the statement if so.
+
+    Returns ``(statement_to_run, destination_or_None)``. ``destination`` is
+    ``None`` for an ordinary query, and otherwise the JSON-safe description of
+    where the rows went, echoed back in the tool's envelope.
+
+    Partial destinations are rejected rather than ignored. Dropping a
+    half-specified export and silently running the plain query would return
+    rows the caller never asked for and write nothing — the opposite of the
+    request, and invisible unless they noticed the missing file.
+    """
+    requested = [p for p in (link, bucket, path) if p and p.strip()]
+    if not requested:
+        if output_format:
+            raise CopyToError(
+                "copy_to_format was given without a destination; "
+                "copy_to_link, copy_to_bucket and copy_to_path are all "
+                "required to export."
+            )
+        return statement, None
+
+    copy_statement = build_copy_to_statement(
+        statement,
+        link=link,  # type: ignore[arg-type]  # validated inside
+        bucket=bucket,  # type: ignore[arg-type]
+        path=path,  # type: ignore[arg-type]
+        output_format=output_format,
+    )
+    return copy_statement, {
+        "link": link.strip(),  # type: ignore[union-attr]
+        "bucket": bucket.strip(),  # type: ignore[union-attr]
+        "path": path.strip(),  # type: ignore[union-attr]
+        "format": (output_format or DEFAULT_COPY_TO_FORMAT).strip().lower(),
+    }
+
+
+def run_query_sync(
+    ctx: Context,
+    statement: str,
+    copy_to_link: str | None = None,
+    copy_to_bucket: str | None = None,
+    copy_to_path: str | None = None,
+    copy_to_format: str | None = None,
+) -> dict[str, Any]:
+    """Run a SQL++ statement and return its result rows, or export them to object storage.
 
     Can carry SELECT, DML, or DDL statements. Rows are streamed from the
     server and collected up to a configured byte budget; a result that would
     exceed it is cut short and reported with truncated: true.
+
+    To send a large result straight to object storage instead of returning it,
+    pass copy_to_link, copy_to_bucket and copy_to_path. The statement is then
+    wrapped in COPY ... TO and the rows are written to the external bucket; the
+    tool returns a confirmation with no rows, so a result too large to read
+    inline costs nothing in context. Use this when a query would otherwise be
+    truncated and the full data is needed.
+
+    An export here waits for the whole upload to finish before returning, so
+    the call takes as long as the copy does. For a large export prefer
+    run_query_async, which returns a handle once the query is submitted and
+    lets you poll for completion instead of holding the request open.
 
     When the server is in read-only mode, or the caller's token lacks the
     write scope, the statement is executed with ``QueryOptions(readonly=True)``
@@ -112,10 +260,24 @@ def run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
     full grammar parser, since read-only mode is the only thing that cares
     about the distinction.
 
+    Args:
+        statement: The SQL++ statement to execute.
+        copy_to_link: Name of an existing external link (e.g. an S3 link
+            created with CREATE LINK). Required to export.
+        copy_to_bucket: Destination bucket in the external store. Required
+            to export.
+        copy_to_path: Path prefix within that bucket, e.g. "exports/run1".
+            Required to export.
+        copy_to_format: Output format — json (default) or parquet.
+
     Returns {"success": True, "rows": [...], "row_count": N,
     "truncated": bool} on success, or {"success": False, "error": "..."} on
     failure. When truncated is true the remaining rows were not read and
-    cannot be retrieved by calling again — narrow the statement instead.
+    cannot be retrieved by calling again — narrow the statement, or export it
+    with the copy_to_* arguments.
+
+    When exporting, returns {"success": True, "exported": True,
+    "destination": {...}} and no rows — the data is in object storage.
     """
     cluster = get_oi_cluster(ctx)
 
@@ -132,7 +294,21 @@ def run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
     lacks_write_scope = token is not None and SCOPE_WRITE not in (token.scopes or [])
     enforce_readonly = read_only_mode or lacks_write_scope
 
-    if enforce_readonly and _is_copy_to_statement(statement):
+    try:
+        statement_to_run, destination = _resolve_copy_to(
+            statement,
+            link=copy_to_link,
+            bucket=copy_to_bucket,
+            path=copy_to_path,
+            output_format=copy_to_format,
+        )
+    except CopyToError as e:
+        logger.debug(f"Rejecting export request: {e}")
+        return tool_error(e, statement=statement)
+
+    # Checks the statement actually being sent, so an export built from the
+    # copy_to_* arguments is gated exactly like one the caller wrote by hand.
+    if enforce_readonly and _is_copy_to_statement(statement_to_run):
         logger.debug("Blocking COPY ... TO statement under read-only mode")
         return tool_error(
             "COPY ... TO is blocked under read-only mode: the server itself "
@@ -143,13 +319,34 @@ def run_query_sync(ctx: Context, statement: str) -> dict[str, Any]:
 
     try:
         logger.debug(
-            f"Running SQL++ statement synchronously (readonly={enforce_readonly})"
+            f"Running SQL++ statement synchronously "
+            f"(readonly={enforce_readonly}, export={destination is not None})"
         )
         result = (
-            cluster.execute_query(statement, QueryOptions(readonly=True))
+            cluster.execute_query(statement_to_run, QueryOptions(readonly=True))
             if enforce_readonly
-            else cluster.execute_query(statement)
+            else cluster.execute_query(statement_to_run)
         )
+        if destination is not None:
+            # A COPY ... TO returns no result rows — the data went to the
+            # external store. Draining the (empty) stream anyway keeps the
+            # SDK's response fully consumed before the handle is dropped.
+            result.get_all_rows()
+            logger.info(
+                f"Exported query results to {destination['bucket']}/"
+                f"{destination['path']} via link {destination['link']}"
+            )
+            return tool_success(
+                exported=True,
+                destination=destination,
+                message=(
+                    f"Results were written to "
+                    f"{destination['bucket']}/{destination['path']} as "
+                    f"{destination['format']}. No rows are returned for an "
+                    f"export; read them from object storage."
+                ),
+            )
+
         # result.rows() is the SDK's lazy BlockingIterator; get_all_rows()
         # would be list() over the same stream, buffering the whole result.
         bounded = collect_rows_within_budget(
@@ -247,7 +444,14 @@ def _extract_metadata(result: Any, query_handle: str) -> dict[str, Any]:
     return metadata
 
 
-def run_query_async(ctx: Context, statement: str) -> dict[str, Any]:
+def run_query_async(
+    ctx: Context,
+    statement: str,
+    copy_to_link: str | None = None,
+    copy_to_bucket: str | None = None,
+    copy_to_path: str | None = None,
+    copy_to_format: str | None = None,
+) -> dict[str, Any]:
     """Start a SQL++ query without waiting for it to finish.
 
     Use for queries expected to take a while. Returns right away with a
@@ -255,6 +459,13 @@ def run_query_async(ctx: Context, statement: str) -> dict[str, Any]:
     needed for every follow-up call, and the query holds resources on the
     server until you finish with discard_async_query_results or
     cancel_async_query.
+
+    Pass copy_to_link, copy_to_bucket and copy_to_path to export the results
+    to object storage instead of fetching them back. This is the right tool
+    for a large export: run_query_sync would hold the request open for the
+    entire upload, while this returns as soon as the query is submitted and
+    lets you poll for completion. get_async_query_results then reports that
+    the export finished and names the destination, rather than carrying rows.
 
     Usual sequence: get_async_query_results until it reports ready, then
     discard_async_query_results. For quick queries use run_query_sync
@@ -268,10 +479,19 @@ def run_query_async(ctx: Context, statement: str) -> dict[str, Any]:
 
     Args:
         statement: The SQL++ statement to execute.
+        copy_to_link: Name of an existing external link (e.g. an S3 link
+            created with CREATE LINK). Required to export.
+        copy_to_bucket: Destination bucket in the external store. Required
+            to export.
+        copy_to_path: Path prefix within that bucket, e.g. "exports/run1".
+            Required to export.
+        copy_to_format: Output format — json (default) or parquet.
 
     Returns:
         {"success": True, "query_handle": "..."}, or
-        {"success": False, "error": "..."} on failure.
+        {"success": False, "error": "..."} on failure. When exporting, the
+        response also carries "exported": True and "destination": {...}, and
+        the eventual results will be empty — the rows go to object storage.
     """
     cluster = get_oi_cluster(ctx)
     registry = get_oi_handle_registry(ctx)
@@ -283,7 +503,21 @@ def run_query_async(ctx: Context, statement: str) -> dict[str, Any]:
     lacks_write_scope = token is not None and SCOPE_WRITE not in (token.scopes or [])
     enforce_readonly = read_only_mode or lacks_write_scope
 
-    if enforce_readonly and _is_copy_to_statement(statement):
+    try:
+        statement_to_run, destination = _resolve_copy_to(
+            statement,
+            link=copy_to_link,
+            bucket=copy_to_bucket,
+            path=copy_to_path,
+            output_format=copy_to_format,
+        )
+    except CopyToError as e:
+        logger.debug(f"Rejecting export request: {e}")
+        return tool_error(e, statement=statement)
+
+    # Checks the statement actually being sent, so an export built from the
+    # copy_to_* arguments is gated exactly like one the caller wrote by hand.
+    if enforce_readonly and _is_copy_to_statement(statement_to_run):
         logger.debug("Blocking COPY ... TO statement under read-only mode")
         return tool_error(
             "COPY ... TO is blocked under read-only mode: the server itself "
@@ -293,14 +527,36 @@ def run_query_async(ctx: Context, statement: str) -> dict[str, Any]:
         )
 
     try:
-        logger.debug(f"Starting async query (readonly={enforce_readonly})")
-        handle = (
-            cluster.start_query(statement, QueryOptions(readonly=True))
-            if enforce_readonly
-            else cluster.start_query(statement)
+        logger.debug(
+            f"Starting async query (readonly={enforce_readonly}, "
+            f"export={destination is not None})"
         )
-        query_handle = registry.register(handle, statement)
-        logger.info(f"Started async query (token={query_handle})")
+        handle = (
+            cluster.start_query(statement_to_run, QueryOptions(readonly=True))
+            if enforce_readonly
+            else cluster.start_query(statement_to_run)
+        )
+        # Register the statement actually sent, so the handle registry and any
+        # later diagnostics show the COPY that is really running. The
+        # destination rides along so get_async_query_results can say where the
+        # rows went — by then it has only the token to work from.
+        query_handle = registry.register(handle, statement_to_run, destination)
+        logger.info(
+            f"Started async query (token={query_handle}, "
+            f"export={destination is not None})"
+        )
+        if destination is not None:
+            return tool_success(
+                query_handle=query_handle,
+                exported=True,
+                destination=destination,
+                message=(
+                    f"Export submitted. Call get_async_query_results with this "
+                    f"query_handle to check whether it has finished; it will "
+                    f"return no rows, as the results are written to "
+                    f"{destination['bucket']}/{destination['path']}."
+                ),
+            )
         return tool_success(
             query_handle=query_handle,
             message=(
@@ -357,6 +613,7 @@ def get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
                 ),
             )
 
+        destination = entry.destination
         result = status.result_handle().fetch_results()
         # fetch_results() hands back the same BlockingQueryResult type the sync
         # path returns, so the identical streaming budget applies here.
@@ -373,6 +630,30 @@ def get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
         # Deliberately NOT evicted: the server keeps the result buffers after
         # a fetch, so the token must stay valid for a re-fetch or an explicit
         # discard.
+        if destination is not None:
+            # A finished export returns zero rows, which on its own reads as
+            # "the query matched nothing". Name the destination so the result
+            # is self-describing rather than relying on the caller to recall
+            # what run_query_async was asked to do.
+            logger.info(
+                f"Export complete for async query (token={query_handle}) -> "
+                f"{destination['bucket']}/{destination['path']}"
+            )
+            return tool_success(
+                query_handle=query_handle,
+                ready=True,
+                exported=True,
+                destination=destination,
+                row_count=0,
+                metadata=metadata,
+                message=(
+                    f"Export complete. Results were written to "
+                    f"{destination['bucket']}/{destination['path']} as "
+                    f"{destination['format']}. No rows are returned for an "
+                    f"export; read them from object storage."
+                ),
+            )
+
         logger.info(
             f"Fetched {bounded.row_count} row(s) for async query "
             f"(token={query_handle}, truncated={bounded.truncated})"
