@@ -5,6 +5,8 @@ Covers:
 - parse_index_stats_key for both key shapes plus unrecognised input.
 - get_index_stats response reshaping (indexer split out, node reported).
 - get_index_stats filter-hierarchy validation and error propagation.
+- get_index_stats rejects Capella connections up front, before any cluster
+  connection or REST call.
 """
 
 from __future__ import annotations
@@ -30,6 +32,11 @@ SETTINGS = {
     "username": "Administrator",
     "password": "password",
     "ca_cert_path": None,
+}
+
+CAPELLA_SETTINGS = {
+    **SETTINGS,
+    "connection_string": "couchbases://cb.abc.cloud.couchbase.com",
 }
 
 # Shape of a real /api/v1/stats response: the node-level "indexer" block sits at
@@ -445,3 +452,61 @@ class TestNotHostedReporting:
         result = self._call({"a:8091": RAW_STATS}, ["b:8091"], failures)
         assert result["nodes_without_index"] == ["b:8091"]
         assert result["nodes_failed"] == failures
+
+
+class TestGetIndexStatsCapellaGuard:
+    """The Capella rejection must happen before anything is attempted.
+
+    Registration normally keeps this tool off a Capella server entirely, so
+    this guard only runs where gating did not apply — an embedding host that
+    resolved no deployment, or a Capella cluster behind a custom hostname. It
+    is the only check in those cases, which is why it is tested directly
+    rather than through the registration path.
+    """
+
+    @staticmethod
+    def _call_with_capella():
+        with (
+            patch(
+                "cb_mcp.tools.operational.index.get_settings",
+                return_value=CAPELLA_SETTINGS,
+            ),
+            patch("cb_mcp.tools.operational.index.validate_connection_settings"),
+            patch(
+                "cb_mcp.tools.operational.index.get_cluster_connection"
+            ) as get_cluster,
+            patch(
+                "cb_mcp.tools.operational.index.fetch_index_stats_from_rest_api"
+            ) as fetch,
+        ):
+            with pytest.raises(ValueError) as excinfo:
+                get_index_stats(SimpleNamespace())
+            return excinfo.value, get_cluster, fetch
+
+    def test_raises_for_a_capella_connection(self):
+        error, _, _ = self._call_with_capella()
+        assert "Capella" in str(error)
+
+    def test_does_not_open_a_cluster_connection(self):
+        """Rejecting up front is the point: no connection, no REST call.
+
+        A guard that fired after ``get_cluster_connection`` would still raise,
+        but only after paying for a connection the tool cannot use.
+        """
+        _, get_cluster, fetch = self._call_with_capella()
+        get_cluster.assert_not_called()
+        fetch.assert_not_called()
+
+    def test_self_managed_connection_is_not_rejected(self):
+        """The guard must key on the host, not merely on being called."""
+        with (
+            patch("cb_mcp.tools.operational.index.get_settings", return_value=SETTINGS),
+            patch("cb_mcp.tools.operational.index.validate_connection_settings"),
+            patch("cb_mcp.tools.operational.index.get_cluster_connection"),
+            patch(
+                "cb_mcp.tools.operational.index.fetch_index_stats_from_rest_api",
+                return_value=({"node1:8091": RAW_STATS}, [], []),
+            ),
+        ):
+            result = get_index_stats(SimpleNamespace())
+        assert "node1:8091" in result["nodes"]
