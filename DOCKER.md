@@ -53,7 +53,8 @@ Documentation: <https://docs.couchbase.com/mcp-server/get-started/overview.html>
 
 | Tool Name | Description |
 | --------- | ----------- |
-| `list_indexes` | List all indexes in the cluster with their definitions, with optional filtering by bucket, scope, collection and index name. Each entry includes `is_vector` (and, when true, `vector_type`: `hyperscale` or `composite`). Set `return_raw_index_stats=true` to return the unprocessed index information. |
+| `list_indexes` | List all indexes in the cluster with their definitions, with optional filtering by bucket, scope, collection and index name. Each entry includes `is_vector` (and, when true, `vector_type`: `hyperscale` or `composite`). Set `return_raw_index_stats=true` to return the unprocessed index information.  |
+| `get_index_stats` | Get per-index statistics (size, fragmentation, scan traffic, indexing lag) from the Index Service, per node. Names which index is responsible for disk or memory pressure, and identifies unused indexes. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
 | `get_index_advisor_recommendations` | Get index recommendations from Couchbase Index Advisor for a given SQL++ query to optimize query performance |
 | `create_index` | **Deprecated** — use `create_query_index` instead. Create a scalar (non-vector) GSI secondary index on a collection. Deferred by default — call `build_index` afterward to build it. Kept for backward compatibility, removed in a future 2.0. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `create_query_index` | Create a GSI index — scalar, Hyperscale vector, or Composite vector — via `index_type`, all through raw SQL++ (neither vector shape has an SDK management API). `similarity` and `dimension` are required for vector types, with no default. Deferred by default — call `build_index` afterward. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
