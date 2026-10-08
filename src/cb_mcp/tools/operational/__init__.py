@@ -83,6 +83,7 @@ from .server import (
     get_cluster_health_and_services,
     get_cluster_health_snapshot,
     get_cluster_metrics,
+    get_cluster_system_events,
     get_cluster_tasks,
     get_collections_in_scope,
     get_scopes_and_collections_in_bucket,
@@ -114,6 +115,7 @@ TOOL_SET = ToolSet(
         get_cluster_metrics,
         get_cluster_tasks,
         get_cluster_health_snapshot,
+        get_cluster_system_events,
         # KV read tools
         get_document_by_id,
         lookup_subdocument,
@@ -185,6 +187,7 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_cluster_metrics": ToolAnnotations(readOnlyHint=True),
     "get_cluster_tasks": ToolAnnotations(readOnlyHint=True),
     "get_cluster_health_snapshot": ToolAnnotations(readOnlyHint=True),
+    "get_cluster_system_events": ToolAnnotations(readOnlyHint=True),
     # KV read tools
     "get_document_by_id": ToolAnnotations(readOnlyHint=True),
     "lookup_subdocument": ToolAnnotations(readOnlyHint=True),
@@ -259,6 +262,8 @@ TOOL_DEPLOYMENT_REQUIREMENTS: dict[str, Deployment] = {
     "get_cluster_tasks": Deployment.ON_PREM,
     # Management REST, plus the per-node endpoints it fans out to.
     "get_cluster_health_snapshot": Deployment.ON_PREM,
+    # GET /events on the Management REST port.
+    "get_cluster_system_events": Deployment.ON_PREM,
     # Index Service REST: /pools/default/nodeServices to find the indexers,
     # then each indexer's /api/v1/stats (9102/19102).
     "get_index_stats": Deployment.ON_PREM,
@@ -330,6 +335,7 @@ __all__ = [
     "get_cluster_metrics",
     "get_cluster_tasks",
     "get_cluster_health_snapshot",
+    "get_cluster_system_events",
     "get_queries_not_selective",
     "get_queries_not_using_covering_index",
     "get_queries_using_primary_index",
