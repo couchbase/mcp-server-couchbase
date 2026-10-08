@@ -237,3 +237,58 @@ def test_prd_sample_records_serialise(record, expected_subset):
     document = json.loads(record.to_json_line(SERVER))
     for key, value in expected_subset.items():
         assert document[key] == value
+
+
+# ---------------------------------------------------------------------------
+# one record is one line, whatever a caller puts in it
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("char", "name"),
+    [
+        # The three that ``json.dumps`` leaves raw. Everything else
+        # ``str.splitlines`` splits on is below 0x20, which it already escapes.
+        ("\u2028", "LINE SEPARATOR"),
+        ("\u2029", "PARAGRAPH SEPARATOR"),
+        ("\x85", "NEXT LINE"),
+    ],
+)
+def test_a_caller_cannot_split_a_record_into_two_lines(char, name):
+    """JSON Lines means one record per line, and a caller must not break it.
+
+    ``ensure_ascii=False`` leaves these as raw bytes, and Python's
+    ``str.splitlines`` — used by this repo's own readers and by many log
+    shippers — treats every one of them as a line terminator. A bucket or
+    document name carrying one would split its own record into unparseable
+    fragments, destroying the entry that recorded the call. Reachable without
+    any cluster access: the record is written even when the tool fails.
+    """
+    record = AuditRecord(
+        id=61490,
+        name="document read",
+        description="d",
+        outcome=OUTCOME_SUCCESS,
+        payload={"ks": f"travel{char}sample.inventory.airline"},
+    )
+    line = record.to_json_line(ServerContext.detect())
+
+    assert line.endswith("\n")
+    assert len(line.splitlines()) == 1, f"{name} split the record"
+    # Escaped, not stripped: the recorded value still says what the caller sent.
+    assert json.loads(line)["ks"] == f"travel{char}sample.inventory.airline"
+
+
+def test_escaping_leaves_ordinary_non_ascii_readable():
+    """The escape must not undo ``ensure_ascii=False`` for normal text."""
+    record = AuditRecord(
+        id=61490,
+        name="document read",
+        description="d",
+        outcome=OUTCOME_SUCCESS,
+        payload={"ks": "航空会社.inventory.航空"},
+    )
+    line = record.to_json_line(ServerContext.detect())
+
+    assert "航空会社" in line, "non-Latin names must stay readable in the file"
+    assert json.loads(line)["ks"] == "航空会社.inventory.航空"

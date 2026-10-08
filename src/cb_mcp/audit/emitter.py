@@ -14,13 +14,17 @@ from __future__ import annotations
 
 import atexit
 import logging
+import os
+import signal
+import threading
+import types
 from dataclasses import replace
 from typing import Any
 
 from ..utils.constants import LOGGER_NAMESPACE
 from .catalog import SERVICE_PACKAGE, AuditEvent, ToolCallEvent
 from .config import SINK_FILE, ResolvedAuditConfig
-from .record import AuditRecord, ServerContext
+from .record import OUTCOME_SUCCESS, AuditRecord, ServerContext
 from .sink import (
     AuditSink,
     AuditSinkProtocol,
@@ -225,6 +229,9 @@ def init_audit(config: ResolvedAuditConfig) -> AuditLogger:
     sink: AuditSinkProtocol = sinks[0] if len(sinks) == 1 else CompositeAuditSink(sinks)
     sink.start()
     _active = AuditLogger(config, sink=sink)
+    # Only once auditing is actually running: a server with auditing off has no
+    # reason to touch the process's signal disposition.
+    _install_sigterm_handler()
 
     logger.info(
         "Audit logging enabled. sinks=%s, service_package=%s, file=%s, "
@@ -261,6 +268,106 @@ def _shutdown_at_exit() -> None:
     not evidence of tampering, and must not be read as such.
     """
     shutdown_audit()
+
+
+#: The SIGTERM handler that was in place before auditing installed its own, so
+#: it can still run. ``None`` means nothing has been installed yet.
+_previous_sigterm: Any = None
+_sigterm_installed = False
+
+#: How long to wait for the audit trail to close on a SIGTERM that nothing else
+#: is handling. Bounded because a shutdown must not hang; short because the
+#: process is about to terminate either way.
+_SIGTERM_DRAIN_SECONDS = 3.0
+
+
+def _close_audit_for_signal() -> None:
+    """Record the stop and close the sink. Runs on a helper thread, not inline.
+
+    A signal handler runs on the main thread — the same thread that calls
+    ``emit`` and therefore the one that holds the sink queue's lock while it
+    does. That lock is not reentrant, so queueing a record from inside the
+    handler could deadlock a shutdown that must not hang. On a helper thread the
+    worst case is waiting for the main thread's lock, which the bounded join
+    below turns into a missing record rather than a wedged process.
+    """
+    audit = get_audit_logger()
+    if audit.active:
+        audit.emit_event(
+            AuditEvent.SERVER_STOPPED,
+            outcome=OUTCOME_SUCCESS,
+            shutdown_signal="SIGTERM",
+        )
+    shutdown_audit()
+
+
+def _handle_sigterm(signum: int, frame: types.FrameType | None) -> None:
+    """Close the audit trail when, and only when, nothing else will.
+
+    ``docker stop`` sends SIGTERM, and Python's default disposition terminates
+    the process without running ``atexit`` hooks or unwinding the lifespan. So
+    under stdio the most ordinary shutdown a container has produced no ``server
+    stopped`` record at all — while the catalogue says a missing one means the
+    shutdown was not clean. An operator restarting a container would have read
+    an unclean shutdown on every single restart, which makes the signal
+    worthless for spotting a real one.
+
+    **When another handler already owns SIGTERM, this one does nothing but hand
+    over.** Under the http transport that handler is uvicorn's, which sets a
+    flag and then *drains in-flight requests* before exiting. Closing the audit
+    trail here would leave every one of those calls unrecorded — the middleware
+    reads the process-wide logger, finds it inactive, and emits nothing, not
+    even a dropped count. A write cancelled by a rolling restart would vanish,
+    which is precisely what recording cancelled calls exists to prevent. The
+    lifespan already emits ``server stopped`` when uvicorn unwinds it, so
+    deferring loses nothing and keeps the records that are still arriving.
+    """
+    previous = _previous_sigterm
+    if previous is signal.SIG_IGN:
+        return
+    if callable(previous):
+        previous(signum, frame)
+        return
+
+    # SIG_DFL (or an unreadable handler): nothing else will unwind anything, so
+    # this is the only chance to close the trail.
+    worker = threading.Thread(
+        target=_close_audit_for_signal, name="cb-mcp-audit-sigterm", daemon=True
+    )
+    worker.start()
+    worker.join(timeout=_SIGTERM_DRAIN_SECONDS)
+
+    # Terminate with the conventional status for the signal rather than exiting
+    # 0 and hiding that we were killed.
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+
+
+def _install_sigterm_handler() -> None:
+    """Install :func:`_handle_sigterm`, once, when it is possible to do so.
+
+    ``signal.signal`` only works on the main thread of the main interpreter, so
+    an embedding host that builds the app on a worker thread simply does not get
+    this; auditing is unaffected otherwise.
+    """
+    global _sigterm_installed, _previous_sigterm  # noqa: PLW0603
+    if _sigterm_installed:
+        return
+    try:
+        previous = signal.getsignal(signal.SIGTERM)
+        # Published before the handler is installed: a SIGTERM delivered
+        # between the two would otherwise read ``None`` and take the default
+        # path, skipping the handler that actually owns the shutdown.
+        _previous_sigterm = previous
+        signal.signal(signal.SIGTERM, _handle_sigterm)
+    except (ValueError, OSError, AttributeError):
+        logger.debug(
+            "Could not install the audit SIGTERM handler; a SIGTERM shutdown "
+            "will not record a 'server stopped' event.",
+            exc_info=True,
+        )
+        return
+    _sigterm_installed = True
 
 
 __all__ = [

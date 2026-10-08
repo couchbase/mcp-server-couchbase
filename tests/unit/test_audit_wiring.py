@@ -19,17 +19,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import signal
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from _all_specs import ALL_SPECS
 
+from cb_mcp.audit import emitter
+from cb_mcp.audit.catalog import AuditEvent
 from cb_mcp.audit.config import resolve_audit_config
 from cb_mcp.audit.emitter import get_audit_logger, init_audit, shutdown_audit
 from cb_mcp.audit.sink import process_scoped_path
 from cb_mcp.auth import CouchbaseJWTVerifier
-from cb_mcp.core.app import build_app
+from cb_mcp.core.app import _start_audit, build_app
 
 
 def _records(directory: Path) -> list[dict]:
@@ -55,6 +59,22 @@ def _audit_config(tmp_path: Path, **overrides):
     }
     options.update(overrides)
     return resolve_audit_config(**options)
+
+
+def _build_unstarted_app(spec, audit_config, tmp_path):
+    """Call ``build_app`` without running its lifespan.
+
+    The warning under test is emitted while the app is being built, not while
+    it runs, which is the point: an operator sees it at startup.
+    """
+    with patch("cb_mcp.core.app.FastMCP", return_value=MagicMock()):
+        return build_app(
+            spec,
+            tools=list(spec.tools.all_tools)[:1],
+            settings={"transport": "stdio", "oauth_enabled": False},
+            provider_factory=MagicMock(),
+            audit_config=audit_config,
+        )
 
 
 def _run_lifespan(spec, audit_config, tmp_path):
@@ -223,6 +243,97 @@ async def test_an_accepted_token_emits_no_record(tmp_path):
     assert [r for r in _records(tmp_path) if r["name"] == "token rejected"] == []
 
 
+def test_the_startup_record_states_the_configuration_actually_in_force(tmp_path):
+    """The permanent record must not claim a file sink that failed to open.
+
+    57346 is written once and kept for the life of the audit trail. An earlier
+    version corrected the logger's own copy of the config but still wrote the
+    *requested* one into this record and onto ``AppContext``, so an auditor —
+    and ``get_server_configuration_status`` — were told records were going to
+    disk when the file sink had been dropped.
+    """
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    config = _audit_config(
+        blocked, sinks="console,file", file=str(blocked / "audit.log")
+    )
+    process_scoped_path(config.file).mkdir()
+
+    try:
+        effective = _start_audit(
+            next(sp for sp in ALL_SPECS if sp.audit_package is not None),
+            config,
+            transport="stdio",
+            oauth_enabled=False,
+            read_only_mode=False,
+            registered_tool_names=["get_document_by_id"],
+            settings={},
+        )
+    finally:
+        shutdown_audit()
+
+    # What _start_audit hands back is what every reporter must use.
+    assert effective.sinks == ("console",)
+    assert effective.process_file is None
+    assert config.sinks == ("console", "file"), "the requested config is unchanged"
+
+
+def test_the_57346_record_and_app_context_both_state_what_is_in_force(tmp_path, capsys):
+    """The two places the snapshot is actually consumed.
+
+    ``_start_audit`` returning the effective config is only half the fix: the
+    57346 record is written once and kept forever, and ``AppContext`` is what
+    ``get_server_configuration_status`` reports. Asserting only the return
+    value left both consumers free to use the requested config instead — and
+    both mutations passed the whole suite, producing a permanent record that
+    claimed a file sink which had failed to open.
+    """
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    config = _audit_config(
+        blocked, sinks="console,file", file=str(blocked / "audit.log")
+    )
+    process_scoped_path(config.file).mkdir()
+    spec = next(sp for sp in ALL_SPECS if sp.audit_package is not None)
+
+    captured: dict = {}
+
+    def capture_app(*_args, **kwargs):
+        captured["lifespan"] = kwargs.get("lifespan")
+        return MagicMock()
+
+    with patch("cb_mcp.core.app.FastMCP", side_effect=capture_app):
+        build_app(
+            spec,
+            tools=list(spec.tools.all_tools)[:1],
+            settings={"transport": "stdio", "oauth_enabled": False},
+            provider_factory=MagicMock(),
+            audit_config=config,
+        )
+
+    async def run() -> None:
+        async with captured["lifespan"](MagicMock()) as app_context:
+            # What the status tool will report.
+            assert app_context.audit_config["sinks"] == ["console"]
+            assert app_context.audit_config["process_file"] is None
+
+    try:
+        asyncio.run(run())
+    finally:
+        shutdown_audit()
+
+    # What the permanent record says. The file sink was dropped, so the record
+    # went to the surviving console sink — which is itself the point.
+    emitted = [
+        json.loads(line)
+        for line in capsys.readouterr().err.splitlines()
+        if line.startswith("{")
+    ]
+    configuration = next(r for r in emitted if r["name"] == "server configuration")
+    assert configuration["audit_config"]["sinks"] == ["console"], configuration
+    assert configuration["audit_config"]["process_file"] is None, configuration
+
+
 def test_a_file_sink_that_cannot_be_opened_is_removed_from_the_snapshot(tmp_path):
     """The reported configuration must match what is actually being written.
 
@@ -266,3 +377,126 @@ def test_auditing_reports_itself_off_when_every_sink_fails(tmp_path):
         assert audit.config.as_dict()["enabled"] is False
     finally:
         shutdown_audit()
+
+
+def test_sigterm_records_a_clean_shutdown_when_nothing_else_handles_it(
+    tmp_path, monkeypatch
+):
+    """``docker stop`` under stdio must not look like a crash in the trail.
+
+    SIGTERM's default disposition terminates the process without running
+    ``atexit`` or unwinding the lifespan, so the most ordinary container
+    shutdown produced no ``server stopped`` record — while the catalogue says a
+    missing one means the shutdown was not clean. Every restart would have read
+    as an unclean one, which makes the signal useless for finding a real one.
+    """
+    config = _audit_config(tmp_path, sinks="file")
+    killed: list[int] = []
+
+    audit = init_audit(config)
+    assert audit.active
+    try:
+        # SIG_DFL is the stdio case: nothing else will unwind anything.
+        monkeypatch.setattr(emitter, "_previous_sigterm", signal.SIG_DFL)
+        monkeypatch.setattr(emitter.signal, "signal", lambda *_a: None)
+        monkeypatch.setattr(emitter.os, "kill", lambda _pid, sig: killed.append(sig))
+        emitter._handle_sigterm(signal.SIGTERM, None)
+    finally:
+        shutdown_audit()
+
+    records = _records(tmp_path)
+    names = [r["name"] for r in records]
+    assert "server stopped" in names, names
+    stopped = next(r for r in records if r["name"] == "server stopped")
+    assert stopped["outcome"] == "success"
+    # Says *how* it stopped, without claiming a failure.
+    assert stopped["shutdown_signal"] == "SIGTERM"
+    assert "reason" not in stopped
+    # Still exits by the signal, so the status code does not pretend it was a
+    # normal exit.
+    assert killed == [signal.SIGTERM]
+
+
+def test_sigterm_hands_over_without_closing_when_another_handler_owns_it(
+    tmp_path, monkeypatch
+):
+    """Under http, uvicorn drains in-flight requests *after* its handler runs.
+
+    Closing the audit trail before handing over left every call still running
+    unrecorded — the middleware reads the process-wide logger, finds it
+    inactive and emits nothing, not even a dropped count. A write cancelled by
+    a rolling restart would vanish, which is exactly the suppression that
+    catching ``BaseException`` around the tool exists to prevent. The lifespan
+    emits ``server stopped`` when uvicorn unwinds it, so handing over loses
+    nothing.
+    """
+    config = _audit_config(tmp_path, sinks="file")
+    chained: list[int] = []
+
+    audit = init_audit(config)
+    assert audit.active
+    try:
+        monkeypatch.setattr(
+            emitter, "_previous_sigterm", lambda signum, _frame: chained.append(signum)
+        )
+        emitter._handle_sigterm(signal.SIGTERM, None)
+
+        # The whole point: auditing is still running, so records arriving
+        # during the drain are still written.
+        assert chained == [signal.SIGTERM]
+        assert get_audit_logger().active is True
+        get_audit_logger().emit_event(AuditEvent.SESSION_INITIALIZED, outcome="success")
+    finally:
+        shutdown_audit()
+
+    names = [r["name"] for r in _records(tmp_path)]
+    assert "session initialized" in names, (
+        f"a record arriving during the drain was lost: {names}"
+    )
+
+
+def test_the_sigterm_handler_is_installed_only_when_auditing_runs(
+    tmp_path, monkeypatch
+):
+    """A server with auditing off must not touch the signal disposition."""
+    monkeypatch.setattr(emitter, "_sigterm_installed", False)
+    monkeypatch.setattr(emitter, "_previous_sigterm", None)
+    original = signal.getsignal(signal.SIGTERM)
+    try:
+        init_audit(_audit_config(tmp_path, enabled=False))
+        assert signal.getsignal(signal.SIGTERM) is original
+        assert emitter._sigterm_installed is False
+
+        init_audit(_audit_config(tmp_path, sinks="file"))
+        assert signal.getsignal(signal.SIGTERM) is emitter._handle_sigterm
+    finally:
+        shutdown_audit()
+        signal.signal(signal.SIGTERM, original)
+
+
+def test_enabling_auditing_on_an_unaudited_server_warns(tmp_path, caplog):
+    """Silence is indistinguishable from a broken sink.
+
+    The Operational Insights server accepts every audit flag and reports it,
+    but records nothing. An operator who enabled auditing there would find an
+    empty directory, with the only signal being ``active: false`` buried in the
+    status tool.
+    """
+    unaudited = next(sp for sp in ALL_SPECS if sp.audit_package is None)
+    config = _audit_config(tmp_path, sinks="file")
+
+    with caplog.at_level(logging.WARNING):
+        _build_unstarted_app(unaudited, config, tmp_path)
+
+    assert "declares no audit package" in caplog.text
+    assert unaudited.id in caplog.text
+
+
+def test_an_audited_server_does_not_warn(tmp_path, caplog):
+    audited = next(sp for sp in ALL_SPECS if sp.audit_package is not None)
+    config = _audit_config(tmp_path, sinks="file")
+
+    with caplog.at_level(logging.WARNING):
+        _build_unstarted_app(audited, config, tmp_path)
+
+    assert "declares no audit package" not in caplog.text

@@ -556,7 +556,7 @@ uvx couchbase-mcp-server --audit-log-enabled=true \
   --audit-log-rotation-interval=1d \
   --audit-log-retention-max-backups=90
 
-# 100 MB in total: ten 10 MB files, no interval rotation
+# ~100 MB of records, ~20 MB on disk once gzipped
 uvx couchbase-mcp-server --audit-log-enabled=true \
   --audit-log-sinks=file --audit-log-file-path=/var/log/cb-mcp/audit.log \
   --audit-log-rotation-max-size-mb=10 \

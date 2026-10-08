@@ -55,15 +55,20 @@ def _start_audit(
     read_only_mode: bool,
     registered_tool_names: list[str],
     settings: Mapping[str, Any],
-) -> None:
+) -> ResolvedAuditConfig:
     """Initialise auditing and write the two startup records.
 
     Emits nothing at all when the server declares no audit package, or when
     auditing is configured off or its sink could not be opened.
+
+    Returns the configuration **actually in force**, which is not always the
+    one passed in: a file sink whose path cannot be opened is dropped at this
+    point. Everything that reports the audit configuration must use the value
+    returned here, never the requested one.
     """
     audit = init_audit(audit_config)
     if not audit.active:
-        return
+        return audit.config
 
     warn_on_unauthenticated_http(transport, oauth_enabled)
 
@@ -97,8 +102,12 @@ def _start_audit(
         confirmation_required_tools=sorted(
             settings.get("confirmation_required_tools", ())
         ),
-        audit_config=audit_config.as_dict(),
+        # The configuration in force, not the one requested: this record is
+        # permanent, and claiming a file sink that failed to open would tell an
+        # auditor records were on disk when none were.
+        audit_config=audit.config.as_dict(),
     )
+    return audit.config
 
 
 def build_app(
@@ -143,14 +152,30 @@ def build_app(
     """
     audits = audit_config is not None and spec.audit_package is not None
 
+    if audit_config is not None and audit_config.enabled and spec.audit_package is None:
+        # Silence here is indistinguishable from a broken audit sink. An
+        # operator who set CB_MCP_AUDIT_LOG_ENABLED=true on this server would
+        # otherwise find an empty audit file, or none at all, with the only
+        # signal being ``active: false`` buried in the status tool.
+        logger.warning(
+            "Audit logging is enabled but server %r declares no audit package, "
+            "so no audit records will be written. Auditing currently applies to "
+            "the operational server only; the settings are accepted and "
+            "reported so a shared configuration can be used unchanged.",
+            spec.id,
+        )
+
     @asynccontextmanager
     async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
         """Build the lifespan AppContext from host-resolved configuration."""
         transport = settings.get("transport")
         # Audit is initialised first so the server-started record is the first
         # line in the file and every later record shares its static context.
+        # What auditing is actually doing, which differs from what was asked
+        # for when a sink could not be opened. The status tool reports this.
+        effective_audit_config = audit_config
         if audits:
-            _start_audit(
+            effective_audit_config = _start_audit(
                 spec,
                 audit_config,  # type: ignore[arg-type]
                 transport=str(transport),
@@ -187,7 +212,9 @@ def build_app(
                 read_only_mode=read_only_mode,
                 logging_config=logging_config,
                 audit_config=(
-                    audit_config.as_dict() if audit_config is not None else None
+                    effective_audit_config.as_dict()
+                    if effective_audit_config is not None
+                    else None
                 ),
                 server_id=spec.id,
                 server_name=spec.fastmcp_name,

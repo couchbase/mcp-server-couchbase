@@ -27,6 +27,7 @@ Coverage map:
 
 from __future__ import annotations
 
+import functools
 import gzip
 import io
 import json
@@ -625,12 +626,35 @@ def test_a_draining_writer_does_not_reopen_the_file_after_close(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+class _BrokenWrite(io.StringIO):
+    """Raises on write, optionally after accepting a few lines first."""
+
+    def __init__(self, fail_after: int = 0) -> None:
+        super().__init__()
+        self._fail_after = fail_after
+        self._accepted = 0
+
+    def write(self, text):
+        if self._accepted >= self._fail_after:
+            raise OSError("stream is gone")
+        self._accepted += 1
+        return super().write(text)
+
+
+class _BrokenFlush(io.StringIO):
+    """Buffers writes happily, then fails to flush, like a full disk."""
+
+    def flush(self):
+        raise OSError("No space left on device")
+
+
 def test_console_sink_writes_lines_to_its_stream():
     stream = io.StringIO()
     sink = ConsoleAuditSink(stream)
     sink.start()
     sink.emit('{"a":1}\n')
     sink.emit('{"b":2}\n')
+    sink.close(timeout=5.0)
 
     assert stream.getvalue() == '{"a":1}\n{"b":2}\n'
     assert sink.stats == {"written": 2, "dropped": 0, "write_errors": 0}
@@ -645,27 +669,93 @@ def test_console_sink_defaults_to_stderr_never_stdout(capsys):
     sink = ConsoleAuditSink()
     sink.start()
     sink.emit('{"audited":true}\n')
+    sink.close(timeout=5.0)
 
     captured = capsys.readouterr()
     assert captured.err == '{"audited":true}\n'
     assert captured.out == ""
 
 
-def test_console_sink_counts_a_broken_stream_rather_than_raising():
-    class Broken(io.StringIO):
-        def write(self, _text):
-            raise OSError("stream is gone")
+def test_console_sink_never_blocks_its_caller_on_a_stalled_stream():
+    """The blocker this sink's queue exists for.
 
-    sink = ConsoleAuditSink(Broken())
-    sink.emit('{"x":1}\n')
+    ``console`` is the *default* sink, and under stdio its stderr is a pipe
+    owned by the MCP client. Written inline, a client that stops draining that
+    pipe blocks the audit write at the 64 KiB buffer — and the caller is the
+    asyncio event loop, so every in-flight tool call and the JSON-RPC reader
+    stall with it. Enabling auditing was enough to hang the server.
 
-    assert sink.stats["dropped"] == 1
-    assert sink.stats["write_errors"] == 1
+    The stall is a blocking ``write`` the test controls, rather than a real
+    pipe: the emitting runs on a worker thread and the stall is released in
+    teardown, so a regression *fails* here instead of hanging the suite —
+    which matters when the property under test is "does not block forever".
+    """
+    release = threading.Event()
+    entered = threading.Event()
+
+    class StalledStream(io.StringIO):
+        def write(self, text):
+            entered.set()
+            release.wait(timeout=30)
+            return super().write(text)
+
+    sink = ConsoleAuditSink(StalledStream(), queue_size=16)
+    sink.start()
+    finished = threading.Event()
+
+    def emit_many() -> None:
+        for index in range(2000):
+            sink.emit(json.dumps({"n": index}) + "\n")
+        finished.set()
+
+    worker = threading.Thread(target=emit_many, daemon=True)
+    try:
+        worker.start()
+        assert entered.wait(timeout=5.0), "the writer never reached the stream"
+        assert finished.wait(timeout=5.0), (
+            "emit() blocked on a stalled stream; the caller is the event loop"
+        )
+        # The records that could not be written are dropped and *counted* —
+        # that is the whole bargain, and the counter is how an operator finds
+        # out. Silence would be the unacceptable outcome.
+        assert sink.stats["dropped"] > 0
+    finally:
+        release.set()
+        sink.close(timeout=2.0)
+
+
+@pytest.mark.parametrize(
+    ("stream_factory", "label"),
+    [
+        (_BrokenWrite, "write fails"),
+        (_BrokenFlush, "flush fails"),
+        (functools.partial(_BrokenWrite, fail_after=2), "write fails mid-batch"),
+    ],
+)
+def test_console_sink_counts_every_lost_record(stream_factory, label):
+    """A buffered line that is never flushed never reached the console.
+
+    Crediting only the lines not yet handed to ``write`` left the rest
+    unaccounted — ``written`` at zero and ``dropped`` at zero while records
+    vanished. ``dropped`` is documented as the only way an operator learns of
+    a gap, so it has to cover the whole batch.
+    """
+    sink = ConsoleAuditSink(stream_factory())
+    sink.start()
+    for index in range(5):
+        sink.emit(json.dumps({"n": index}) + "\n")
+    sink.close(timeout=5.0)
+
+    stats = sink.stats
+    assert stats["write_errors"] >= 1, label
+    assert stats["written"] + stats["dropped"] == 5, f"{label}: {stats}"
+    assert stats["written"] == 0, f"{label}: {stats}"
 
 
 def test_console_sink_emits_whole_lines_under_concurrency():
     stream = io.StringIO()
     sink = ConsoleAuditSink(stream)
+    sink.start()
 
     def worker(worker_id: int) -> None:
         for index in range(50):
@@ -676,6 +766,7 @@ def test_console_sink_emits_whole_lines_under_concurrency():
         thread.start()
     for thread in threads:
         thread.join()
+    sink.close(timeout=5.0)
 
     lines = stream.getvalue().splitlines()
     assert len(lines) == 300
@@ -867,3 +958,111 @@ def test_prd_retention_cases_end_to_end(
     survivors = _numbered(sink)
     assert survivors[-1] == records - 1, "the newest record was not retained"
     assert survivors == list(range(survivors[0], records)), survivors
+
+
+def test_a_glob_metacharacter_in_the_path_does_not_disable_retention(tmp_path):
+    """``max_backups`` must bound the directory whatever the path looks like.
+
+    The live filename becomes a glob pattern when backups are listed. Left
+    unescaped, a path like ``audit[1].log`` reads ``[1]`` as a character class,
+    matches nothing, and pruning silently stops — the directory grows without
+    limit while the setting claims to bound it, and the operator has no signal.
+    """
+    line = json.dumps({"n": 0}) + "\n"
+    sink = AuditSink(tmp_path / "audit[1].log", max_bytes=len(line) * 2, max_backups=2)
+    sink.start()
+    for index in range(20):
+        sink.emit(json.dumps({"n": index}) + "\n")
+    _drain(sink)
+
+    assert len(sink._existing_backups()) > 0, "the sink cannot see its own backups"
+    assert len(_backups(sink)) == 2, [p.name for p in _backups(sink)]
+
+
+def test_a_failed_flush_is_counted_as_lost_not_written(tmp_path):
+    """``dropped`` is documented as the only way an operator learns of a gap.
+
+    ``write`` only fills the stream's buffer; a full disk fails at ``flush``.
+    Counting a record as written when it was buffered meant the most likely
+    real failure reported a clean audit trail — ``written`` climbing, ``dropped``
+    at zero — for records that never reached the disk.
+    """
+
+    class FailingFlush:
+        """Buffers writes happily, fails to flush, like ENOSPC."""
+
+        closed = False
+
+        def __init__(self) -> None:
+            self.written: list[str] = []
+
+        def write(self, text: str) -> None:
+            self.written.append(text)
+
+        def flush(self) -> None:
+            raise OSError("No space left on device")
+
+        def close(self) -> None:
+            self.closed = True
+
+    sink = AuditSink(tmp_path / "a.log", max_bytes=0, max_backups=0)
+    sink._stream.close()
+    sink._stream = FailingFlush()  # type: ignore[assignment]
+    sink.start()
+    for index in range(5):
+        sink.emit(json.dumps({"n": index}) + "\n")
+    _settle(sink)
+    stats = dict(sink.stats)
+    sink.close(timeout=5.0)
+
+    assert stats["written"] == 0, f"buffered records reported as written: {stats}"
+    assert stats["dropped"] == 5, stats
+    assert stats["write_errors"] >= 1, stats
+
+
+def test_records_abandoned_at_shutdown_are_counted(tmp_path):
+    """A wedged destination must not make an audit gap invisible.
+
+    ``close`` gives the writer a bounded time to drain, which a wedged disk or
+    an un-drained console pipe will exceed. Whatever is still queued is lost;
+    the counters have to say so, because ``dropped`` is the only signal an
+    operator has.
+    """
+    release = threading.Event()
+
+    class StalledStream(io.StringIO):
+        def write(self, text):
+            release.wait(timeout=30)
+            return super().write(text)
+
+    sink = ConsoleAuditSink(StalledStream(), queue_size=256)
+    sink.start()
+    try:
+        for index in range(200):
+            sink.emit(json.dumps({"n": index}) + "\n")
+        sink.close(timeout=0.3)  # the writer is stuck in write()
+        stats = sink.stats
+    finally:
+        release.set()
+
+    assert stats["dropped"] > 0, f"abandoned records went uncounted: {stats}"
+    # The batch the writer is stuck inside is genuinely undecided — it may yet
+    # land — so the counters must not claim it either way. Everything still in
+    # the queue, which is the bulk of it, is counted.
+    assert stats["dropped"] >= 100, stats
+    assert stats["written"] + stats["dropped"] <= 200, (
+        f"counters over-report what was handled: {stats}"
+    )
+
+
+def test_records_queued_before_start_are_not_silently_discarded(tmp_path):
+    """``emit`` before ``start`` used to be a no-op that lost records quietly."""
+    stream = io.StringIO()
+    sink = ConsoleAuditSink(stream)
+    # Deliberately no start().
+    sink.emit('{"early":1}\n')
+    sink.close(timeout=5.0)
+
+    assert stream.getvalue() == '{"early":1}\n'
+    assert sink.stats["written"] == 1
+    assert sink.stats["dropped"] == 0

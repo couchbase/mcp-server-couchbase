@@ -21,7 +21,13 @@ from click.testing import CliRunner
 
 import mcp_server
 from cb_mcp.auth import OAuthConfigError, resolve_oauth
-from cb_mcp.utils.constants import LOGGER_ROOT, SCOPE_READ, SCOPE_WRITE
+from cb_mcp.utils.cli_params import CliParams, CredentialProfile
+from cb_mcp.utils.constants import (
+    LOGGER_NAMESPACE,
+    LOGGER_ROOT,
+    SCOPE_READ,
+    SCOPE_WRITE,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -340,3 +346,83 @@ class TestAuditOptions:
                 "--audit-log-disabled-events",
             ):
                 assert flag in result.output, f"{flag} missing from {command} --help"
+
+
+class TestAuditDiagnosticOrdering:
+    """Audit diagnostics must reach the operator's configured log sinks.
+
+    ``README`` and ``DOCKER.md`` both promise "an error in the log" when the
+    file sink is selected without a path. Resolving the audit configuration
+    inside ``from_click`` emitted that error two lines before
+    ``cli.logging.apply()`` ran, so it went to ``logging.lastResort`` on raw
+    stderr while the per-level log files stayed empty — the documented
+    behaviour was simply not happening.
+    """
+
+    @staticmethod
+    def _params(**overrides) -> dict:
+        """A complete Click params mapping, as the real entrypoint receives it."""
+        captured: dict = {}
+
+        def capture(params, *, credentials):
+            captured["params"] = dict(params)
+            raise SystemExit(0)
+
+        with patch.object(CliParams, "from_click", side_effect=capture):
+            CliRunner().invoke(
+                mcp_server.main,
+                [
+                    "operational",
+                    "--connection-string",
+                    "couchbase://localhost",
+                    "--username",
+                    "u",
+                    "--password",
+                    "p",
+                ],
+                env=dict(os.environ),
+                catch_exceptions=True,
+            )
+        params = captured["params"]
+        params.update(overrides)
+        return params
+
+    def test_resolution_is_deferred_until_first_access(self):
+        emitted: list[str] = []
+
+        class Capture(logging.Handler):
+            def emit(self, record):
+                emitted.append(record.getMessage())
+
+        params = self._params(
+            audit_log_enabled=True,
+            audit_log_sinks="file",
+            audit_log_file_path=None,
+        )
+        handler = Capture()
+        audit_logger = logging.getLogger(f"{LOGGER_NAMESPACE}.audit.config")
+        audit_logger.addHandler(handler)
+        try:
+            cli = CliParams.from_click(
+                params,
+                credentials=CredentialProfile(options=lambda f: f, settings_keys=()),
+            )
+            # Nothing logged yet: this is the window in which the real startup
+            # path configures logging.
+            assert emitted == [], emitted
+
+            config = cli.audit
+        finally:
+            audit_logger.removeHandler(handler)
+
+        assert config.enabled is False
+        assert any("no audit file path is configured" in m for m in emitted), emitted
+
+    def test_the_resolved_configuration_is_cached(self):
+        params = self._params(audit_log_enabled=True, audit_log_sinks="console")
+        cli = CliParams.from_click(
+            params, credentials=CredentialProfile(options=lambda f: f, settings_keys=())
+        )
+        # Resolution warns; repeating it per access would duplicate every
+        # diagnostic and re-derive the process-scoped path.
+        assert cli.audit is cli.audit

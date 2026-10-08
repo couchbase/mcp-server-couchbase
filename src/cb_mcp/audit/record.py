@@ -69,6 +69,22 @@ def utc_timestamp() -> str:
     return f"{now.strftime('%Y-%m-%dT%H:%M:%S')}.{now.microsecond // 1000:03d}Z"
 
 
+#: The three characters Python's ``str.splitlines`` treats as line terminators
+#: and ``json.dumps`` leaves raw under ``ensure_ascii=False``. Mapped back to
+#: their escape sequences so one record is always exactly one line.
+#:
+#: Only three, not the whole ``splitlines`` set: ``json.dumps`` already escapes
+#: every character below ``0x20``, so VT, FF, FS, GS and RS can never reach the
+#: output raw and listing them would imply a guard that does nothing.
+_LINE_TERMINATOR_ESCAPES = str.maketrans(
+    {
+        "\u2028": "\\u2028",
+        "\u2029": "\\u2029",
+        "\x85": "\\u0085",
+    }
+)
+
+
 @dataclass(frozen=True)
 class ServerContext:
     """Static per-process context, resolved once at startup."""
@@ -140,16 +156,23 @@ class AuditRecord:
         to serialise would be a silently missing audit entry — strictly worse
         than a stringified value. ``ensure_ascii=False`` keeps non-Latin
         document ids and keyspace names readable.
+
+        **One record is one line.** That is the whole contract of JSON Lines,
+        and a caller must not be able to break it. ``ensure_ascii=False`` leaves
+        U+2028 and U+2029 as raw bytes, and Python's ``str.splitlines`` — used
+        by this repo's own readers, and by many log shippers — treats both as
+        line terminators. A bucket or document name containing one would split
+        its own record into unparseable fragments, destroying the very entry
+        that recorded the call. They are escaped back to their ``\\u`` form,
+        which is still valid JSON and reads identically once parsed.
         """
-        return (
-            json.dumps(
-                self.as_dict(server),
-                ensure_ascii=False,
-                separators=(",", ":"),
-                default=str,
-            )
-            + "\n"
+        line = json.dumps(
+            self.as_dict(server),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            default=str,
         )
+        return line.translate(_LINE_TERMINATOR_ESCAPES) + "\n"
 
 
 __all__ = [

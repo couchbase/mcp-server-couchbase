@@ -28,6 +28,7 @@ import asyncio
 import json
 import logging
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -53,6 +54,7 @@ from cb_mcp.core.app import build_app
 from cb_mcp.servers.operational.spec import SPEC
 from cb_mcp.tools.operational.query import (
     _query_correlation_options,
+    run_cluster_query,
     run_sql_plus_plus_query,
 )
 from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
@@ -605,3 +607,102 @@ def test_audit_is_shut_down_when_provider_startup_fails(tmp_path):
     stopped = by_name["server stopped"]
     assert stopped["outcome"] == "error", stopped
     assert stopped["reason"] == "lifespan_error", stopped
+
+
+# ---------------------------------------------------------------------------
+# the correlation id must actually reach the SDK
+# ---------------------------------------------------------------------------
+
+
+def _ctx_with(**lifespan) -> Context:
+    """A Context exposing just the lifespan attributes the query tool reads."""
+    return cast(
+        Context,
+        SimpleNamespace(
+            request_context=SimpleNamespace(
+                lifespan_context=SimpleNamespace(**lifespan)
+            )
+        ),
+    )
+
+
+def test_scope_query_is_given_the_requests_correlation_id():
+    """The MCP-to-Server audit join depends on this argument being passed.
+
+    ``_query_correlation_options`` was tested in isolation, so nothing noticed
+    whether the tool handed the result to the SDK. Replacing the call with
+    ``options = {}`` passed the whole suite while the join advertised in
+    README silently stopped working — and the correlation only exists in
+    historical data if it was written at the time.
+    """
+    captured: dict = {}
+
+    class FakeScope:
+        def query(self, statement, **kwargs):
+            captured["statement"] = statement
+            captured["kwargs"] = kwargs
+            return []
+
+    class FakeBucket:
+        def scope(self, _name):
+            return FakeScope()
+
+    cid = "11111111-2222-3333-4444-555555555555"
+    state_dict = {"cid": cid}
+    token = audit_state._AUDIT_STATE.set(state_dict)
+    try:
+        with (
+            patch(
+                "cb_mcp.tools.operational.query.get_cluster_connection",
+                return_value=SimpleNamespace(),
+            ),
+            patch(
+                "cb_mcp.tools.operational.query.connect_to_bucket",
+                return_value=FakeBucket(),
+            ),
+            patch(
+                "cb_mcp.tools.operational.query.get_audit_logger",
+                return_value=SimpleNamespace(active=False),
+            ),
+            patch(
+                "cb_mcp.tools.operational.query.get_access_token",
+                return_value=None,
+            ),
+        ):
+            run_sql_plus_plus_query(
+                _ctx_with(read_only_mode=False),
+                bucket_name="travel-sample",
+                scope_name="inventory",
+                query="SELECT 1",
+            )
+    finally:
+        audit_state._AUDIT_STATE.reset(token)
+
+    assert captured["kwargs"].get("client_context_id") == cid, captured
+
+
+def test_an_explicit_client_context_id_is_not_overwritten():
+    """A caller passing their own id keeps it, as the comment promises."""
+    captured: dict = {}
+
+    class FakeCluster:
+        def query(self, statement, **kwargs):
+            captured["kwargs"] = kwargs
+            return []
+
+    state_dict = {"cid": "audit-minted-id"}
+    token = audit_state._AUDIT_STATE.set(state_dict)
+    try:
+        with patch(
+            "cb_mcp.tools.operational.query.get_cluster_connection",
+            return_value=FakeCluster(),
+        ):
+            run_cluster_query(
+                _ctx_with(read_only_mode=False),
+                "SELECT 1",
+                client_context_id="callers-own-id",
+            )
+    finally:
+        audit_state._AUDIT_STATE.reset(token)
+
+    assert captured["kwargs"]["client_context_id"] == "callers-own-id"

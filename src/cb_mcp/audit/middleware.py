@@ -46,7 +46,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
-from fastmcp.exceptions import NotFoundError
+from fastmcp.exceptions import NotFoundError, ValidationError
 from fastmcp.server.middleware import Middleware
 
 from ..utils.constants import LOGGER_NAMESPACE
@@ -69,6 +69,7 @@ from .record import (
     OUTCOME_ERROR,
     OUTCOME_SUCCESS,
     REASON_EXECUTION_ERROR,
+    REASON_INVALID_ARGUMENTS,
 )
 
 logger = logging.getLogger(f"{LOGGER_NAMESPACE}.audit.middleware")
@@ -228,7 +229,15 @@ class AuditMiddleware(Middleware):
             cid = request_state.get("cid")
             try:
                 result = await call_next(context)
-            except Exception as exc:
+            except BaseException as exc:
+                # ``BaseException``, not ``Exception``: ``asyncio.CancelledError``
+                # is not an ``Exception``, and a cancelled call is exactly the
+                # one that must still be recorded. The tool may already have
+                # mutated the cluster before the client timed out, disconnected
+                # or the server began shutting down — and a caller able to drop
+                # the record of a write by cancelling would have a way to act
+                # without leaving a trace, on events the catalogue makes
+                # non-filterable precisely so they cannot be suppressed.
                 self._emit_outcome(
                     audit,
                     tool_name=tool_name,
@@ -280,7 +289,15 @@ class AuditMiddleware(Middleware):
                 return
 
             confirmation = state.get_confirmation()
-            if confirmation == state.CONFIRMATION_SKIPPED:
+            refusal = state.get_refusal()
+
+            # The confirmation wrapper sits *outside* the tool and the SQL++
+            # gates sit inside it, so a call can skip confirmation and then be
+            # refused anyway. 57491 says the tool "executed without
+            # confirmation" and carries ``outcome=success``; emitting it for a
+            # call a gate then blocked asserts an execution that never
+            # happened. The refusal below is the whole truth about that call.
+            if confirmation == state.CONFIRMATION_SKIPPED and refusal is None:
                 # Not ``blocked``: the tool *ran*, unconfirmed, which is what
                 # the catalogue entry describes. Recording it as blocked would
                 # make a reviewer counting ``outcome=blocked`` read unconfirmed
@@ -296,7 +313,6 @@ class AuditMiddleware(Middleware):
                     confirmation="skipped",
                 )
 
-            refusal = state.get_refusal()
             if refusal is not None:
                 self._emit_refusal(
                     audit,
@@ -390,7 +406,17 @@ class AuditMiddleware(Middleware):
         reason: str | None = None
         if failure is not None:
             outcome = OUTCOME_ERROR
-            reason = REASON_EXECUTION_ERROR
+            # Malformed input and a failed execution are different facts, and
+            # the PRD gives them different reasons. FastMCP rejects arguments
+            # against the tool's schema *before* the body runs, so
+            # ``execution_error`` on one of those asserts an execution that
+            # never began — on a record that also carries a keyspace and a
+            # required scope taken from arguments the server refused.
+            reason = (
+                REASON_INVALID_ARGUMENTS
+                if isinstance(failure, ValidationError)
+                else REASON_EXECUTION_ERROR
+            )
         elif getattr(result, "is_error", False):
             # A tool that reports failure through the result rather than by
             # raising is still a failed operation as far as an auditor cares.

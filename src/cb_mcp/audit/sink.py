@@ -46,6 +46,7 @@ should not become an outage.
 from __future__ import annotations
 
 import contextlib
+import glob
 import gzip
 import logging
 import os
@@ -172,152 +173,27 @@ class AuditSinkProtocol(Protocol):
         """``written`` / ``dropped`` / ``write_errors`` for the status tool."""
 
 
-class ConsoleAuditSink:
-    """Writes audit lines to stderr, synchronously.
+class _QueuedSink:
+    """Producer/consumer plumbing for a sink that must never block its caller.
 
-    **stderr, never stdout.** Under the stdio transport stdout *is* the JSON-RPC
-    channel: one audit line written there corrupts the client's stream and takes
-    the session down. The PRD calls this sink "console"; the stream is stderr,
-    and that is not configurable.
+    ``emit`` only puts a line on a bounded queue; a dedicated daemon thread does
+    the writing. **Every** destination needs this, not just the file: the caller
+    is the asyncio event loop, and a synchronous write there — to a disk, a pipe
+    or a terminal — stalls every in-flight tool call and the JSON-RPC reader
+    with it. When the queue is full, records are dropped and counted rather than
+    applying back-pressure to tool execution. That is the deliberate trade:
+    audit unavailability must not become an outage.
 
-    Unlike the file sink this writes inline rather than on a thread. A console
-    is a pipe or a terminal, not a disk that can fill: the write is a buffer
-    copy, there is no rotation, retention or compression to do, and giving it a
-    thread would add a second ordering of records against the operational log
-    for no benefit. If stderr itself is wedged, that is already fatal to the
-    operational log too.
+    Subclasses implement :meth:`_write_batch`, and may override :meth:`_on_idle`
+    (work to do while no records are arriving) and :meth:`_on_close` (releasing
+    whatever the subclass owns).
     """
 
-    def __init__(self, stream: IO[str] | None = None) -> None:
-        self._stream = stream
-        self._written = 0
-        self._dropped = 0
-        self._errors = 0
-        self._closed = False
-        self._lock = threading.Lock()
-        self._last_error_log = 0.0
+    #: Writer thread name, per sink, so a stack dump says which destination is
+    #: stuck.
+    _THREAD_NAME = "cb-mcp-audit-writer"
 
-    def start(self) -> None:
-        """Nothing to start; present so every sink has one lifecycle."""
-
-    def emit(self, line: str) -> None:
-        """Write one already-formatted line. Never raises."""
-        if self._closed:
-            self._dropped += 1
-            return
-        stream = self._stream if self._stream is not None else sys.stderr
-        try:
-            # Held across write+flush so a record cannot be split by another
-            # thread's line. Tool calls are concurrent; audit lines are not.
-            with self._lock:
-                stream.write(line)
-                stream.flush()
-            self._written += 1
-        except (OSError, ValueError) as exc:
-            self._errors += 1
-            self._dropped += 1
-            now = time.monotonic()
-            if (
-                not self._last_error_log
-                or now - self._last_error_log >= _ERROR_LOG_INTERVAL_SECONDS
-            ):
-                self._last_error_log = now
-                logger.error(
-                    "Audit console sink failure: %s (dropped=%d). Audit records "
-                    "are being lost; the server continues to serve.",
-                    exc,
-                    self._dropped,
-                )
-
-    def close(self, timeout: float = DEFAULT_CLOSE_TIMEOUT) -> None:
-        """Stop accepting records. The stream itself is not ours to close."""
-        self._closed = True
-
-    @property
-    def stats(self) -> dict[str, int]:
-        return {
-            "written": self._written,
-            "dropped": self._dropped,
-            "write_errors": self._errors,
-        }
-
-
-class CompositeAuditSink:
-    """Fans every record out to several sinks.
-
-    One failing sink must not stop the others: each is given the line
-    independently, and no sink's ``emit`` is allowed to raise anyway. Stats are
-    summed, so an operator reading ``get_server_configuration_status`` sees the
-    total records lost across destinations rather than having to add up a list.
-    """
-
-    def __init__(self, sinks: list[AuditSinkProtocol]) -> None:
-        self._sinks = list(sinks)
-
-    @property
-    def sinks(self) -> tuple[AuditSinkProtocol, ...]:
-        return tuple(self._sinks)
-
-    def start(self) -> None:
-        for sink in self._sinks:
-            sink.start()
-
-    def emit(self, line: str) -> None:
-        for sink in self._sinks:
-            sink.emit(line)
-
-    def close(self, timeout: float = DEFAULT_CLOSE_TIMEOUT) -> None:
-        for sink in self._sinks:
-            sink.close(timeout=timeout)
-
-    @property
-    def stats(self) -> dict[str, int]:
-        totals = {"written": 0, "dropped": 0, "write_errors": 0}
-        for sink in self._sinks:
-            for key, value in sink.stats.items():
-                totals[key] = totals.get(key, 0) + value
-        return totals
-
-
-class AuditSink:
-    """Writes audit lines to a per-process file on a background thread."""
-
-    def __init__(
-        self,
-        path: str | os.PathLike[str],
-        *,
-        max_bytes: int,
-        max_backups: int,
-        interval_seconds: int = 0,
-        compress: bool = True,
-        queue_size: int = DEFAULT_QUEUE_SIZE,
-    ) -> None:
-        """Open the sink's file, creating parent directories as needed.
-
-        ``max_bytes`` of 0 turns size-based rotation off, ``interval_seconds``
-        of 0 turns age-based rotation off, and both off means one file that
-        grows for as long as the process runs. Only negative values are
-        rejected — they are typos, not instructions.
-
-        Raises:
-            OSError: if the file cannot be created or opened. The caller is
-                expected to report this and continue without auditing rather
-                than abort startup.
-        """
-        if max_bytes < 0:
-            raise ValueError(f"max_bytes must not be negative, got {max_bytes}.")
-        if max_backups < 0:
-            raise ValueError(f"max_backups must not be negative, got {max_backups}.")
-        if interval_seconds < 0:
-            raise ValueError(
-                f"interval_seconds must not be negative, got {interval_seconds}."
-            )
-
-        self.path = process_scoped_path(path)
-        self._max_bytes = max_bytes
-        self._max_backups = max_backups
-        self._interval = interval_seconds
-        self._compress = compress
+    def __init__(self, *, queue_size: int = DEFAULT_QUEUE_SIZE) -> None:
         self._queue: queue.Queue = queue.Queue(maxsize=queue_size)
         self._thread: threading.Thread | None = None
         self._closed = threading.Event()
@@ -332,41 +208,6 @@ class AuditSink:
         self._last_error_log = 0.0
         self._last_producer_error_log = 0.0
 
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        # Line-buffered text append. Opened eagerly so a misconfigured path
-        # fails at startup, where it can be reported, rather than on the first
-        # audited operation.
-        # Deliberately not a context manager: the stream is owned for the
-        # lifetime of the sink and written by the background thread. Closing it
-        # per record would defeat both the batching and the append semantics.
-        self._stream = open(self.path, "a", encoding="utf-8")  # noqa: SIM115
-        self._size = self.path.stat().st_size
-        self._rotate_at = self._next_rotation_deadline(from_existing_file=True)
-
-    def _next_rotation_deadline(self, *, from_existing_file: bool = False) -> float:
-        """When the interval trigger next falls due, or ``inf`` when it is off.
-
-        On open the clock is anchored to the file's **last modification time**
-        rather than to now, so a restart does not hand the live file a fresh
-        interval it has not earned. A file last written longer ago than the
-        interval is therefore already due and rolls over on the first record —
-        which is what an operator asking for daily files expects after the
-        server was down for a week. Once running, each rotation sets the next
-        deadline from the clock, so a busy file cannot push its own deadline
-        forward by being written to.
-        """
-        if self._interval <= 0:
-            return float("inf")
-        anchor = time.time()
-        if from_existing_file:
-            try:
-                stat = self.path.stat()
-                if stat.st_size > 0:
-                    anchor = stat.st_mtime
-            except OSError:  # pragma: no cover - file was just opened
-                pass
-        return anchor + self._interval
-
     # -- lifecycle --------------------------------------------------------
 
     def start(self) -> None:
@@ -374,14 +215,14 @@ class AuditSink:
         if self._thread is not None:
             return
         self._thread = threading.Thread(
-            target=self._run, name="cb-mcp-audit-writer", daemon=True
+            target=self._run, name=self._THREAD_NAME, daemon=True
         )
         self._thread.start()
 
     def close(self, timeout: float = DEFAULT_CLOSE_TIMEOUT) -> None:
-        """Drain the queue, stop the writer thread and close the file.
+        """Drain the queue, stop the writer thread, release the destination.
 
-        Safe to call more than once. Best-effort: a wedged filesystem cannot be
+        Safe to call more than once. Best-effort: a wedged destination cannot be
         allowed to hang shutdown, so the drain is bounded by ``timeout``.
         """
         if self._closed.is_set():
@@ -396,17 +237,23 @@ class AuditSink:
                 self._queue.put_nowait(_SENTINEL)
             self._thread.join(timeout=timeout)
             self._thread = None
-        try:
-            if not self._stream.closed:
-                self._stream.flush()
-                self._stream.close()
-        except (OSError, ValueError):  # pragma: no cover - nothing left to do
-            # ValueError is "I/O operation on closed file". The writer may still
-            # be draining past the join timeout and may close the stream between
-            # the check above and the flush; letting that escape would abort
-            # shutdown — including the sibling sinks a composite is still
-            # closing, and the atexit hook.
-            pass
+        else:
+            # Never started. Records queued before ``start`` would otherwise be
+            # discarded in silence, with neither ``written`` nor ``dropped``
+            # accounting for them.
+            self._drain_remaining()
+
+        abandoned = self._queue.qsize()
+        if abandoned:
+            # The join timed out on a wedged destination. Those records are
+            # gone; say so, because an audit gap nobody can see is the one
+            # outcome this sink exists to avoid.
+            self._dropped += abandoned
+            self._log_failure(
+                f"{abandoned} audit record(s) still queued when the writer was "
+                f"given up on after {timeout:g}s"
+            )
+        self._on_close()
 
     # -- producer side ----------------------------------------------------
 
@@ -446,11 +293,7 @@ class AuditSink:
                 # post the sentinel into a full queue.
                 if self._closed.is_set():
                     return
-                # An idle server still ages its file. Without this, a daily
-                # rotation on a quiet deployment would not happen until the
-                # next record arrived — possibly days late, with a day's worth
-                # of records already in the wrong file.
-                self._rotate_on_idle()
+                self._on_idle()
                 continue
             if item is _SENTINEL:
                 self._drain_remaining()
@@ -477,6 +320,11 @@ class AuditSink:
         the flag is set lands *behind* the sentinel, and without this drain the
         writer would return without it — unwritten and uncounted, which is the
         one outcome an audit sink must not produce quietly.
+
+        It narrows that window rather than closing it: a record queued after the
+        final ``get_nowait`` below is still lost, and still uncounted. Closing it
+        completely would mean holding a lock across ``emit``, which is what the
+        whole queue design exists to avoid.
         """
         leftovers: list[str] = []
         while True:
@@ -488,6 +336,246 @@ class AuditSink:
                 leftovers.append(item)
         if leftovers:
             self._write_batch(leftovers)
+
+    # -- subclass hooks ---------------------------------------------------
+
+    def _write_batch(self, lines: list[str]) -> None:
+        raise NotImplementedError
+
+    def _on_idle(self) -> None:
+        """Called on the writer thread whenever the queue is empty."""
+
+    def _on_close(self) -> None:
+        """Release whatever the subclass owns, once the writer has stopped."""
+
+    def _describe(self) -> str:
+        """Short identifier for failure reports."""
+        return type(self).__name__
+
+    def _log_failure(self, message: str, *, producer: bool = False) -> None:
+        """Report a sink failure as an error, rate-limited.
+
+        The first failure is always reported; subsequent ones at most once per
+        interval, carrying the running totals so the operational log shows the
+        scale of the gap without being flooded by it.
+
+        The producer side (a full queue) and the writer side (a failed write,
+        rotation or compression) are rate-limited **separately**. They are
+        different faults with different fixes, and sharing one timer meant a
+        burst of queue-full reports could hide a disk failure for a minute.
+        """
+        now = time.monotonic()
+        last = self._last_producer_error_log if producer else self._last_error_log
+        if last and now - last < _ERROR_LOG_INTERVAL_SECONDS:
+            return
+        if producer:
+            self._last_producer_error_log = now
+        else:
+            self._last_error_log = now
+        logger.error(
+            "Audit sink failure: %s (sink=%s, dropped=%d, write_errors=%d). "
+            "Audit records are being lost; the server continues to serve.",
+            message,
+            self._describe(),
+            self._dropped,
+            self._errors,
+        )
+
+
+class ConsoleAuditSink(_QueuedSink):
+    """Writes audit lines to stderr, on a background thread.
+
+    **stderr, never stdout.** Under the stdio transport stdout *is* the JSON-RPC
+    channel: one audit line written there corrupts the client's stream and takes
+    the session down. The PRD calls this sink "console"; the stream is stderr,
+    and that is not configurable.
+
+    **Queued, like the file sink.** This wrote inline once, reasoning that a
+    console is a pipe or a terminal rather than a disk that can fill. A pipe is
+    exactly what fills: under stdio, stderr belongs to the MCP client, and a
+    client that does not drain it blocks the writer at the 64 KiB pipe buffer —
+    which, written inline, is the whole event loop. Since ``console`` is also
+    the *default* sink, that made enabling auditing alone enough to hang the
+    server. The queue bounds the damage to dropped records, which are counted.
+    """
+
+    _THREAD_NAME = "cb-mcp-audit-console"
+
+    def __init__(
+        self, stream: IO[str] | None = None, *, queue_size: int = DEFAULT_QUEUE_SIZE
+    ) -> None:
+        super().__init__(queue_size=queue_size)
+        self._stream = stream
+
+    def _describe(self) -> str:
+        return "console"
+
+    def _write_batch(self, lines: list[str]) -> None:
+        # Resolved per batch rather than held: pytest's capsys, and a host that
+        # redirects output, both replace ``sys.stderr`` after construction.
+        stream = self._stream if self._stream is not None else sys.stderr
+        buffered = 0
+        try:
+            for line in lines:
+                stream.write(line)
+                buffered += 1
+            stream.flush()
+        except (OSError, ValueError) as exc:
+            # Every line in this batch is lost, not just the ones that had not
+            # been handed to ``write`` yet: a buffered line that is never
+            # flushed never reaches the console. ``dropped`` is documented as
+            # the only way an operator learns of a gap, so it must account for
+            # all of them.
+            self._errors += 1
+            self._dropped += len(lines)
+            self._log_failure(f"failed to write to the console: {exc}")
+            return
+        self._written += buffered
+
+
+class CompositeAuditSink:
+    """Fans every record out to several sinks.
+
+    One failing sink must not stop the others: each is given the line
+    independently, and no sink's ``emit`` is allowed to raise anyway. Stats are
+    summed, so an operator reading ``get_server_configuration_status`` sees the
+    total records lost across destinations rather than having to add up a list.
+    """
+
+    def __init__(self, sinks: list[AuditSinkProtocol]) -> None:
+        self._sinks = list(sinks)
+
+    @property
+    def sinks(self) -> tuple[AuditSinkProtocol, ...]:
+        return tuple(self._sinks)
+
+    def start(self) -> None:
+        for sink in self._sinks:
+            sink.start()
+
+    def emit(self, line: str) -> None:
+        for sink in self._sinks:
+            sink.emit(line)
+
+    def close(self, timeout: float = DEFAULT_CLOSE_TIMEOUT) -> None:
+        for sink in self._sinks:
+            sink.close(timeout=timeout)
+
+    @property
+    def stats(self) -> dict[str, int]:
+        totals = {"written": 0, "dropped": 0, "write_errors": 0}
+        for sink in self._sinks:
+            for key, value in sink.stats.items():
+                totals[key] = totals.get(key, 0) + value
+        return totals
+
+
+class AuditSink(_QueuedSink):
+    """Writes audit lines to a per-process file on a background thread."""
+
+    _THREAD_NAME = "cb-mcp-audit-writer"
+
+    def __init__(
+        self,
+        path: str | os.PathLike[str],
+        *,
+        max_bytes: int,
+        max_backups: int,
+        interval_seconds: int = 0,
+        compress: bool = True,
+        queue_size: int = DEFAULT_QUEUE_SIZE,
+    ) -> None:
+        """Open the sink's file, creating parent directories as needed.
+
+        ``max_bytes`` of 0 turns size-based rotation off, ``interval_seconds``
+        of 0 turns age-based rotation off, and both off means one file that
+        grows for as long as the process runs. Only negative values are
+        rejected — they are typos, not instructions.
+
+        Raises:
+            OSError: if the file cannot be created or opened. The caller is
+                expected to report this and continue without auditing rather
+                than abort startup.
+        """
+        if max_bytes < 0:
+            raise ValueError(f"max_bytes must not be negative, got {max_bytes}.")
+        if max_backups < 0:
+            raise ValueError(f"max_backups must not be negative, got {max_backups}.")
+        if interval_seconds < 0:
+            raise ValueError(
+                f"interval_seconds must not be negative, got {interval_seconds}."
+            )
+
+        super().__init__(queue_size=queue_size)
+        self.path = process_scoped_path(path)
+        self._max_bytes = max_bytes
+        self._max_backups = max_backups
+        self._interval = interval_seconds
+        self._compress = compress
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Block-buffered text append: durability comes from the explicit flush
+        # at the end of each batch, not from the open mode. Opened eagerly so a
+        # misconfigured path fails at startup, where it can be reported, rather
+        # than on the first audited operation.
+        # Deliberately not a context manager: the stream is owned for the
+        # lifetime of the sink and written by the background thread. Closing it
+        # per record would defeat both the batching and the append semantics.
+        self._stream = open(self.path, "a", encoding="utf-8")  # noqa: SIM115
+        self._size = self.path.stat().st_size
+        self._rotate_at = self._next_rotation_deadline(from_existing_file=True)
+
+    def _next_rotation_deadline(self, *, from_existing_file: bool = False) -> float:
+        """When the interval trigger next falls due, or ``inf`` when it is off.
+
+        On open the clock is anchored to the file's **last modification time**
+        rather than to now, so a restart does not hand the live file a fresh
+        interval it has not earned. A file last written longer ago than the
+        interval is therefore already due and rolls over on the first record —
+        which is what an operator asking for daily files expects after the
+        server was down for a week. Once running, each rotation sets the next
+        deadline from the clock, so a busy file cannot push its own deadline
+        forward by being written to.
+        """
+        if self._interval <= 0:
+            return float("inf")
+        anchor = time.time()
+        if from_existing_file:
+            try:
+                stat = self.path.stat()
+                if stat.st_size > 0:
+                    anchor = stat.st_mtime
+            except OSError:  # pragma: no cover - file was just opened
+                pass
+        return anchor + self._interval
+
+    # -- file-specific hooks ----------------------------------------------
+
+    def _describe(self) -> str:
+        return str(self.path)
+
+    def _on_idle(self) -> None:
+        """An idle server still ages its file.
+
+        Without this, a daily rotation on a quiet deployment would not happen
+        until the next record arrived — possibly days late, with a day's worth
+        of records already in the wrong file.
+        """
+        self._rotate_on_idle()
+
+    def _on_close(self) -> None:
+        """Flush and close the live file once the writer has stopped."""
+        try:
+            if not self._stream.closed:
+                self._stream.flush()
+                self._stream.close()
+        except (OSError, ValueError):  # pragma: no cover - nothing left to do
+            # ValueError is "I/O operation on closed file". The writer may still
+            # be draining past the join timeout and may close the stream between
+            # the check above and the flush; letting that escape would abort
+            # shutdown — including the sibling sinks a composite is still
+            # closing, and the atexit hook.
+            pass
 
     def _reopen_if_closed(self) -> None:
         """Re-establish the stream if it is not open.
@@ -513,13 +601,15 @@ class AuditSink:
         self._size = self.path.stat().st_size
 
     def _write_batch(self, lines: list[str]) -> None:
+        buffered = 0
         for line in lines:
             try:
+                encoded_length = len(line.encode("utf-8"))
                 self._reopen_if_closed()
-                self._rotate_if_needed(len(line.encode("utf-8")))
+                self._rotate_if_needed(encoded_length)
                 self._stream.write(line)
-                self._size += len(line.encode("utf-8"))
-                self._written += 1
+                self._size += encoded_length
+                buffered += 1
             except (OSError, ValueError) as exc:
                 # ValueError is "I/O operation on closed file": reachable when
                 # ``close`` closes the stream while this thread is still
@@ -531,8 +621,16 @@ class AuditSink:
             if not self._stream.closed:
                 self._stream.flush()
         except (OSError, ValueError) as exc:
+            # The records counted as buffered above never reached the disk. A
+            # full disk fails here, not at ``write`` — so counting them as
+            # written at write time reported a clean audit trail for records
+            # that were lost, and ``dropped`` is documented as the only way an
+            # operator discovers a gap.
             self._errors += 1
+            self._dropped += buffered
+            buffered = 0
             self._log_failure(f"failed to flush audit file: {exc}")
+        self._written += buffered
 
     def _interval_is_due(self) -> bool:
         """Whether the interval has elapsed, skipping the period if nothing was written.
@@ -691,7 +789,12 @@ class AuditSink:
         """
         parent = self.path.parent
         try:
-            candidates = list(parent.glob(f"{self.path.name}.*"))
+            # The live filename is escaped before it becomes a glob pattern.
+            # Unescaped, a path like ``audit[1].log`` reads ``[1]`` as a
+            # character class, matches nothing, and retention silently stops
+            # pruning — the directory grows without limit while max_backups
+            # claims to bound it.
+            candidates = list(parent.glob(f"{glob.escape(self.path.name)}.*"))
         except OSError:  # pragma: no cover - directory vanished mid-rotation
             return []
         return sorted(
@@ -716,35 +819,6 @@ class AuditSink:
                 self._log_failure(
                     f"failed to delete the old audit backup {path}: {exc}"
                 )
-
-    def _log_failure(self, message: str, *, producer: bool = False) -> None:
-        """Report a sink failure as an error, rate-limited.
-
-        The first failure is always reported; subsequent ones at most once per
-        interval, carrying the running totals so the operational log shows the
-        scale of the gap without being flooded by it.
-
-        The producer side (a full queue) and the writer side (a failed write,
-        rotation or compression) are rate-limited **separately**. They are
-        different faults with different fixes, and sharing one timer meant a
-        burst of queue-full reports could hide a disk failure for a minute.
-        """
-        now = time.monotonic()
-        last = self._last_producer_error_log if producer else self._last_error_log
-        if last and now - last < _ERROR_LOG_INTERVAL_SECONDS:
-            return
-        if producer:
-            self._last_producer_error_log = now
-        else:
-            self._last_error_log = now
-        logger.error(
-            "Audit sink failure: %s (file=%s, dropped=%d, write_errors=%d). "
-            "Audit records are being lost; the server continues to serve.",
-            message,
-            self.path,
-            self._dropped,
-            self._errors,
-        )
 
 
 def _with_gz(path: Path) -> Path:
