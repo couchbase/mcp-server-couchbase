@@ -12,7 +12,11 @@ jobs:
     # workflow_run chains always execute on the default branch, so head_branch is always
     # "main" by this point — we use the artifact to recover the original tag name instead.
     runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion == 'success'
+    # workflow_run matches by name only, so reject runs from forks or PR events.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      contains(fromJSON('["workflow_run", "workflow_dispatch"]'), github.event.workflow_run.event)
     permissions:
       actions: read
     outputs:
@@ -31,7 +35,7 @@ jobs:
         run: |
           VERSION=$(tr -d '\r\n' < version.txt)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+'; then
+          if echo "$VERSION" | grep -qxE 'v[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*'; then
             echo "is-version-tag=true" >> "$GITHUB_OUTPUT"
           else
             echo "is-version-tag=false" >> "$GITHUB_OUTPUT"

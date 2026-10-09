@@ -27,7 +27,13 @@ jobs:
     name: Publish Docker Image (public) via Jenkins
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # workflow_run matches by name only, so reject runs from forks or PR events.
+    if: >-
+      github.event_name == 'workflow_dispatch' || (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        contains(fromJSON('["workflow_run", "workflow_dispatch"]'), github.event.workflow_run.event)
+      )
     steps:
       - name: Download version artifact
         if: github.event_name == 'workflow_run'
@@ -41,6 +47,15 @@ jobs:
         if: github.event_name == 'workflow_run'
         id: artifact-version
         run: echo "version=$(cat version.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Validate version
+        env:
+          VERSION: ${{ github.event.inputs.version || steps.artifact-version.outputs.version || github.event.workflow_run.head_branch }}
+        run: |
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*$ ]]; then
+            echo "::error::Refusing to proceed: VERSION '$VERSION' is not a valid version tag"
+            exit 1
+          fi
 
       - name: Check if stable release
         id: check-stable
@@ -61,10 +76,10 @@ jobs:
           set -eo pipefail
           queued_job_url=$(curl -X POST \
             "$JENKINS_BASE_URL/job/$JOB_NAME/buildWithParameters" \
-            -d "PRODUCT=${PRODUCT}" \
-            -d "VERSION=${VERSION}" \
-            -d "REGISTRY=${REGISTRY}" \
-            -d "TAG_LATEST=${TAG_LATEST}" \
+            --data-urlencode "PRODUCT=${PRODUCT}" \
+            --data-urlencode "VERSION=${VERSION}" \
+            --data-urlencode "REGISTRY=${REGISTRY}" \
+            --data-urlencode "TAG_LATEST=${TAG_LATEST}" \
             --user "$JENKINS_USER:$JENKINS_API_TOKEN" \
             --fail -s -D - -o /dev/null | grep -i "location:" | cut -d' ' -f2 | tr -d '\r')
 
