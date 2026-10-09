@@ -24,6 +24,7 @@ import sys
 import time
 from pathlib import Path
 
+import httpx
 import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
@@ -117,6 +118,13 @@ def test_workers_serve_fresh_connections_and_log_per_process(workers_server):
         return [await _list_tools_once(url) for _ in range(CONNECTIONS)]
 
     tool_lists = asyncio.run(run())
+
+    # The liveness endpoint is served by every worker, outside OAuth.
+    health_url = url.removesuffix("/mcp") + "/health"
+    for _ in range(CONNECTIONS):
+        response = httpx.get(health_url, timeout=5)
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok", "server": "operational"}
 
     assert tool_lists[0], "no tools registered"
     assert all(names == tool_lists[0] for names in tool_lists), (

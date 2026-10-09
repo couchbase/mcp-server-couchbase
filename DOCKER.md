@@ -413,6 +413,33 @@ The server logs to `stderr` by default. Logging is configured with the `CB_MCP_L
 
 For more details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/logging.html).
 
+### Health Check
+
+With `CB_MCP_TRANSPORT=http`, the server answers `GET /health` with `{"status": "ok", "server": "<server>"}` on the same port as the MCP endpoint. It is a liveness check: it confirms the server is up and serving HTTP, does not connect to the cluster, and needs no authentication even when OAuth is enabled. It is not available on `stdio`, which has no HTTP listener.
+
+Kubernetes:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
+Docker Compose (the image has no `curl`, so the check uses Python):
+
+```yaml
+healthcheck:
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+  interval: 10s
+  timeout: 5s
+  retries: 3
+```
+
+Use port `8001` for the `operational-insights` server, or whatever `CB_MCP_PORT` is set to. If `CB_MCP_HOST` is not `0.0.0.0`, make sure the probe can reach that address.
+
 ### OAuth 2.1 Authorization
 
 When running with `CB_MCP_TRANSPORT=http`, the server can act as an **OAuth 2.1 resource server**: it validates incoming bearer JWTs against your identity provider's JWKS. It is provider-agnostic (any OAuth 2.1 / OIDC provider that publishes a JWKS — Auth0, Okta, Keycloak, AWS Cognito, Microsoft Entra, etc.) and does **not** issue tokens or manage users. OAuth settings are ignored on `stdio`.

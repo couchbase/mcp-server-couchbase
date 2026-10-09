@@ -38,6 +38,10 @@ NETWORK_TRANSPORTS_SDK_MAPPING = {
     "sse": "sse",
 }
 
+# Liveness endpoint served alongside the MCP endpoint on network transports,
+# for container orchestrators and load balancers. See cb_mcp.core.app.
+HEALTH_CHECK_PATH = "/health"
+
 # The MCP spec ties OAuth to streamable-HTTP transport specifically (not SSE),
 # so we gate the OAuth wiring strictly on this transport name. SSE is a
 # network transport but is explicitly out of scope for OAuth in this build.

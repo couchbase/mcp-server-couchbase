@@ -20,8 +20,11 @@ from typing import Any
 from fastmcp import FastMCP
 from fastmcp.server.auth import AuthProvider
 from fastmcp.tools import FunctionTool
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from ..utils.constants import (
+    HEALTH_CHECK_PATH,
     LOGGER_NAMESPACE,
     NETWORK_TRANSPORTS,
     NETWORK_TRANSPORTS_SDK_MAPPING,
@@ -125,6 +128,7 @@ def build_app(
             logger.info("Closing MCP server")
 
     mcp = FastMCP(spec.fastmcp_name, lifespan=app_lifespan, auth=auth)
+    _add_health_check(mcp, spec)
 
     logger.info(
         f"Registering {len(tools)} tool(s) for server '{spec.id}' "
@@ -140,6 +144,26 @@ def build_app(
     logger.info(f"Registered {len(tools)} tool(s) for server '{spec.id}'")
 
     return mcp
+
+
+def _add_health_check(mcp: FastMCP, spec: ServerSpec) -> None:
+    """Serve ``GET /health`` next to the MCP endpoint on network transports.
+
+    A *liveness* check for container orchestrators and load balancers: it
+    answers whenever this process can serve HTTP, and deliberately does not
+    touch the backing cluster. Connections are opened lazily on first tool
+    call, and a cluster outage must not make an orchestrator restart
+    containers that are themselves healthy.
+
+    Unauthenticated by design. FastMCP applies OAuth to the MCP endpoint
+    only, so probes keep working when OAuth is enabled, and the response
+    carries nothing beyond the server id. Present in every ``--workers``
+    process too, since each builds its app through here.
+    """
+
+    @mcp.custom_route(HEALTH_CHECK_PATH, methods=["GET"], include_in_schema=False)
+    async def health(_request: Request) -> JSONResponse:
+        return JSONResponse({"status": "ok", "server": spec.id})
 
 
 def run_app(

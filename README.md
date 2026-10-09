@@ -791,6 +791,14 @@ A good starting point is the number of CPU cores available to the server. With m
 - Each worker writes its own log files, named with the host and process id, for example `mcp_server.<host>.<pid>.info.log`. A restarted worker starts a new set of files.
 - The [Operational Insights server](#operational-insights-server) supports only one worker, because its async query handles are held in process memory.
 
+### Health Check
+
+In HTTP mode the server also answers `GET /health` (for example <http://localhost:8000/health>) with `{"status": "ok", "server": "operational"}`. Use it for container liveness probes and load-balancer health checks:
+
+- It reports that the server process is up and serving HTTP. It does not connect to the cluster, so a cluster outage does not make healthy containers restart.
+- It needs no authentication, even when OAuth is enabled; it returns nothing beyond the server name.
+- It is served by every worker when running with `--workers`.
+
 ### MCP Client Configuration
 
 ```json
