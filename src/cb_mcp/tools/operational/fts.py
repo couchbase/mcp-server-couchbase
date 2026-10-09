@@ -5,11 +5,12 @@ management.
 This module covers listing Search indexes, reading a single index's definition,
 executing/explaining FTS queries, and creating/updating (upsert_fts_index) or
 dropping (drop_fts_index) an index definition. Both scope-level (scoped) indexes and
-cluster-level ("legacy") indexes are supported. Vector search is explicitly out of
-scope here — a raw FTS query body (match, match_phrase, term, conjuncts, disjuncts,
-geo, date/numeric range, query_string, ...) is supported via a raw-JSON passthrough,
-but vector queries require the SDK's SearchRequest + VectorSearch combination, which
-these tools do not build.
+cluster-level ("legacy") indexes are supported. Vector search querying is out of
+scope here (see run_search_vector_search) — a raw FTS query body (match, match_phrase,
+term, conjuncts, disjuncts, geo, date/numeric range, query_string, ...) is supported
+via a raw-JSON passthrough, but vector queries require the SDK's SearchRequest +
+VectorSearch combination, which these tools do not build. A vector field mapping in
+upsert_fts_index's params is unaffected by this — see its own docstring.
 
 upsert_fts_index and drop_fts_index are write operations — not loaded when
 READ_ONLY_MODE is True — and require the couchbase-mcp:write OAuth scope.
@@ -358,9 +359,13 @@ def upsert_fts_index(
     get_fts_index_definition's "params" field) — e.g. {"doc_config": {"mode":
     "scope.collection.type_field"}, "mapping": {...}}. Omitting it produces the Search
     service's default mapping (typically dynamic — indexes every field it finds);
-    pass an explicit params.mapping for anything more specific. plan_params controls
-    index partitioning/replicas (e.g. numReplicas); source_params and source_uuid are
-    passed through to the SDK as-is and rarely need to be set.
+    pass an explicit params.mapping for anything more specific. A mapped field can be
+    a vector field (type: "vector", with dims/similarity) — similarity here is
+    "dot_product"/"cosine"/"l2_norm", not GSI's DOT/COSINE/L2; for the vector field
+    mapping JSON shape, see
+    https://docs.couchbase.com/server/current/vector-search/create-vector-search-index-rest-api.html.
+    plan_params controls index partitioning/replicas (e.g. numReplicas); source_params
+    and source_uuid are passed through to the SDK as-is and rarely need to be set.
 
     Returns {"success": True, "index_name", "bucket", "scope"} on success, or
     {"success": False, "error": ...} on failure — e.g. an invalid mapping or a stale

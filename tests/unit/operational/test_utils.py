@@ -28,8 +28,10 @@ from cb_mcp.utils.operational.connection_string import validate_connection_setti
 from cb_mcp.utils.operational.context import get_cluster_connection
 from cb_mcp.utils.operational.index_utils import (
     _build_query_params,
+    classify_vector_index,
     clean_index_definition,
     fetch_indexes_from_rest_api,
+    normalize_vector_type,
     process_index_data_from_query,
     process_index_data_from_rest_api,
     validate_filter_params,
@@ -350,6 +352,233 @@ class TestIndexUtilsFunctions:
 
         assert result is not None
         assert result["isPrimary"] is True
+
+    def test_classify_vector_index_hyperscale(self) -> None:
+        definition = "CREATE VECTOR INDEX `idx` ON `b`(`embedding` VECTOR) WITH {}"
+        assert classify_vector_index(["`embedding` VECTOR"], definition) == (
+            True,
+            "hyperscale",
+        )
+
+    def test_classify_vector_index_composite_with_scalar_keys(self) -> None:
+        definition = "CREATE INDEX `idx` ON `b`(`type`,`embedding` VECTOR) WITH {}"
+        assert classify_vector_index(["`type`", "`embedding` VECTOR"], definition) == (
+            True,
+            "composite",
+        )
+
+    def test_classify_vector_index_composite_with_zero_scalar_keys(self) -> None:
+        """Regression test (flagged in PR review): a Composite Vector Index
+        created with zero scalar keys has exactly one index_key entry, the
+        vector key alone -- identical in shape to Hyperscale's index_key.
+        Key count alone would misclassify this as hyperscale; the
+        definition's leading keyword ("CREATE INDEX", not "CREATE VECTOR
+        INDEX") is what actually disambiguates it, confirmed live."""
+        definition = "CREATE INDEX `idx` ON `b`(`embedding` VECTOR) USING GSI WITH {}"
+        assert classify_vector_index(["`embedding` VECTOR"], definition) == (
+            True,
+            "composite",
+        )
+
+    def test_classify_vector_index_is_case_insensitive(self) -> None:
+        """Couchbase reformats some casing when it echoes a definition back
+        (e.g. ON -> on) -- confirmed live -- so the check must not assume
+        the submitted casing survives verbatim."""
+        definition = "create vector index `idx` on `b`(`embedding` VECTOR) with {}"
+        assert classify_vector_index(["`embedding` VECTOR"], definition) == (
+            True,
+            "hyperscale",
+        )
+
+    def test_classify_vector_index_non_vector(self) -> None:
+        definition = "CREATE INDEX `idx` ON `b`(`type`,`category`) WITH {}"
+        assert classify_vector_index(["`type`", "`category`"], definition) == (
+            False,
+            None,
+        )
+
+    def test_classify_vector_index_empty_or_missing_key(self) -> None:
+        assert classify_vector_index([], "CREATE INDEX `idx` ON `b`() WITH {}") == (
+            False,
+            None,
+        )
+        assert classify_vector_index(None, None) == (False, None)
+
+    def test_process_index_data_from_query_detects_hyperscale_vector(self) -> None:
+        """A single-entry index_key (the vector key alone) resolves to
+        vector_type="hyperscale" -- confirmed against a live 8.0+ cluster via
+        classify_vector_index."""
+        idx = {
+            "name": "idx_vec",
+            "bucket": "b",
+            "scope": "s",
+            "collection": "c",
+            "state": "online",
+            "index_key": ["`embedding` VECTOR"],
+            "metadata": {
+                "definition": "CREATE VECTOR INDEX `idx_vec` ON `b`.`s`.`c` (`embedding` VECTOR) WITH {}",
+                "last_scan_time": None,
+            },
+        }
+
+        result = process_index_data_from_query(idx)
+
+        assert result["is_vector"] is True
+        assert result["vector_type"] == "hyperscale"
+
+    def test_process_index_data_from_query_detects_composite_vector(self) -> None:
+        """A multi-entry index_key (vector key plus scalar keys) resolves to
+        vector_type="composite"."""
+        idx = {
+            "name": "idx_vec",
+            "bucket": "b",
+            "scope": "s",
+            "collection": "c",
+            "state": "online",
+            "index_key": ["`type`", "`embedding` VECTOR"],
+            "metadata": {
+                "definition": "CREATE INDEX `idx_vec` ON `b`.`s`.`c` (`type`, `embedding` VECTOR) USING GSI WITH {}",
+                "last_scan_time": None,
+            },
+        }
+
+        result = process_index_data_from_query(idx)
+
+        assert result["is_vector"] is True
+        assert result["vector_type"] == "composite"
+
+    def test_process_index_data_from_query_composite_with_zero_scalar_keys(
+        self,
+    ) -> None:
+        """Regression test (flagged in PR review): create_query_index allows
+        a Composite Vector Index with zero scalar keys, which has the same
+        single-entry index_key as Hyperscale -- must still classify as
+        "composite" via the definition's leading keyword, not "hyperscale"."""
+        idx = {
+            "name": "idx_vec",
+            "bucket": "b",
+            "scope": "s",
+            "collection": "c",
+            "state": "online",
+            "index_key": ["`embedding` VECTOR"],
+            "metadata": {
+                "definition": "CREATE INDEX `idx_vec` ON `b`.`s`.`c` (`embedding` VECTOR) USING GSI WITH {}",
+                "last_scan_time": None,
+            },
+        }
+
+        result = process_index_data_from_query(idx)
+
+        assert result["is_vector"] is True
+        assert result["vector_type"] == "composite"
+
+    def test_process_index_data_from_query_scalar_is_not_vector(self) -> None:
+        """A plain scalar index_key sets is_vector=False and omits vector_type."""
+        idx = {
+            "name": "idx_scalar",
+            "bucket": "b",
+            "scope": "s",
+            "collection": "c",
+            "state": "online",
+            "index_key": ["`email`"],
+            "metadata": {
+                "definition": "CREATE INDEX `idx_scalar` ON `b`.`s`.`c` (`email`)",
+                "last_scan_time": None,
+            },
+        }
+
+        result = process_index_data_from_query(idx)
+
+        assert result["is_vector"] is False
+        assert "vector_type" not in result
+
+    def test_process_index_data_from_rest_api_hyperscale_vector(self) -> None:
+        """REST's isVectorIndex/indexType are surfaced directly -- no text
+        heuristic needed on this path, unlike the query-service row processor."""
+        idx = {
+            "name": "idx_vec",
+            "definition": "CREATE VECTOR INDEX `idx_vec` ON `b` (`embedding` VECTOR) WITH {}",
+            "status": "Ready",
+            "bucket": "b",
+            "lastScanTime": "NA",
+            "isVectorIndex": True,
+            "indexType": "Hyperscale Vector Index",
+        }
+
+        result = process_index_data_from_rest_api(idx)
+
+        assert result["is_vector"] is True
+        assert result["vector_type"] == "hyperscale"
+
+    def test_process_index_data_from_rest_api_composite_vector(self) -> None:
+        """Confirmed against a live Couchbase Server 8.0.1 cluster: a
+        Composite Vector Index's indexType is its storage engine name (e.g.
+        "plasma"), not a distinct vector-aware label -- same value a plain
+        scalar GSI index would report."""
+        idx = {
+            "name": "idx_vec",
+            "definition": "CREATE INDEX `idx_vec` ON `b` (type, `embedding` VECTOR) USING GSI WITH {}",
+            "status": "Ready",
+            "bucket": "b",
+            "lastScanTime": "NA",
+            "isVectorIndex": True,
+            "indexType": "plasma",
+        }
+
+        result = process_index_data_from_rest_api(idx)
+
+        assert result["is_vector"] is True
+        assert result["vector_type"] == "composite"
+
+    def test_process_index_data_from_rest_api_vector_missing_index_type_defaults_to_composite(
+        self,
+    ) -> None:
+        """isVectorIndex=True with no indexType at all still resolves by
+        elimination -- not "hyperscale" -> must be "composite", never
+        "unknown" (there's no ambiguous-vector-type outcome once is_vector is
+        confirmed; "unknown" is reserved for when REST itself is
+        unreachable, which is a different code path)."""
+        idx = {
+            "name": "idx_vec",
+            "definition": "CREATE VECTOR INDEX `idx_vec` ON `b` (`embedding` VECTOR) WITH {}",
+            "status": "Ready",
+            "bucket": "b",
+            "lastScanTime": "NA",
+            "isVectorIndex": True,
+        }
+
+        result = process_index_data_from_rest_api(idx)
+
+        assert result["is_vector"] is True
+        assert result["vector_type"] == "composite"
+
+    def test_process_index_data_from_rest_api_scalar_has_no_vector_type(self) -> None:
+        """A scalar index (isVectorIndex absent/False) gets is_vector=False
+        and no vector_type key at all -- not vector_type=None."""
+        idx = {
+            "name": "idx_scalar",
+            "definition": "CREATE INDEX `idx_scalar` ON `b` (`email`)",
+            "status": "Ready",
+            "bucket": "b",
+            "lastScanTime": "NA",
+        }
+
+        result = process_index_data_from_rest_api(idx)
+
+        assert result["is_vector"] is False
+        assert "vector_type" not in result
+
+    def test_normalize_vector_type(self) -> None:
+        """Only "hyperscale" is ever positively matched -- everything else
+        (including "plasma", Composite's real reported value, and a missing
+        field) resolves to "composite" by elimination. See the function's
+        docstring: this never returns "unknown" itself."""
+        assert normalize_vector_type("Hyperscale Vector Index") == "hyperscale"
+        assert normalize_vector_type("hyperscale vector index") == "hyperscale"
+        assert normalize_vector_type("plasma") == "composite"
+        assert normalize_vector_type("something else") == "composite"
+        assert normalize_vector_type(None) == "composite"
+        assert normalize_vector_type("") == "composite"
 
     def test_process_index_data_from_query_last_scan_time(self) -> None:
         """lastScanTime should be included from metadata."""
@@ -1173,6 +1402,112 @@ class TestListIndexesVersionRouting:
         mock_rest.assert_not_called()
         assert len(result) == 1
         assert result[0]["name"] == "idx1"
+
+    def test_version_8_hyperscale_index_classified_with_no_rest_call(self) -> None:
+        """A single-key (vector-only) system:indexes row resolves to
+        vector_type="hyperscale" from index_key alone -- fetch_indexes_from_rest_api
+        must never be called on this path (confirmed live: a Hyperscale
+        index's index_key has exactly one entry)."""
+        mock_ctx = MagicMock()
+        mock_cluster = MagicMock()
+        info = MagicMock()
+        info.nodes = [{"version": "8.0.0-enterprise"}]
+        mock_cluster.cluster_info.return_value = info
+
+        with (
+            patch(
+                "cb_mcp.tools.operational.index.get_settings",
+                return_value={
+                    "connection_string": "couchbase://localhost",
+                    "username": "u",
+                    "password": "p",
+                },
+            ),
+            patch(
+                "cb_mcp.tools.operational.index.get_cluster_connection",
+                return_value=mock_cluster,
+            ),
+            patch(
+                "cb_mcp.tools.operational.index.run_cluster_query",
+                return_value=[
+                    {
+                        "name": "idx_vec",
+                        "bucket": "b",
+                        "scope": "s",
+                        "collection": "c",
+                        "state": "online",
+                        "index_key": ["`embedding` VECTOR"],
+                        "metadata": {
+                            "definition": (
+                                "CREATE VECTOR INDEX idx_vec ON b.s.c "
+                                "(embedding VECTOR) WITH {}"
+                            ),
+                            "last_scan_time": None,
+                        },
+                    }
+                ],
+            ),
+            patch(
+                "cb_mcp.tools.operational.index.fetch_indexes_from_rest_api"
+            ) as mock_rest,
+        ):
+            result = list_indexes(mock_ctx)
+
+        mock_rest.assert_not_called()
+        assert result[0]["is_vector"] is True
+        assert result[0]["vector_type"] == "hyperscale"
+
+    def test_version_8_composite_index_classified_with_no_rest_call(self) -> None:
+        """A multi-key system:indexes row (vector key plus scalar keys)
+        resolves to vector_type="composite" from index_key alone."""
+        mock_ctx = MagicMock()
+        mock_cluster = MagicMock()
+        info = MagicMock()
+        info.nodes = [{"version": "8.0.0-enterprise"}]
+        mock_cluster.cluster_info.return_value = info
+
+        with (
+            patch(
+                "cb_mcp.tools.operational.index.get_settings",
+                return_value={
+                    "connection_string": "couchbase://localhost",
+                    "username": "u",
+                    "password": "p",
+                },
+            ),
+            patch(
+                "cb_mcp.tools.operational.index.get_cluster_connection",
+                return_value=mock_cluster,
+            ),
+            patch(
+                "cb_mcp.tools.operational.index.run_cluster_query",
+                return_value=[
+                    {
+                        "name": "idx_vec",
+                        "bucket": "b",
+                        "scope": "s",
+                        "collection": "c",
+                        "state": "online",
+                        "index_key": ["`type`", "`embedding` VECTOR"],
+                        "metadata": {
+                            "definition": (
+                                "CREATE INDEX idx_vec ON b.s.c "
+                                "(type, embedding VECTOR) USING GSI WITH {}"
+                            ),
+                            "last_scan_time": None,
+                        },
+                    }
+                ],
+            ),
+            patch(
+                "cb_mcp.tools.operational.index.fetch_indexes_from_rest_api"
+            ) as mock_rest,
+        ):
+            result = list_indexes(mock_ctx)
+
+        mock_rest.assert_not_called()
+        assert result[0]["is_vector"] is True
+        assert result[0]["vector_type"] == "composite"
 
     def test_version_7_uses_rest_api(self) -> None:
         """Cluster version < 8 should fall back to the REST API."""

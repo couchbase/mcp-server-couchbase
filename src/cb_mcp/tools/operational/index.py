@@ -2,6 +2,10 @@
 Tools for index operations.
 
 This module contains tools for listing and managing indexes in the Couchbase cluster and getting index recommendations using the Couchbase Index Advisor.
+
+create_index is deprecated in favor of create_query_index (vector_index.py),
+which covers scalar indexes plus both GSI vector index shapes. create_index is
+kept for backward compatibility, not removed.
 """
 
 import logging
@@ -188,7 +192,9 @@ def list_indexes(
     Filters must be provided hierarchically: scope requires bucket, collection requires both, index requires all three.
     Set ``return_raw_index_stats=True`` to get the unprocessed source row for each index.
 
-    Each result contains: name, definition (CREATE INDEX statement), status, isPrimary, bucket, scope, collection, lastScanTime.
+    Each result contains: name, definition (CREATE INDEX statement), status, isPrimary, bucket, scope, collection, lastScanTime,
+    is_vector (True for a Hyperscale or Composite Vector Index), and, only when is_vector is True, vector_type
+    ("hyperscale" or "composite").
     If a required field is missing, the entry contains warning and raw_index_stats instead.
 
     Source depends on cluster version: v8+ queries ``system:indexes`` via the
@@ -381,10 +387,17 @@ def create_index(
     num_replicas: int | None = None,
     ignore_if_exists: bool = False,
 ) -> dict[str, Any]:
-    """Create a non-vector (scalar) GSI secondary index on a collection.
-    This is the preferred way to create a scalar index — use it instead of a raw CREATE
-    INDEX statement via run_sql_plus_plus_query. It only creates scalar GSI indexes; it
-    cannot create vector indexes.
+    """[DEPRECATED] Create a non-vector (scalar) GSI secondary index on a collection.
+
+    Deprecated: prefer create_query_index(index_type="scalar", ...) instead, which
+    covers this tool's entire surface plus vector indexes. create_index is kept for
+    backward compatibility only, is not scheduled for near-term removal, and will be
+    removed in a future 2.0 release. Existing callers do not need to migrate
+    immediately.
+
+    This was the preferred way to create a scalar index — use it instead of a raw
+    CREATE INDEX statement via run_sql_plus_plus_query. It only creates scalar GSI
+    indexes; it cannot create vector indexes.
 
     By default the index is created deferred (not built). The recommended next step is to
     call build_index to trigger the build, then list_indexes to confirm it reaches the
@@ -443,8 +456,9 @@ def build_index(
 
     This builds every index in the collection currently in the 'deferred' state — you
     cannot target a single index by name, and this includes vector indexes if any are
-    deferred (only create_index is restricted to scalar indexes; build is not). If there
-    are no deferred indexes, this is a harmless no-op.
+    deferred (create_query_index can create both scalar and vector indexes; the deprecated
+    create_index is scalar-only, but build is not restricted either way). If there are no
+    deferred indexes, this is a harmless no-op.
 
     The build runs asynchronously: success means the build was triggered, not that it has
     finished. Use list_indexes to check when the index(es) reach the 'online' state.
