@@ -12,10 +12,14 @@ Coverage map:
   - positional argument forwarding compatibility
 """
 
+import inspect
 from types import SimpleNamespace
 
 import pytest
-from fastmcp import Context
+from fastmcp import Client, Context, FastMCP
+from fastmcp.client.elicitation import ElicitResult
+from fastmcp.exceptions import ToolError
+from fastmcp.tools import FunctionTool
 
 from cb_mcp.tools.operational import TOOL_ANNOTATIONS, get_tools
 from cb_mcp.utils.config import parse_tool_names
@@ -176,8 +180,12 @@ class TestWrapWithConfirmation:
                     session=FakeSession(supports_elicitation),
                 )
 
-            async def elicit(self, message, schema):
-                return await elicit_callback(message, schema)
+            async def elicit(self, **kwargs):
+                # Bind against FastMCP's real signature, so a keyword the
+                # real Context.elicit does not accept fails here exactly as
+                # it would in production (it once used ``schema=``).
+                inspect.signature(Context.elicit).bind(self, **kwargs)
+                return await elicit_callback(kwargs["message"], kwargs["response_type"])
 
         return FakeContext()
 
@@ -436,3 +444,106 @@ class TestWrapWithConfirmation:
         result = await wrapped(ctx=fake_ctx)
         assert result is True
         assert called is True
+
+
+class TestConfirmationPrompt:
+    """What the user is shown and asked to fill in when confirming a tool call.
+
+    Coverage:
+    - The confirmation message names the tool and its key arguments.
+    - ``ConfirmationResult`` produces a valid JSON schema with a boolean
+      ``confirm`` field defaulting to true.
+
+    Whether the prompt is actually sent is covered elsewhere: the fake
+    context in ``TestWrapWithConfirmation`` is checked against FastMCP's real
+    ``Context.elicit`` signature, and ``TestConfirmationEndToEnd`` runs the
+    round trip against a real FastMCP server and client. Clients that do not
+    advertise elicitation support are handled by capability detection in the
+    wrapper, not by anything in this class.
+    """
+
+    def test_confirmation_message_is_readable(self):
+        """Confirmation message should be human-readable and informative."""
+        msg = _build_confirmation_message(
+            "upsert_document_by_id",
+            {
+                "bucket_name": "travel-sample",
+                "document_id": "hotel_001",
+            },
+        )
+        assert "upsert_document_by_id" in msg
+        assert "travel-sample" in msg
+        assert "hotel_001" in msg
+        # Message should not contain technical jargon
+        assert "{" not in msg or "{{" in msg  # No raw JSON
+
+    def test_confirmation_result_schema_is_valid(self):
+        """ConfirmationResult must generate valid JSON schema."""
+        schema = ConfirmationResult.model_json_schema()
+
+        # Schema must be valid JSON Schema
+        assert "type" in schema
+        assert "properties" in schema
+        assert "confirm" in schema["properties"]
+
+        # The 'confirm' property should be boolean
+        confirm_prop = schema["properties"]["confirm"]
+        assert confirm_prop.get("type") == "boolean"
+        assert confirm_prop.get("default") is True
+
+
+class TestConfirmationEndToEnd:
+    """A real FastMCP server and client, in memory: no fakes on either side.
+
+    The fake-context tests above check the wrapper's decisions; these check
+    that the elicitation round trip actually works against FastMCP itself,
+    which is what the fakes once hid (``ctx.elicit(schema=...)`` raised
+    ``TypeError`` on every confirmed call).
+    """
+
+    @staticmethod
+    def _server(calls: list[str]) -> FastMCP:
+        def delete_thing(ctx: Context, document_id: str) -> str:
+            calls.append(document_id)
+            return f"deleted {document_id}"
+
+        mcp = FastMCP("confirmation-e2e")
+        mcp.add_tool(FunctionTool.from_function(wrap_with_confirmation(delete_thing)))
+        return mcp
+
+    @pytest.mark.asyncio
+    async def test_confirmed_call_runs_the_tool(self):
+        calls: list[str] = []
+        prompts: list[str] = []
+
+        async def confirm(message, response_type, params, context):
+            prompts.append(message)
+            return response_type(confirm=True)
+
+        async with Client(self._server(calls), elicitation_handler=confirm) as client:
+            result = await client.call_tool("delete_thing", {"document_id": "doc-1"})
+
+        assert calls == ["doc-1"]
+        assert result.data == "deleted doc-1"
+        assert prompts and "delete_thing" in prompts[0] and "doc-1" in prompts[0]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            pytest.param(lambda rt: rt(confirm=False), id="accept-confirm-false"),
+            pytest.param(lambda rt: ElicitResult(action="decline"), id="decline"),
+            pytest.param(lambda rt: ElicitResult(action="cancel"), id="cancel"),
+        ],
+    )
+    async def test_unconfirmed_call_never_runs_the_tool(self, answer):
+        calls: list[str] = []
+
+        async def respond(message, response_type, params, context):
+            return answer(response_type)
+
+        async with Client(self._server(calls), elicitation_handler=respond) as client:
+            with pytest.raises(ToolError, match="not confirmed"):
+                await client.call_tool("delete_thing", {"document_id": "doc-1"})
+
+        assert calls == []
