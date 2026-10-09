@@ -234,3 +234,19 @@ def test_at_most_one_spec_owns_each_sdk_log_hook():
         hooks_by_identity.setdefault(id(spec.sdk_log_hook), []).append(spec.id)
     for owners in hooks_by_identity.values():
         assert len(owners) == 1, f"sdk_log_hook shared by multiple specs: {owners}"
+
+
+def test_multi_worker_support_is_declared_as_expected():
+    """Pin each server's ``supports_multiple_workers`` deliberately.
+
+    The field defaults to ``True``, so a new server that keeps per-process
+    state between tool calls would silently allow ``--workers > 1`` and fail
+    only when a follow-up call lands on another worker. Listing every server
+    here forces that to be a decision rather than a default.
+    """
+    expected = {
+        "operational": True,
+        # Async query handles live in one process's QueryResultsRegistry.
+        "operational-insights": False,
+    }
+    assert {spec.id: spec.supports_multiple_workers for spec in ALL_SPECS} == expected

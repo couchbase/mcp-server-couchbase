@@ -177,6 +177,14 @@ class ServerSpec:
     #: accept this call only once per process.
     sdk_log_hook: Callable[[str, int], None] | None = None
 
+    #: Whether this server may run as several worker processes behind one
+    #: socket (``--workers > 1``). ``False`` for a server that keeps state in
+    #: process memory which a follow-up request may need, because the next
+    #: request can land on a different worker. Session state is not the
+    #: question here — multi-worker mode is always stateless HTTP — this is
+    #: about state the server's *own* tools keep between calls.
+    supports_multiple_workers: bool = True
+
     #: Distribution names whose versions are worth reporting in the startup
     #: diagnostic snapshot, beyond the core dependencies every server shares.
     reported_dependencies: tuple[str, ...] = ()

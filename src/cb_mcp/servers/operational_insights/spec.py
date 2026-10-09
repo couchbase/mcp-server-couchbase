@@ -36,6 +36,11 @@ SPEC = ServerSpec(
     scopes=ScopeSpec(read=SCOPE_READ, write=SCOPE_WRITE),
     annotations=TOOL_ANNOTATIONS,
     scope_hints=TOOL_SCOPE_HINTS,
+    # Async query handles live in one process's QueryResultsRegistry (see
+    # utils/operational_insights/handle_registry.py), so a token minted on
+    # one worker is unknown to the others. Single-process stateless HTTP is
+    # fine: the registry is per-process, not per-session.
+    supports_multiple_workers=False,
     # This server owns the couchbase_operational_insights SDK's logging.
     sdk_log_hook=bridge_sdk_logging,
     reported_dependencies=("couchbase-operational-insights",),

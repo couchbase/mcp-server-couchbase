@@ -25,6 +25,10 @@ LOGGER_NAMESPACE = f"{LOGGER_ROOT}.mcp"
 DEFAULT_READ_ONLY_MODE = True
 DEFAULT_TRANSPORT = "stdio"
 DEFAULT_HOST = "127.0.0.1"
+# Server processes serving the streamable HTTP transport. One process is
+# capped at about one CPU core by the GIL, so raising this is how a server
+# uses more than one core; see cb_mcp.core.serving.
+DEFAULT_WORKERS = 1
 
 # Allowed Transport Types
 ALLOWED_TRANSPORTS = ["stdio", "http", "sse"]

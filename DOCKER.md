@@ -200,6 +200,8 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_MCP_TRANSPORT`                   | Transport mode (stdio/http/sse)                                                                                                                          | `stdio`                                                        |
 | `CB_MCP_HOST`                        | Server host (HTTP/SSE modes)                                                                                                                             | `127.0.0.1`                                                    |
 | `CB_MCP_PORT`                        | Server port (HTTP/SSE modes). Defaults to each server's own port when unset (`operational`: `8000`, `operational-insights`: `8001`) — set explicitly only to override. | `8000` (`operational`) / `8001` (`operational-insights`) |
+| `CB_MCP_WORKERS`                     | Number of server worker processes for the `http` transport. Values above 1 use more CPU cores, run in stateless HTTP mode, cannot be combined with `CB_MCP_CONFIRMATION_REQUIRED_TOOLS`, and write per-worker log files named `<base>.<host>.<pid>.<level>.log`. `operational` server only. | `1` |
+| `CB_MCP_STATELESS_HTTP`              | Handle each HTTP request without per-session state (`http` transport only). Cannot be combined with `CB_MCP_CONFIRMATION_REQUIRED_TOOLS`. | `true` when workers > 1, otherwise `false` |
 | `CB_MCP_DISABLED_TOOLS`              | Tools to disable (see [Disabling Tools](#disabling-tools))                                                                                               | None                                                           |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | Tools that require explicit user confirmation before execution (see [Elicitation/Confirmation for Tool Calls](#elicitationconfirmation-for-tool-calls))  | None                                                           |
 | `CB_MCP_LOG_LEVEL`                   | Logging level for the server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging))                                                        | `info`                                                         |
@@ -371,6 +373,8 @@ When a listed tool is invoked:
 
 - If the client supports elicitation, the user is prompted to confirm before execution.
 - If the client does not support elicitation, the tool executes without confirmation for backward compatibility.
+
+Confirmation needs an MCP session, so it cannot be combined with stateless HTTP (`CB_MCP_STATELESS_HTTP=true`, or `CB_MCP_WORKERS` above 1). The server refuses to start with that combination rather than running the listed tools unconfirmed.
 
 #### MCP Client Configuration Example
 

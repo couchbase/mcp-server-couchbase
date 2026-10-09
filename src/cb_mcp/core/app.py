@@ -25,11 +25,13 @@ from ..utils.constants import (
     LOGGER_NAMESPACE,
     NETWORK_TRANSPORTS,
     NETWORK_TRANSPORTS_SDK_MAPPING,
+    STREAMABLE_HTTP_TRANSPORT,
 )
 from ..utils.context import AppContext
 from ..utils.environment import log_environment_info
 from ..utils.telemetry import send_install_ping
 from .contracts import ProviderLifecycle
+from .serving import apply_thread_pool_limit
 from .spec import ServerSpec
 
 logger = logging.getLogger(f"{LOGGER_NAMESPACE}.core.app")
@@ -44,6 +46,8 @@ def build_app(
     auth: AuthProvider | None = None,
     read_only_mode: bool = True,
     logging_config: Mapping[str, Any] | None = None,
+    thread_pool_size: int | None = None,
+    send_startup_ping: bool = True,
 ) -> FastMCP:
     """Build the ``FastMCP`` application for ``spec``, ready to ``run()``.
 
@@ -63,6 +67,16 @@ def build_app(
     populate it without adopting ours. It surfaces via
     ``get_server_configuration_status``.
 
+    ``thread_pool_size`` caps concurrently executing tool calls in this
+    process (``None`` keeps AnyIO's default); see
+    :func:`cb_mcp.core.serving.apply_thread_pool_limit`. When ``settings``
+    carries a ``thread_pool_size`` key, the lifespan reports the limit that
+    actually took effect under it rather than the configured value.
+
+    ``send_startup_ping`` is ``False`` for the processes of a multi-worker
+    deployment, whose supervisor sends one event for all of them so N
+    workers do not look like N installs.
+
     The returned server is *not* started; the caller chooses the transport and
     calls ``run()``. See :func:`run_app` for the standard invocation.
     """
@@ -71,6 +85,13 @@ def build_app(
     async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
         """Build the lifespan AppContext from host-resolved configuration."""
         transport = settings.get("transport")
+        # Applied here because AnyIO's default limiter is run-scoped: it
+        # exists only inside the event loop, and each worker process has its
+        # own. Reported as the effective value so support sees the real cap.
+        effective_pool_size = apply_thread_pool_limit(thread_pool_size)
+        run_settings: Mapping[str, Any] = settings
+        if "thread_pool_size" in settings:
+            run_settings = {**settings, "thread_pool_size": effective_pool_size}
         # Name the server: both servers log into the same hierarchy, so in an
         # aggregated stream these lines are otherwise indistinguishable. The
         # wire-visible name is a static fact and lives in the env-info record,
@@ -79,13 +100,15 @@ def build_app(
             f"MCP server '{spec.id}' initialized in lazy mode for tool "
             f"discovery. Modes: (read_only_mode={read_only_mode})"
         )
+        logger.info(f"Tool-call concurrency limit: {effective_pool_size} per process")
         # Diagnostic snapshot for customer support. Filtered at INFO; visible
         # whenever the user runs with --log-level DEBUG.
-        log_environment_info(transport, settings, spec)
-        send_install_ping(transport, server_id=spec.id)
+        log_environment_info(transport, run_settings, spec)
+        if send_startup_ping:
+            send_install_ping(transport, server_id=spec.id)
         app_context = AppContext(
             cluster_provider=provider_factory(),
-            settings=settings,
+            settings=run_settings,
             read_only_mode=read_only_mode,
             logging_config=logging_config,
             server_id=spec.id,
@@ -125,14 +148,22 @@ def run_app(
     transport: str,
     host: str | None = None,
     port: int | None = None,
+    stateless_http: bool = False,
 ) -> None:
     """Run ``mcp`` on ``transport``, translating our transport names to the SDK's.
 
     ``host``/``port`` are forwarded only for network transports; passing them
     for stdio is an error in the SDK rather than a no-op.
+
+    ``stateless_http`` is forwarded only when true, and only for streamable
+    HTTP: FastMCP rejects it on SSE, and leaving it unset otherwise keeps
+    FastMCP's own default (including its ``FASTMCP_STATELESS_HTTP`` setting)
+    exactly as before this option existed.
     """
     sdk_transport = NETWORK_TRANSPORTS_SDK_MAPPING.get(transport, transport)
     run_kwargs: dict[str, Any] = {}
     if transport in NETWORK_TRANSPORTS:
         run_kwargs = {"host": host, "port": port}
+    if stateless_http and transport == STREAMABLE_HTTP_TRANSPORT:
+        run_kwargs["stateless_http"] = True
     mcp.run(transport=sdk_transport, show_banner=False, **run_kwargs)  # type: ignore[arg-type]
