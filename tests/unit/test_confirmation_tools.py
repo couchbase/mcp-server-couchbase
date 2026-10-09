@@ -446,18 +446,20 @@ class TestWrapWithConfirmation:
         assert called is True
 
 
-class TestElicitationSchemaCompatibility:
-    """Tests for elicitation schema compatibility with MCP clients.
+class TestConfirmationPrompt:
+    """What the user is shown and asked to fill in when confirming a tool call.
 
     Coverage:
-    - Elicitation message formatting for different client types
-    - Schema parameter handling (known issue with some clients)
-    - SSE vs JSON-RPC transport compatibility
-    - Claude Code/CLI limitation documentation
+    - The confirmation message names the tool and its key arguments.
+    - ``ConfirmationResult`` produces a valid JSON schema with a boolean
+      ``confirm`` field defaulting to true.
 
-    Known Issue: Claude Code/CLI do not support the 'schema' parameter
-    in Context.elicit(), which is required by MCP 2025-12-11 spec.
-    Workaround: Clients without elicitation support fall back to execution.
+    Whether the prompt is actually sent is covered elsewhere: the fake
+    context in ``TestWrapWithConfirmation`` is checked against FastMCP's real
+    ``Context.elicit`` signature, and ``TestConfirmationEndToEnd`` runs the
+    round trip against a real FastMCP server and client. Clients that do not
+    advertise elicitation support are handled by capability detection in the
+    wrapper, not by anything in this class.
     """
 
     def test_confirmation_message_is_readable(self):
@@ -488,55 +490,6 @@ class TestElicitationSchemaCompatibility:
         confirm_prop = schema["properties"]["confirm"]
         assert confirm_prop.get("type") == "boolean"
         assert confirm_prop.get("default") is True
-
-    @pytest.mark.asyncio
-    async def test_elicitation_without_schema_parameter_fallback(self):
-        """Clients that don't support schema parameter should fall back gracefully.
-
-        This tests the workaround for Claude Code/CLI limitation.
-        Known Issue: Context.elicit(schema=...) raises TypeError in some clients.
-        Workaround: When elicitation fails due to schema, fall back to execution.
-        """
-
-        def sample_tool(ctx: Context) -> str:
-            return "tool executed"
-
-        wrapped = wrap_with_confirmation(sample_tool)
-
-        # Simulate a client that doesn't support schema parameter
-        class SchemaIncompatibleContext:
-            def __init__(self):
-                self.request_context = SimpleNamespace(
-                    lifespan_context=SimpleNamespace(),
-                    session=SimpleNamespace(
-                        check_client_capability=lambda c: (
-                            True
-                        )  # Claims elicitation support
-                    ),
-                )
-
-            async def elicit(self, message, response_type=None, schema=None):
-                # This is the issue: some clients don't accept 'schema' parameter
-                if schema is not None:
-                    raise TypeError(
-                        "elicit() got an unexpected keyword argument 'schema'"
-                    )
-                # If called without schema, should work
-                return SimpleNamespace(
-                    action="accept", data=SimpleNamespace(confirm=True)
-                )
-
-        fake_ctx = SchemaIncompatibleContext()
-
-        # The wrapper should handle this gracefully
-        # Either by: 1) not passing schema, 2) falling back to execution
-        try:
-            result = await wrapped(ctx=fake_ctx)
-            # If it gets here, the wrapper handled the compatibility issue
-            assert result == "tool executed"
-        except TypeError as e:
-            # If TypeError is raised, it should be about the schema parameter
-            assert "schema" in str(e).lower()
 
 
 class TestConfirmationEndToEnd:
