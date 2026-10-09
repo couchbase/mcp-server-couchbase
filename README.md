@@ -113,7 +113,7 @@ the `couchbase-operational-insights` SDK.
 | `create_index` | Create a scalar (non-vector) GSI secondary index on a collection. Deferred by default — call `build_index` afterward to build it. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `build_index` | Trigger the build of all deferred indexes on a collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `drop_index` | Drop a GSI index (scalar or vector) from a collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
-| `run_sql_plus_plus_query` | Run a [SQL++ query](https://www.couchbase.com/sqlplusplus/) on a specified scope.<br><br>Queries are automatically scoped to the specified bucket and scope, so use collection names directly (e.g., `SELECT * FROM users` instead of `SELECT * FROM bucket.scope.users`).<br><br>`CB_MCP_READ_ONLY_MODE` is `true` by default, which means that **all write operations (KV, Query, scope/collection management, index management, and FTS index management)** are disabled. When enabled (i.e. `CB_MCP_READ_ONLY_MODE=true`), write tools are not loaded and SQL++ queries that modify data are blocked. |
+| `run_sql_plus_plus_query` | Run a [SQL++ query](https://www.couchbase.com/sqlplusplus/) on a specified scope.<br><br>Returns `{"success", "rows", "row_count", "truncated"}`. Rows are streamed from the cluster and collected up to `CB_MCP_MAX_QUERY_RESULT_SIZE` (15 kB by default); a result that would exceed it is cut short and reported with `truncated: true` plus a `truncation` object. The remaining rows are not fetched and cannot be retrieved by calling again — narrow the query instead.<br><br>Queries are automatically scoped to the specified bucket and scope, so use collection names directly (e.g., `SELECT * FROM users` instead of `SELECT * FROM bucket.scope.users`).<br><br>`CB_MCP_READ_ONLY_MODE` is `true` by default, which means that **all write operations (KV, Query, scope/collection management, index management, and FTS index management)** are disabled. When enabled (i.e. `CB_MCP_READ_ONLY_MODE=true`), write tools are not loaded and SQL++ queries that modify data are blocked. |
 | `explain_sql_plus_plus_query` | Generate and evaluate an EXPLAIN plan for a SQL++ query. Returns query metadata, extracted plan, and plan evaluation findings. |
 
 ### Full-text search (FTS) tools
@@ -167,13 +167,13 @@ if a single MCP client registers both servers at once.
 | `oi_get_collections_in_scope` | List all collections (datasets) in a scope. |
 | `oi_get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. |
 | `oi_list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog (the SDK has no index manager). |
-| `oi_run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return all result rows. Enforces read-only mode server-side via `QueryOptions(readonly=True)` — there is no client-side SQL++ parser here. |
+| `oi_run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return its result rows, up to `CB_MCP_MAX_QUERY_RESULT_SIZE`; a larger result is cut short and reported with `truncated: true`. Pass `copy_to_link`, `copy_to_bucket` and `copy_to_path` to export the rows to object storage instead of returning them (see [Exporting large results](#exporting-large-results-operational-insights)). Enforces read-only mode server-side via `QueryOptions(readonly=True)` — there is no client-side SQL++ parser here. |
 | `oi_explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
 | `oi_create_index` | Create a secondary index via `CREATE INDEX` (the SDK has no index manager). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
-| `oi_run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Same read-only enforcement as `oi_run_query_sync`. |
-| `oi_get_async_query_results` | Check whether an async query has finished and, if so, return its rows. Doubles as the status check — call again later if not yet ready. |
+| `oi_run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Accepts the same `copy_to_*` export arguments as `oi_run_query_sync`, and is the better choice for a large export since it does not hold the request open for the upload. Same read-only enforcement as `oi_run_query_sync`. |
+| `oi_get_async_query_results` | Check whether an async query has finished and, if so, return its rows (subject to the same `CB_MCP_MAX_QUERY_RESULT_SIZE` budget, reported via `truncated`). For an exporting query it reports completion and names the destination instead of returning rows. Doubles as the status check — call again later if not yet ready. |
 | `oi_discard_async_query_results` | Free a finished async query's result buffers on the server. Normal cleanup step after `oi_get_async_query_results`. |
-| `oi_cancel_async_query` | Stop an async query that is still running. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** A finished query cannot be cancelled — discard its results instead. |
+| `oi_cancel_async_query` | Stop an async query that is still running. Available in read-only mode: cancelling releases resources the caller allocated and does not modify stored data. A finished query cannot be cancelled — discard its results instead. |
 
 The Server Async Request API tools form a start → poll → discard-or-cancel
 flow for long-running queries: `oi_run_query_async` returns a `query_handle`,
@@ -297,6 +297,7 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_STATELESS_HTTP` | `--stateless-http` | Handle each HTTP request without per-session state. Only honored with `http`; cannot be combined with confirmation-required tools (see [Multiple Workers](#multiple-workers)) | `true` when workers > 1, otherwise `false` |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Elicitation/Confirmation Required Tools](#elicitationconfirmation-for-tool-calls)) | None |
+| `CB_MCP_MAX_QUERY_RESULT_SIZE` | `--max-query-result-size` | Maximum size **in bytes** of a query tool's result. Rows are streamed from the cluster and reading stops once the budget is reached; the response then reports `truncated: true` along with a `truncation` object explaining what happened. Applies to `run_sql_plus_plus_query` (operational) and `oi_run_query_sync` / `oi_get_async_query_results` (Operational Insights). Values above `1048576` (1 MB) or below `1024` (1 kB) are clamped with a startup warning | `15360` (15 kB) |
 | `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
 | `CB_MCP_LOG_SINKS` | `--log-sinks` | Comma-separated log destinations: `stderr`, `file`, or both (see [Logging](#logging)) | `stderr` |
 | `CB_MCP_LOG_FILE` | `--log-file` | Base path for per-level log files (only used when the `file` sink is enabled) | `mcp_server.log` |
@@ -740,6 +741,57 @@ Example MCP client configuration:
 See [Operational Insights tools](#operational-insights-tools) above for the
 tool list, and the note there about the three tool names shared with the
 operational server.
+
+### Exporting large results (Operational Insights)
+
+A query whose result exceeds `CB_MCP_MAX_QUERY_RESULT_SIZE` comes back
+truncated, which is the right default for a tool whose output is read by an
+LLM — but sometimes the full data is what you need. `oi_run_query_sync` and
+`oi_run_query_async` can write the rows to external object storage instead of
+returning them, so the size of the result stops mattering.
+
+Pass all three destination arguments:
+
+| Argument | Description |
+| --------- | ------------ |
+| `copy_to_link` | Name of an existing external link, created with `CREATE LINK ... TYPE S3`. Required. |
+| `copy_to_bucket` | Destination bucket in the external store. Required. |
+| `copy_to_path` | Path prefix within that bucket, e.g. `exports/run1`. Required. |
+| `copy_to_format` | `json` (default) or `parquet`. |
+
+The statement is wrapped in `COPY ... TO` and the tool returns a confirmation
+with **no rows**:
+
+```json
+{
+  "success": true,
+  "exported": true,
+  "destination": {
+    "link": "s3Link",
+    "bucket": "my-exports",
+    "path": "exports/run1",
+    "format": "json"
+  },
+  "message": "Results were written to my-exports/exports/run1 as json. ..."
+}
+```
+
+Notes:
+
+- **All three of link, bucket and path are required.** A partial destination is
+  rejected rather than quietly running the query and returning rows, which
+  would write nothing and look like success.
+- **`oi_run_query_sync` waits for the whole upload** before returning, so the
+  call takes as long as the copy does. For a large export prefer
+  `oi_run_query_async`, which returns a `query_handle` as soon as the query is
+  submitted; `oi_get_async_query_results` then reports completion and names the
+  destination rather than returning rows.
+- **Exports are blocked in read-only mode.** `COPY ... TO` writes data to
+  external storage, so it requires `CB_MCP_READ_ONLY_MODE=false` (or a token
+  carrying `couchbase-mcp:write`), even though the Operational Insights server
+  itself classifies the statement as read-only.
+- `csv` is not offered: the server requires a `TYPE(...)` clause naming the
+  output schema for CSV, which cannot be inferred from an arbitrary `SELECT`.
 
 Both servers share a single [MCP Registry](https://registry.modelcontextprotocol.io)
 listing, `io.github.couchbase/mcp-server-couchbase`, published from

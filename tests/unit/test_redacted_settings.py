@@ -66,6 +66,7 @@ def test_secret_paths_redacted_to_presence_booleans():
         "username": None,
         "disabled_tools": None,
         "confirmation_required_tools": None,
+        "max_query_result_size": None,
         # OAuth coordinates: safe keys, absent in input → None
         "oauth_enabled": None,
         "oauth_jwks_uri": None,
