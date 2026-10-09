@@ -70,12 +70,14 @@ env:
   NUM_STORAGE_PARTITIONS: 16
   CLUSTER_USERNAME: Administrator
   CLUSTER_PASSWORD: password
-  # Difference 2: 1024 rather than the integration tier's 100.
-  # /sampleBuckets/install refuses travel-sample below a 200MB quota, and
-  # the quota cannot be raised after clusterInit (the data service rejects
-  # a later increase), so it must be right the first time. The accuracy
-  # tier needs the sample data; the integration tier does not.
-  CLUSTER_MEMORY_QUOTA: 1024
+  # Must stay 100: the enterprise-analytics image caps the data service
+  # quota at 100MB regardless of host RAM, and clusterInit rejects anything
+  # larger outright ("The data service quota (NNNMB) cannot be greater than
+  # 100MB"), which fails configure_cluster.sh. This is also why the sample
+  # data is seeded with SQL++ DDL rather than /sampleBuckets/install, which
+  # requires a 200MB quota and is therefore unreachable on this image — see
+  # load_travel_sample.sh.
+  CLUSTER_MEMORY_QUOTA: 100
   CLUSTER_NAME: OI Accuracy Cluster
   # 127.0.0.1, not localhost: the couchbase_operational_insights SDK picks
   # a random address when a hostname resolves to more than one (localhost
@@ -217,7 +219,7 @@ jobs:
       # Only the accuracy tier needs this: its schema-inference cases sample
       # real document content, so they need a populated collection. The OI
       # integration tests create their own throwaway collections instead.
-      - name: Load travel-sample into OI
+      - name: Seed travel-sample dataset into OI
         run: ./scripts/oi_ci_cluster/load_travel_sample.sh
 
       # Resolve a human-readable run id for the results file:
