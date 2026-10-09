@@ -20,6 +20,7 @@ Coverage map:
 - SQL++ statement class is recorded for audit when auditing is active
 - SQL++ classification is not computed when auditing is off (no added cost)
 - identity resolution across the three domains
+- the local identity comes from the kernel, not the caller's environment
 """
 
 from __future__ import annotations
@@ -27,6 +28,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import pwd
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -447,6 +450,46 @@ def test_stdio_resolves_to_the_local_process_owner():
         identity = resolve_real_userid("stdio")
     assert identity["domain"] == DOMAIN_LOCAL
     assert identity["user"]
+
+
+def test_local_identity_ignores_the_caller_controlled_environment():
+    """``real_userid`` must not be settable by whoever launches the server.
+
+    Under stdio the client *is* the launcher — Claude Desktop, Cursor, a shell
+    script — so it controls the process environment. ``getpass.getuser()``
+    reads ``LOGNAME``/``USER``/``LNAME``/``USERNAME`` before the password
+    database, which would let that launcher write any name it liked into the
+    access-decision field of every record. The uid comes from the kernel.
+    """
+    real_name = pwd.getpwuid(os.geteuid()).pw_name
+    spoofed = {
+        "LOGNAME": "alice",
+        "USER": "alice",
+        "LNAME": "alice",
+        "USERNAME": "alice",
+    }
+    with (
+        patch.dict(os.environ, spoofed),
+        patch("cb_mcp.audit.identity.get_access_token", return_value=None),
+    ):
+        identity = resolve_real_userid("stdio")
+    assert identity == {"domain": DOMAIN_LOCAL, "user": real_name}
+    assert identity["user"] != "alice"
+
+
+def test_local_identity_falls_back_to_the_numeric_uid_without_a_passwd_entry():
+    """Containers routinely run as a uid with no passwd entry.
+
+    A number is a worse identity than a name but an honest one; failing the
+    call, or silently taking the environment's word for it, would both be
+    worse.
+    """
+    with (
+        patch("cb_mcp.audit.identity.pwd.getpwuid", side_effect=KeyError(1001)),
+        patch("cb_mcp.audit.identity.get_access_token", return_value=None),
+    ):
+        identity = resolve_real_userid("stdio")
+    assert identity == {"domain": DOMAIN_LOCAL, "user": str(os.geteuid())}
 
 
 def test_http_without_a_token_is_anonymous():

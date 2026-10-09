@@ -9,7 +9,10 @@ Three domains, per the PRD:
 
 * ``oauth`` — Streamable HTTP with OAuth active. The user is the bearer token's
   subject.
-* ``local`` — stdio. The user is the OS process owner.
+* ``local`` — stdio. The user is the OS process owner, resolved from the
+  effective uid rather than the environment: under stdio the client launches
+  the server and therefore controls its environment, so anything an
+  environment variable could set is not an identity.
 * ``anonymous`` — HTTP without OAuth. There is no caller authentication, so
   there is no identity to record.
 
@@ -30,6 +33,11 @@ import getpass
 import logging
 import os
 
+try:  # pragma: no cover - import guard, exercised by platform not by test
+    import pwd
+except ImportError:  # pragma: no cover - Windows
+    pwd = None  # type: ignore[assignment]
+
 from fastmcp.server.dependencies import get_access_token
 
 from ..utils.constants import LOGGER_NAMESPACE, STREAMABLE_HTTP_TRANSPORT
@@ -45,20 +53,41 @@ UNKNOWN_USER = "unknown"
 
 
 def _process_owner() -> str:
-    """Best-effort OS process owner.
+    """Best-effort OS process owner, resolved from the kernel where possible.
 
-    ``getpass.getuser`` consults the environment before the password database
-    and raises on a container with no matching passwd entry and no ``USER`` set,
-    so both are guarded.
+    The value lands in ``real_userid.user`` for every stdio record, which is
+    the access-decision identity an auditor reads. It must therefore come from
+    something the caller cannot set.
+
+    ``getpass.getuser`` cannot be that source: it consults ``LOGNAME``,
+    ``USER``, ``LNAME`` and ``USERNAME`` *before* the password database, so a
+    caller who launches the server with ``USER=someone-else`` writes that name
+    into every record. On POSIX the effective uid is asked of the kernel and
+    mapped through the password database instead; ``getpass`` remains the
+    fallback on Windows, which has no ``pwd`` module and no such environment
+    precedence problem in the same form.
+
+    A container with no matching passwd entry raises :class:`KeyError`, so the
+    numeric uid is the last resort before :data:`UNKNOWN_USER`.
     """
+    if pwd is not None:  # POSIX
+        try:
+            return pwd.getpwuid(os.geteuid()).pw_name
+        except Exception:
+            logger.debug(
+                "Could not map the effective uid to a passwd entry; "
+                "falling back to the numeric uid",
+                exc_info=True,
+            )
+    else:  # pragma: no cover - Windows has no pwd module
+        try:
+            return getpass.getuser()
+        except Exception:
+            logger.debug("getpass.getuser() failed", exc_info=True)
+            return UNKNOWN_USER
+
     try:
-        return getpass.getuser()
-    except Exception:
-        logger.debug("getpass.getuser() failed; falling back to uid", exc_info=True)
-    try:
-        return str(os.getuid())  # type: ignore[attr-defined]
-    except AttributeError:  # pragma: no cover - Windows has no getuid
-        return UNKNOWN_USER
+        return str(os.geteuid())
     except Exception:  # pragma: no cover - defensive
         return UNKNOWN_USER
 
