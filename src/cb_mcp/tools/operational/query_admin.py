@@ -179,14 +179,13 @@ def get_active_queries(ctx: Context, timeout: int = 30) -> dict[str, Any]:
                     )
                     response.raise_for_status()
                     items = response.json()
-                    any_success = True
-                    if isinstance(items, list):
-                        active_requests.extend(items)
-                    else:
-                        logger.warning(
+                    if not isinstance(items, list):
+                        raise ValueError(
                             f"/admin/active_requests on {endpoint} returned "
-                            f"{type(items).__name__}, expected a list; ignoring it"
+                            f"{type(items).__name__}, expected a list"
                         )
+                    active_requests.extend(items)
+                    any_success = True
                 except Exception as e:
                     logger.warning(
                         f"Failed to fetch active queries from {endpoint}: {e}"
@@ -231,9 +230,10 @@ def delete_active_query(
     """Cancel an in-flight query by its request ID.
 
     This is the one tool in the query-health set with remediation power, and
-    its blast radius is small and reversible in effect — it ends one query,
-    not a topology or data change. A killed query cannot be resumed; confirm
-    the request ID and statement with get_active_queries first.
+    its blast radius is small and contained — it ends one query, not a
+    topology or data change. It is not reversible: a killed query cannot be
+    resumed; confirm the request ID and statement with get_active_queries
+    first.
 
     Calls DELETE /admin/active_requests/{request_id}. Self-managed Couchbase
     Server 7.6+ only (Capella is rejected without a REST call); needs the Full
@@ -247,9 +247,12 @@ def delete_active_query(
 
     Returns {"success": True, "request_id": ..., "node": "<host:port that
     cancelled it>"} on success, or {"success": False, "error": ...,
-    "request_id": ..., "nodes_tried": [...]} if no node reports having that
-    request (already finished, wrong ID), the cluster is Capella, or
-    request_id is empty.
+    "request_id": ..., "nodes_tried": [...]} on failure. The error message
+    distinguishes two cases: every node reporting "not found" (already
+    finished, or a wrong ID) versus at least one node failing for a
+    different reason (auth, server error, connectivity) — the latter means
+    cancellation could not be confirmed, not that the request is gone.
+    Also returned if the cluster is Capella or request_id is empty.
     """
     try:
         if not isinstance(request_id, str) or not request_id.strip():
@@ -288,24 +291,51 @@ def delete_active_query(
                         auth=(settings["username"], settings["password"]),
                     )
                     if response.status_code == 404:
-                        nodes_tried.append({"node": endpoint, "result": "not found"})
+                        nodes_tried.append(
+                            {
+                                "node": endpoint,
+                                "status": "not_found",
+                                "result": "not found",
+                            }
+                        )
                         continue
                     response.raise_for_status()
                     logger.info(f"Cancelled query {request_id!r} on {endpoint}")
                     return tool_success(request_id=request_id, node=endpoint)
                 except httpx.HTTPStatusError as e:
-                    nodes_tried.append({"node": endpoint, "result": str(e)})
+                    nodes_tried.append(
+                        {"node": endpoint, "status": "error", "result": str(e)}
+                    )
                 except Exception as e:
                     logger.warning(
                         f"Failed to reach {endpoint} while cancelling "
                         f"{request_id!r}: {e}"
                     )
-                    nodes_tried.append({"node": endpoint, "result": str(e)})
+                    nodes_tried.append(
+                        {"node": endpoint, "status": "error", "result": str(e)}
+                    )
 
+        # Only every node agreeing "not found" means the request is actually
+        # gone. If any node failed a different way (auth, 5xx, connection
+        # error), cancellation was never confirmed there — reporting "not
+        # found" in that case would read as "safe to assume it's done" when
+        # it might still be running on the node that couldn't be reached.
+        if all(entry["status"] == "not_found" for entry in nodes_tried):
+            return tool_error(
+                f"Request {request_id!r} was not found on any of "
+                f"{len(endpoints)} query node(s) — it may have already "
+                f"finished, or the ID may be wrong. Confirm with "
+                f"get_active_queries.",
+                request_id=request_id,
+                nodes_tried=nodes_tried,
+            )
         return tool_error(
-            f"Request {request_id!r} was not found on any of {len(endpoints)} "
-            f"query node(s) — it may have already finished, or the ID may be "
-            f"wrong. Confirm with get_active_queries.",
+            f"Could not confirm cancellation of request {request_id!r}: it "
+            f"was reported not found on some query node(s), but at least "
+            f"one other node failed for a different reason (see "
+            f"nodes_tried) rather than confirming it absent, so it may "
+            f"still be running there. Confirm with get_active_queries and "
+            f"retry once the failing node(s) are reachable.",
             request_id=request_id,
             nodes_tried=nodes_tried,
         )

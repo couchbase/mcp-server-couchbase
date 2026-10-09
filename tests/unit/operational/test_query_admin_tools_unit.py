@@ -278,6 +278,37 @@ class TestGetActiveQueries:
 
         assert result["status"] == "error"
 
+    def test_non_list_response_is_treated_as_node_failure_not_success(self) -> None:
+        """A 200 with an unexpected shape (e.g. a proxy/API envelope) must not
+        be counted as a successful empty answer — it's reported as a failed
+        node, same as an unreachable one."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        client_patch, _ = _patch_httpx_client(
+            "get", [_ok_response({"unexpected": "envelope"}), _ok_response([])]
+        )
+
+        with _patch_endpoints(["node1:8093", "node2:8093"]), client_patch:
+            result = get_active_queries(ctx)
+
+        assert result["status"] == "success"
+        assert result["active_requests"] == []
+        assert len(result["unreachable_nodes"]) == 1
+        assert result["unreachable_nodes"][0]["node"] == "node1:8093"
+
+    def test_all_non_list_responses_is_a_total_failure(self) -> None:
+        """If every node returns an unexpected shape, that's a real failure,
+        not a quiet 'zero active queries' success."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        client_patch, _ = _patch_httpx_client(
+            "get",
+            [_ok_response({"unexpected": "envelope"}), _ok_response({"also": "bad"})],
+        )
+
+        with _patch_endpoints(["node1:8093", "node2:8093"]), client_patch:
+            result = get_active_queries(ctx)
+
+        assert result["status"] == "error"
+
 
 class TestDeleteActiveQuery:
     """delete_active_query: per-node try-in-turn, write-tool success/error envelope."""
@@ -341,7 +372,9 @@ class TestDeleteActiveQuery:
             "node": "node2:8093",
         }
 
-    def test_returns_error_when_not_found_on_any_node(self) -> None:
+    def test_returns_not_found_message_only_when_every_node_says_not_found(
+        self,
+    ) -> None:
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         client_patch, _ = _patch_httpx_client(
             "delete", [_status_response(404), _status_response(404)]
@@ -351,11 +384,15 @@ class TestDeleteActiveQuery:
             result = delete_active_query(ctx, request_id="abc-123")
 
         assert result["success"] is False
+        assert "was not found" in result["error"]
         assert "abc-123" in result["error"]
         assert result["request_id"] == "abc-123"
         assert len(result["nodes_tried"]) == 2
 
-    def test_returns_error_when_every_node_unreachable(self) -> None:
+    def test_does_not_report_not_found_when_every_node_is_unreachable(self) -> None:
+        """A connection error is not the same as the server saying 'not
+        found' — reporting it as such would read as 'safe, it's done' when
+        cancellation was never attempted."""
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         error = httpx.ConnectError("refused")
         client_patch, _ = _patch_httpx_client("delete", [error, error])
@@ -364,4 +401,26 @@ class TestDeleteActiveQuery:
             result = delete_active_query(ctx, request_id="abc-123")
 
         assert result["success"] is False
+        assert "was not found" not in result["error"]
+        assert "Could not confirm cancellation" in result["error"]
+        assert len(result["nodes_tried"]) == 2
+
+    def test_mixed_not_found_and_real_failure_is_not_reported_as_not_found(
+        self,
+    ) -> None:
+        """One node genuinely has no record of the request; the other failed
+        for an unrelated reason (e.g. auth/5xx). The request may still be
+        running on the node that failed, so this must not be reported as a
+        clean not-found."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        client_patch, _ = _patch_httpx_client(
+            "delete", [_status_response(404), _status_response(500)]
+        )
+
+        with _patch_endpoints(["node1:8093", "node2:8093"]), client_patch:
+            result = delete_active_query(ctx, request_id="abc-123")
+
+        assert result["success"] is False
+        assert "was not found" not in result["error"]
+        assert "Could not confirm cancellation" in result["error"]
         assert len(result["nodes_tried"]) == 2
