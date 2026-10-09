@@ -12,6 +12,7 @@ Covers:
   - get_cluster_metrics
   - get_cluster_tasks
   - get_cluster_health_snapshot
+  - get_cluster_system_events
   - discover_tool_input_values
 """
 
@@ -275,6 +276,35 @@ def _build_cases(bucket: str, scope: str) -> list[AccuracyCase]:
             expected_tools=[
                 ExpectedToolCall(
                     tool_name="get_cluster_health_snapshot",
+                    parameters=Matcher.any_value(),
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="get_cluster_system_events_what_changed",
+            prompt=(
+                "Our Couchbase cluster started having problems about an hour "
+                "ago. What changed on the cluster around then?"
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_cluster_system_events",
+                    parameters=Matcher.any_value(),
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="get_cluster_system_events_recent_errors",
+            prompt=("Show me any errors in the Couchbase cluster's system event log."),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_cluster_system_events",
                     parameters=Matcher.any_value(),
                 ),
             ],

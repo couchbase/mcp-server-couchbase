@@ -57,6 +57,7 @@ EXPECTED_TOOLS = {
     "get_cluster_metrics",
     "get_cluster_tasks",
     "get_cluster_health_snapshot",
+    "get_cluster_system_events",
     # Performance analysis tools
     "get_longest_running_queries",
     "get_most_frequent_queries",
@@ -83,6 +84,7 @@ TOOLS_BY_CATEGORY = {
         "get_cluster_metrics",
         "get_cluster_tasks",
         "get_cluster_health_snapshot",
+        "get_cluster_system_events",
     },
     "kv": {
         "get_document_by_id",
