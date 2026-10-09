@@ -88,20 +88,27 @@ def resolve_serving(
     thread_pool_size: int | None,
     supports_multiple_workers: bool,
     confirmation_required: Collection[str],
+    runtime_default_stateless: bool = False,
 ) -> ServingConfig:
     """Resolve the serving options, or raise :class:`ServingConfigError`.
 
-    ``stateless_http`` of ``None`` means "decide from the worker count":
-    stateless exactly when ``workers > 1``, so single-process deployments keep
-    their sessions. ``confirmation_required`` is the *resolved* set from tool
-    gating, so an empty or entirely invalid list never trips the check.
+    ``stateless_http`` of ``None`` means "not set by the operator": stateless
+    when ``workers > 1``, otherwise whatever the HTTP runtime would do on its
+    own — ``runtime_default_stateless``, which the host reads from FastMCP's
+    settings (``FASTMCP_STATELESS_HTTP``). Folding that default in here is
+    what keeps a deployment that already set FastMCP's variable working
+    unchanged, while the checks below and the diagnostic record see the mode
+    that will actually run. ``confirmation_required`` is the *resolved* set
+    from tool gating, so an empty or entirely invalid list never trips the
+    check.
 
     Every contradictory combination is an error rather than a silent
     override: quietly dropping to one worker would hand the operator a
     fraction of the capacity they asked for, and quietly ignoring an explicit
     ``--stateless-http false`` would hide a configuration they wrote down.
-    The one exception is stateless mode on stdio, which is inert there and
-    only warned about.
+    The exceptions are inert settings, warned about and ignored: stateless
+    mode on stdio, and an *inherited* runtime default on SSE (an explicit
+    ``--stateless-http`` on SSE is still an error).
     """
     if workers > 1:
         if transport != STREAMABLE_HTTP_TRANSPORT:
@@ -124,12 +131,26 @@ def resolve_serving(
                 "keep session state."
             )
 
-    resolved_stateless = workers > 1 if stateless_http is None else stateless_http
+    explicit = stateless_http is not None
+    if explicit:
+        resolved_stateless = bool(stateless_http)
+        source = "--stateless-http"
+    elif workers > 1:
+        resolved_stateless = True
+        source = f"--workers={workers}"
+    else:
+        resolved_stateless = runtime_default_stateless
+        source = "FASTMCP_STATELESS_HTTP"
 
-    if resolved_stateless and transport not in NETWORK_TRANSPORTS:
+    # Inert here: stdio has no HTTP at all, and an inherited runtime default
+    # should not turn an SSE server that works today into a startup error.
+    inert = transport not in NETWORK_TRANSPORTS or (
+        transport != STREAMABLE_HTTP_TRANSPORT and not explicit
+    )
+    if resolved_stateless and inert:
         logger.warning(
-            "--stateless-http is only honored for the %s transport; ignoring "
-            "it for transport=%s.",
+            "%s is only honored for the %s transport; ignoring it for transport=%s.",
+            source,
             STREAMABLE_HTTP_TRANSPORT,
             transport,
         )
@@ -144,13 +165,13 @@ def resolve_serving(
 
     if resolved_stateless and confirmation_required:
         raise ServingConfigError(
-            "Stateless HTTP cannot be combined with "
+            f"Stateless HTTP (enabled by {source}) cannot be combined with "
             "--confirmation-required-tools "
             f"({', '.join(sorted(confirmation_required))}): confirmation uses "
             "MCP elicitation, which needs a session, and stateless mode keeps "
             "none. Remove the confirmation-required tools (or disable them "
             "with --disabled-tools), or run a single worker without "
-            "--stateless-http."
+            "--stateless-http or FASTMCP_STATELESS_HTTP."
         )
 
     return ServingConfig(

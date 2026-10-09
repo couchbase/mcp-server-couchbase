@@ -53,6 +53,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, NamedTuple
 
 import click
+import fastmcp
 import uvicorn
 from fastmcp import FastMCP
 from fastmcp.server.http import StarletteWithLifespan
@@ -199,6 +200,10 @@ def _build_server(
             thread_pool_size=cli.transport.thread_pool_size,
             supports_multiple_workers=spec.supports_multiple_workers,
             confirmation_required=gated.confirmation_required,
+            # What FastMCP would do if left alone (FASTMCP_STATELESS_HTTP),
+            # so a deployment relying on it keeps working and the checks see
+            # the mode that will actually run.
+            runtime_default_stateless=fastmcp.settings.stateless_http,
         )
     except ServingConfigError as e:
         raise click.UsageError(str(e)) from e

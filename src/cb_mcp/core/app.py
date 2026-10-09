@@ -179,15 +179,20 @@ def run_app(
     ``host``/``port`` are forwarded only for network transports; passing them
     for stdio is an error in the SDK rather than a no-op.
 
-    ``stateless_http`` is forwarded only when true, and only for streamable
-    HTTP: FastMCP rejects it on SSE, and leaving it unset otherwise keeps
-    FastMCP's own default (including its ``FASTMCP_STATELESS_HTTP`` setting)
-    exactly as before this option existed.
+    ``stateless_http`` is always forwarded on network transports, true or
+    false, so FastMCP runs exactly the mode the host resolved and validated.
+    Leaving it unset would let FastMCP fall back to its own
+    ``FASTMCP_STATELESS_HTTP`` setting behind the host's back; a host that
+    wants to honour that setting folds it in when resolving (see
+    ``cb_mcp.core.serving.resolve_serving``). SSE has no stateless mode, so
+    it only ever receives ``False``.
     """
     sdk_transport = NETWORK_TRANSPORTS_SDK_MAPPING.get(transport, transport)
     run_kwargs: dict[str, Any] = {}
     if transport in NETWORK_TRANSPORTS:
-        run_kwargs = {"host": host, "port": port}
-    if stateless_http and transport == STREAMABLE_HTTP_TRANSPORT:
-        run_kwargs["stateless_http"] = True
+        run_kwargs = {
+            "host": host,
+            "port": port,
+            "stateless_http": stateless_http and transport == STREAMABLE_HTTP_TRANSPORT,
+        }
     mcp.run(transport=sdk_transport, show_banner=False, **run_kwargs)  # type: ignore[arg-type]

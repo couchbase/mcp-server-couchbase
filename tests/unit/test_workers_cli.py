@@ -12,10 +12,12 @@ import os
 from unittest.mock import MagicMock, patch
 
 import couchbase
+import fastmcp
 import pytest
 from click.testing import CliRunner
 
 import mcp_server
+from cb_mcp.core.app import run_app
 from cb_mcp.utils.cli_params import decode_worker_config, encode_worker_config
 from cb_mcp.utils.logging import ParsedLogLevel, ParsedLogSinks
 
@@ -339,3 +341,59 @@ class TestCreateApp:
         )
         app.http_app.assert_called_once_with(stateless_http=True)
         assert returned is app.http_app.return_value
+
+
+class TestFastMCPStatelessSetting:
+    """FastMCP's own FASTMCP_STATELESS_HTTP, read once at import into settings."""
+
+    @pytest.fixture
+    def fastmcp_stateless(self, monkeypatch):
+        monkeypatch.setattr(fastmcp.settings, "stateless_http", True)
+
+    @pytest.mark.usefixtures("fastmcp_stateless")
+    def test_is_honoured_and_reported(self):
+        result, cap = _invoke(["--transport", "http"])
+        assert result.exit_code == 0, result.output
+        assert cap["run_app"].call_args.kwargs["stateless_http"] is True
+        assert _settings_from(cap["lifespan"])["stateless_http"] is True
+
+    @pytest.mark.usefixtures("fastmcp_stateless")
+    def test_explicit_flag_overrides_it(self):
+        result, cap = _invoke(["--transport", "http", "--stateless-http", "false"])
+        assert result.exit_code == 0, result.output
+        assert cap["run_app"].call_args.kwargs["stateless_http"] is False
+
+    @pytest.mark.usefixtures("fastmcp_stateless")
+    def test_rejects_confirmation_tools(self):
+        """The gap this closes: previously startup passed, then prompts failed."""
+        result, cap = _invoke(
+            [
+                "--transport",
+                "http",
+                "--read-only-mode",
+                "false",
+                "--confirmation-required-tools",
+                "upsert_document_by_id",
+            ]
+        )
+        assert result.exit_code == 2, result.output
+        assert "FASTMCP_STATELESS_HTTP" in result.output
+        cap["run_app"].assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("transport", "requested", "expected"),
+    [
+        ("http", False, {"host": "h", "port": 1, "stateless_http": False}),
+        ("http", True, {"host": "h", "port": 1, "stateless_http": True}),
+        ("sse", True, {"host": "h", "port": 1, "stateless_http": False}),
+        ("stdio", True, {}),
+    ],
+)
+def test_run_app_always_passes_the_resolved_mode(transport, requested, expected):
+    """Never left unset, so FastMCP cannot fall back to its own env var."""
+    mcp = MagicMock()
+    run_app(mcp, transport=transport, host="h", port=1, stateless_http=requested)
+    kwargs = mcp.run.call_args.kwargs
+    kwargs.pop("transport"), kwargs.pop("show_banner")
+    assert kwargs == expected

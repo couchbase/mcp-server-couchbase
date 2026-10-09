@@ -149,3 +149,38 @@ class TestThreadPoolLimit:
 )
 def test_uvicorn_log_level(ours, uvicorn):
     assert uvicorn_log_level(ours) == uvicorn
+
+
+class TestInheritedRuntimeDefault:
+    """FASTMCP_STATELESS_HTTP, as the host reads it from FastMCP's settings.
+
+    It is the default when --stateless-http is unset, so deployments that
+    relied on it keep working, and the checks see the mode that will run.
+    """
+
+    def test_is_honoured_when_the_flag_is_unset(self):
+        assert _resolve(runtime_default_stateless=True).stateless_http is True
+
+    def test_explicit_flag_overrides_it(self):
+        config = _resolve(stateless_http=False, runtime_default_stateless=True)
+        assert config.stateless_http is False
+
+    def test_workers_still_imply_stateless_when_it_is_false(self):
+        assert _resolve(workers=2).stateless_http is True
+
+    def test_confirmation_tools_are_rejected_and_the_source_is_named(self):
+        with pytest.raises(ServingConfigError, match="FASTMCP_STATELESS_HTTP"):
+            _resolve(
+                runtime_default_stateless=True,
+                confirmation_required={"upsert_document_by_id"},
+            )
+
+    @pytest.mark.parametrize("transport", ["stdio", "sse"])
+    def test_is_ignored_with_a_warning_where_it_cannot_apply(self, transport, caplog):
+        config = _resolve(transport=transport, runtime_default_stateless=True)
+        assert config.stateless_http is False
+        assert "FASTMCP_STATELESS_HTTP" in caplog.text
+
+    def test_explicit_flag_on_sse_is_still_an_error(self):
+        with pytest.raises(ServingConfigError, match="no stateless mode"):
+            _resolve(transport="sse", stateless_http=True)
