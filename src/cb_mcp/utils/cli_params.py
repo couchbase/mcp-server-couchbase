@@ -36,6 +36,7 @@ Deliberately not here: anything a reader needs in order to understand *what
 the servers are*. That story stays in ``mcp_server.py``.
 """
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, NamedTuple
@@ -54,6 +55,7 @@ from ..core.cli.options import (
     tool_gating_options,
     transport_options,
 )
+from ..core.serving import ServingConfig
 from ..core.spec import Deployment, ServerSpec
 from ..servers.operational_insights.cli import oi_credential_options
 from ..tool_registration import prepare_tools_for_registration
@@ -72,6 +74,8 @@ __all__ = [
     "EmbeddingParams",
     "GatedTools",
     "build_settings",
+    "decode_worker_config",
+    "encode_worker_config",
     "gate_tools",
     "resolve_deployment_for",
     "resolved_logging_snapshot",
@@ -134,11 +138,20 @@ INSIGHTS_CREDENTIALS = CredentialProfile(
 
 @dataclass(frozen=True)
 class TransportParams:
-    """``--transport``/``--host``/``--port``: where the server listens, if it listens."""
+    """Where the server listens, if it listens, and how it is served.
+
+    ``stateless_http`` is ``None`` when the operator did not set it, meaning
+    "decide from the worker count"; ``cb_mcp.core.serving.resolve_serving``
+    turns it into a concrete bool. ``thread_pool_size`` comes from a hidden
+    flag and is ``None`` unless set.
+    """
 
     transport: str
     host: str
     port: int
+    workers: int
+    stateless_http: bool | None
+    thread_pool_size: int | None
 
     @classmethod
     def from_click(cls, params: Mapping[str, Any]) -> "TransportParams":
@@ -146,6 +159,9 @@ class TransportParams:
             transport=params["transport"],
             host=params["host"],
             port=params["port"],
+            workers=params["workers"],
+            stateless_http=params["stateless_http"],
+            thread_pool_size=params["thread_pool_size"],
         )
 
 
@@ -457,7 +473,11 @@ def gate_tools(
 
 
 def build_settings(
-    cli: CliParams, *, gated: GatedTools, oauth_enabled: bool
+    cli: CliParams,
+    *,
+    gated: GatedTools,
+    oauth_enabled: bool,
+    serving: ServingConfig,
 ) -> dict[str, Any]:
     """Assemble the ``settings`` mapping the whole runtime reads.
 
@@ -470,7 +490,9 @@ def build_settings(
 
     Note the gated-tool entries are the *resolved name sets*, not the raw
     strings the operator typed: the record should say what was actually
-    disabled, not what was requested.
+    disabled, not what was requested. The serving entries are likewise the
+    resolved topology; ``thread_pool_size`` is replaced during lifespan
+    startup with the limit that actually took effect.
     """
     settings = dict(cli.credentials)
     settings.update(
@@ -479,6 +501,9 @@ def build_settings(
             "transport": cli.transport.transport,
             "host": cli.transport.host,
             "port": cli.transport.port,
+            "workers": serving.workers,
+            "stateless_http": serving.stateless_http,
+            "thread_pool_size": serving.thread_pool_size,
             **cli.oauth.as_settings(enabled=oauth_enabled),
             **cli.embedding.as_settings(),
             "disabled_tools": gated.disabled,
@@ -528,3 +553,58 @@ def server_options(
         oauth_options,
         embedding_options,
     )
+
+
+# Click params whose callback results are not JSON-native.
+_LOG_LEVEL_KEY = "log_level"
+_LOG_SINKS_KEY = "log_sinks"
+
+
+def encode_worker_config(server_id: str, params: Mapping[str, Any]) -> str:
+    """Serialise one run's raw Click params for a ``--workers`` child process.
+
+    Uvicorn spawns each worker as a fresh interpreter that never parsed the
+    CLI, so the supervisor hands over the params it parsed and the worker
+    replays the exact same startup path from them. ``server_id`` says which
+    server to rebuild.
+
+    The two parsed-log params are ``NamedTuple`` callback results that
+    ``json`` would flatten into anonymous arrays, so they are written as
+    explicit objects. Every other param is a JSON-native scalar or ``None``;
+    anything else raises ``TypeError`` here rather than reaching a worker
+    half-configured.
+
+    The payload carries secrets (database password, embedding API keys) when
+    configured. It travels through the child's environment, the same
+    exposure as the already-supported ``CB_PASSWORD``-style variables.
+    """
+    payload = dict(params)
+    level: ParsedLogLevel = payload[_LOG_LEVEL_KEY]
+    payload[_LOG_LEVEL_KEY] = {
+        "level": level.level,
+        "invalid_token": level.invalid_token,
+    }
+    sinks: ParsedLogSinks = payload[_LOG_SINKS_KEY]
+    payload[_LOG_SINKS_KEY] = {
+        "sinks": sorted(sinks.sinks),
+        "invalid_tokens": list(sinks.invalid_tokens),
+    }
+    return json.dumps({"server_id": server_id, "params": payload})
+
+
+def decode_worker_config(raw: str) -> tuple[str, dict[str, Any]]:
+    """Rebuild ``(server_id, params)`` from :func:`encode_worker_config`.
+
+    ``params`` comes back shaped exactly like the Click params the supervisor
+    parsed, so the worker runs the same startup code rather than a second,
+    worker-only path.
+    """
+    payload = json.loads(raw)
+    params = payload["params"]
+    level = params[_LOG_LEVEL_KEY]
+    params[_LOG_LEVEL_KEY] = ParsedLogLevel(level["level"], level["invalid_token"])
+    sinks = params[_LOG_SINKS_KEY]
+    params[_LOG_SINKS_KEY] = ParsedLogSinks(
+        set(sinks["sinks"]), list(sinks["invalid_tokens"])
+    )
+    return payload["server_id"], params

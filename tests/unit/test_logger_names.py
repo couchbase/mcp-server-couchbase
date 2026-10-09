@@ -49,6 +49,7 @@ EXPECTED_LOGGER_NAMES = {
     # shared
     "cb_mcp.auth": "couchbase.mcp.auth",
     "cb_mcp.core.app": "couchbase.mcp.core.app",
+    "cb_mcp.core.serving": "couchbase.mcp.core.serving",
     "cb_mcp.tool_registration": "couchbase.mcp.tool_registration",
     "cb_mcp.utils.cli": "couchbase.mcp.utils.cli",
     "cb_mcp.utils.config": "couchbase.mcp.utils.config",

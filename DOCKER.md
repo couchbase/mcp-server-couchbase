@@ -200,6 +200,8 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_MCP_TRANSPORT`                   | Transport mode (stdio/http/sse)                                                                                                                          | `stdio`                                                        |
 | `CB_MCP_HOST`                        | Server host (HTTP/SSE modes)                                                                                                                             | `127.0.0.1`                                                    |
 | `CB_MCP_PORT`                        | Server port (HTTP/SSE modes). Defaults to each server's own port when unset (`operational`: `8000`, `operational-insights`: `8001`) — set explicitly only to override. | `8000` (`operational`) / `8001` (`operational-insights`) |
+| `CB_MCP_WORKERS`                     | Number of server worker processes for the `http` transport. Values above 1 use more CPU cores, run in stateless HTTP mode, cannot be combined with `CB_MCP_CONFIRMATION_REQUIRED_TOOLS`, and write per-worker log files named `<base>.<host>.<pid>.<level>.log`. `operational` server only. | `1` |
+| `CB_MCP_STATELESS_HTTP`              | Handle each HTTP request without per-session state (`http` transport only). Cannot be combined with `CB_MCP_CONFIRMATION_REQUIRED_TOOLS`. | `true` when workers > 1, otherwise `false` |
 | `CB_MCP_DISABLED_TOOLS`              | Tools to disable (see [Disabling Tools](#disabling-tools))                                                                                               | None                                                           |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | Tools that require explicit user confirmation before execution (see [Elicitation/Confirmation for Tool Calls](#elicitationconfirmation-for-tool-calls))  | None                                                           |
 | `CB_MCP_LOG_LEVEL`                   | Logging level for the server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging))                                                        | `info`                                                         |
@@ -372,6 +374,8 @@ When a listed tool is invoked:
 - If the client supports elicitation, the user is prompted to confirm before execution.
 - If the client does not support elicitation, the tool executes without confirmation for backward compatibility.
 
+Confirmation needs an MCP session, so it cannot be combined with stateless HTTP (`CB_MCP_STATELESS_HTTP=true`, or `CB_MCP_WORKERS` above 1). The server refuses to start with that combination rather than running the listed tools unconfirmed.
+
 #### MCP Client Configuration Example
 
 ```json
@@ -408,6 +412,33 @@ The server logs to `stderr` by default. Logging is configured with the `CB_MCP_L
 - **Server-config snapshot** — with the `file` sink active, a one-shot record is written as JSON to a dedicated `mcp_server_config.log.json` file (derived from `CB_MCP_LOG_FILE`), overwritten each start, so support always has the current config even after other logs rotate.
 
 For more details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/logging.html).
+
+### Health Check
+
+With `CB_MCP_TRANSPORT=http`, the server answers `GET /health` with `{"status": "ok", "server": "<server>"}` on the same port as the MCP endpoint. It is a liveness check: it confirms the server is up and serving HTTP, does not connect to the cluster, and needs no authentication even when OAuth is enabled. It is not available on `stdio`, which has no HTTP listener.
+
+Kubernetes:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
+Docker Compose (the image has no `curl`, so the check uses Python):
+
+```yaml
+healthcheck:
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+  interval: 10s
+  timeout: 5s
+  retries: 3
+```
+
+Use port `8001` for the `operational-insights` server, or whatever `CB_MCP_PORT` is set to. If `CB_MCP_HOST` is not `0.0.0.0`, make sure the probe can reach that address.
 
 ### OAuth 2.1 Authorization
 

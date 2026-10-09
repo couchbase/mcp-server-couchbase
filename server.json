@@ -88,6 +88,20 @@
           "isSecret": false
         },
         {
+          "name": "CB_MCP_WORKERS",
+          "description": "Number of server worker processes (default: 1). Values above 1 use more CPU cores, require the http transport, run in stateless HTTP mode, and cannot be combined with CB_MCP_CONFIRMATION_REQUIRED_TOOLS. Each worker writes log files named with the host and process id.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_STATELESS_HTTP",
+          "description": "Handle each HTTP request without per-session state (default: true when workers > 1, otherwise false). Only honored with the http transport; cannot be combined with CB_MCP_CONFIRMATION_REQUIRED_TOOLS.",
+          "isRequired": false,
+          "format": "boolean",
+          "isSecret": false
+        },
+        {
           "name": "CB_MCP_DISABLED_TOOLS",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
           "isRequired": false,
@@ -384,6 +398,22 @@
           "description": "Port to run the MCP server on (default: 8000). Used only for HTTP and SSE transport modes.",
           "isRequired": false,
           "format": "number",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--workers",
+          "description": "Number of server worker processes (default: 1). Values above 1 use more CPU cores, require the http transport, run in stateless HTTP mode, and cannot be combined with --confirmation-required-tools. Each worker writes log files named with the host and process id.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--stateless-http",
+          "description": "Handle each HTTP request without per-session state (default: true when workers > 1, otherwise false). Only honored with the http transport; cannot be combined with --confirmation-required-tools.",
+          "isRequired": false,
+          "format": "boolean",
           "isSecret": false
         },
         {
@@ -714,6 +744,13 @@
           "isSecret": false
         },
         {
+          "name": "CB_MCP_STATELESS_HTTP",
+          "description": "Handle each HTTP request without per-session state (default: true when workers > 1, otherwise false). Only honored with the http transport; cannot be combined with CB_MCP_CONFIRMATION_REQUIRED_TOOLS.",
+          "isRequired": false,
+          "format": "boolean",
+          "isSecret": false
+        },
+        {
           "name": "CB_MCP_DISABLED_TOOLS",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
           "isRequired": false,
@@ -969,6 +1006,14 @@
           "description": "Port to run the MCP server on (default: 8001). Used only for HTTP and SSE transport modes.",
           "isRequired": false,
           "format": "number",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--stateless-http",
+          "description": "Handle each HTTP request without per-session state (default: true when workers > 1, otherwise false). Only honored with the http transport; cannot be combined with --confirmation-required-tools.",
+          "isRequired": false,
+          "format": "boolean",
           "isSecret": false
         },
         {
@@ -1241,6 +1286,20 @@
           "description": "Port to run the MCP server on (default: 8000). Used only for HTTP and SSE transport modes.",
           "isRequired": false,
           "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_WORKERS",
+          "description": "Number of server worker processes (default: 1). Values above 1 use more CPU cores, require the http transport, run in stateless HTTP mode, and cannot be combined with CB_MCP_CONFIRMATION_REQUIRED_TOOLS. Each worker writes log files named with the host and process id.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_STATELESS_HTTP",
+          "description": "Handle each HTTP request without per-session state (default: true when workers > 1, otherwise false). Only honored with the http transport; cannot be combined with CB_MCP_CONFIRMATION_REQUIRED_TOOLS.",
+          "isRequired": false,
+          "format": "boolean",
           "isSecret": false
         },
         {
@@ -1546,6 +1605,13 @@
           "description": "Port to run the MCP server on (default: 8001). Used only for HTTP and SSE transport modes.",
           "isRequired": false,
           "format": "number",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_STATELESS_HTTP",
+          "description": "Handle each HTTP request without per-session state (default: true when workers > 1, otherwise false). Only honored with the http transport; cannot be combined with CB_MCP_CONFIRMATION_REQUIRED_TOOLS.",
+          "isRequired": false,
+          "format": "boolean",
           "isSecret": false
         },
         {

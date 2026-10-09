@@ -34,6 +34,7 @@ from ...utils.constants import (
     DEFAULT_OAUTH_ALGORITHM,
     DEFAULT_READ_ONLY_MODE,
     DEFAULT_TRANSPORT,
+    DEFAULT_WORKERS,
     SCOPE_READ,
     SCOPE_WRITE,
 )
@@ -141,6 +142,42 @@ def transport_options(*, default_port: int) -> Callable:
             envvar="CB_MCP_PORT",
             default=default_port,
             help="Port to run the server on.",
+        ),
+        click.option(
+            "--workers",
+            "workers",
+            envvar="CB_MCP_WORKERS",
+            type=click.IntRange(min=1),
+            default=DEFAULT_WORKERS,
+            help="Number of server worker processes. One process is limited "
+            "to about one CPU core by the Python GIL, so raise this to use "
+            "more cores. Values above 1 require --transport=http, run in "
+            "stateless HTTP mode, and cannot be combined with "
+            "--confirmation-required-tools. Workers share one listening "
+            "socket, so --host/--port are unchanged.",
+        ),
+        click.option(
+            "--stateless-http",
+            "stateless_http",
+            envvar="CB_MCP_STATELESS_HTTP",
+            type=bool,
+            default=None,
+            help="Handle each HTTP request with a fresh MCP transport instead "
+            "of keeping per-session state. Defaults to true when --workers is "
+            "above 1 (required, since sessions are not shared between "
+            "processes) and false otherwise. Only honored with "
+            "--transport=http; cannot be combined with "
+            "--confirmation-required-tools.",
+        ),
+        # Deliberately hidden and undocumented: an internal tuning knob, not
+        # yet part of the supported surface. See cb_mcp.core.serving.
+        click.option(
+            "--thread-pool-size",
+            "thread_pool_size",
+            envvar="CB_MCP_THREAD_POOL_SIZE",
+            type=click.IntRange(min=1),
+            default=None,
+            hidden=True,
         ),
     )
 

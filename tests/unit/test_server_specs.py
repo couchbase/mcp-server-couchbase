@@ -7,8 +7,11 @@ Operational Insights server, there was nothing to check these against. This
 file is that check, over every spec in ``tests/_all_specs.ALL_SPECS``.
 """
 
+import dataclasses
+
 from _all_specs import ALL_SPECS
 
+from cb_mcp.core.spec import ServerSpec
 from cb_mcp.utils.constants import LOGGER_NAMESPACE
 
 # A name appearing on two servers means one of two very different things,
@@ -234,3 +237,52 @@ def test_at_most_one_spec_owns_each_sdk_log_hook():
         hooks_by_identity.setdefault(id(spec.sdk_log_hook), []).append(spec.id)
     for owners in hooks_by_identity.values():
         assert len(owners) == 1, f"sdk_log_hook shared by multiple specs: {owners}"
+
+
+def test_multi_worker_support_is_declared_as_expected():
+    """Pin each server's ``supports_multiple_workers`` deliberately.
+
+    The field defaults to ``True``, so a new server that keeps per-process
+    state between tool calls would silently allow ``--workers > 1`` and fail
+    only when a follow-up call lands on another worker. Listing every server
+    here forces that to be a decision rather than a default.
+    """
+    expected = {
+        "operational": True,
+        # Async query handles live in one process's QueryResultsRegistry.
+        "operational-insights": False,
+    }
+    assert {spec.id: spec.supports_multiple_workers for spec in ALL_SPECS} == expected
+
+
+def test_server_spec_fields_are_append_only():
+    """``ServerSpec`` is a shared ``cb_mcp.core`` contract: never reorder it.
+
+    A consumer constructing it positionally binds by index, so a field
+    inserted mid-class silently shifts every later value into the wrong
+    field. New fields go at the end; this pins the order of every field that
+    already shipped.
+    """
+    shipped = [
+        "id",
+        "fastmcp_name",
+        "logger_namespace",
+        "display_name",
+        "tools",
+        "scopes",
+        "default_port",
+        "default_log_file",
+        "annotations",
+        "scope_hints",
+        "deployment_requirements",
+        "deployment_resolver",
+        "sdk_log_hook",
+        "reported_dependencies",
+        "safe_settings_keys",
+        "secret_settings_keys",
+        "supports_multiple_workers",
+    ]
+    names = [f.name for f in dataclasses.fields(ServerSpec)]
+    assert names[: len(shipped)] == shipped, (
+        "ServerSpec fields were reordered or removed; add new fields at the end."
+    )

@@ -293,6 +293,8 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_TRANSPORT` | `--transport` | Transport mode: `stdio`, `http`, `sse` | `stdio` |
 | `CB_MCP_HOST` | `--host` | Host for HTTP/SSE transport modes | `127.0.0.1` |
 | `CB_MCP_PORT` | `--port` | Port for HTTP/SSE transport modes | `8000` |
+| `CB_MCP_WORKERS` | `--workers` | Number of server worker processes for the `http` transport. Values above 1 run in stateless HTTP mode (see [Multiple Workers](#multiple-workers)) | `1` |
+| `CB_MCP_STATELESS_HTTP` | `--stateless-http` | Handle each HTTP request without per-session state. Only honored with `http`; cannot be combined with confirmation-required tools (see [Multiple Workers](#multiple-workers)) | `true` when workers > 1, otherwise `false` |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Elicitation/Confirmation Required Tools](#elicitationconfirmation-for-tool-calls)) | None |
 | `CB_MCP_MAX_QUERY_RESULT_SIZE` | `--max-query-result-size` | Maximum size **in bytes** of a query tool's result. Rows are streamed from the cluster and reading stops once the budget is reached; the response then reports `truncated: true` along with a `truncation` object explaining what happened. Applies to `run_sql_plus_plus_query` (operational) and `oi_run_query_sync` / `oi_get_async_query_results` (Operational Insights). Values above `1048576` (1 MB) or below `1024` (1 kB) are clamped with a startup warning | `15360` (15 kB) |
@@ -500,6 +502,8 @@ When a listed tool is invoked:
 - If the client supports elicitation, the user is prompted to confirm.
 - If the client does not support elicitation, the tool executes without confirmation for backward compatibility.
 
+Confirmation needs an MCP session, so it cannot be used with stateless HTTP (`--stateless-http`, or `--workers` above 1). The server refuses to start with that combination rather than running the listed tools unconfirmed.
+
 You can also check the version of the server using:
 
 ```bash
@@ -511,7 +515,7 @@ uvx couchbase-mcp-server --version
 The MCP server logs to `stderr` by default. Logging is configured with the `CB_MCP_LOG_*` variables listed in [Additional Configuration](#additional-configuration-for-mcp-server):
 
 - **`CB_MCP_LOG_LEVEL`** — how much is logged: `info` (the default) logs lifecycle events and tool invocations, `debug` adds verbose internal detail, and `off` disables all logging.
-- **`CB_MCP_LOG_SINKS`** — where logs go: `stderr` (the default), per-level rotating files (`file`), or both. With `file`, one file is written per level (for example `mcp_server.info.log` and `mcp_server.error.log`) at the path set by `CB_MCP_LOG_FILE`.
+- **`CB_MCP_LOG_SINKS`** — where logs go: `stderr` (the default), per-level rotating files (`file`), or both. With `file`, one file is written per level (for example `mcp_server.info.log` and `mcp_server.error.log`) at the path set by `CB_MCP_LOG_FILE`. With [multiple workers](#multiple-workers), each worker's files also carry the host and process id (`mcp_server.<host>.<pid>.info.log`).
 - **Rotation size** — `CB_MCP_LOG_ROTATION_MAX_SIZE_MB` is the global size (**in MB**) at which each per-level file rotates. Override individual levels with `CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE_MB` (`ERROR`/`WARNING`/`INFO`/`DEBUG`), also **in MB**, which inherit the global when unset. A size of `0` (global or per-level) is invalid and falls back to the default (1 MB) with a startup warning. `CB_MCP_LOG_MAX_BYTES` (bytes) is **deprecated** but still honored for backward compatibility; it is ignored when `CB_MCP_LOG_ROTATION_MAX_SIZE_MB` is also set, and prints a deprecation warning at startup.
 - **Retention** — `CB_MCP_LOG_RETENTION_BACKUP_COUNT` sets how many rotated backups are kept per level (excluding the live file); the default of `1` preserves the previous behaviour. Override individual levels with `CB_MCP_LOG_<LEVEL>_RETENTION_BACKUP_COUNT` (`ERROR`/`WARNING`/`INFO`/`DEBUG`), which inherit the global value when unset. Set a count to `0` to keep only the live file for that level — it is still capped by the rotation size (reset on rollover rather than backed up).
 - **Server-config snapshot** — when the `file` sink is active, a one-shot record (OS, Python, dependency versions, transport, resolved logging config, and redacted server config) is written as JSON to a dedicated `mcp_server_config.log.json` file (derived from the `CB_MCP_LOG_FILE` base). It is overwritten on each start, so support always has the current config and it never scrolls out of a rotating log.
@@ -817,6 +821,35 @@ uvx couchbase-mcp-server \
 ```
 
 The server will be available on <http://localhost:8000/mcp>. This can be used in MCP clients supporting streamable http transport mode such as Cursor.
+
+### Multiple Workers
+
+One server process uses at most about one CPU core. To use more cores, run several worker processes behind the same host and port:
+
+```bash
+uvx couchbase-mcp-server \
+  --connection-string='<couchbase_connection_string>' \
+  --username='<database_username>' \
+  --password='<database_password>' \
+  --transport=http \
+  --workers=4
+```
+
+A good starting point is the number of CPU cores available to the server. With more than one worker:
+
+- The `http` transport is required.
+- The server runs in stateless HTTP mode, because a client's requests can reach different workers. You can also set `--stateless-http=true` on a single worker, for example when several replicas sit behind a load balancer without sticky sessions.
+- `--confirmation-required-tools` cannot be used, since confirmation needs a session (see [Elicitation/Confirmation for Tool Calls](#elicitationconfirmation-for-tool-calls)).
+- Each worker writes its own log files, named with the host and process id, for example `mcp_server.<host>.<pid>.info.log`. A restarted worker starts a new set of files.
+- The [Operational Insights server](#operational-insights-server) supports only one worker, because its async query handles are held in process memory.
+
+### Health Check
+
+In HTTP mode the server also answers `GET /health` (for example <http://localhost:8000/health>) with `{"status": "ok", "server": "operational"}`. Use it for container liveness probes and load-balancer health checks:
+
+- It reports that the server process is up and serving HTTP. It does not connect to the cluster, so a cluster outage does not make healthy containers restart.
+- It needs no authentication, even when OAuth is enabled; it returns nothing beyond the server name.
+- It is served by every worker when running with `--workers`.
 
 ### MCP Client Configuration
 
