@@ -456,8 +456,9 @@ def build_index(
 
     This builds every index in the collection currently in the 'deferred' state — you
     cannot target a single index by name, and this includes vector indexes if any are
-    deferred (only create_index is restricted to scalar indexes; build is not). If there
-    are no deferred indexes, this is a harmless no-op.
+    deferred (create_query_index can create both scalar and vector indexes; the deprecated
+    create_index is scalar-only, but build is not restricted either way). If there are no
+    deferred indexes, this is a harmless no-op.
 
     The build runs asynchronously: success means the build was triggered, not that it has
     finished. Use list_indexes to check when the index(es) reach the 'online' state.

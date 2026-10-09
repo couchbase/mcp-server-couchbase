@@ -361,8 +361,12 @@ def create_query_index(
     cannot override dimension, similarity, description, num_replicas, or
     deferred, which this tool already manages explicitly.
 
-    condition is an optional WHERE clause for a partial index. num_replicas
-    optionally sets index replica count. By default the index is created
+    condition is an optional WHERE clause for a partial index -- this works for
+    the vector shapes too, not just scalar; the planner only selects the index
+    for a query whose own predicate implies condition, so a query tool's
+    filter (e.g. run_vector_search's where) must match or imply it, or the
+    index is silently skipped in favor of a full scan rather than erroring.
+    num_replicas optionally sets index replica count. By default the index is created
     deferred (not built) -- call build_index afterward, then list_indexes to
     confirm it reaches 'online'. Pass ignore_if_exists=True to avoid an error
     when an index with this name already exists.
@@ -437,6 +441,15 @@ def create_query_index(
                 "reaches 'online'."
             )
         return response
+    except ValueError as e:
+        # Input-shape mistakes an LLM caller makes routinely (wrong
+        # index_type, missing dimension/similarity, a param that doesn't
+        # apply to the chosen shape) -- expected, not exceptional, so no
+        # traceback noise.
+        logger.warning(f"Rejected {index_type} index {index_name!r} on {keyspace}: {e}")
+        return tool_error(
+            e, index_name=index_name, keyspace=keyspace, index_type=index_type
+        )
     except Exception as e:
         logger.error(
             f"Error creating {index_type} index {index_name!r} on {keyspace}: {e}",
