@@ -177,14 +177,6 @@ class ServerSpec:
     #: accept this call only once per process.
     sdk_log_hook: Callable[[str, int], None] | None = None
 
-    #: Whether this server may run as several worker processes behind one
-    #: socket (``--workers > 1``). ``False`` for a server that keeps state in
-    #: process memory which a follow-up request may need, because the next
-    #: request can land on a different worker. Session state is not the
-    #: question here — multi-worker mode is always stateless HTTP — this is
-    #: about state the server's *own* tools keep between calls.
-    supports_multiple_workers: bool = True
-
     #: Distribution names whose versions are worth reporting in the startup
     #: diagnostic snapshot, beyond the core dependencies every server shares.
     reported_dependencies: tuple[str, ...] = ()
@@ -194,3 +186,16 @@ class ServerSpec:
 
     #: Settings keys whose *presence* may be logged but never their value.
     secret_settings_keys: tuple[str, ...] = ()
+
+    #: Whether this server may run as several worker processes behind one
+    #: socket (``--workers > 1``). ``False`` for a server that keeps state in
+    #: process memory which a follow-up request may need, because the next
+    #: request can land on a different worker. Session state is not the
+    #: question here — multi-worker mode is always stateless HTTP — this is
+    #: about state the server's *own* tools keep between calls.
+    #:
+    #: Kept last on purpose: ``ServerSpec`` is a shared ``cb_mcp.core``
+    #: contract, and a new field inserted mid-class would shift the positional
+    #: index of every field after it for any consumer constructing it
+    #: positionally. Add future fields after this one for the same reason.
+    supports_multiple_workers: bool = True

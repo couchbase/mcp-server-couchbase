@@ -397,3 +397,56 @@ def test_run_app_always_passes_the_resolved_mode(transport, requested, expected)
     kwargs = mcp.run.call_args.kwargs
     kwargs.pop("transport"), kwargs.pop("show_banner")
     assert kwargs == expected
+
+
+@pytest.mark.parametrize(
+    "stateless_args",
+    [
+        pytest.param(["--stateless-http", "true"], id="explicit-stateless"),
+        pytest.param(["--workers", "2"], id="implied-by-workers"),
+    ],
+)
+def test_disabling_the_confirmation_tools_clears_the_stateless_error(stateless_args):
+    """The error tells operators to use --disabled-tools; that must work.
+
+    The configured confirmation set keeps disabled names for diagnostics, so
+    the stateless check has to look at the tools that will actually register.
+    """
+    result, cap = _invoke(
+        [
+            "--transport",
+            "http",
+            "--read-only-mode",
+            "false",
+            *stateless_args,
+            "--confirmation-required-tools",
+            "upsert_document_by_id",
+            "--disabled-tools",
+            "upsert_document_by_id",
+        ]
+    )
+    assert result.exit_code == 0, result.output
+    served = cap["run_app"].called or cap["uvicorn_run"].called
+    assert served
+
+
+def test_disabled_confirmation_tools_are_still_reported_as_configured():
+    """Diagnostics keep showing what the operator asked for."""
+    result, cap = _invoke(
+        [
+            "--transport",
+            "http",
+            "--read-only-mode",
+            "false",
+            "--stateless-http",
+            "true",
+            "--confirmation-required-tools",
+            "upsert_document_by_id",
+            "--disabled-tools",
+            "upsert_document_by_id",
+        ]
+    )
+    assert result.exit_code == 0, result.output
+    settings = _settings_from(cap["lifespan"])
+    assert "upsert_document_by_id" in settings["confirmation_required_tools"]
+    assert "upsert_document_by_id" in settings["disabled_tools"]

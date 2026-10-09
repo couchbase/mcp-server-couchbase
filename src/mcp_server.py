@@ -199,7 +199,12 @@ def _build_server(
             stateless_http=cli.transport.stateless_http,
             thread_pool_size=cli.transport.thread_pool_size,
             supports_multiple_workers=spec.supports_multiple_workers,
-            confirmation_required=gated.confirmation_required,
+            # Only tools that will actually be registered: the configured set
+            # deliberately keeps names that were also disabled (so diagnostics
+            # report what the operator asked for), and a disabled tool can
+            # never prompt. Without this, --disabled-tools could not clear the
+            # error that recommends it.
+            confirmation_required=gated.confirmation_required - gated.disabled,
             # What FastMCP would do if left alone (FASTMCP_STATELESS_HTTP),
             # so a deployment relying on it keeps working and the checks see
             # the mode that will actually run.
