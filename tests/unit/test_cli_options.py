@@ -21,7 +21,13 @@ from click.testing import CliRunner
 
 import mcp_server
 from cb_mcp.auth import OAuthConfigError, resolve_oauth
-from cb_mcp.utils.constants import LOGGER_ROOT, SCOPE_READ, SCOPE_WRITE
+from cb_mcp.utils.cli_params import CliParams, CredentialProfile
+from cb_mcp.utils.constants import (
+    LOGGER_NAMESPACE,
+    LOGGER_ROOT,
+    SCOPE_READ,
+    SCOPE_WRITE,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -217,3 +223,211 @@ class TestResolveOauthScopeLabelCollision:
         )
         assert result.exit_code == 2
         assert "must be distinct" in result.output
+
+
+class TestAuditOptions:
+    """The six audit flags, through Click, to a resolved configuration.
+
+    Audit settings do not appear in ``app_context.settings`` — deliberately, so
+    they are not duplicated into the env-info snapshot — so these assert on the
+    ``ResolvedAuditConfig`` the entrypoint hands to ``build_app`` instead.
+    """
+
+    @staticmethod
+    def _resolved(args: list[str], env: dict | None = None):
+        captured: dict = {}
+        real = mcp_server.build_app
+
+        def capture(*a, **kw):
+            captured["audit"] = kw.get("audit_config")
+            return real(*a, **kw)
+
+        with (
+            patch("cb_mcp.core.app.FastMCP", return_value=MagicMock()),
+            patch("mcp_server.build_app", side_effect=capture),
+            patch("mcp_server.run_app"),
+        ):
+            result = CliRunner().invoke(
+                mcp_server.main,
+                ["--connection-string", "couchbase://localhost", *args],
+                env={**os.environ, **(env or {})},
+                catch_exceptions=False,
+            )
+        assert result.exit_code == 0, result.output
+        return captured["audit"]
+
+    def test_auditing_is_off_by_default(self):
+        config = self._resolved([])
+        assert config.enabled is False
+        assert config.file is None
+        assert config.tool_args is False
+
+    def test_flags_reach_the_resolved_configuration(self, tmp_path):
+        config = self._resolved(
+            [
+                "--audit-log-enabled",
+                "true",
+                "--audit-log-sinks",
+                "console,file",
+                "--audit-log-file-path",
+                str(tmp_path / "audit.log"),
+                "--audit-log-rotation-max-size-mb",
+                "4",
+                "--audit-log-rotation-interval",
+                "2w",
+                "--audit-log-retention-max-backups",
+                "7",
+                "--audit-log-tool-args",
+                "true",
+                "--audit-log-disabled-events",
+                "61490,61491",
+            ]
+        )
+        assert config.enabled is True
+        assert config.sinks == ("console", "file")
+        assert config.file == str(tmp_path / "audit.log")
+        assert config.rotation_max_size_mb == 4.0
+        assert config.rotation_interval == "2w"
+        assert config.rotation_interval_seconds == 2 * 604_800
+        assert config.max_backups == 7
+        assert config.tool_args is True
+        assert config.disabled_events == (61490, 61491)
+        # The process-scoped path is resolved once, here, so startup can log
+        # the exact file and an operator is never left guessing.
+        assert config.process_file and config.process_file.endswith(".log")
+
+    def test_env_vars_are_honoured(self, tmp_path):
+        config = self._resolved(
+            [],
+            env={
+                "CB_MCP_AUDIT_LOG_ENABLED": "true",
+                "CB_MCP_AUDIT_LOG_SINKS": "file",
+                "CB_MCP_AUDIT_LOG_FILE_PATH": str(tmp_path / "from-env.log"),
+                "CB_MCP_AUDIT_LOG_ROTATION_INTERVAL": "30d",
+                "CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS": "3",
+                "CB_MCP_AUDIT_LOG_TOOL_ARGS": "true",
+            },
+        )
+        assert config.enabled is True
+        assert config.sinks == ("file",)
+        assert config.file == str(tmp_path / "from-env.log")
+        assert config.rotation_interval == "30d"
+        assert config.max_backups == 3
+        assert config.tool_args is True
+
+    def test_enabling_the_file_sink_without_a_path_still_starts_the_server(self):
+        """Per the PRD this is reported, not fatal: the server still starts."""
+        config = self._resolved(
+            ["--audit-log-enabled", "true", "--audit-log-sinks", "file"]
+        )
+        assert config.enabled is False
+
+    def test_enabling_without_a_file_defaults_to_the_console_sink(self):
+        """The default sink needs no path, so this is a working configuration."""
+        config = self._resolved(["--audit-log-enabled", "true"])
+        assert config.enabled is True
+        assert config.sinks == ("console",)
+        assert config.writes_file is False
+
+    def test_both_subcommands_accept_the_audit_flags(self):
+        for command in ("operational", "operational-insights"):
+            result = CliRunner().invoke(
+                mcp_server.main, [command, "--help"], catch_exceptions=False
+            )
+            assert result.exit_code == 0
+            for flag in (
+                "--audit-log-enabled",
+                "--audit-log-sinks",
+                "--audit-log-file-path",
+                "--audit-log-rotation-max-size-mb",
+                "--audit-log-rotation-interval",
+                "--audit-log-retention-max-backups",
+                "--audit-log-tool-args",
+                "--audit-log-disabled-events",
+            ):
+                assert flag in result.output, f"{flag} missing from {command} --help"
+
+
+class TestAuditDiagnosticOrdering:
+    """Audit diagnostics must reach the operator's configured log sinks.
+
+    ``README`` and ``DOCKER.md`` both promise "an error in the log" when the
+    file sink is selected without a path. Resolving the audit configuration
+    inside ``from_click`` emitted that error two lines before
+    ``cli.logging.apply()`` ran, so it went to ``logging.lastResort`` on raw
+    stderr while the per-level log files stayed empty — the documented
+    behaviour was simply not happening.
+    """
+
+    @staticmethod
+    def _params(**overrides) -> dict:
+        """A complete Click params mapping, as the real entrypoint receives it."""
+        captured: dict = {}
+
+        def capture(params, *, credentials):
+            captured["params"] = dict(params)
+            raise SystemExit(0)
+
+        with patch.object(CliParams, "from_click", side_effect=capture):
+            CliRunner().invoke(
+                mcp_server.main,
+                [
+                    "operational",
+                    "--connection-string",
+                    "couchbase://localhost",
+                    "--username",
+                    "u",
+                    "--password",
+                    "p",
+                ],
+                env=dict(os.environ),
+                catch_exceptions=True,
+            )
+        params = captured["params"]
+        params.update(overrides)
+        return params
+
+    def test_resolution_is_deferred_until_first_access(self):
+        emitted: list[str] = []
+
+        class Capture(logging.Handler):
+            def emit(self, record):
+                emitted.append(record.getMessage())
+
+        params = self._params(
+            audit_log_enabled=True,
+            audit_log_sinks="file",
+            audit_log_file_path=None,
+        )
+        handler = Capture()
+        audit_logger = logging.getLogger(f"{LOGGER_NAMESPACE}.audit.config")
+        audit_logger.addHandler(handler)
+        try:
+            cli = CliParams.from_click(
+                params,
+                credentials=CredentialProfile(options=lambda f: f, settings_keys=()),
+            )
+            # Nothing logged yet: this is the window in which the real startup
+            # path configures logging.
+            assert emitted == [], emitted
+
+            config = cli.audit
+        finally:
+            audit_logger.removeHandler(handler)
+
+        assert config.enabled is False
+        assert any("no audit file path is configured" in m for m in emitted), emitted
+
+    def test_the_resolved_configuration_is_cached(self):
+        params = self._params(audit_log_enabled=True, audit_log_sinks="console")
+        cli = CliParams.from_click(
+            params, credentials=CredentialProfile(options=lambda f: f, settings_keys=())
+        )
+        # Resolution warns; repeating it per access would duplicate every
+        # diagnostic and re-derive the process-scoped path. Two named locals
+        # rather than `cli.audit is cli.audit`: the latter reads as a comparison
+        # of identical expressions, which static analysis flags and a reader has
+        # to pause over.
+        first = cli.audit
+        second = cli.audit
+        assert first is second

@@ -113,6 +113,7 @@ def _start_server(
         auth=auth,
         read_only_mode=cli.gating.read_only_mode,
         logging_config=resolved_logging_snapshot(),
+        audit_config=cli.audit,
     )
 
     run_app(

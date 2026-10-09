@@ -1,0 +1,193 @@
+{
+  "service_package": "operational",
+  "blocks": {
+    "core": 57344,
+    "operational": 61440
+  },
+  "events": [
+    {
+      "id": 57344,
+      "name": "server started",
+      "description": "MCP server started; carries the static server context",
+      "category": "lifecycle",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 57345,
+      "name": "server stopped",
+      "description": "MCP server shut down cleanly",
+      "category": "lifecycle",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 57346,
+      "name": "server configuration",
+      "description": "Resolved server configuration recorded at startup, including read-only mode and the withheld and disabled tool sets",
+      "category": "lifecycle",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 57360,
+      "name": "session initialized",
+      "description": "MCP initialize handshake completed",
+      "category": "session",
+      "default_enabled": true,
+      "filterable": true
+    },
+    {
+      "id": 57376,
+      "name": "token rejected",
+      "description": "Bearer JWT rejected during verification",
+      "category": "authorization",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 57377,
+      "name": "scope check denied",
+      "description": "A required OAuth scope was not granted by the presented token",
+      "category": "authorization",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 57488,
+      "name": "write blocked (read-only mode)",
+      "description": "A SQL++ statement modifying data or structure was refused because CB_MCP_READ_ONLY_MODE is enabled",
+      "category": "guardrail",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 57490,
+      "name": "confirmation declined",
+      "description": "The user rejected an elicitation for a confirmation-required tool",
+      "category": "guardrail",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 57491,
+      "name": "confirmation skipped",
+      "description": "A confirmation-required tool executed without confirmation because the client does not support elicitation",
+      "category": "guardrail",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 61488,
+      "name": "cluster read",
+      "description": "A cluster read operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": true
+    },
+    {
+      "id": 61489,
+      "name": "schema read",
+      "description": "A schema read operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": true
+    },
+    {
+      "id": 61490,
+      "name": "document read",
+      "description": "A document read operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": true
+    },
+    {
+      "id": 61491,
+      "name": "query read",
+      "description": "A query read operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": true
+    },
+    {
+      "id": 61492,
+      "name": "index read",
+      "description": "An index read operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": true
+    },
+    {
+      "id": 61493,
+      "name": "performance read",
+      "description": "A performance read operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": true
+    },
+    {
+      "id": 61496,
+      "name": "search read",
+      "description": "A search read operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": true
+    },
+    {
+      "id": 61520,
+      "name": "cluster write",
+      "description": "A cluster write operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 61521,
+      "name": "schema write",
+      "description": "A schema write operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 61522,
+      "name": "document write",
+      "description": "A document write operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 61523,
+      "name": "query write",
+      "description": "A query write operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 61524,
+      "name": "index write",
+      "description": "An index write operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 61525,
+      "name": "performance write",
+      "description": "A performance write operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 61528,
+      "name": "search write",
+      "description": "A search write operation was requested through a tool",
+      "category": "tool_call",
+      "default_enabled": true,
+      "filterable": false
+    }
+  ]
+}

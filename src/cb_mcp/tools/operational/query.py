@@ -12,6 +12,9 @@ from fastmcp import Context
 from fastmcp.server.dependencies import get_access_token
 from lark_sqlpp import modifies_data, modifies_structure, parse_sqlpp
 
+from ...audit import state as audit_state
+from ...audit.emitter import get_audit_logger
+from ...audit.exceptions import ReadOnlyWriteBlockedError, StatementScopeDeniedError
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.constants import SCOPE_WRITE
 from ...utils.operational.connection import connect_to_bucket, format_keyspace
@@ -28,6 +31,28 @@ from ...utils.responses import tool_success
 from ...utils.sqlpp import safe_ident
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.query")
+
+
+def _query_correlation_options() -> dict[str, str]:
+    """SDK query options carrying this request's audit correlation id.
+
+    Couchbase Server's SQL++ audit records carry ``clientContextId``, captured
+    from the query's ``client_context_id``. Propagating our ``cid`` into it
+    makes an MCP audit record joinable to the Server audit record for the same
+    statement — an exact join, not a timestamp heuristic.
+
+    Nothing consumes that join yet; it is set now so the correlation exists in
+    historical data by the time a later phase wants to query it. Empty when
+    auditing is inactive, so an unaudited call is byte-for-byte the request it
+    was before.
+
+    Only the query service can do this. The KV protocol exposes no
+    client-supplied correlation field, so a document-level join between an
+    MCP record and a Couchbase Server audit record stays approximate: it has
+    to be made on timestamp and keyspace rather than on a shared id.
+    """
+    cid = audit_state.get_cid()
+    return {"client_context_id": cid} if cid else {}
 
 
 def get_schema_for_collection(
@@ -171,10 +196,6 @@ def run_sql_plus_plus_query(
     function — it keeps FTS-specific result shape (score, fragments, facets) out of
     general query results and gives clearer tracing of what was searched.
     """
-    cluster = get_cluster_connection(ctx)
-
-    bucket = connect_to_bucket(cluster, bucket_name)
-
     app_context = ctx.request_context.lifespan_context
     read_only_mode = app_context.read_only_mode
 
@@ -190,6 +211,85 @@ def run_sql_plus_plus_query(
     token = get_access_token()
     lacks_write_scope = token is not None and SCOPE_WRITE not in (token.scopes or [])
     block_query_writes = read_only_mode or lacks_write_scope
+
+    # Classification and the write guard both run *before* the cluster is
+    # touched. Connecting first meant an unreachable cluster or a missing
+    # bucket raised before the statement was ever inspected, so a failed
+    # attempt to run DML was recorded against the query *read* id — and read
+    # ids are filterable, so "someone tried to UPDATE and it failed" could be
+    # filtered out of the audit log by an operator turning read noise down.
+    # Nothing here does I/O: read-only mode and the token both come from the
+    # request context.
+    #
+    # It also means a statement the guard refuses is now refused without a
+    # connection attempt, so the caller gets the accurate reason (blocked)
+    # rather than whatever connection error happened to come first.
+    results: list[dict[str, Any]] = []
+    # EXPLAIN statements are always safe to execute and should bypass write checks.
+    is_explain = _is_explain_statement(query)
+
+    # This tool is the one whose audit category depends on the statement it
+    # is given, so when auditing is active the statement must be inspected
+    # even where the write guard would not have needed to. Otherwise an
+    # *allowed* DML statement would be recorded against the query-read id,
+    # and read ids are filterable — a successful mutation could be filtered
+    # out of the audit log. The parse is done once here and shared with the
+    # guard below, so an audited call never pays for it twice, and a call
+    # made with auditing off pays nothing at all.
+    audit_active = get_audit_logger().active
+    needs_audit_classification = audit_active and not is_explain
+
+    if is_explain and audit_active:
+        audit_state.record_statement_class("read")
+
+    if (block_query_writes or needs_audit_classification) and not is_explain:
+        try:
+            kind = _blocked_write_kind(parse_sqlpp(query))
+        except Exception:
+            if block_query_writes:
+                raise
+            if audit_active:
+                audit_state.record_statement_class("write")
+            kind = None
+        else:
+            if audit_active:
+                audit_state.record_statement_class(
+                    "write" if kind is not None else "read"
+                )
+
+        if kind is not None and block_query_writes:
+            if lacks_write_scope and not read_only_mode:
+                # lacks_write_scope implies token is not None here.
+                held_scopes = sorted(set(token.scopes or []))
+                msg = (
+                    f"SQL++ {kind} modification requires the "
+                    f"'{SCOPE_WRITE}' scope; token scopes are {held_scopes}."
+                )
+                logger.warning(msg)
+                audit_state.record_refusal(
+                    event_id=StatementScopeDeniedError.audit_event.id,
+                    event_name=StatementScopeDeniedError.audit_event.event_name,
+                    outcome=StatementScopeDeniedError.audit_outcome,
+                    reason=StatementScopeDeniedError.audit_reason,
+                    required_scope="write",
+                    statement_kind=kind,
+                )
+                raise StatementScopeDeniedError(msg)
+            msg = f"{kind.capitalize()} modification query is not allowed in read-only mode"
+            logger.error(msg)
+            audit_state.record_refusal(
+                event_id=ReadOnlyWriteBlockedError.audit_event.id,
+                event_name=ReadOnlyWriteBlockedError.audit_event.event_name,
+                outcome=ReadOnlyWriteBlockedError.audit_outcome,
+                reason=ReadOnlyWriteBlockedError.audit_reason,
+                statement_kind=kind,
+            )
+            raise ReadOnlyWriteBlockedError(msg)
+
+    # Only now is the cluster touched. Everything above is a policy
+    # decision made from the request context alone.
+    cluster = get_cluster_connection(ctx)
+    bucket = connect_to_bucket(cluster, bucket_name)
 
     try:
         scope = bucket.scope(scope_name)
@@ -220,10 +320,11 @@ def run_sql_plus_plus_query(
         # Reached only for read-only queries (or when writes are allowed).
         # Forward named parameters only when provided so existing callers that
         # pass none keep the exact previous behaviour.
+        options = _query_correlation_options()
         result = (
-            scope.query(query, named_parameters=named_parameters)
+            scope.query(query, named_parameters=named_parameters, **options)
             if named_parameters is not None
-            else scope.query(query)
+            else scope.query(query, **options)
         )
         # The SDK's QueryResult streams rows, so this stops reading — and stops
         # the cluster sending — once the budget is spent, rather than buffering
@@ -295,7 +396,9 @@ def run_cluster_query(ctx: Context, query: str, **kwargs: Any) -> list[dict[str,
 
     try:
         logger.debug("Executing cluster query")
-        result = cluster.query(query, **kwargs)
+        # Caller-supplied kwargs win, so an explicit client_context_id is never
+        # overwritten by the audit correlation id.
+        result = cluster.query(query, **{**_query_correlation_options(), **kwargs})
         for row in result:
             results.append(row)
         logger.info(f"Cluster query returned {len(results)} row(s)")
