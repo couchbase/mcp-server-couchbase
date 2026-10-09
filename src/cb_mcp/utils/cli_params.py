@@ -153,16 +153,22 @@ class TransportParams:
 
 @dataclass(frozen=True)
 class GatingParams:
-    """Which tools get registered at all: read-only mode plus the opt-out lists.
+    """What the server will let a tool do: read-only mode, the opt-out lists, and the result budget.
 
     The two lists stay as the operator typed them (comma-separated names or a
     file path); ``prepare_tools_for_registration`` parses and validates them
     against the tools that actually loaded.
+
+    ``max_query_result_size`` rides here rather than in its own params class
+    because it shares the others' role — a limit on what a registered tool may
+    do — and because it is declared in the same Click stack. It arrives already
+    clamped by ``validate_max_query_result_size``.
     """
 
     read_only_mode: bool
     disabled_tools: str | None
     confirmation_required_tools: str | None
+    max_query_result_size: int
 
     @classmethod
     def from_click(cls, params: Mapping[str, Any]) -> "GatingParams":
@@ -170,6 +176,7 @@ class GatingParams:
             read_only_mode=params["read_only_mode"],
             disabled_tools=params["disabled_tools"],
             confirmation_required_tools=params["confirmation_required_tools"],
+            max_query_result_size=params["max_query_result_size"],
         )
 
 
@@ -541,6 +548,7 @@ def build_settings(
             **cli.embedding.as_settings(),
             "disabled_tools": gated.disabled,
             "confirmation_required_tools": gated.confirmation_required,
+            "max_query_result_size": cli.gating.max_query_result_size,
         }
     )
     return settings

@@ -20,6 +20,7 @@ from ...utils.cli import (
     validate_log_level,
     validate_log_path,
     validate_log_sinks,
+    validate_max_query_result_size,
     validate_scope_label,
 )
 from ...utils.constants import (
@@ -33,6 +34,7 @@ from ...utils.constants import (
     DEFAULT_LOG_BACKUP_COUNT,
     DEFAULT_LOG_LEVEL,
     DEFAULT_LOG_SINKS,
+    DEFAULT_MAX_QUERY_RESULT_SIZE,
     DEFAULT_OAUTH_ALGORITHM,
     DEFAULT_READ_ONLY_MODE,
     DEFAULT_TRANSPORT,
@@ -163,8 +165,20 @@ tool_gating_options = compose(
         "Also accepts a file path containing one tool name per line. "
         "Requires the MCP client to support elicitation.",
     ),
+    click.option(
+        "--max-query-result-size",
+        "max_query_result_size",
+        envvar="CB_MCP_MAX_QUERY_RESULT_SIZE",
+        callback=validate_max_query_result_size,
+        type=int,
+        default=DEFAULT_MAX_QUERY_RESULT_SIZE,
+        help="Maximum size, in bytes, of a query tool's result. Rows are "
+        "streamed from the cluster and reading stops once this budget is "
+        "reached; the response then reports truncated: true. Values above "
+        "1048576 (1 MB) or below 1024 (1 kB) are clamped with a warning.",
+    ),
 )
-"""Per-tool opt-outs and confirmation requirements. Shared by every server."""
+"""Per-tool opt-outs, confirmation requirements, and the query result budget. Shared by every server."""
 
 
 def logging_options(*, default_log_file: str) -> Callable:
