@@ -70,14 +70,25 @@ TOOL_SET = ToolSet(
         # read-only logic needed.
         oi_get_async_query_results,
         oi_discard_async_query_results,
-    ),
-    write=(
-        oi_create_index,
-        # Interrupts an in-flight query, a more consequential action than
-        # discarding an already-finished one — disabled entirely under
-        # --read-only-mode rather than runtime-gated.
+        # Cancelling mutates no data: it releases server resources the caller
+        # itself allocated with oi_run_query_async. Classified read-only for
+        # the same reason oi_discard_async_query_results is — both end a query
+        # the caller started, and neither touches stored data.
+        #
+        # It was previously a write tool on the grounds that interrupting an
+        # in-flight query is "more consequential" than discarding a finished
+        # one. That reasoning measures the wrong axis: read-only mode exists
+        # to prevent *mutation*, and consequence is already communicated to
+        # clients by destructiveHint=True in TOOL_ANNOTATIONS. The practical
+        # cost of the old classification was a dead end — under
+        # --read-only-mode (the default) oi_run_query_async was registered but
+        # oi_cancel_async_query was not, so a caller could start a long query
+        # and have no way to stop it, while oi_discard_async_query_results
+        # answered an in-flight handle by recommending a tool that was not
+        # loaded.
         oi_cancel_async_query,
     ),
+    write=(oi_create_index,),
 )
 
 # Derived views, kept for parity with the operational tools package.
@@ -96,7 +107,8 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "oi_explain_query": ToolAnnotations(readOnlyHint=True),
     # oi_run_query_sync/oi_run_query_async can carry DDL/DML, so they get no
     # readOnlyHint (matches run_sql_plus_plus_query on the operational
-    # server).
+    # server). Their copy_to_* arguments write to external storage, which is
+    # the same classification for the same reason — no change needed here.
     "oi_run_query_sync": ToolAnnotations(),
     "oi_run_query_async": ToolAnnotations(),
     "oi_get_async_query_results": ToolAnnotations(readOnlyHint=True),
