@@ -273,7 +273,6 @@ def _shutdown_at_exit() -> None:
 #: The SIGTERM handler that was in place before auditing installed its own, so
 #: it can still run. ``None`` means nothing has been installed yet.
 _previous_sigterm: Any = None
-_sigterm_installed = False
 
 #: How long to wait for the audit trail to close on a SIGTERM that nothing else
 #: is handling. Bounded because a shutdown must not hang; short because the
@@ -349,12 +348,23 @@ def _install_sigterm_handler() -> None:
     ``signal.signal`` only works on the main thread of the main interpreter, so
     an embedding host that builds the app on a worker thread simply does not get
     this; auditing is unaffected otherwise.
+
+    "Already installed" is read from the live signal disposition rather than
+    tracked in a module flag. The flag was a second copy of state the ``signal``
+    module already owns, and the two could disagree: a host that installed its
+    own handler after ours would leave the flag saying "installed" while the
+    disposition said otherwise, and ours would never be restored. Reading the
+    disposition cannot drift — and it is what makes the guard below load-bearing
+    rather than an optimisation.
     """
-    global _sigterm_installed, _previous_sigterm  # noqa: PLW0603
-    if _sigterm_installed:
-        return
+    global _previous_sigterm  # noqa: PLW0603
     try:
         previous = signal.getsignal(signal.SIGTERM)
+        if previous is _handle_sigterm:
+            # Ours is already in place. Falling through would record this very
+            # function as its own predecessor, and the next SIGTERM would
+            # recurse into it until the stack ran out.
+            return
         # Published before the handler is installed: a SIGTERM delivered
         # between the two would otherwise read ``None`` and take the default
         # path, skipping the handler that actually owns the shutdown.
@@ -366,8 +376,6 @@ def _install_sigterm_handler() -> None:
             "will not record a 'server stopped' event.",
             exc_info=True,
         )
-        return
-    _sigterm_installed = True
 
 
 __all__ = [

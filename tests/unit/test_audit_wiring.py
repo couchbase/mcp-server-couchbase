@@ -459,16 +459,38 @@ def test_the_sigterm_handler_is_installed_only_when_auditing_runs(
     tmp_path, monkeypatch
 ):
     """A server with auditing off must not touch the signal disposition."""
-    monkeypatch.setattr(emitter, "_sigterm_installed", False)
     monkeypatch.setattr(emitter, "_previous_sigterm", None)
     original = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
     try:
         init_audit(_audit_config(tmp_path, enabled=False))
-        assert signal.getsignal(signal.SIGTERM) is original
-        assert emitter._sigterm_installed is False
+        assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
 
         init_audit(_audit_config(tmp_path, sinks="file"))
         assert signal.getsignal(signal.SIGTERM) is emitter._handle_sigterm
+    finally:
+        shutdown_audit()
+        signal.signal(signal.SIGTERM, original)
+
+
+def test_installing_twice_does_not_chain_the_handler_to_itself(tmp_path):
+    """The install guard is correctness, not an optimisation.
+
+    ``_handle_sigterm`` hands over to ``_previous_sigterm`` whenever it is
+    callable. If a second install captured the already-installed handler as its
+    own predecessor, the next SIGTERM would call itself until the stack ran
+    out — on the one path that exists to make shutdown *more* reliable.
+    """
+    original = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    try:
+        init_audit(_audit_config(tmp_path, sinks="file"))
+        shutdown_audit()
+        init_audit(_audit_config(tmp_path, sinks="file"))
+
+        assert signal.getsignal(signal.SIGTERM) is emitter._handle_sigterm
+        assert emitter._previous_sigterm is not emitter._handle_sigterm
+        assert emitter._previous_sigterm is signal.SIG_DFL
     finally:
         shutdown_audit()
         signal.signal(signal.SIGTERM, original)

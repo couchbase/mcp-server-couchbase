@@ -424,5 +424,10 @@ class TestAuditDiagnosticOrdering:
             params, credentials=CredentialProfile(options=lambda f: f, settings_keys=())
         )
         # Resolution warns; repeating it per access would duplicate every
-        # diagnostic and re-derive the process-scoped path.
-        assert cli.audit is cli.audit
+        # diagnostic and re-derive the process-scoped path. Two named locals
+        # rather than `cli.audit is cli.audit`: the latter reads as a comparison
+        # of identical expressions, which static analysis flags and a reader has
+        # to pause over.
+        first = cli.audit
+        second = cli.audit
+        assert first is second
