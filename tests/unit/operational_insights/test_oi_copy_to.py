@@ -194,6 +194,34 @@ class TestRunQuerySyncExport:
         assert "required to export" in result["error"]
         cluster.execute_query.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "blank",
+        [
+            {"copy_to_link": ""},
+            {"copy_to_link": "   "},
+            {"copy_to_bucket": ""},
+            {"copy_to_path": ""},
+            {"copy_to_bucket": "", "copy_to_path": ""},
+            {"copy_to_link": "", "copy_to_bucket": "b", "copy_to_path": "p"},
+        ],
+    )
+    def test_blank_destination_field_is_rejected(self, blank: dict) -> None:
+        """A supplied-but-blank field is an invalid export, not an absent one.
+
+        Filtering the destination on truthiness made ``copy_to_link=""``
+        disappear, so the export request vanished and the plain query ran —
+        returning rows the caller never asked for and writing nothing. That is
+        the silent downgrade ``_resolve_copy_to`` exists to prevent, so
+        presence is tested with ``is not None``.
+        """
+        ctx, cluster = make_oi_ctx(read_only_mode=False)
+
+        result = self._run(ctx, cluster, **blank)
+
+        assert result["success"] is False
+        assert "required to export" in result["error"]
+        cluster.execute_query.assert_not_called()
+
     def test_format_without_destination_is_rejected(self) -> None:
         ctx, cluster = make_oi_ctx(read_only_mode=False)
 

@@ -192,8 +192,15 @@ def _resolve_copy_to(
     half-specified export and silently running the plain query would return
     rows the caller never asked for and write nothing — the opposite of the
     request, and invisible unless they noticed the missing file.
+
+    "Supplied" means ``is not None``, deliberately: a blank or whitespace-only
+    value is a *supplied* destination field that happens to be invalid, not an
+    absent one. Treating ``copy_to_link=""`` as absent made the whole export
+    request vanish and the plain query run — the exact silent downgrade this
+    function exists to prevent. Blank values now reach
+    ``build_copy_to_statement``, which rejects them by name.
     """
-    requested = [p for p in (link, bucket, path) if p and p.strip()]
+    requested = [p for p in (link, bucket, path) if p is not None]
     if not requested:
         if output_format:
             raise CopyToError(
