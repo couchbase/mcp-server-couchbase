@@ -72,7 +72,7 @@ from .logging import (
 from .scope_enforcement import required_scopes_for_tool, wrap_with_scope_check
 
 # Reo.dev telemetry
-from .telemetry import send_install_ping, wrap_with_telemetry
+from .telemetry import send_install_ping
 
 # Note: Individual modules create their own hierarchical loggers using:
 # logger = logging.getLogger(f"{LOGGER_NAMESPACE}.module.name")
@@ -129,5 +129,4 @@ __all__ = [
     "wrap_with_scope_check",
     # Reo.dev telemetry
     "send_install_ping",
-    "wrap_with_telemetry",
 ]
