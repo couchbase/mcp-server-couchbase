@@ -32,7 +32,12 @@ def test_advisor_binds_user_query_as_named_parameter(user_query: str) -> None:
 
     with patch(
         "cb_mcp.tools.operational.index.run_sql_plus_plus_query",
-        return_value=fake_results,
+        return_value={
+            "success": True,
+            "rows": fake_results,
+            "row_count": len(fake_results),
+            "truncated": False,
+        },
     ) as mock_run:
         result = get_index_advisor_recommendations(
             ctx, "travel-sample", "inventory", user_query

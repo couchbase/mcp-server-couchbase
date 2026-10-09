@@ -76,7 +76,7 @@ def get_index_advisor_recommendations(
             scope_name,
             advisor_query,
             named_parameters={"advise_statement": query},
-        )
+        )["rows"]
 
         if not advisor_results:
             return {
