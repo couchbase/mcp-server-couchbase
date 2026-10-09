@@ -35,6 +35,7 @@ via tool_success/tool_error instead of raising.
 """
 
 import logging
+import re
 from typing import Any
 
 from couchbase.options import SearchOptions
@@ -156,6 +157,14 @@ def run_vector_search(
 
     try:
         vector, embedding_info = embed_query_text(get_settings(ctx), query_text)
+
+        # Validate the where clause to prevent SQL injection
+        if where is not None:
+            # Reject patterns that could enable SQL injection or statement chaining
+            if ";" in where:
+                raise ValueError("Invalid where clause: semicolons are not allowed")
+            if "--" in where or "/*" in where or "*/" in where:
+                raise ValueError("Invalid where clause: SQL comments are not allowed")
 
         distance_args = f"doc.{safe_ident(vector_field)}, $query_vector, {quote_literal(distance_metric)}"
         if num_probes is not None:
