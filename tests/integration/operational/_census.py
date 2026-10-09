@@ -57,6 +57,10 @@ EXPECTED_TOOLS = {
     "get_cluster_tasks",
     "get_cluster_health_snapshot",
     "get_cluster_system_events",
+    # Query service admin (N1QL Admin REST API) tools
+    "get_cluster_query_vitals",
+    "get_active_queries",
+    "delete_active_query",
     # Performance analysis tools
     "get_longest_running_queries",
     "get_most_frequent_queries",
@@ -117,6 +121,11 @@ TOOLS_BY_CATEGORY = {
     "vector_search": {
         "run_vector_search",
         "run_search_vector_search",
+    },
+    "query_admin": {
+        "get_cluster_query_vitals",
+        "get_active_queries",
+        "delete_active_query",
     },
     "management": {
         "create_scope",
@@ -208,4 +217,5 @@ TOOL_REQUIRED_PARAMS = {
         "distance_metric",
     ],
     "run_search_vector_search": ["index_name", "vector_field", "vector_query_text"],
+    "delete_active_query": ["request_id"],
 }

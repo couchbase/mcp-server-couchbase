@@ -96,6 +96,16 @@ Both tools embed query text using the model configured via `EMBEDDING_*` environ
 | `get_queries_not_using_covering_index` | Get queries that don't use a covering index |
 | `get_queries_not_selective` | Get queries that are not selective (index scans return many more documents than final result) |
 
+### Query service health tools
+
+These reach the Query service's own N1QL Admin REST API, distinct from the SQL++ system-catalog-based tools above — they report the query engine's health directly, per node, and include the only remediation action in this group. **Self-managed Couchbase Server 7.6+ only — not available on Capella.**
+
+| Tool Name | Description |
+| --------- | ----------- |
+| `get_cluster_query_vitals` | Get query-engine health (request rate, active/queued request counts, memory, GC, uptime) from every query-service node, via the Query service's `/admin/vitals` endpoint. Distinguishes "the workload is heavy" from "the query engine itself is stressed." Requires at minimum the Read-Only Admin (`ro_admin`) role. |
+| `get_active_queries` | Get all queries executing right now, merged across every query-service node, via the `/admin/active_requests` endpoint — elapsed time, statement, client, state. Requires at minimum the Read-Only Admin (`ro_admin`) role. |
+| `delete_active_query` | Cancel an in-flight query by its request ID via `DELETE /admin/active_requests/{request_id}`, trying every query node in turn. Requires the Full Admin or Cluster Admin role. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+
 ### Operational Insights tools
 
 This image also runs a second server, for Operational Insights clusters —

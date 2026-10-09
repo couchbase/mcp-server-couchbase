@@ -71,6 +71,13 @@ from .query import (
     run_sql_plus_plus_query,
 )
 
+# Query service admin (N1QL Admin REST API) tools
+from .query_admin import (
+    delete_active_query,
+    get_active_queries,
+    get_cluster_query_vitals,
+)
+
 # Reference data tools
 from .reference import (
     discover_tool_input_values,
@@ -116,6 +123,8 @@ TOOL_SET = ToolSet(
         get_cluster_tasks,
         get_cluster_health_snapshot,
         get_cluster_system_events,
+        get_cluster_query_vitals,
+        get_active_queries,
         # KV read tools
         get_document_by_id,
         lookup_subdocument,
@@ -162,6 +171,8 @@ TOOL_SET = ToolSet(
         create_index,
         build_index,
         drop_index,
+        # Query service admin write tools
+        delete_active_query,
         # FTS write tools
         upsert_fts_index,
         drop_fts_index,
@@ -188,6 +199,8 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_cluster_tasks": ToolAnnotations(readOnlyHint=True),
     "get_cluster_health_snapshot": ToolAnnotations(readOnlyHint=True),
     "get_cluster_system_events": ToolAnnotations(readOnlyHint=True),
+    "get_cluster_query_vitals": ToolAnnotations(readOnlyHint=True),
+    "get_active_queries": ToolAnnotations(readOnlyHint=True),
     # KV read tools
     "get_document_by_id": ToolAnnotations(readOnlyHint=True),
     "lookup_subdocument": ToolAnnotations(readOnlyHint=True),
@@ -231,6 +244,8 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "create_index": ToolAnnotations(),
     "build_index": ToolAnnotations(idempotentHint=True),
     "drop_index": ToolAnnotations(destructiveHint=True),
+    # Query service admin write tools
+    "delete_active_query": ToolAnnotations(destructiveHint=True),
     # FTS write tools
     "upsert_fts_index": ToolAnnotations(idempotentHint=True),
     "drop_fts_index": ToolAnnotations(destructiveHint=True),
@@ -267,6 +282,11 @@ TOOL_DEPLOYMENT_REQUIREMENTS: dict[str, Deployment] = {
     # Index Service REST: /pools/default/nodeServices to find the indexers,
     # then each indexer's /api/v1/stats (9102/19102).
     "get_index_stats": Deployment.ON_PREM,
+    # GET /admin/vitals and GET/DELETE /admin/active_requests on the Query
+    # REST port (8093/18093).
+    "get_cluster_query_vitals": Deployment.ON_PREM,
+    "get_active_queries": Deployment.ON_PREM,
+    "delete_active_query": Deployment.ON_PREM,
 }
 
 # Per-tool explanations appended to a scope-denial error, reaching the
@@ -336,6 +356,9 @@ __all__ = [
     "get_cluster_tasks",
     "get_cluster_health_snapshot",
     "get_cluster_system_events",
+    "get_cluster_query_vitals",
+    "get_active_queries",
+    "delete_active_query",
     "get_queries_not_selective",
     "get_queries_not_using_covering_index",
     "get_queries_using_primary_index",

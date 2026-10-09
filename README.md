@@ -149,6 +149,16 @@ Both tools embed query text using the model configured via [Embedding Provider C
 | `get_queries_not_using_covering_index` | Get queries that don't use a covering index |
 | `get_queries_not_selective` | Get queries that are not selective (index scans return many more documents than final result) |
 
+### Query service health tools
+
+These reach the Query service's own N1QL Admin REST API, distinct from the SQL++ system-catalog-based tools above — they report the query engine's health directly, per node, and include the only remediation action in this group. **Self-managed Couchbase Server 7.6+ only — not available on Capella.**
+
+| Tool Name | Description |
+| --------- | ----------- |
+| `get_cluster_query_vitals` | Get query-engine health (request rate, active/queued request counts, memory, GC, uptime) from every query-service node, via the Query service's `/admin/vitals` endpoint. Distinguishes "the workload is heavy" from "the query engine itself is stressed." Requires at minimum the Read-Only Admin (`ro_admin`) role. |
+| `get_active_queries` | Get all queries executing right now, merged across every query-service node, via the `/admin/active_requests` endpoint — elapsed time, statement, client, state. Requires at minimum the Read-Only Admin (`ro_admin`) role. |
+| `delete_active_query` | Cancel an in-flight query by its request ID via `DELETE /admin/active_requests/{request_id}`, trying every query node in turn. Requires the Full Admin or Cluster Admin role. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+
 ### Operational Insights tools
 
 Registered by the separate `operational-insights` server (see
@@ -377,14 +387,18 @@ You can disable specific tools to prevent them from being loaded and exposed to 
 
 A few tools reach Couchbase through REST endpoints that Couchbase Capella does not expose. The server works out which kind of cluster `CB_CONNECTION_STRING` points at — Capella when every host ends in `.cloud.couchbase.com`, self-managed otherwise — and does not register the tools that cannot work there. They are reported alongside your own disabled tools by `get_server_configuration_status`, and listed in the startup log.
 
-Today this affects the four tools that reach Couchbase through an admin REST endpoint rather than the SDK, none of which are registered on a Capella connection:
+Today this affects the eight tools that reach Couchbase through an admin REST endpoint rather than the SDK, none of which are registered on a Capella connection:
 
 | Tool | Endpoint it needs |
 | --- | --- |
 | `get_cluster_metrics` | Management REST (`/pools/default/stats/range`) |
 | `get_cluster_tasks` | Management REST (`/pools/default/tasks`) |
 | `get_cluster_health_snapshot` | Management REST, plus per-node endpoints |
+| `get_cluster_system_events` | Management REST (`/events`) |
 | `get_index_stats` | Index Service REST (each indexer's `/api/v1/stats`) |
+| `get_cluster_query_vitals` | Query service REST (each query node's `/admin/vitals`) |
+| `get_active_queries` | Query service REST (each query node's `/admin/active_requests`) |
+| `delete_active_query` | Query service REST (`DELETE /admin/active_requests/{id}`) |
 
 Tools that go through the Couchbase SDK are unaffected and stay available on Capella — `get_cluster_health_and_services` (ping) and `get_cluster_diagnostics_report` (diagnostics) among them.
 

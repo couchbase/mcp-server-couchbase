@@ -21,6 +21,7 @@ WRITE_TOOL_NAMES = frozenset(
         "insert_document_by_id",
         "replace_document_by_id",
         "delete_document_by_id",
+        "delete_active_query",
     }
 )
 
