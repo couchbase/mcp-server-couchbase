@@ -63,6 +63,7 @@ EXPECTED_LOGGER_NAMES = {
     "cb_mcp.tools.operational.index": "couchbase.mcp.operational.tools.index",
     "cb_mcp.tools.operational.kv": "couchbase.mcp.operational.tools.kv",
     "cb_mcp.tools.operational.query": "couchbase.mcp.operational.tools.query",
+    "cb_mcp.tools.operational.query_admin": "couchbase.mcp.operational.tools.query_admin",
     "cb_mcp.tools.operational.reference": "couchbase.mcp.operational.tools.reference",
     "cb_mcp.tools.operational.server": "couchbase.mcp.operational.tools.server",
     "cb_mcp.tools.operational.vector_search": "couchbase.mcp.operational.tools.vector_search",

@@ -158,6 +158,25 @@ class TestPrepareToolsScopeEnforcement:
         ):
             asyncio.run(upsert(None, "b", "s", "c", "id", {}))
 
+    def test_enforce_scopes_true_rejects_read_token_for_delete_active_query(self):
+        """delete_active_query, added to TOOL_SET.write, must be gated the same way."""
+        tools, _, _ = prepare_tools_for_registration(
+            read_only_mode=False,
+            disabled_tools=None,
+            confirmation_required_tools=None,
+            enforce_scopes=True,
+        )
+        delete_query = next(t for t in tools if t.__name__ == "delete_active_query")
+        token = SimpleNamespace(scopes=[SCOPE_READ])
+
+        with (
+            patch(
+                "cb_mcp.utils.scope_enforcement.get_access_token", return_value=token
+            ),
+            pytest.raises(PermissionError),
+        ):
+            asyncio.run(delete_query(None, request_id="abc-123"))
+
 
 class TestDisabledAndConfirmationOverlap:
     """Behavior when a tool is named in BOTH --disabled-tools and
@@ -222,10 +241,17 @@ def test_spec_wires_the_declared_deployment_requirements():
 
 #: Derived from the spec rather than spelled out, so adding a tool to
 #: ``TOOL_DEPLOYMENT_REQUIREMENTS`` does not silently falsify these tests.
+#:
+#: Restricted to tools loaded under read_only_mode=True — the mode every test
+#: below uses — because a write tool absent for that reason was never a
+#: candidate for the deployment gate to withhold in the first place.
+_LOADED_UNDER_READ_ONLY = {
+    t.__name__ for t in OPERATIONAL_SPEC.tools.tools_for(read_only_mode=True)
+}
 WITHHELD_ON_CAPELLA = {
     name
     for name, required in OPERATIONAL_SPEC.deployment_requirements.items()
-    if required is not Deployment.CAPELLA
+    if required is not Deployment.CAPELLA and name in _LOADED_UNDER_READ_ONLY
 }
 
 

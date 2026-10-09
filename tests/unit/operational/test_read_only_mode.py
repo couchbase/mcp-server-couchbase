@@ -33,14 +33,16 @@ WRITE_TOOL_NAMES = {
     "create_index",
     "build_index",
     "drop_index",
+    # Query service admin write tools
+    "delete_active_query",
     # FTS index management write tools
     "upsert_fts_index",
     "drop_fts_index",
 }
 
-# Read-only tool names that should always be available (33 tools)
+# Read-only tool names that should always be available (35 tools)
 READ_ONLY_TOOL_NAMES = {
-    # Server/Cluster management tools (12)
+    # Server/Cluster management tools (14)
     "get_buckets_in_cluster",
     "get_server_configuration_status",
     "test_cluster_connection",
@@ -53,6 +55,8 @@ READ_ONLY_TOOL_NAMES = {
     "get_cluster_tasks",
     "get_cluster_health_snapshot",
     "get_cluster_system_events",
+    "get_cluster_query_vitals",
+    "get_active_queries",
     # KV read tools (2)
     "get_document_by_id",
     "lookup_subdocument",
@@ -95,7 +99,7 @@ class TestToolCategories:
 
     def test_write_tools_defined(self):
         """Verify WRITE_TOOLS list is properly defined."""
-        assert len(WRITE_TOOLS) == 14
+        assert len(WRITE_TOOLS) == 15
         tool_names = {tool.__name__ for tool in WRITE_TOOLS}
         assert tool_names == WRITE_TOOL_NAMES
 
@@ -186,18 +190,18 @@ class TestToolCounts:
         """Verify correct number of tools in read-only mode."""
         tools = get_tools(read_only_mode=True)
         assert len(tools) == len(READ_ONLY_TOOLS)
-        assert len(tools) == 33  # Expected count of read-only tools
+        assert len(tools) == 35  # Expected count of read-only tools
 
     def test_all_tools_mode_tool_count(self):
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (33 read-only + 14 write)
-        assert len(tools) == 47
+        # Expected total count (35 read-only + 15 write)
+        assert len(tools) == 50
 
     def test_write_tools_count(self):
-        """Verify exactly 14 write tools exist."""
-        assert len(WRITE_TOOLS) == 14
+        """Verify exactly 15 write tools exist."""
+        assert len(WRITE_TOOLS) == 15
 
 
 class TestReadOnlyModeToolFiltering:
@@ -269,6 +273,12 @@ class TestReadOnlyModeToolFiltering:
         tool_names = {tool.__name__ for tool in tools}
         assert "drop_index" not in tool_names
 
+    def test_delete_active_query_tool_filtered_in_read_only_mode(self):
+        """Verify delete_active_query is filtered in read-only mode."""
+        tools = get_tools(read_only_mode=True)
+        tool_names = {tool.__name__ for tool in tools}
+        assert "delete_active_query" not in tool_names
+
     def test_upsert_fts_index_tool_filtered_in_read_only_mode(self):
         """Verify upsert_fts_index is filtered in read-only mode."""
         tools = get_tools(read_only_mode=True)
@@ -317,6 +327,26 @@ class TestReadOnlyModeToolFiltering:
         tools_write = get_tools(read_only_mode=False)
         tool_names_write = {tool.__name__ for tool in tools_write}
         assert "explain_sql_plus_plus_query" in tool_names_write
+
+    def test_get_cluster_query_vitals_tool_always_available(self):
+        """Verify get_cluster_query_vitals is always available."""
+        tools_read_only = get_tools(read_only_mode=True)
+        tool_names_read_only = {tool.__name__ for tool in tools_read_only}
+        assert "get_cluster_query_vitals" in tool_names_read_only
+
+        tools_write = get_tools(read_only_mode=False)
+        tool_names_write = {tool.__name__ for tool in tools_write}
+        assert "get_cluster_query_vitals" in tool_names_write
+
+    def test_get_active_queries_tool_always_available(self):
+        """Verify get_active_queries is always available."""
+        tools_read_only = get_tools(read_only_mode=True)
+        tool_names_read_only = {tool.__name__ for tool in tools_read_only}
+        assert "get_active_queries" in tool_names_read_only
+
+        tools_write = get_tools(read_only_mode=False)
+        tool_names_write = {tool.__name__ for tool in tools_write}
+        assert "get_active_queries" in tool_names_write
 
 
 class TestAppContext:

@@ -23,6 +23,8 @@ from .constants import (
     INDEX_REST_PORT_TLS,
     MANAGEMENT_REST_PORT_PLAIN,
     MANAGEMENT_REST_PORT_TLS,
+    QUERY_REST_PORT_PLAIN,
+    QUERY_REST_PORT_TLS,
 )
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.utils.index_utils")
@@ -415,6 +417,48 @@ def resolve_management_endpoints(cluster: Any, connection_string: str) -> list[s
     # ordinary deployment even though it cannot cover a remapped one.
     is_tls = connection_string.lower().startswith("couchbases://")
     port = MANAGEMENT_REST_PORT_TLS if is_tls else MANAGEMENT_REST_PORT_PLAIN
+    return [
+        f"{_bracket_ipv6(host)}:{port}"
+        for host in extract_hosts_from_connection_string(connection_string)
+    ]
+
+
+def resolve_query_endpoints(cluster: Any, connection_string: str) -> list[str]:
+    """List the cluster's query-service endpoints as ``host:port``.
+
+    The N1QL query service serves both the client query protocol and the
+    ``/admin/*`` endpoints on the same port, so wherever the SDK can reach the
+    query service for a SQL++ request is also where its admin API lives.
+    Mirrors ``resolve_management_endpoints``: uses ``ping`` (cheap, limited to
+    the query service) rather than ``diagnostics`` (which only reports sockets
+    already open, and a freshly opened cluster has none), falling back to the
+    connection string's hosts on the default port when the SDK reports
+    nothing.
+
+    Unlike the management endpoint, every node that comes back here matters:
+    ``/admin/vitals`` and ``/admin/active_requests`` are answered per node, so
+    callers should query every endpoint this returns rather than the first
+    one that works.
+    """
+    endpoints: list[str] = []
+    try:
+        report = json.loads(
+            cluster.ping(PingOptions(service_types=[ServiceType.Query])).as_json()
+        )
+        for endpoint in report.get("services", {}).get("query", []):
+            remote = endpoint.get("remote")
+            if remote and remote not in endpoints:
+                endpoints.append(remote)
+    except Exception as e:
+        logger.warning(f"Could not ping the query service: {e}")
+
+    if endpoints:
+        return endpoints
+
+    # Nothing to go on — assume the default port, which is right for an
+    # ordinary deployment even though it cannot cover a remapped one.
+    is_tls = connection_string.lower().startswith("couchbases://")
+    port = QUERY_REST_PORT_TLS if is_tls else QUERY_REST_PORT_PLAIN
     return [
         f"{_bracket_ipv6(host)}:{port}"
         for host in extract_hosts_from_connection_string(connection_string)
