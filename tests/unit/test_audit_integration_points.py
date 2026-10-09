@@ -339,7 +339,12 @@ def test_unparseable_statement_still_runs_when_writes_are_allowed_and_auditing_o
             )
         # Executed rather than raised, and booked against the never-filtered
         # query write id so a possible mutation is never dropped from the log.
-        assert result == []
+        # Asserted on the outcome rather than the whole payload: what this test
+        # is about is that the call ran, not what the query tool's result looks
+        # like, and pinning the full shape made it a casualty of an unrelated
+        # change to that shape.
+        assert result["success"] is True
+        assert result["rows"] == []
         assert audit_state.get_statement_class() == "write"
     finally:
         audit_state.reset(token)

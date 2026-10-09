@@ -93,6 +93,7 @@ def test_read_only_tools_are_classified_read(tool_name):
         ("test_cluster_connection", 61488),
         ("get_cluster_tasks", 61488),
         ("get_cluster_health_snapshot", 61488),
+        ("get_cluster_system_events", 61488),
         ("get_buckets_in_cluster", 61489),
         ("get_schema_for_collection", 61489),
         ("create_scope", 61521),

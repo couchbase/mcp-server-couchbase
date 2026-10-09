@@ -61,6 +61,9 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # like their neighbours above.
         "get_cluster_tasks": ("cluster", "read"),
         "get_cluster_health_snapshot": ("cluster", "read"),
+        # The cluster's own event log via GET /events — a server-level read,
+        # like its neighbours above.
+        "get_cluster_system_events": ("cluster", "read"),
         # Reads bundled reference data rather than the cluster, so it touches
         # no keyspace and has no service of its own. Booked as a cluster read:
         # it is a server-level informational call, which is what that category
