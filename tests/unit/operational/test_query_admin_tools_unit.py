@@ -13,11 +13,14 @@ that can't reasonably be exercised against a live single-node test cluster:
   reports (rather than fails on) a node that could not be reached.
 - Both return an error envelope, rather than raising, when every query node
   fails.
-- delete_active_query tries every discovered query node in turn, stopping at
-  the first one that reports success; a "not found" on a node is not a
-  failure, just a reason to try the next one. It rejects Capella connections
-  and an empty request_id up front, and returns a structured failure when no
-  node reports having the request.
+- delete_active_query sends the cancellation to every discovered query node
+  (it has no reliable way to tell from a response which node actually held
+  the request, or whether a given status code means cancelled vs. not
+  found — Couchbase Server does not distinguish these consistently). It
+  reports delivery, not outcome: success as long as at least one node
+  answered, regardless of that answer's status code. It rejects Capella
+  connections and an empty request_id up front, and only fails when no query
+  node could be reached at all.
 """
 
 from __future__ import annotations
@@ -105,6 +108,19 @@ def _status_response(status_code: int) -> MagicMock:
             f"{status_code} error", request=MagicMock(), response=response
         )
     )
+    return response
+
+
+def _delete_response(status_code: int, body: str = "") -> MagicMock:
+    """Build a mock httpx.Response for a DELETE call: only .status_code/.text are read.
+
+    delete_active_query does not call .raise_for_status() or .json() on
+    these — it records the status code and body as diagnostic data without
+    treating either as a verdict.
+    """
+    response = MagicMock()
+    response.status_code = status_code
+    response.text = body
     return response
 
 
@@ -311,7 +327,14 @@ class TestGetActiveQueries:
 
 
 class TestDeleteActiveQuery:
-    """delete_active_query: per-node try-in-turn, write-tool success/error envelope."""
+    """delete_active_query: delivers to every node, reports delivery not outcome.
+
+    Couchbase Server's DELETE /admin/active_requests/{id} does not reliably
+    distinguish a successful cancellation from a request that was never
+    there — both can come back as the same error status on some builds. So
+    these tests assert on what the tool can actually promise: it reached (or
+    didn't reach) each node, not whether the cancellation took effect.
+    """
 
     def test_rejects_empty_request_id_without_rest_call(self) -> None:
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
@@ -340,9 +363,11 @@ class TestDeleteActiveQuery:
         assert result["success"] is False
         assert "Capella" in result["error"]
 
-    def test_first_node_success(self) -> None:
+    def test_reports_success_once_delivered_to_a_single_node(self) -> None:
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
-        client_patch, mock_client = _patch_httpx_client("delete", [_ok_response(None)])
+        client_patch, mock_client = _patch_httpx_client(
+            "delete", [_delete_response(200, "ok")]
+        )
 
         with _patch_endpoints(["localhost:8093"]), client_patch:
             result = delete_active_query(ctx, request_id="abc-123")
@@ -352,47 +377,50 @@ class TestDeleteActiveQuery:
         assert result == {
             "success": True,
             "request_id": "abc-123",
-            "node": "localhost:8093",
+            "nodes": [
+                {"node": "localhost:8093", "http_status": 200, "body": "ok"}
+            ],
         }
 
-    def test_tries_next_node_after_not_found(self) -> None:
-        """A 404 on one node means "not here", not "cancellation failed"."""
+    def test_sends_to_every_node_regardless_of_status_code(self) -> None:
+        """Unlike the old try-in-turn behavior, every node is contacted —
+        there is no reliable per-node signal (e.g. 404) to stop early on."""
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         client_patch, mock_client = _patch_httpx_client(
-            "delete", [_status_response(404), _ok_response(None)]
+            "delete",
+            [_delete_response(500, "not found"), _delete_response(200, "ok")],
         )
 
         with _patch_endpoints(["node1:8093", "node2:8093"]), client_patch:
             result = delete_active_query(ctx, request_id="abc-123")
 
         assert mock_client.delete.call_count == 2
-        assert result == {
-            "success": True,
-            "request_id": "abc-123",
-            "node": "node2:8093",
-        }
+        assert result["success"] is True
+        assert result["nodes"] == [
+            {"node": "node1:8093", "http_status": 500, "body": "not found"},
+            {"node": "node2:8093", "http_status": 200, "body": "ok"},
+        ]
 
-    def test_returns_not_found_message_only_when_every_node_says_not_found(
+    def test_reports_success_even_when_every_node_returns_an_error_status(
         self,
     ) -> None:
+        """A 500 from every node is still "delivered" — this status code is
+        known to also appear for genuinely successful cancellations on some
+        Couchbase Server builds, so it must not be read as failure."""
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         client_patch, _ = _patch_httpx_client(
-            "delete", [_status_response(404), _status_response(404)]
+            "delete",
+            [_delete_response(500, "error A"), _delete_response(500, "error B")],
         )
 
         with _patch_endpoints(["node1:8093", "node2:8093"]), client_patch:
             result = delete_active_query(ctx, request_id="abc-123")
 
-        assert result["success"] is False
-        assert "was not found" in result["error"]
-        assert "abc-123" in result["error"]
-        assert result["request_id"] == "abc-123"
-        assert len(result["nodes_tried"]) == 2
+        assert result["success"] is True
+        assert len(result["nodes"]) == 2
+        assert "unreachable_nodes" not in result
 
-    def test_does_not_report_not_found_when_every_node_is_unreachable(self) -> None:
-        """A connection error is not the same as the server saying 'not
-        found' — reporting it as such would read as 'safe, it's done' when
-        cancellation was never attempted."""
+    def test_fails_only_when_every_node_is_unreachable(self) -> None:
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         error = httpx.ConnectError("refused")
         client_patch, _ = _patch_httpx_client("delete", [error, error])
@@ -401,26 +429,22 @@ class TestDeleteActiveQuery:
             result = delete_active_query(ctx, request_id="abc-123")
 
         assert result["success"] is False
-        assert "was not found" not in result["error"]
-        assert "Could not confirm cancellation" in result["error"]
-        assert len(result["nodes_tried"]) == 2
+        assert result["request_id"] == "abc-123"
 
-    def test_mixed_not_found_and_real_failure_is_not_reported_as_not_found(
+    def test_partial_reachability_still_reports_success_with_unreachable_listed(
         self,
     ) -> None:
-        """One node genuinely has no record of the request; the other failed
-        for an unrelated reason (e.g. auth/5xx). The request may still be
-        running on the node that failed, so this must not be reported as a
-        clean not-found."""
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         client_patch, _ = _patch_httpx_client(
-            "delete", [_status_response(404), _status_response(500)]
+            "delete", [_delete_response(200, "ok"), httpx.ConnectError("refused")]
         )
 
         with _patch_endpoints(["node1:8093", "node2:8093"]), client_patch:
             result = delete_active_query(ctx, request_id="abc-123")
 
-        assert result["success"] is False
-        assert "was not found" not in result["error"]
-        assert "Could not confirm cancellation" in result["error"]
-        assert len(result["nodes_tried"]) == 2
+        assert result["success"] is True
+        assert result["nodes"] == [
+            {"node": "node1:8093", "http_status": 200, "body": "ok"}
+        ]
+        assert len(result["unreachable_nodes"]) == 1
+        assert result["unreachable_nodes"][0]["node"] == "node2:8093"

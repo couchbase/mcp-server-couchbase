@@ -86,13 +86,21 @@ async def test_get_active_queries() -> None:
 
 
 @pytest.mark.asyncio
-async def test_delete_active_query_with_bogus_id_reports_not_found() -> None:
-    """A request ID that doesn't exist must fail cleanly, not raise.
+async def test_delete_active_query_with_bogus_id_reports_delivery() -> None:
+    """A request ID that doesn't exist must not raise, and must not be
+    reported as a failure either.
+
+    delete_active_query reports delivery, not outcome: Couchbase Server's
+    DELETE /admin/active_requests/{id} does not reliably distinguish a
+    cancelled request from one that never existed (both can come back as the
+    same error status on some builds), so "success" here only means the
+    request reached a query node — confirmed via the per-node diagnostic
+    data in "nodes", not inferred from any status code.
 
     This is the only branch of delete_active_query safe to exercise without
     coordinating a genuinely long-running query from a second session: every
-    query node is tried and none can have a request matching a UUID that was
-    never issued.
+    query node is reached and none can have a request matching a UUID that
+    was never issued.
     """
     async with create_mcp_session() as session:
         response = await session.call_tool(
@@ -107,7 +115,12 @@ async def test_delete_active_query_with_bogus_id_reports_not_found() -> None:
         if payload.get("success") is False and _is_capella_rejection(payload):
             return
 
-        assert payload.get("success") is False, (
-            f"Expected a bogus request id to be reported as not found: {payload}"
+        assert payload.get("success") is True, (
+            f"Expected the request to be delivered successfully: {payload}"
         )
-        assert "00000000-0000-0000-0000-000000000000" in payload.get("error", "")
+        assert payload.get("request_id") == "00000000-0000-0000-0000-000000000000"
+        nodes = payload.get("nodes")
+        assert isinstance(nodes, list) and len(nodes) > 0
+        for entry in nodes:
+            assert "node" in entry
+            assert "http_status" in entry
