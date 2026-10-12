@@ -98,6 +98,11 @@ from .server import (
     test_cluster_connection,
 )
 
+# Vector index creation tools
+from .vector_index import (
+    create_query_index,
+)
+
 # Vector search tools
 from .vector_search import (
     run_search_vector_search,
@@ -169,6 +174,7 @@ TOOL_SET = ToolSet(
         delete_collection,
         # Index write tools
         create_index,
+        create_query_index,
         build_index,
         drop_index,
         # Query service admin write tools
@@ -242,6 +248,7 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "delete_collection": ToolAnnotations(destructiveHint=True),
     # Index write tools
     "create_index": ToolAnnotations(),
+    "create_query_index": ToolAnnotations(),
     "build_index": ToolAnnotations(idempotentHint=True),
     "drop_index": ToolAnnotations(destructiveHint=True),
     # Query service admin write tools
@@ -341,6 +348,7 @@ __all__ = [
     "list_indexes",
     "get_index_stats",
     "create_index",
+    "create_query_index",
     "build_index",
     "drop_index",
     "list_fts_indexes",

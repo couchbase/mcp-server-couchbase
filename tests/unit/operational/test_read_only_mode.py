@@ -31,6 +31,7 @@ WRITE_TOOL_NAMES = {
     "delete_collection",
     # Index management write tools
     "create_index",
+    "create_query_index",
     "build_index",
     "drop_index",
     # Query service admin write tools
