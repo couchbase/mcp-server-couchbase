@@ -112,13 +112,19 @@ def run_vector_search(
 
     num_probes/rerank/top_n_scan are Hyperscale Vector Index tuning
     parameters (centroids to probe, rerank count, top-N scan). Pass all three
-    together or none -- a Composite Vector Index doesn't use them, and this
-    tool has no way to tell which index type will actually serve the query.
+    together or none -- a Composite Vector Index doesn't use them. This tool
+    itself has no index_name to check, but list_indexes now reports each
+    index's `vector_type` ("hyperscale" or "composite") -- check that first
+    if you need to know which shape will actually serve the query.
 
     where is an optional raw SQL++ boolean expression (e.g. "doc.status =
     'active'") appended to prefilter candidates before the vector ordering --
     this tool only ever emits a SELECT, so, unlike run_sql_plus_plus_query,
-    there is no write-guard for it to bypass.
+    there is no write-guard for it to bypass. If the index was created with a
+    partial-index condition (create_query_index's condition), where must match
+    or imply it for the planner to actually use that index -- otherwise it
+    falls back to a full scan silently (confirmed via EXPLAIN), the same
+    footgun documented above for a mismatched distance_metric.
 
     select_fields limits the projected document fields; omit it to return
     the full document. limit defaults to 10, matching the other query/search
