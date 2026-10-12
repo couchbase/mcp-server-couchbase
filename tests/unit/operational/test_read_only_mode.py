@@ -100,7 +100,7 @@ class TestToolCategories:
 
     def test_write_tools_defined(self):
         """Verify WRITE_TOOLS list is properly defined."""
-        assert len(WRITE_TOOLS) == 15
+        assert len(WRITE_TOOLS) == 16
         tool_names = {tool.__name__ for tool in WRITE_TOOLS}
         assert tool_names == WRITE_TOOL_NAMES
 
@@ -197,12 +197,12 @@ class TestToolCounts:
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (35 read-only + 15 write)
-        assert len(tools) == 50
+        # Expected total count (35 read-only + 16 write)
+        assert len(tools) == 51
 
     def test_write_tools_count(self):
-        """Verify exactly 15 write tools exist."""
-        assert len(WRITE_TOOLS) == 15
+        """Verify exactly 16 write tools exist."""
+        assert len(WRITE_TOOLS) == 16
 
 
 class TestReadOnlyModeToolFiltering:
