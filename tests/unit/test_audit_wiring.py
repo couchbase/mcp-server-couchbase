@@ -18,6 +18,7 @@ unexercised. These tests drive the real seams instead:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import signal
@@ -499,12 +500,19 @@ def test_installing_twice_does_not_chain_the_handler_to_itself(tmp_path):
 def test_enabling_auditing_on_an_unaudited_server_warns(tmp_path, caplog):
     """Silence is indistinguishable from a broken sink.
 
-    The Operational Insights server accepts every audit flag and reports it,
-    but records nothing. An operator who enabled auditing there would find an
-    empty directory, with the only signal being ``active: false`` buried in the
-    status tool.
+    A server that declares no audit package accepts every audit flag and
+    reports it, but records nothing. An operator who enabled auditing there
+    would find an empty directory, with the only signal being ``active: false``
+    buried in the status tool.
+
+    Every server this repository ships is audited since Operational Insights
+    got its own block on 2026-10-12, so the spec is synthesised rather than
+    found. The warning is kept, and kept tested, because the next server added
+    starts out exactly like this one — and the day it does, an operator must be
+    told rather than left reading an empty file.
     """
-    unaudited = next(sp for sp in ALL_SPECS if sp.audit_package is None)
+    audited = next(sp for sp in ALL_SPECS if sp.audit_package is not None)
+    unaudited = dataclasses.replace(audited, id="future-unaudited", audit_package=None)
     config = _audit_config(tmp_path, sinks="file")
 
     with caplog.at_level(logging.WARNING):
@@ -512,6 +520,13 @@ def test_enabling_auditing_on_an_unaudited_server_warns(tmp_path, caplog):
 
     assert "declares no audit package" in caplog.text
     assert unaudited.id in caplog.text
+
+
+def test_every_shipped_server_is_audited():
+    """Records the state the test above has to synthesise around."""
+    assert [sp.audit_package for sp in ALL_SPECS] == [
+        sp.audit_package for sp in ALL_SPECS if sp.audit_package is not None
+    ]
 
 
 def test_an_audited_server_does_not_warn(tmp_path, caplog):

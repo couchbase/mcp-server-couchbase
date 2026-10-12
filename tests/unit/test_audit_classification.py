@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from cb_mcp.audit.catalog import CATEGORIES
+from cb_mcp.audit.catalog import CATEGORIES, SERVICE_PACKAGE_BLOCKS
 from cb_mcp.audit.classification import (
     TOOL_CLASSIFICATION,
     classify_tool,
@@ -28,10 +28,11 @@ from cb_mcp.audit.classification import (
     unclassified_tool_names,
 )
 from cb_mcp.tools.operational import ALL_TOOLS, READ_ONLY_TOOLS, WRITE_TOOLS
+from cb_mcp.tools.operational_insights import ALL_TOOLS as OI_ALL_TOOLS
+from cb_mcp.tools.operational_insights import WRITE_TOOLS as OI_WRITE_TOOLS
 
-#: The audited package. Only ``operational`` has a Tier-2 block and a
-#: classification table; the Operational Insights server declares no
-#: ``audit_package`` and is deliberately not audited.
+#: The operational package. Operational Insights has its own block and table
+#: since 2026-10-12; constants for it are defined alongside these.
 PACKAGE = "operational"
 
 #: Main collapsed the four per-area tool groups into read-only and write when
@@ -41,6 +42,11 @@ PACKAGE = "operational"
 REGISTERED = {tool.__name__ for tool in ALL_TOOLS}
 WRITE_TOOL_NAMES = {tool.__name__ for tool in WRITE_TOOLS}
 READ_ONLY_NAMES = {tool.__name__ for tool in READ_ONLY_TOOLS}
+
+#: The Operational Insights server, audited under its own block since
+#: 2026-10-12.
+OI_REGISTERED = {tool.__name__ for tool in OI_ALL_TOOLS}
+OI_WRITE_NAMES = {tool.__name__ for tool in OI_WRITE_TOOLS}
 
 
 def test_every_registered_tool_is_classified():
@@ -55,16 +61,71 @@ def test_classification_covers_the_registered_set_exactly():
     assert set(TOOL_CLASSIFICATION[PACKAGE]) == REGISTERED
 
 
-def test_only_the_operational_package_is_classified():
-    """Operational Insights is deliberately unaudited.
+def test_every_classified_package_has_a_block_and_vice_versa():
+    """A half-registered package is the failure this guards.
 
-    Its tools collide with operational's on five names, so classifying it
-    without its own Tier-2 block would book its records against operational
-    ids. Adding it is a table here plus a block in the catalogue — this test
-    is what will fail, informatively, on the day someone adds one without
-    the other.
+    A table with no block raises at runtime the first time a tool is called; a
+    block with no table sends every tool down the fail-closed path, recording
+    real calls against a placeholder category. Both halves land together or
+    this fails.
     """
-    assert set(TOOL_CLASSIFICATION) == {"operational"}
+    assert set(TOOL_CLASSIFICATION) == set(SERVICE_PACKAGE_BLOCKS)
+    assert set(TOOL_CLASSIFICATION) == {"operational", "operational_insights"}
+
+
+def test_the_two_servers_resolve_their_shared_tool_names_differently():
+    """The reason the table is keyed by package at all.
+
+    Both servers register get_server_configuration_status. Booking one against
+    the other's block would file its records under ids that mean a different
+    server, and nothing in the record would reveal it.
+    """
+    operational = resolve_tool_call_event(
+        "get_server_configuration_status", package="operational"
+    )
+    insights = resolve_tool_call_event(
+        "get_server_configuration_status", package="operational_insights"
+    )
+    assert operational.id == 61495
+    assert insights.id == 65591
+    # Same category and class, so the difference is purely the block.
+    assert operational.category == insights.category == "config"
+    assert operational.operation_class == insights.operation_class == "read"
+
+
+def test_every_registered_oi_tool_is_classified():
+    assert unclassified_tool_names(OI_REGISTERED, "operational_insights") == []
+
+
+def test_no_stale_oi_entries():
+    assert (
+        sorted(set(TOOL_CLASSIFICATION["operational_insights"]) - OI_REGISTERED) == []
+    )
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "expected_id"),
+    [
+        ("get_server_configuration_status", 65591),  # config read
+        ("oi_get_databases_in_cluster", 65585),  # schema read
+        ("oi_get_schema_for_collection", 65585),
+        ("oi_run_query_sync", 65587),  # query read
+        ("oi_cancel_async_query", 65587),
+        ("oi_list_indexes", 65588),  # index read
+        ("oi_create_index", 65620),  # index write
+    ],
+)
+def test_oi_tool_maps_to_the_expected_event_id(tool_name, expected_id):
+    """Every id is in the OI block, never the operational one."""
+    event = resolve_tool_call_event(tool_name, package="operational_insights")
+    assert event.id == expected_id
+    assert 65536 <= event.id < 65536 + 4096
+
+
+@pytest.mark.parametrize("tool_name", sorted(OI_WRITE_NAMES))
+def test_oi_write_tools_are_classified_write(tool_name):
+    _, operation_class = classify_tool(tool_name, package="operational_insights")
+    assert operation_class == "write", tool_name
 
 
 @pytest.mark.parametrize("tool_name", sorted(WRITE_TOOL_NAMES))
@@ -94,6 +155,14 @@ def test_read_only_tools_are_classified_read(tool_name):
         ("get_cluster_tasks", 61488),
         ("get_cluster_health_snapshot", 61488),
         ("get_cluster_system_events", 61488),
+        # Moved into Cluster Setup & Health on 2026-10-12: both describe how a
+        # service is holding up rather than the query workload or the index
+        # inventory.
+        ("get_cluster_query_vitals", 61488),
+        ("get_index_stats", 61488),
+        # The server's own surface, split out of cluster on the same date.
+        ("get_server_configuration_status", 61495),
+        ("discover_tool_input_values", 61495),
         ("get_buckets_in_cluster", 61489),
         ("get_schema_for_collection", 61489),
         ("create_scope", 61521),
@@ -107,7 +176,6 @@ def test_read_only_tools_are_classified_read(tool_name):
         ("drop_index", 61524),
         ("get_longest_running_queries", 61493),
         ("get_queries_not_selective", 61493),
-        ("get_cluster_query_vitals", 61493),
         ("get_active_queries", 61493),
         # The first tool to take the performance write id, and the only one in
         # the server that cancels another caller's in-flight work.
@@ -115,10 +183,10 @@ def test_read_only_tools_are_classified_read(tool_name):
         # Search keeps its own category rather than folding into index: a
         # reviewer filtering on `index read` must not get FTS traffic, and
         # `run_fts_query` is a query, not an index operation.
-        ("list_fts_indexes", 61494),
-        ("run_fts_query", 61494),
-        ("upsert_fts_index", 61526),
-        ("drop_fts_index", 61526),
+        ("list_fts_indexes", 61496),
+        ("run_fts_query", 61496),
+        ("upsert_fts_index", 61528),
+        ("drop_fts_index", 61528),
     ],
 )
 def test_tool_maps_to_the_expected_event_id(tool_name, expected_id):

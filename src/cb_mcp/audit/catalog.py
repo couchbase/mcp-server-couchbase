@@ -15,6 +15,18 @@ The ID space is treated as frozen. Adding a tool requires only a new entry in
 :mod:`cb_mcp.audit.classification` — no new event ID, and no change to a SIEM
 rule.
 
+Events defined in code are the source of truth for the server. ``descriptor.json``
+ships the same catalogue for operators and SIEM authors;
+``tests/unit/test_audit_catalog.py`` asserts the two never drift.
+
+Two catalogue entries from the PRD draft are deliberately absent:
+
+* *tool invocation blocked (disabled)* — withheld and disabled tools are never
+  registered with FastMCP, so the model is never told they exist and there is
+  no refusal to record. Removed by product decision on 2026-08-25.
+* *session terminated* — FastMCP 3.x exposes no session-end hook and a stdio
+  client simply closes the pipe, so the event could never be emitted reliably.
+  On hold by product decision.
 """
 
 from __future__ import annotations
@@ -32,21 +44,40 @@ CORE_BLOCK = 0xE000  # 57344
 #: Tier-2 block for the operational service package (kv, query, index, ...).
 OPERATIONAL_BLOCK = 0xF000  # 61440
 
-#: Service package this build audits by default, and the only one today.
+#: Tier-2 block for the Operational Insights (analytics) service package.
+OPERATIONAL_INSIGHTS_BLOCK = 0x10000  # 65536
+
+#: Tier-2 block reserved for the AI Data Plane package.
 #:
-#: The repository ships two servers. Only ``operational`` is audited: the
-#: Operational Insights server's tool surface is new and still moving, and a
-#: Tier-2 block, once records exist against it, can never be renumbered. Its
-#: block is therefore left unallocated rather than spent early.
+#: Claimed but not populated: no AI Data Plane tools exist in this repository,
+#: so the package has no classification table and emits nothing. The number is
+#: recorded here so the allocation is visible in one place and cannot be handed
+#: to a different package later.
+AI_DATA_PLANE_BLOCK = 0x13000  # 77824
+
+#: Service package used when a caller names none.
+#:
+#: Not "the only audited package" any more — see
+#: :data:`SERVICE_PACKAGE_BLOCKS`. It remains the default because the
+#: operational server is the one whose tools the shared helpers are usually
+#: asked about; every audited server passes its own package explicitly, from
+#: ``ServerSpec.audit_package``.
 DEFAULT_SERVICE_PACKAGE = "operational"
 
-#: ``service package -> Tier-2 block base``. Blocks are 0x1000 apart, so the
-#: next package takes 0x10000. Adding one means an entry here, an entry in
-#: :data:`CATEGORY_SLOTS`, a classification table in
-#: :mod:`cb_mcp.audit.classification`, and ``audit_package`` on its
-#: ``ServerSpec`` — and renumbers nothing that already exists.
+#: ``service package -> Tier-2 block base``. Blocks are 0x1000 apart. Adding a
+#: package means an entry here, an entry in :data:`CATEGORY_SLOTS`, a
+#: classification table in :mod:`cb_mcp.audit.classification`, and
+#: ``audit_package`` on its ``ServerSpec`` — and renumbers nothing that already
+#: exists.
+#:
+#: The AI Data Plane block is deliberately **not** listed: a package with no
+#: tools would otherwise look audited to :func:`tool_call_event`, and a block
+#: present here but absent from :data:`CATEGORY_SLOTS` is a half-registered
+#: package waiting to raise at runtime. Its number is reserved by the constant
+#: above instead, which is a comment on paper rather than a promise in code.
 SERVICE_PACKAGE_BLOCKS: dict[str, int] = {
     "operational": OPERATIONAL_BLOCK,
+    "operational_insights": OPERATIONAL_INSIGHTS_BLOCK,
 }
 
 #: Relative offset of the first read event inside a Tier-2 block.
@@ -71,6 +102,11 @@ MAX_SLOT = 15
 #:
 #: Add a category by giving it the next free slot (:func:`next_free_slot`).
 #: Never change a number already in this table.
+#: Every package instantiates the *same* axis, so a slot means the same
+#: category in every block and an id decodes to package-by-block and
+#: category-by-offset. A package omits the slots it has no tools for rather
+#: than renumbering: Operational Insights has no kv or search surface, so those
+#: slots simply stay empty in its block and keep their meaning.
 CATEGORY_SLOTS: dict[str, dict[str, int]] = {
     "operational": {
         "cluster": 0,
@@ -79,13 +115,28 @@ CATEGORY_SLOTS: dict[str, dict[str, int]] = {
         "query": 3,
         "index": 4,
         "performance": 5,
-        # Slots 6 and 7 are retired (see RETIRED_SLOTS) and deliberately left
-        # unused, so search took the next never-allocated slot instead of
-        # reusing one. Reuse was permitted by the rule below — neither retired
-        # slot ever emitted a record — but declined: two dead numbers cost
-        # nothing in a 16-slot block, and a slot that has meant two different
-        # things is a trap for anyone reading old rules.
+        # Slot 6 is retired (see RETIRED_SLOTS) and deliberately left unused.
+        #
+        # Slot 7 held the retired `analytics` category and was revived for
+        # `config` on 2026-10-12 by product decision. Permitted by the rule
+        # below — `analytics` never had a tool classified to it, so the slot
+        # never emitted a record and no SIEM rule for the old meaning can
+        # exist. `next_free_slot` still declines to offer retired slots, so
+        # this reuse was chosen rather than inherited from a helper.
+        "config": 7,
         "search": 8,
+    },
+    # Operational Insights. Same axis, its own block: the two servers collide
+    # on tool names — `get_server_configuration_status`, `create_index`,
+    # `list_indexes`, `get_collections_in_scope`, `get_schema_for_collection` —
+    # so a shared table could not represent both, and booking one server's call
+    # against the other's block would put records under ids that mean a
+    # different server.
+    "operational_insights": {
+        "schema": 1,
+        "query": 3,
+        "index": 4,
+        "config": 7,
     },
 }
 
@@ -103,11 +154,14 @@ CATEGORY_SLOTS: dict[str, dict[str, int]] = {
 #: :func:`next_free_slot`'s reusable set.
 RETIRED_SLOTS: dict[str, dict[str, int]] = {
     "operational": {
-        # Retired before release: no tool was ever classified to either
-        # category, so neither slot ever emitted a record and both would be
-        # safe to reallocate. Left unallocated by choice when the search
+        # Retired before release: no tool was ever classified to it, so it
+        # never emitted a record. Left unallocated by choice when the search
         # category was added on 2026-09-29 — see the note in CATEGORY_SLOTS.
         "vector": 6,
+        # `analytics` held slot 7 and was retired on the same terms. The slot
+        # was then revived for `config` on 2026-10-12; the entry stays here so
+        # the history of the number remains visible, and so the invariant test
+        # can assert that a revived slot was one that never emitted.
         "analytics": 7,
     },
 }
@@ -336,6 +390,11 @@ _CATEGORY_LABELS: dict[str, str] = {
     "query": "query",
     "index": "index",
     "performance": "performance",
+    # Labels are shared across packages, so a slot reads the same wherever it
+    # appears. "config" covers the server's own status and configuration
+    # surface, which is MCP-level rather than cluster-level — the distinction
+    # that took it out of `cluster`.
+    "config": "config",
     "search": "search",
 }
 
@@ -380,39 +439,79 @@ def build_descriptor() -> dict:
         }
         for event in AuditEvent
     ]
+    # Every package's Tier-2 events, not just the default one. The descriptor
+    # is what a SIEM author reads to know which ids this build can emit, and a
+    # deployment commonly runs both servers — shipping only one block's ids
+    # would make the other server's records look unknown.
+    #
+    # ``service_package`` is carried on each entry because the tool-call names
+    # repeat across blocks: "query read" is 61491 in operational and 65587 in
+    # operational_insights, and the name alone cannot tell them apart.
     entries += [
         {
             "id": event.id,
             "name": event.event_name,
             "description": event.description,
             "category": "tool_call",
+            "service_package": package,
             "default_enabled": True,
             "filterable": event.filterable,
         }
-        for event in all_tool_call_events()
+        for package in SERVICE_PACKAGE_BLOCKS
+        for event in all_tool_call_events(package)
     ]
     entries.sort(key=lambda entry: entry["id"])
     return {
-        "service_package": SERVICE_PACKAGE,
+        # Kept for readers that expect a single value, and meaning what it
+        # always did: the package a build audits by default. The authoritative
+        # list is `service_packages`, and every tool-call entry names its own.
+        "service_package": DEFAULT_SERVICE_PACKAGE,
+        "service_packages": sorted(SERVICE_PACKAGE_BLOCKS),
         "blocks": {"core": CORE_BLOCK, **SERVICE_PACKAGE_BLOCKS},
         "events": entries,
     }
 
 
-#: Every event name that may appear in a record, mapped to its numeric id.
+#: Every event name that may appear in a record, mapped to its numeric id —
+#: for the core block and the **default** package only.
+#:
+#: Deliberately not spanning every package: a tool-call name such as "query
+#: read" exists in each Tier-2 block with a different id, so a name is only
+#: unique within a package and a flat name map could not represent more than
+#: one. Nothing resolves a name to an id at runtime — the operator-facing
+#: filter takes ids, which are globally unique — so this stays a convenience
+#: for the default package rather than becoming a package-keyed structure with
+#: no caller.
 EVENT_NAMES_TO_IDS: dict[str, int] = {
     **{event.event_name: event.id for event in AuditEvent},
     **{event.event_name: event.id for event in all_tool_call_events()},
 }
 
 #: Ids of events an operator is permitted to suppress via configuration.
+#:
+#: Spans every registered package. A process runs one package, but an operator
+#: writing CB_MCP_AUDIT_LOG_DISABLED_EVENTS should not have an id rejected as
+#: unknown merely because this process happens to serve a different package —
+#: the same configuration is routinely shared across both servers.
 FILTERABLE_IDS: frozenset[int] = frozenset(
     [event.id for event in AuditEvent if event.filterable]
-    + [event.id for event in all_tool_call_events() if event.filterable]
+    + [
+        event.id
+        for package in SERVICE_PACKAGE_BLOCKS
+        for event in all_tool_call_events(package)
+        if event.filterable
+    ]
 )
 
-#: Every known event id.
-ALL_IDS: frozenset[int] = frozenset(EVENT_NAMES_TO_IDS.values())
+#: Every known event id, across every registered package.
+ALL_IDS: frozenset[int] = frozenset(
+    [event.id for event in AuditEvent]
+    + [
+        event.id
+        for package in SERVICE_PACKAGE_BLOCKS
+        for event in all_tool_call_events(package)
+    ]
+)
 
 
 __all__ = [

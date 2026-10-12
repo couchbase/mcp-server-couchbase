@@ -54,6 +54,10 @@ def test_category_order_is_the_wire_contract():
         "query",
         "index",
         "performance",
+        # Slot 7, revived from the retired `analytics` category on 2026-10-12
+        # by product decision. Safe only because `analytics` never had a tool
+        # classified to it and so never emitted a record; see RETIRED_SLOTS.
+        "config",
         "search",
     )
 
@@ -163,11 +167,16 @@ print(json.dumps(build_descriptor(), indent=2))" > src/cb_mcp/audit/descriptor.j
 def test_descriptor_entries_are_well_formed():
     shipped = json.loads(DESCRIPTOR_PATH.read_text(encoding="utf-8"))
     assert shipped["service_package"] == "operational"
-    assert shipped["blocks"] == {"core": 57344, "operational": 61440}
+    assert shipped["blocks"] == {
+        "core": 57344,
+        "operational": 61440,
+        "operational_insights": 65536,
+    }
+    assert shipped["service_packages"] == ["operational", "operational_insights"]
     ids = [entry["id"] for entry in shipped["events"]]
     assert ids == sorted(ids), "descriptor must be ordered by id"
     for entry in shipped["events"]:
-        assert set(entry) == {
+        required = {
             "id",
             "name",
             "description",
@@ -175,6 +184,16 @@ def test_descriptor_entries_are_well_formed():
             "default_enabled",
             "filterable",
         }
+        assert required <= set(entry), entry
+        # Tool-call names repeat across blocks -- "query read" is 61491 in
+        # operational and 65587 in operational_insights -- so a Tier-2 entry
+        # must name its package or a SIEM author cannot tell them apart. Core
+        # events are shared by every package and carry no such field.
+        if entry["category"] == "tool_call":
+            assert entry["service_package"] in {"operational", "operational_insights"}
+            assert set(entry) == required | {"service_package"}
+        else:
+            assert set(entry) == required
         assert entry["default_enabled"] is True
         assert entry["description"].strip()
 
@@ -217,10 +236,41 @@ def test_slot_table_pins_the_shipped_numbers():
         "query": 3,
         "index": 4,
         "performance": 5,
+        # Revived the retired `analytics` slot on 2026-10-12. Permitted
+        # because that category never emitted a record, and taken as an
+        # explicit decision -- next_free_slot still declines to offer it.
+        "config": 7,
         # Added 2026-09-29 with the FTS tools. Slot 8, not the reusable
         # retired 6, so no number has ever meant two things.
         "search": 8,
     }
+
+
+def test_operational_insights_slots_match_the_shared_axis():
+    """A slot must mean the same category in every block.
+
+    That is what lets an id decode to package-by-block and category-by-offset.
+    A package omits the slots it has no tools for; it never renumbers.
+    """
+    oi = catalog.CATEGORY_SLOTS["operational_insights"]
+    assert oi == {"schema": 1, "query": 3, "index": 4, "config": 7}
+    shared = catalog.CATEGORY_SLOTS["operational"]
+    for category, slot in oi.items():
+        assert shared[category] == slot, category
+
+
+def test_operational_insights_ids_sit_in_its_own_block():
+    """Same offsets, different block -- and never the operational numbers."""
+    base = catalog.SERVICE_PACKAGE_BLOCKS["operational_insights"]
+    assert base == 0x10000
+    assert catalog.tool_call_event_id("query", "read", "operational_insights") == 65587
+    assert catalog.tool_call_event_id("query", "write", "operational_insights") == 65619
+    assert catalog.tool_call_event_id("config", "read", "operational_insights") == 65591
+    # The collision this block exists to prevent: the same tool name in both
+    # servers must never resolve to the same id.
+    assert catalog.tool_call_event_id(
+        "config", "read", "operational"
+    ) != catalog.tool_call_event_id("config", "read", "operational_insights")
 
 
 def test_retiring_a_category_does_not_move_its_neighbours(monkeypatch):
@@ -259,14 +309,16 @@ def test_next_free_slot_skips_retired_slots(monkeypatch):
     """
     monkeypatch.setattr(catalog, "RETIRED_SLOTS", {"operational": {"vector": 6}})
     monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset())
-    assert catalog.next_free_slot() == 7
+    # 7 is live (config) and 8 is live (search), so the next never-allocated
+    # slot is 9 -- the helper still refuses to offer the retired 6.
+    assert catalog.next_free_slot() == 9
 
 
 def test_permanently_reserved_slots_are_never_reallocated(monkeypatch):
     """A slot that has emitted records must not be handed to a new category."""
     monkeypatch.setattr(catalog, "RETIRED_SLOTS", {"operational": {"vector": 6}})
     monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset({6}))
-    assert catalog.next_free_slot() == 7
+    assert catalog.next_free_slot() == 9
 
 
 def test_exhausted_block_is_an_explicit_error(monkeypatch):
@@ -300,6 +352,36 @@ def test_retired_categories_are_gone_but_their_slots_are_recorded():
             catalog.tool_call_event_id(name, "read")
 
 
+def test_retired_ids_are_absent_from_the_catalogue_and_descriptor():
+    """Slot 6 stays dead: 61494 and 61526 must not resolve to anything.
+
+    Slot 7 (61495/61527) was retired with `analytics` and later revived for
+    `config`, which the rule permits only because `analytics` never emitted a
+    record. Slot 6 was not revived, so its pair must still resolve to nothing
+    -- and this test is what would catch it being handed out by accident.
+    """
+    retired = {61494, 61526}
+    live = {event.id for event in all_tool_call_events()}
+    assert live & retired == set()
+
+    shipped = json.loads(DESCRIPTOR_PATH.read_text(encoding="utf-8"))
+    assert {entry["id"] for entry in shipped["events"]} & retired == set()
+
+
+def test_the_revived_slot_never_emitted_under_its_old_meaning():
+    """The precondition for reusing slot 7, asserted rather than assumed.
+
+    Reallocating a slot that had ever emitted a record would make an existing
+    SIEM rule silently match a new, unrelated event. `analytics` was retired
+    with no tool ever classified to it, so no record for 61495 can exist in
+    anyone's logs -- which is the only reason `config` may have the number.
+    """
+    assert catalog.RETIRED_SLOTS["operational"]["analytics"] == 7
+    assert catalog.CATEGORY_SLOTS["operational"]["config"] == 7
+    # Permanently reserved slots are the ones that *did* emit; 7 is not one.
+    assert 7 not in catalog.PERMANENTLY_RESERVED_SLOTS
+
+
 def test_retirement_did_not_move_the_surviving_ids():
     """The point of the explicit slot table, asserted on the real retirement."""
     assert tool_call_event_id("cluster", "read") == 61488
@@ -316,7 +398,7 @@ def test_search_ids_are_the_shipped_numbers():
     """Pinned literally, like every other shipped id.
 
     Search took slot 8 rather than the reusable retired slot 6, so these are
-    61494/61526.
+    61496/61528 and not 61494/61526.
     """
-    assert tool_call_event_id("search", "read") == 61494
-    assert tool_call_event_id("search", "write") == 61526
+    assert tool_call_event_id("search", "read") == 61496
+    assert tool_call_event_id("search", "write") == 61528

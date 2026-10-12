@@ -50,8 +50,18 @@ from .catalog import DEFAULT_SERVICE_PACKAGE, ToolCallEvent, tool_call_event
 #: than alphabetically, so a reviewer can check a whole block in one pass.
 TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
     "operational": {
-        # -- cluster / health ---------------------------------------------
-        "get_server_configuration_status": ("cluster", "read"),
+        # -- config (MCP server status and configuration) -------------------
+        # The server's own status and configuration, not the cluster's. It
+        # reports what this process was started with — transport, read-only
+        # mode, the withheld and disabled tool sets — so an operator auditing
+        # "who inspected the server" must not have it mixed in with cluster
+        # health checks.
+        "get_server_configuration_status": ("config", "read"),
+        # Reads bundled reference data shipped with the server and touches no
+        # cluster at all, so it belongs with the server's own surface rather
+        # than with Cluster Setup & Health.
+        "discover_tool_input_values": ("config", "read"),
+        # -- cluster (Cluster Setup & Health) ------------------------------
         "test_cluster_connection": ("cluster", "read"),
         "get_cluster_health_and_services": ("cluster", "read"),
         "get_cluster_diagnostics_report": ("cluster", "read"),
@@ -64,11 +74,13 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # The cluster's own event log via GET /events — a server-level read,
         # like its neighbours above.
         "get_cluster_system_events": ("cluster", "read"),
-        # Reads bundled reference data rather than the cluster, so it touches
-        # no keyspace and has no service of its own. Booked as a cluster read:
-        # it is a server-level informational call, which is what that category
-        # already covers.
-        "discover_tool_input_values": ("cluster", "read"),
+        # Query-engine vitals (/admin/vitals) and GSI indexer stats. Both
+        # describe how a *service* in the cluster is holding up rather than
+        # what a caller queried or which indexes exist, which is what Cluster
+        # Setup & Health means; get_cluster_query_vitals moved here from
+        # performance and get_index_stats from index on 2026-10-12.
+        "get_cluster_query_vitals": ("cluster", "read"),
+        "get_index_stats": ("cluster", "read"),
         # -- schema / discovery --------------------------------------------
         "get_buckets_in_cluster": ("schema", "read"),
         "get_scopes_in_bucket": ("schema", "read"),
@@ -98,7 +110,6 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # -- index -----------------------------------------------------------
         "list_indexes": ("index", "read"),
         "get_index_advisor_recommendations": ("index", "read"),
-        "get_index_stats": ("index", "read"),
         "create_index": ("index", "write"),
         # The replacement for the deprecated create_index (#303), creating
         # scalar *and* vector GSI indexes through SQL++. It takes the same id:
@@ -117,15 +128,12 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "get_queries_using_primary_index": ("performance", "read"),
         "get_queries_not_using_covering_index": ("performance", "read"),
         "get_queries_not_selective": ("performance", "read"),
-        # The N1QL Admin REST API (/admin/vitals, /admin/active_requests) added
-        # in #308. Booked as performance rather than query: `query read` means
-        # "a caller ran a statement", and a reviewer reconstructing what was
-        # executed must not find listings of other people's requests mixed into
-        # it. Vitals is the query service's own load picture — request rate,
-        # active and queued counts — which is what this category already means;
-        # get_cluster_metrics stays a cluster read because it covers node
-        # hardware rather than the N1QL layer.
-        "get_cluster_query_vitals": ("performance", "read"),
+        # The N1QL Admin REST API's active-request surface (#308). Booked as
+        # performance rather than query: `query read` means "a caller ran a
+        # statement", and a reviewer reconstructing what was executed must not
+        # find listings of other callers' in-flight requests mixed into it.
+        # The vitals half of that API moved to cluster — it describes service
+        # health rather than the query workload.
         "get_active_queries": ("performance", "read"),
         # The first performance *write*, taking the id (61525) the catalogue
         # reserved when the category was allocated — a map entry, no new id and
@@ -137,7 +145,7 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # Its own category rather than folded into index: run_fts_query is a
         # query, so a reviewer filtering on `index read` should not get search
         # traffic mixed in. FTS index management has since landed and takes the
-        # search *write* id (61526) that the catalogue already reserved — the
+        # search *write* id (61528) that the catalogue already reserved — the
         # extension point working as designed: a new tool is a map entry, not a
         # new id and not a SIEM rule change.
         "list_fts_indexes": ("search", "read"),
@@ -148,6 +156,53 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "run_search_vector_search": ("search", "read"),
         "upsert_fts_index": ("search", "write"),
         "drop_fts_index": ("search", "write"),
+    },
+    # -- Operational Insights (analytics) ------------------------------------
+    #
+    # Its own block (0x10000) on the *same* category axis, so a slot means the
+    # same thing in both and an id decodes to package-by-block and
+    # category-by-offset. The roadmap's own grouping maps onto that axis
+    # rather than replacing it:
+    #
+    #   Data Model & Schema Discovery, Metadata Introspection -> schema
+    #   Query and Index, Async Request API, Query Execution   -> query / index
+    #   Scope & Collection Management                         -> schema write
+    #   Query Monitoring                                      -> performance
+    #
+    # Only the tools this server actually registers are listed. The roadmap
+    # sheet also names 1.2 tools that do not exist yet, and spells the shipped
+    # ones `operational_insights_*` where the server registers them `oi_*`;
+    # classifying a name that is never registered would be dead weight that
+    # the parity test cannot check.
+    "operational_insights": {
+        # -- config (MCP server status and configuration) -------------------
+        # Same tool name as the operational server's, which is exactly why
+        # this table is keyed by package: the two must resolve to different
+        # ids (61495 and 65591), and a flat name map could not express that.
+        "get_server_configuration_status": ("config", "read"),
+        # -- schema / discovery ---------------------------------------------
+        # Analytics names its containers database/scope/collection; they are
+        # the same discovery surface as the operational server's bucket/scope/
+        # collection reads, so they take the same slot.
+        "oi_get_databases_in_cluster": ("schema", "read"),
+        "oi_get_scopes_in_database": ("schema", "read"),
+        "oi_get_collections_in_scope": ("schema", "read"),
+        "oi_get_schema_for_collection": ("schema", "read"),
+        # -- query (SQL++ over Analytics) -----------------------------------
+        "oi_run_query_sync": ("query", "read"),
+        "oi_run_query_async": ("query", "read"),
+        "oi_explain_query": ("query", "read"),
+        # The async request lifecycle. Retrieving, discarding and cancelling
+        # all act on a handle for a query this caller submitted, so they stay
+        # with the query that produced it rather than forming a category of
+        # their own — "Async Request API" is a shape of the API, not a
+        # different resource.
+        "oi_get_async_query_results": ("query", "read"),
+        "oi_discard_async_query_results": ("query", "read"),
+        "oi_cancel_async_query": ("query", "read"),
+        # -- index -----------------------------------------------------------
+        "oi_list_indexes": ("index", "read"),
+        "oi_create_index": ("index", "write"),
     },
 }
 

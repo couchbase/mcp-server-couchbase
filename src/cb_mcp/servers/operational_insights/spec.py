@@ -23,6 +23,13 @@ SPEC = ServerSpec(
     fastmcp_name=FASTMCP_SERVER_NAME,
     logger_namespace=OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE,
     display_name="Couchbase Operational Insights MCP Server",
+    # Audited under its own Tier-2 block (0x10000). It shares the category axis
+    # with the operational server but not the block: the two collide on tool
+    # names — get_server_configuration_status, create_index, list_indexes,
+    # get_collections_in_scope, get_schema_for_collection — and booking this
+    # server's calls against the operational block would file them under ids
+    # that mean a different server.
+    audit_package="operational_insights",
     tools=TOOL_SET,
     # Must differ from every other server's values (see ServerSpec.default_port
     # / default_log_file docstrings).

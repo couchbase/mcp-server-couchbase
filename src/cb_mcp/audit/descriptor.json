@@ -1,8 +1,13 @@
 {
   "service_package": "operational",
+  "service_packages": [
+    "operational",
+    "operational_insights"
+  ],
   "blocks": {
     "core": 57344,
-    "operational": 61440
+    "operational": 61440,
+    "operational_insights": 65536
   },
   "events": [
     {
@@ -82,6 +87,7 @@
       "name": "cluster read",
       "description": "A cluster read operation was requested through a tool",
       "category": "tool_call",
+      "service_package": "operational",
       "default_enabled": true,
       "filterable": true
     },
@@ -90,6 +96,7 @@
       "name": "schema read",
       "description": "A schema read operation was requested through a tool",
       "category": "tool_call",
+      "service_package": "operational",
       "default_enabled": true,
       "filterable": true
     },
@@ -98,6 +105,7 @@
       "name": "document read",
       "description": "A document read operation was requested through a tool",
       "category": "tool_call",
+      "service_package": "operational",
       "default_enabled": true,
       "filterable": true
     },
@@ -106,6 +114,7 @@
       "name": "query read",
       "description": "A query read operation was requested through a tool",
       "category": "tool_call",
+      "service_package": "operational",
       "default_enabled": true,
       "filterable": true
     },
@@ -114,6 +123,7 @@
       "name": "index read",
       "description": "An index read operation was requested through a tool",
       "category": "tool_call",
+      "service_package": "operational",
       "default_enabled": true,
       "filterable": true
     },
@@ -122,14 +132,25 @@
       "name": "performance read",
       "description": "A performance read operation was requested through a tool",
       "category": "tool_call",
+      "service_package": "operational",
       "default_enabled": true,
       "filterable": true
     },
     {
-      "id": 61494,
+      "id": 61495,
+      "name": "config read",
+      "description": "A config read operation was requested through a tool",
+      "category": "tool_call",
+      "service_package": "operational",
+      "default_enabled": true,
+      "filterable": true
+    },
+    {
+      "id": 61496,
       "name": "search read",
       "description": "A search read operation was requested through a tool",
       "category": "tool_call",
+      "service_package": "operational",
       "default_enabled": true,
       "filterable": true
     },
@@ -138,6 +159,7 @@
       "name": "cluster write",
       "description": "A cluster write operation was requested through a tool",
       "category": "tool_call",
+      "service_package": "operational",
       "default_enabled": true,
       "filterable": false
     },
@@ -146,6 +168,7 @@
       "name": "schema write",
       "description": "A schema write operation was requested through a tool",
       "category": "tool_call",
+      "service_package": "operational",
       "default_enabled": true,
       "filterable": false
     },
@@ -154,6 +177,7 @@
       "name": "document write",
       "description": "A document write operation was requested through a tool",
       "category": "tool_call",
+      "service_package": "operational",
       "default_enabled": true,
       "filterable": false
     },
@@ -162,6 +186,7 @@
       "name": "query write",
       "description": "A query write operation was requested through a tool",
       "category": "tool_call",
+      "service_package": "operational",
       "default_enabled": true,
       "filterable": false
     },
@@ -170,6 +195,7 @@
       "name": "index write",
       "description": "An index write operation was requested through a tool",
       "category": "tool_call",
+      "service_package": "operational",
       "default_enabled": true,
       "filterable": false
     },
@@ -178,14 +204,97 @@
       "name": "performance write",
       "description": "A performance write operation was requested through a tool",
       "category": "tool_call",
+      "service_package": "operational",
       "default_enabled": true,
       "filterable": false
     },
     {
-      "id": 61526,
+      "id": 61527,
+      "name": "config write",
+      "description": "A config write operation was requested through a tool",
+      "category": "tool_call",
+      "service_package": "operational",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 61528,
       "name": "search write",
       "description": "A search write operation was requested through a tool",
       "category": "tool_call",
+      "service_package": "operational",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 65585,
+      "name": "schema read",
+      "description": "A schema read operation was requested through a tool",
+      "category": "tool_call",
+      "service_package": "operational_insights",
+      "default_enabled": true,
+      "filterable": true
+    },
+    {
+      "id": 65587,
+      "name": "query read",
+      "description": "A query read operation was requested through a tool",
+      "category": "tool_call",
+      "service_package": "operational_insights",
+      "default_enabled": true,
+      "filterable": true
+    },
+    {
+      "id": 65588,
+      "name": "index read",
+      "description": "An index read operation was requested through a tool",
+      "category": "tool_call",
+      "service_package": "operational_insights",
+      "default_enabled": true,
+      "filterable": true
+    },
+    {
+      "id": 65591,
+      "name": "config read",
+      "description": "A config read operation was requested through a tool",
+      "category": "tool_call",
+      "service_package": "operational_insights",
+      "default_enabled": true,
+      "filterable": true
+    },
+    {
+      "id": 65617,
+      "name": "schema write",
+      "description": "A schema write operation was requested through a tool",
+      "category": "tool_call",
+      "service_package": "operational_insights",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 65619,
+      "name": "query write",
+      "description": "A query write operation was requested through a tool",
+      "category": "tool_call",
+      "service_package": "operational_insights",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 65620,
+      "name": "index write",
+      "description": "An index write operation was requested through a tool",
+      "category": "tool_call",
+      "service_package": "operational_insights",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 65623,
+      "name": "config write",
+      "description": "A config write operation was requested through a tool",
+      "category": "tool_call",
+      "service_package": "operational_insights",
       "default_enabled": true,
       "filterable": false
     }
