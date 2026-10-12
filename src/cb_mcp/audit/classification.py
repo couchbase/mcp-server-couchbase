@@ -137,7 +137,7 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # Its own category rather than folded into index: run_fts_query is a
         # query, so a reviewer filtering on `index read` should not get search
         # traffic mixed in. FTS index management has since landed and takes the
-        # search *write* id (61528) that the catalogue already reserved — the
+        # search *write* id (61526) that the catalogue already reserved — the
         # extension point working as designed: a new tool is a map entry, not a
         # new id and not a SIEM rule change.
         "list_fts_indexes": ("search", "read"),

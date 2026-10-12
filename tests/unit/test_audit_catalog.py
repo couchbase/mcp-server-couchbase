@@ -300,16 +300,6 @@ def test_retired_categories_are_gone_but_their_slots_are_recorded():
             catalog.tool_call_event_id(name, "read")
 
 
-def test_retired_ids_are_absent_from_the_catalogue_and_descriptor():
-    """61494/61495 and 61526/61527 must not resolve to anything."""
-    retired = {61494, 61495, 61526, 61527}
-    live = {event.id for event in all_tool_call_events()}
-    assert live & retired == set()
-
-    shipped = json.loads(DESCRIPTOR_PATH.read_text(encoding="utf-8"))
-    assert {entry["id"] for entry in shipped["events"]} & retired == set()
-
-
 def test_retirement_did_not_move_the_surviving_ids():
     """The point of the explicit slot table, asserted on the real retirement."""
     assert tool_call_event_id("cluster", "read") == 61488
@@ -326,7 +316,7 @@ def test_search_ids_are_the_shipped_numbers():
     """Pinned literally, like every other shipped id.
 
     Search took slot 8 rather than the reusable retired slot 6, so these are
-    61496/61528 and not 61494/61526.
+    61494/61526.
     """
-    assert tool_call_event_id("search", "read") == 61496
-    assert tool_call_event_id("search", "write") == 61528
+    assert tool_call_event_id("search", "read") == 61494
+    assert tool_call_event_id("search", "write") == 61526

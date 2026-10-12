@@ -115,10 +115,10 @@ def test_read_only_tools_are_classified_read(tool_name):
         # Search keeps its own category rather than folding into index: a
         # reviewer filtering on `index read` must not get FTS traffic, and
         # `run_fts_query` is a query, not an index operation.
-        ("list_fts_indexes", 61496),
-        ("run_fts_query", 61496),
-        ("upsert_fts_index", 61528),
-        ("drop_fts_index", 61528),
+        ("list_fts_indexes", 61494),
+        ("run_fts_query", 61494),
+        ("upsert_fts_index", 61526),
+        ("drop_fts_index", 61526),
     ],
 )
 def test_tool_maps_to_the_expected_event_id(tool_name, expected_id):

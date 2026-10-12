@@ -126,7 +126,7 @@
       "filterable": true
     },
     {
-      "id": 61496,
+      "id": 61494,
       "name": "search read",
       "description": "A search read operation was requested through a tool",
       "category": "tool_call",
@@ -182,7 +182,7 @@
       "filterable": false
     },
     {
-      "id": 61528,
+      "id": 61526,
       "name": "search write",
       "description": "A search write operation was requested through a tool",
       "category": "tool_call",
