@@ -15,7 +15,7 @@ from fastmcp import Context
 from ...servers.operational_insights.constants import (
     OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE,
 )
-from ...utils.operational_insights.context import get_oi_cluster
+from ...utils.operational_insights.context import get_operational_insights_cluster
 from ...utils.operational_insights.sqlpp import keyspace
 
 logger = logging.getLogger(f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.tools.metadata")
@@ -23,7 +23,7 @@ logger = logging.getLogger(f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.tools.metad
 MAX_SCHEMA_SAMPLE_SIZE = 10_000
 
 
-def oi_get_databases_in_cluster(ctx: Context) -> list[dict[str, Any]]:
+def operational_insights_get_databases_in_cluster(ctx: Context) -> list[dict[str, Any]]:
     """List all databases in the Operational Insights cluster.
 
     Returns a list of rows, each with a DatabaseName field.
@@ -35,7 +35,7 @@ def oi_get_databases_in_cluster(ctx: Context) -> list[dict[str, Any]]:
     )
     try:
         logger.debug("Listing databases in cluster")
-        cluster = get_oi_cluster(ctx)
+        cluster = get_operational_insights_cluster(ctx)
         result = cluster.execute_query(query)
         rows = result.get_all_rows()
         logger.info(f"Found {len(rows)} database(s)")
@@ -45,7 +45,9 @@ def oi_get_databases_in_cluster(ctx: Context) -> list[dict[str, Any]]:
         raise
 
 
-def oi_get_scopes_in_database(ctx: Context, database_name: str) -> list[dict[str, Any]]:
+def operational_insights_get_scopes_in_database(
+    ctx: Context, database_name: str
+) -> list[dict[str, Any]]:
     """List all scopes in a database.
 
     Returns a list of rows, each with DatabaseName and ScopeName fields.
@@ -57,7 +59,7 @@ def oi_get_scopes_in_database(ctx: Context, database_name: str) -> list[dict[str
     )
     try:
         logger.debug(f"Listing scopes in database {database_name!r}")
-        cluster = get_oi_cluster(ctx)
+        cluster = get_operational_insights_cluster(ctx)
         result = cluster.execute_query(
             query, QueryOptions(named_parameters={"database_name": database_name})
         )
@@ -71,7 +73,7 @@ def oi_get_scopes_in_database(ctx: Context, database_name: str) -> list[dict[str
         raise
 
 
-def oi_get_collections_in_scope(
+def operational_insights_get_collections_in_scope(
     ctx: Context, database_name: str, scope_name: str
 ) -> list[dict[str, Any]]:
     """List all collections (datasets) in a scope.
@@ -90,7 +92,7 @@ def oi_get_collections_in_scope(
     )
     try:
         logger.debug(f"Listing collections in {database_name!r}.{scope_name!r}")
-        cluster = get_oi_cluster(ctx)
+        cluster = get_operational_insights_cluster(ctx)
         result = cluster.execute_query(
             query,
             QueryOptions(
@@ -128,7 +130,7 @@ def _strip_samples(node: Any) -> Any:
     return node
 
 
-def oi_get_schema_for_collection(
+def operational_insights_get_schema_for_collection(
     ctx: Context,
     database_name: str,
     scope_name: str,
@@ -178,7 +180,7 @@ def oi_get_schema_for_collection(
     query = f'SELECT VALUE ARRAY_INFER_SCHEMA((SELECT VALUE d FROM {ks} AS d LIMIT $sample_size), {{"num_sample_values": {num_sample_values}}});'  # noqa: S608
     try:
         logger.debug(f"Inferring schema for {ks}")
-        cluster = get_oi_cluster(ctx)
+        cluster = get_operational_insights_cluster(ctx)
         result = cluster.execute_query(
             query, QueryOptions(named_parameters={"sample_size": sample_size})
         )
@@ -199,8 +201,8 @@ def oi_get_schema_for_collection(
 
 __all__ = [
     "MAX_SCHEMA_SAMPLE_SIZE",
-    "oi_get_collections_in_scope",
-    "oi_get_databases_in_cluster",
-    "oi_get_schema_for_collection",
-    "oi_get_scopes_in_database",
+    "operational_insights_get_collections_in_scope",
+    "operational_insights_get_databases_in_cluster",
+    "operational_insights_get_schema_for_collection",
+    "operational_insights_get_scopes_in_database",
 ]

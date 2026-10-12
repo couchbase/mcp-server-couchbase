@@ -35,9 +35,9 @@ OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE = f"{LOGGER_NAMESPACE}.{SERVER_ID}"
 
 #: Default port for this server under a network transport. Must differ from
 #: every other server's default_port (see ServerSpec.default_port).
-DEFAULT_OI_PORT = 8001
+DEFAULT_OPERATIONAL_INSIGHTS_PORT = 8001
 
 #: Default base path for this server's log files. Must differ from every
 #: other server's default_log_file — RotatingFileHandler is not
 #: multi-process safe.
-DEFAULT_OI_LOG_FILE = "mcp_server_operational_insights.log"
+DEFAULT_OPERATIONAL_INSIGHTS_LOG_FILE = "mcp_server_operational_insights.log"

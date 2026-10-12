@@ -29,7 +29,7 @@ class OperationalInsightsClusterProvider:
     ``cb_mcp.utils.operational_insights.contracts.OperationalInsightsProvider``
     structurally — that protocol's ``ProviderLifecycle`` half is what the
     shared machinery calls, and its other two members (``get_cluster``
-    returning an OI ``Cluster``, and ``handle_registry``) are what this
+    returning an Operational Insights ``Cluster``, and ``handle_registry``) are what this
     server's own tools reach for.
 
     Two differences from ``OperationalClusterProvider`` make this a separate

@@ -8,7 +8,7 @@ Covers:
   - get_collections_in_scope
   - get_scopes_and_collections_in_bucket
   - get_cluster_health_and_services (including service_types filtering)
-  - get_cluster_diagnostics_report
+  - get_client_connectivity_report
   - get_cluster_metrics
   - get_cluster_tasks
   - get_cluster_health_snapshot

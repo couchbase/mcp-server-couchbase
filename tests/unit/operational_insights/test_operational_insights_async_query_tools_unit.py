@@ -7,11 +7,11 @@ cancel) can be covered without a live cluster, including the error branches
 -- which are returned as {"success": False, "error": ...}, never raised.
 
 Also covers the read-only wiring that the prototype never had:
-``oi_run_query_async`` passes ``QueryOptions(readonly=True)`` to the SDK itself
+``operational_insights_run_query_async`` passes ``QueryOptions(readonly=True)`` to the SDK itself
 whenever the server is in read-only mode or the caller's token lacks the
 write scope, and additionally blocks ``COPY ... TO`` client-side under those
-same conditions -- mirroring ``oi_run_query_sync``'s tests in
-test_oi_query_tools_unit.py.
+same conditions -- mirroring ``operational_insights_run_query_sync``'s tests in
+test_operational_insights_query_tools_unit.py.
 """
 
 from datetime import timedelta
@@ -19,13 +19,13 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from _oi_fakes import make_oi_ctx
+from _operational_insights_fakes import make_operational_insights_ctx
 
 from cb_mcp.tools.operational_insights.query import (
-    oi_cancel_async_query,
-    oi_discard_async_query_results,
-    oi_get_async_query_results,
-    oi_run_query_async,
+    operational_insights_cancel_async_query,
+    operational_insights_discard_async_query_results,
+    operational_insights_get_async_query_results,
+    operational_insights_run_query_async,
 )
 from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
 from cb_mcp.utils.operational_insights.handle_registry import (
@@ -41,7 +41,7 @@ def _make_ctx(*, read_only_mode: bool = False):
     mocked so the tests exercise the actual token minting/eviction the tools
     depend on.
     """
-    ctx, cluster = make_oi_ctx(read_only_mode=read_only_mode)
+    ctx, cluster = make_operational_insights_ctx(read_only_mode=read_only_mode)
     registry = ctx.request_context.lifespan_context.cluster_provider.handle_registry
     return ctx, cluster, registry
 
@@ -72,14 +72,14 @@ def _make_result(rows: list, result_count: int = 1, result_size: int = 42) -> Ma
 
 
 def _start(ctx, cluster, statement: str = "SELECT 1 AS one") -> tuple[str, MagicMock]:
-    """Run oi_run_query_async and return (token, the mock handle it registered)."""
+    """Run operational_insights_run_query_async and return (token, the mock handle it registered)."""
     handle = MagicMock()
     cluster.start_query.return_value = handle
     with patch(
         "cb_mcp.tools.operational_insights.query.get_access_token",
         return_value=None,
     ):
-        result = oi_run_query_async(ctx, statement)
+        result = operational_insights_run_query_async(ctx, statement)
     assert result["success"] is True
     return result["query_handle"], handle
 
@@ -101,7 +101,7 @@ class TestRunQueryAsync:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            result = oi_run_query_async(ctx, "SELECT bad(")
+            result = operational_insights_run_query_async(ctx, "SELECT bad(")
 
         assert result == {
             "success": False,
@@ -118,7 +118,7 @@ class TestRunQueryAsync:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            oi_run_query_async(ctx, "SELECT 1 AS one")
+            operational_insights_run_query_async(ctx, "SELECT 1 AS one")
 
         args, _kwargs = cluster.start_query.call_args
         assert args[0] == "SELECT 1 AS one"
@@ -132,7 +132,7 @@ class TestRunQueryAsync:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            oi_run_query_async(ctx, "SELECT 1 AS one")
+            operational_insights_run_query_async(ctx, "SELECT 1 AS one")
 
         cluster.start_query.assert_called_once_with("SELECT 1 AS one")
 
@@ -145,7 +145,7 @@ class TestRunQueryAsync:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=token,
         ):
-            oi_run_query_async(ctx, "SELECT 1 AS one")
+            operational_insights_run_query_async(ctx, "SELECT 1 AS one")
 
         args, _ = cluster.start_query.call_args
         assert args[1]["readonly"] is True
@@ -159,7 +159,7 @@ class TestRunQueryAsync:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=token,
         ):
-            oi_run_query_async(ctx, "SELECT 1 AS one")
+            operational_insights_run_query_async(ctx, "SELECT 1 AS one")
 
         cluster.start_query.assert_called_once_with("SELECT 1 AS one")
 
@@ -172,7 +172,9 @@ class TestRunQueryAsyncBlocksCopyToUnderReadOnly:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            result = oi_run_query_async(ctx, "COPY ds TO 's3://bucket/path'")
+            result = operational_insights_run_query_async(
+                ctx, "COPY ds TO 's3://bucket/path'"
+            )
 
         assert result["success"] is False
         assert "COPY" in result["error"]
@@ -186,7 +188,9 @@ class TestRunQueryAsyncBlocksCopyToUnderReadOnly:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            result = oi_run_query_async(ctx, "COPY ds TO 's3://bucket/path'")
+            result = operational_insights_run_query_async(
+                ctx, "COPY ds TO 's3://bucket/path'"
+            )
 
         assert result["success"] is True
         cluster.start_query.assert_called_once_with("COPY ds TO 's3://bucket/path'")
@@ -205,7 +209,7 @@ class TestGetAsyncQueryResults:
             [{"one": 1}]
         )
 
-        result = oi_get_async_query_results(ctx, token)
+        result = operational_insights_get_async_query_results(ctx, token)
 
         assert result["success"] is True
         assert result["rows"] == [{"one": 1}]
@@ -234,8 +238,8 @@ class TestGetAsyncQueryResults:
             [{"two": 2}]
         )
 
-        oi_get_async_query_results(ctx, token)
-        oi_get_async_query_results(ctx, token)
+        operational_insights_get_async_query_results(ctx, token)
+        operational_insights_get_async_query_results(ctx, token)
 
         assert handle.fetch_status.call_count == 2
 
@@ -244,7 +248,7 @@ class TestGetAsyncQueryResults:
         token, handle = _start(ctx, cluster)
         handle.fetch_status.return_value.results_ready.return_value = False
 
-        result = oi_get_async_query_results(ctx, token)
+        result = operational_insights_get_async_query_results(ctx, token)
 
         assert result["success"] is True
         assert result["ready"] is False
@@ -255,7 +259,7 @@ class TestGetAsyncQueryResults:
     def test_unknown_token_returns_error_envelope(self) -> None:
         ctx, _, _ = _make_ctx()
 
-        result = oi_get_async_query_results(ctx, "nope")
+        result = operational_insights_get_async_query_results(ctx, "nope")
 
         assert result["success"] is False
         assert "nope" in result["error"]
@@ -270,8 +274,8 @@ class TestGetAsyncQueryResults:
             [{"one": 1}]
         )
 
-        first = oi_get_async_query_results(ctx, token)
-        second = oi_get_async_query_results(ctx, token)
+        first = operational_insights_get_async_query_results(ctx, token)
+        second = operational_insights_get_async_query_results(ctx, token)
 
         assert first["rows"] == [{"one": 1}]
         assert second["rows"] == [{"one": 1}]
@@ -285,8 +289,8 @@ class TestGetAsyncQueryResults:
         result_handle = status.result_handle.return_value
         result_handle.fetch_results.return_value = _make_result([{"one": 1}])
 
-        oi_get_async_query_results(ctx, token)
-        result = oi_discard_async_query_results(ctx, token)
+        operational_insights_get_async_query_results(ctx, token)
+        result = operational_insights_discard_async_query_results(ctx, token)
 
         assert result["discarded"] is True
         result_handle.discard_results.assert_called_once()
@@ -297,7 +301,7 @@ class TestGetAsyncQueryResults:
         token, handle = _start(ctx, cluster)
         handle.fetch_status.return_value.results_ready.return_value = False
 
-        result = oi_get_async_query_results(ctx, token)
+        result = operational_insights_get_async_query_results(ctx, token)
 
         assert result["success"] is True
         assert result["ready"] is False
@@ -314,7 +318,7 @@ class TestGetAsyncQueryResults:
         result_obj.metadata.side_effect = Exception("no metadata")
         status.result_handle.return_value.fetch_results.return_value = result_obj
 
-        result = oi_get_async_query_results(ctx, token)
+        result = operational_insights_get_async_query_results(ctx, token)
 
         assert result["success"] is True
         assert result["rows"] == [{"one": 1}]
@@ -331,7 +335,7 @@ class TestGetAsyncQueryResults:
         )
         status.result_handle.return_value.fetch_results.return_value = result_obj
 
-        result = oi_get_async_query_results(ctx, token)
+        result = operational_insights_get_async_query_results(ctx, token)
 
         assert result["success"] is True
         metrics = result["metadata"]["metrics"]
@@ -347,7 +351,7 @@ class TestGetAsyncQueryResults:
         status.results_ready.return_value = True
         status.result_handle.return_value.fetch_results.side_effect = Exception("boom")
 
-        result = oi_get_async_query_results(ctx, token)
+        result = operational_insights_get_async_query_results(ctx, token)
 
         assert result == {
             "success": False,
@@ -364,7 +368,7 @@ class TestDiscardAsyncQueryResults:
         status.results_ready.return_value = True
         result_handle = status.result_handle.return_value
 
-        result = oi_discard_async_query_results(ctx, token)
+        result = operational_insights_discard_async_query_results(ctx, token)
 
         assert result == {"success": True, "query_handle": token, "discarded": True}
         result_handle.discard_results.assert_called_once()
@@ -375,7 +379,7 @@ class TestDiscardAsyncQueryResults:
         token, handle = _start(ctx, cluster)
         handle.fetch_status.return_value.results_ready.return_value = False
 
-        result = oi_discard_async_query_results(ctx, token)
+        result = operational_insights_discard_async_query_results(ctx, token)
 
         assert result["success"] is True
         assert result["discarded"] is False
@@ -387,7 +391,7 @@ class TestDiscardAsyncQueryResults:
     def test_unknown_token_returns_error_envelope(self) -> None:
         ctx, _, _ = _make_ctx()
 
-        result = oi_discard_async_query_results(ctx, "nope")
+        result = operational_insights_discard_async_query_results(ctx, "nope")
 
         assert result["success"] is False
         assert "nope" in result["error"]
@@ -399,7 +403,7 @@ class TestCancelAsyncQuery:
         token, handle = _start(ctx, cluster)
         handle.fetch_status.return_value.results_ready.return_value = False
 
-        result = oi_cancel_async_query(ctx, token)
+        result = operational_insights_cancel_async_query(ctx, token)
 
         assert result == {"success": True, "query_handle": token, "cancelled": True}
         handle.cancel.assert_called_once()
@@ -414,11 +418,11 @@ class TestCancelAsyncQuery:
         status = handle.fetch_status.return_value
         status.results_ready.return_value = True
 
-        result = oi_cancel_async_query(ctx, token)
+        result = operational_insights_cancel_async_query(ctx, token)
 
         assert result["success"] is True
         assert result["cancelled"] is False
-        assert "oi_discard_async_query_results" in result["message"]
+        assert "operational_insights_discard_async_query_results" in result["message"]
         # cancel() must NOT have been attempted.
         handle.cancel.assert_not_called()
         # The entry survives so the discard the message recommends works.
@@ -431,8 +435,8 @@ class TestCancelAsyncQuery:
         status.results_ready.return_value = True
         result_handle = status.result_handle.return_value
 
-        oi_cancel_async_query(ctx, token)
-        discarded = oi_discard_async_query_results(ctx, token)
+        operational_insights_cancel_async_query(ctx, token)
+        discarded = operational_insights_discard_async_query_results(ctx, token)
 
         assert discarded["discarded"] is True
         result_handle.discard_results.assert_called_once()
@@ -443,7 +447,7 @@ class TestCancelAsyncQuery:
         token, handle = _start(ctx, cluster)
         handle.fetch_status.side_effect = Exception("status unavailable")
 
-        result = oi_cancel_async_query(ctx, token)
+        result = operational_insights_cancel_async_query(ctx, token)
 
         assert result == {
             "success": False,
@@ -458,7 +462,7 @@ class TestCancelAsyncQuery:
         handle.fetch_status.return_value.results_ready.return_value = False
         handle.cancel.side_effect = Exception("already finished")
 
-        result = oi_cancel_async_query(ctx, token)
+        result = operational_insights_cancel_async_query(ctx, token)
 
         assert result == {
             "success": False,
@@ -471,7 +475,7 @@ class TestCancelAsyncQuery:
     def test_unknown_token_returns_error_envelope(self) -> None:
         ctx, _, _ = _make_ctx()
 
-        result = oi_cancel_async_query(ctx, "nope")
+        result = operational_insights_cancel_async_query(ctx, "nope")
 
         assert result["success"] is False
         assert "nope" in result["error"]

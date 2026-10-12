@@ -6,7 +6,7 @@ the error branches (returned as ``{"success": False, "error": ...}``, never
 raised) without a live cluster.
 
 Also covers the read-only wiring that the prototype never had:
-``oi_run_query_sync`` passes ``QueryOptions(readonly=True)`` to the SDK itself
+``operational_insights_run_query_sync`` passes ``QueryOptions(readonly=True)`` to the SDK itself
 whenever the server is in read-only mode or the caller's token lacks the
 write scope, and additionally blocks ``COPY ... TO`` client-side under those
 same conditions — the server itself classifies COPY ... TO as read-only
@@ -17,22 +17,22 @@ external storage or a KV collection.
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from _oi_fakes import make_oi_ctx
+from _operational_insights_fakes import make_operational_insights_ctx
 
 from cb_mcp.tools.operational_insights.query import (
     _is_copy_to_statement,
-    oi_explain_query,
-    oi_run_query_sync,
+    operational_insights_explain_query,
+    operational_insights_run_query_sync,
 )
 from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
 
 
 class TestRunQuerySync:
     def test_returns_success_envelope(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.return_value.rows.return_value = iter([{"one": 1}])
 
-        result = oi_run_query_sync(ctx, "SELECT 1 AS one")
+        result = operational_insights_run_query_sync(ctx, "SELECT 1 AS one")
 
         assert result == {
             "success": True,
@@ -42,10 +42,10 @@ class TestRunQuerySync:
         }
 
     def test_returns_error_envelope_on_sdk_error(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.side_effect = Exception("syntax error")
 
-        result = oi_run_query_sync(ctx, "SELECT bad(")
+        result = operational_insights_run_query_sync(ctx, "SELECT bad(")
 
         assert result == {
             "success": False,
@@ -54,28 +54,28 @@ class TestRunQuerySync:
         }
 
     def test_passes_readonly_true_under_read_only_mode(self) -> None:
-        ctx, cluster = make_oi_ctx(read_only_mode=True)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=True)
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
         with patch(
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            oi_run_query_sync(ctx, "SELECT 1 AS one")
+            operational_insights_run_query_sync(ctx, "SELECT 1 AS one")
 
         args, _kwargs = cluster.execute_query.call_args
         assert args[0] == "SELECT 1 AS one"
         assert args[1]["readonly"] is True
 
     def test_does_not_pass_readonly_when_mode_off_and_no_token(self) -> None:
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
         with patch(
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            oi_run_query_sync(ctx, "SELECT 1 AS one")
+            operational_insights_run_query_sync(ctx, "SELECT 1 AS one")
 
         cluster.execute_query.assert_called_once_with("SELECT 1 AS one")
 
@@ -83,7 +83,7 @@ class TestRunQuerySync:
         """A SCOPE_READ-only token must not mutate via SQL++, even with
         read_only_mode=False — same scope-gap closure as
         run_sql_plus_plus_query on the operational server."""
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
         cluster.execute_query.return_value.get_all_rows.return_value = []
         token = SimpleNamespace(scopes=[SCOPE_READ])
 
@@ -91,13 +91,13 @@ class TestRunQuerySync:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=token,
         ):
-            oi_run_query_sync(ctx, "SELECT 1 AS one")
+            operational_insights_run_query_sync(ctx, "SELECT 1 AS one")
 
         args, _ = cluster.execute_query.call_args
         assert args[1]["readonly"] is True
 
     def test_does_not_pass_readonly_for_a_write_token(self) -> None:
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
         cluster.execute_query.return_value.get_all_rows.return_value = []
         token = SimpleNamespace(scopes=[SCOPE_READ, SCOPE_WRITE])
 
@@ -105,26 +105,26 @@ class TestRunQuerySync:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=token,
         ):
-            oi_run_query_sync(ctx, "SELECT 1 AS one")
+            operational_insights_run_query_sync(ctx, "SELECT 1 AS one")
 
         cluster.execute_query.assert_called_once_with("SELECT 1 AS one")
 
 
 class TestExplainQuery:
     def test_prepends_explain_to_statement(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = [{"plan": {}}]
 
-        result = oi_explain_query(ctx, "SELECT 1 AS one")
+        result = operational_insights_explain_query(ctx, "SELECT 1 AS one")
 
         cluster.execute_query.assert_called_once_with("EXPLAIN SELECT 1 AS one")
         assert result == {"success": True, "plan": [{"plan": {}}]}
 
     def test_returns_error_envelope_on_sdk_error(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.side_effect = Exception("syntax error")
 
-        result = oi_explain_query(ctx, "SELECT bad(")
+        result = operational_insights_explain_query(ctx, "SELECT bad(")
 
         assert result == {
             "success": False,
@@ -178,46 +178,52 @@ class TestIsCopyToStatement:
 
 class TestRunQuerySyncBlocksCopyToUnderReadOnly:
     def test_blocked_under_read_only_mode(self) -> None:
-        ctx, cluster = make_oi_ctx(read_only_mode=True)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=True)
 
         with patch(
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            result = oi_run_query_sync(ctx, "COPY ds TO 's3://bucket/path'")
+            result = operational_insights_run_query_sync(
+                ctx, "COPY ds TO 's3://bucket/path'"
+            )
 
         assert result["success"] is False
         assert "COPY" in result["error"]
         cluster.execute_query.assert_not_called()
 
     def test_blocked_for_a_read_only_token(self) -> None:
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
         token = SimpleNamespace(scopes=[SCOPE_READ])
 
         with patch(
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=token,
         ):
-            result = oi_run_query_sync(ctx, "COPY ds TO 's3://bucket/path'")
+            result = operational_insights_run_query_sync(
+                ctx, "COPY ds TO 's3://bucket/path'"
+            )
 
         assert result["success"] is False
         cluster.execute_query.assert_not_called()
 
     def test_allowed_in_write_mode(self) -> None:
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
         with patch(
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            result = oi_run_query_sync(ctx, "COPY ds TO 's3://bucket/path'")
+            result = operational_insights_run_query_sync(
+                ctx, "COPY ds TO 's3://bucket/path'"
+            )
 
         assert result["success"] is True
         cluster.execute_query.assert_called_once_with("COPY ds TO 's3://bucket/path'")
 
     def test_allowed_for_a_write_token(self) -> None:
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
         cluster.execute_query.return_value.get_all_rows.return_value = []
         token = SimpleNamespace(scopes=[SCOPE_READ, SCOPE_WRITE])
 
@@ -225,6 +231,8 @@ class TestRunQuerySyncBlocksCopyToUnderReadOnly:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=token,
         ):
-            result = oi_run_query_sync(ctx, "COPY ds TO 's3://bucket/path'")
+            result = operational_insights_run_query_sync(
+                ctx, "COPY ds TO 's3://bucket/path'"
+            )
 
         assert result["success"] is True

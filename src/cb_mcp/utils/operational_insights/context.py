@@ -4,7 +4,7 @@
 ``ProviderLifecycle`` — only what the shared machinery calls. Both functions
 here do the same two things: fail loudly if the lifespan never populated the
 provider, then narrow to ``OperationalInsightsProvider`` so this server's
-extra members (``get_cluster``'s OI ``Cluster``, and ``handle_registry``)
+extra members (``get_cluster``'s Operational Insights ``Cluster``, and ``handle_registry``)
 are named by a contract rather than reached for and hoped about.
 """
 
@@ -43,7 +43,7 @@ def _provider(ctx: Context) -> OperationalInsightsProvider:
     return cast(OperationalInsightsProvider, provider)
 
 
-def get_oi_cluster(ctx: Context) -> Cluster:
+def get_operational_insights_cluster(ctx: Context) -> Cluster:
     """Return the Operational Insights cluster for this request via the provider.
 
     Same role as ``cb_mcp.utils.operational.context.get_cluster_connection``,
@@ -54,7 +54,7 @@ def get_oi_cluster(ctx: Context) -> Cluster:
     return _provider(ctx).get_cluster(ctx)
 
 
-def get_oi_handle_registry(ctx: Context) -> QueryResultsRegistry:
+def get_operational_insights_handle_registry(ctx: Context) -> QueryResultsRegistry:
     """Return the Operational Insights async-query handle registry.
 
     The registry lives on the provider, not the shared ``AppContext`` (see
