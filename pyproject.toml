@@ -39,7 +39,7 @@ dependencies = [
     # rather than something a deployment has to know to add. uvloop publishes
     # no Windows wheels, hence the marker.
     "uvloop>=0.21.0,<1.0.0; sys_platform != 'win32' and sys_platform != 'cygwin' and platform_python_implementation != 'PyPy'",
-     "httptools>=0.8.0,<1.0.0",
+    "httptools>=0.8.0,<1.0.0",
 ]
 
 [project.urls]
