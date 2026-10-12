@@ -1,19 +1,19 @@
 """Accuracy tests for the vector search tools.
 
 Covers:
-  - run_vector_search: no index_name (GSI selects the index automatically),
+  - run_vector_query: no index_name (GSI selects the index automatically),
     unlike every other search/query tool that takes one.
-  - run_search_vector_search: index_name required, plus the hybrid
+  - run_vector_search: index_name required, plus the hybrid
     (scalar_query present) vs. vector-only distinction.
   - Disambiguation: a plain full-text relevance prompt should still select
-    run_fts_query, not one of these two, and a "find similar/semantically
-    related" prompt should select run_vector_search over run_fts_query.
+    run_search, not one of these two, and a "find similar/semantically
+    related" prompt should select run_vector_query over run_search.
 
 No seed/cleanup hooks: these cases score tool selection and parameters (see
 accuracy/sdk/scorer.py), not whether the underlying index exists or the call
 actually returns hits, so no live vector index is required — matching the
 "conversational" style cases in the other accuracy test files. index_name in
-the run_search_vector_search cases is a plausible, not necessarily-existing,
+the run_vector_search cases is a plausible, not necessarily-existing,
 name for the same reason.
 """
 
@@ -38,7 +38,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
 
     return [
         AccuracyCase(
-            test_id="run_vector_search_no_index_name",
+            test_id="run_vector_query_no_index_name",
             prompt=(
                 f"In the '{collection}' collection (scope '{scope}', bucket "
                 f"'{bucket}'), find documents whose 'embedding' field is "
@@ -46,7 +46,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="run_vector_search",
+                    tool_name="run_vector_query",
                     parameters={
                         "bucket_name": bucket,
                         "scope_name": scope,
@@ -58,7 +58,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ],
         ),
         AccuracyCase(
-            test_id="run_search_vector_search_named_index",
+            test_id="run_vector_search_named_index",
             prompt=(
                 f"Using the Search index '{index_name}', run a vector "
                 f"similarity search on the 'embedding' field for text "
@@ -66,7 +66,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="run_search_vector_search",
+                    tool_name="run_vector_search",
                     parameters={
                         "index_name": index_name,
                         "vector_field": "embedding",
@@ -76,7 +76,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ],
         ),
         AccuracyCase(
-            test_id="run_search_vector_search_hybrid",
+            test_id="run_vector_search_hybrid",
             prompt=(
                 f"Using the Search index '{index_name}', find products whose "
                 f"'embedding' field is semantically similar to 'a warm winter "
@@ -85,7 +85,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="run_search_vector_search",
+                    tool_name="run_vector_search",
                     parameters={
                         "index_name": index_name,
                         "vector_field": "embedding",
@@ -105,7 +105,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="run_fts_query",
+                    tool_name="run_search",
                     parameters=Matcher.any_value(),
                 ),
             ],
@@ -119,9 +119,9 @@ def vector_search_cases(test_bucket: str, test_scope: str, test_collection: str)
 
 
 VECTOR_SEARCH_CASE_IDS = [
-    "run_vector_search_no_index_name",
-    "run_search_vector_search_named_index",
-    "run_search_vector_search_hybrid",
+    "run_vector_query_no_index_name",
+    "run_vector_search_named_index",
+    "run_vector_search_hybrid",
     "conversational_plain_fts_not_vector_search",
 ]
 

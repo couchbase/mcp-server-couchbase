@@ -50,7 +50,7 @@ REST_ONLY_TOOLS = frozenset(
 SDK_HEALTH_TOOLS = frozenset(
     {
         "get_cluster_health_and_services",
-        "get_cluster_diagnostics_report",
+        "get_client_connectivity_report",
     }
 )
 

@@ -5,7 +5,7 @@ helpers around it do: it names ``couchbase_operational_insights`` types, and
 ``core`` must stay free of both SDKs (see that module's docstring). ``core``
 owns only the service-agnostic half, ``ProviderLifecycle``.
 
-The practical gap this closes: ``get_oi_handle_registry`` reaches
+The practical gap this closes: ``get_operational_insights_handle_registry`` reaches
 ``provider.handle_registry`` on a value the shared layer types as
 ``ProviderLifecycle``, which has no such member. Declaring the attribute in
 a protocol makes that reach checkable instead of an ``AttributeError``

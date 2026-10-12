@@ -8,7 +8,7 @@
 Lives here rather than in ``cb_mcp.utils.context`` (where it was, back when
 "shared" and "Couchbase" meant the same thing) for two reasons: it is the
 exact mirror of
-``cb_mcp.utils.operational_insights.context.get_oi_cluster``, and it is the
+``cb_mcp.utils.operational_insights.context.get_operational_insights_cluster``, and it is the
 only thing that made the shared context module name an SDK at all.
 """
 

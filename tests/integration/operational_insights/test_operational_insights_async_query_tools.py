@@ -18,7 +18,7 @@ import asyncio
 import pytest
 from conftest import extract_payload
 
-from .conftest import create_oi_mcp_session
+from .conftest import create_operational_insights_mcp_session
 
 # A trivial query can finish before the first poll, so readiness is polled
 # rather than assumed.
@@ -27,14 +27,15 @@ POLL_INTERVAL_SECONDS = 0.5
 
 
 async def _poll_until_ready(session, query_handle: str) -> dict | None:
-    """Call oi_get_async_query_results until it reports ready, or attempts run out.
+    """Call operational_insights_get_async_query_results until it reports ready, or attempts run out.
 
     That tool doubles as the readiness check, so polling it IS the status
     check. Returns the ready payload (rows included) or None on timeout.
     """
     for _ in range(POLL_ATTEMPTS):
         response = await session.call_tool(
-            "oi_get_async_query_results", arguments={"query_handle": query_handle}
+            "operational_insights_get_async_query_results",
+            arguments={"query_handle": query_handle},
         )
         payload = extract_payload(response)
         assert payload["success"] is True, payload
@@ -47,7 +48,7 @@ async def _poll_until_ready(session, query_handle: str) -> dict | None:
 async def _start_query(session, statement: str) -> str:
     """Start an async query and return its query_handle token."""
     response = await session.call_tool(
-        "oi_run_query_async", arguments={"statement": statement}
+        "operational_insights_run_query_async", arguments={"statement": statement}
     )
     payload = extract_payload(response)
     assert payload["success"] is True, payload
@@ -58,7 +59,7 @@ async def _start_query(session, statement: str) -> str:
 @pytest.mark.asyncio
 async def test_async_query_full_lifecycle() -> None:
     """Start -> call results until ready, which returns the rows in one step."""
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         handle = await _start_query(session, "SELECT 1 AS one")
 
         payload = await _poll_until_ready(session, handle)
@@ -75,18 +76,20 @@ async def test_async_query_full_lifecycle() -> None:
 async def test_results_can_be_fetched_twice() -> None:
     """Fetching is a read, not a consume: the server keeps the buffers, so
     the same handle can be fetched again and returns identical rows."""
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         handle = await _start_query(session, "SELECT 1 AS one")
         assert await _poll_until_ready(session, handle)
 
         first = extract_payload(
             await session.call_tool(
-                "oi_get_async_query_results", arguments={"query_handle": handle}
+                "operational_insights_get_async_query_results",
+                arguments={"query_handle": handle},
             )
         )
         second = extract_payload(
             await session.call_tool(
-                "oi_get_async_query_results", arguments={"query_handle": handle}
+                "operational_insights_get_async_query_results",
+                arguments={"query_handle": handle},
             )
         )
 
@@ -98,16 +101,18 @@ async def test_results_can_be_fetched_twice() -> None:
 @pytest.mark.asyncio
 async def test_discard_after_fetch_ends_the_lifecycle() -> None:
     """Discard is the cleanup step even after a successful fetch."""
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         handle = await _start_query(session, "SELECT 1 AS one")
         assert await _poll_until_ready(session, handle)
 
         await session.call_tool(
-            "oi_get_async_query_results", arguments={"query_handle": handle}
+            "operational_insights_get_async_query_results",
+            arguments={"query_handle": handle},
         )
         discarded = extract_payload(
             await session.call_tool(
-                "oi_discard_async_query_results", arguments={"query_handle": handle}
+                "operational_insights_discard_async_query_results",
+                arguments={"query_handle": handle},
             )
         )
         assert discarded["success"] is True
@@ -116,7 +121,8 @@ async def test_discard_after_fetch_ends_the_lifecycle() -> None:
         # Only now is the token gone.
         after = extract_payload(
             await session.call_tool(
-                "oi_get_async_query_results", arguments={"query_handle": handle}
+                "operational_insights_get_async_query_results",
+                arguments={"query_handle": handle},
             )
         )
         assert after["success"] is False
@@ -126,12 +132,13 @@ async def test_discard_after_fetch_ends_the_lifecycle() -> None:
 @pytest.mark.asyncio
 async def test_discard_async_query_results() -> None:
     """Ready results can be released without fetching them."""
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         handle = await _start_query(session, "SELECT 1 AS one")
         assert await _poll_until_ready(session, handle)
 
         response = await session.call_tool(
-            "oi_discard_async_query_results", arguments={"query_handle": handle}
+            "operational_insights_discard_async_query_results",
+            arguments={"query_handle": handle},
         )
         payload = extract_payload(response)
 
@@ -140,7 +147,8 @@ async def test_discard_async_query_results() -> None:
 
         # Discarding evicts the token.
         response = await session.call_tool(
-            "oi_get_async_query_results", arguments={"query_handle": handle}
+            "operational_insights_get_async_query_results",
+            arguments={"query_handle": handle},
         )
         assert extract_payload(response)["success"] is False
 
@@ -154,23 +162,25 @@ async def test_cancel_refused_for_completed_query() -> None:
     SDK treats 404 as success, so without the tool's own status check this
     would report cancelled: true and evict the token.
     """
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         handle = await _start_query(session, "SELECT 1 AS one")
         assert await _poll_until_ready(session, handle), "query never became ready"
 
         payload = extract_payload(
             await session.call_tool(
-                "oi_cancel_async_query", arguments={"query_handle": handle}
+                "operational_insights_cancel_async_query",
+                arguments={"query_handle": handle},
             )
         )
         assert payload["success"] is True
         assert payload["cancelled"] is False
-        assert "oi_discard_async_query_results" in payload["message"]
+        assert "operational_insights_discard_async_query_results" in payload["message"]
 
         # The token survived, so the recommended cleanup actually works.
         discarded = extract_payload(
             await session.call_tool(
-                "oi_discard_async_query_results", arguments={"query_handle": handle}
+                "operational_insights_discard_async_query_results",
+                arguments={"query_handle": handle},
             )
         )
         assert discarded["success"] is True
@@ -180,7 +190,7 @@ async def test_cancel_refused_for_completed_query() -> None:
 @pytest.mark.asyncio
 async def test_cancel_running_query() -> None:
     """A query still running can be cancelled, which evicts its token."""
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         # Heavy enough to still be running on the immediately following cancel.
         handle = await _start_query(
             session,
@@ -190,7 +200,8 @@ async def test_cancel_running_query() -> None:
 
         payload = extract_payload(
             await session.call_tool(
-                "oi_cancel_async_query", arguments={"query_handle": handle}
+                "operational_insights_cancel_async_query",
+                arguments={"query_handle": handle},
             )
         )
         assert payload["success"] is True
@@ -199,24 +210,26 @@ async def test_cancel_running_query() -> None:
             # Cancelled: the token is evicted, so a second cancel fails.
             second = extract_payload(
                 await session.call_tool(
-                    "oi_cancel_async_query", arguments={"query_handle": handle}
+                    "operational_insights_cancel_async_query",
+                    arguments={"query_handle": handle},
                 )
             )
             assert second["success"] is False
         else:
             # It finished before the cancel landed; clean up its buffers.
             await session.call_tool(
-                "oi_discard_async_query_results", arguments={"query_handle": handle}
+                "operational_insights_discard_async_query_results",
+                arguments={"query_handle": handle},
             )
 
 
 @pytest.mark.asyncio
 async def test_unknown_handle_returns_error_envelope() -> None:
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         for tool in (
-            "oi_get_async_query_results",
-            "oi_discard_async_query_results",
-            "oi_cancel_async_query",
+            "operational_insights_get_async_query_results",
+            "operational_insights_discard_async_query_results",
+            "operational_insights_cancel_async_query",
         ):
             response = await session.call_tool(
                 tool, arguments={"query_handle": "not-a-real-handle"}
@@ -229,9 +242,10 @@ async def test_unknown_handle_returns_error_envelope() -> None:
 
 @pytest.mark.asyncio
 async def test_invalid_statement_returns_error_envelope() -> None:
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         response = await session.call_tool(
-            "oi_run_query_async", arguments={"statement": "SELECT bad("}
+            "operational_insights_run_query_async",
+            arguments={"statement": "SELECT bad("},
         )
         payload = extract_payload(response)
 

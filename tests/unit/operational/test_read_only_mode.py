@@ -37,8 +37,8 @@ WRITE_TOOL_NAMES = {
     # Query service admin write tools
     "delete_active_query",
     # FTS index management write tools
-    "upsert_fts_index",
-    "drop_fts_index",
+    "upsert_search_index",
+    "drop_search_index",
 }
 
 # Read-only tool names that should always be available (35 tools)
@@ -51,7 +51,7 @@ READ_ONLY_TOOL_NAMES = {
     "get_collections_in_scope",
     "get_scopes_in_bucket",
     "get_cluster_health_and_services",
-    "get_cluster_diagnostics_report",
+    "get_client_connectivity_report",
     "get_cluster_metrics",
     "get_cluster_tasks",
     "get_cluster_health_snapshot",
@@ -70,12 +70,12 @@ READ_ONLY_TOOL_NAMES = {
     "list_indexes",
     "get_index_stats",
     # FTS tools (3)
-    "list_fts_indexes",
-    "get_fts_index_definition",
-    "run_fts_query",
+    "list_search_indexes",
+    "get_search_index_definition",
+    "run_search",
     # Vector search tools (2)
+    "run_vector_query",
     "run_vector_search",
-    "run_search_vector_search",
     # Query performance analysis tools (7)
     "get_queries_not_selective",
     "get_queries_not_using_covering_index",
@@ -280,17 +280,17 @@ class TestReadOnlyModeToolFiltering:
         tool_names = {tool.__name__ for tool in tools}
         assert "delete_active_query" not in tool_names
 
-    def test_upsert_fts_index_tool_filtered_in_read_only_mode(self):
-        """Verify upsert_fts_index is filtered in read-only mode."""
+    def test_upsert_search_index_tool_filtered_in_read_only_mode(self):
+        """Verify upsert_search_index is filtered in read-only mode."""
         tools = get_tools(read_only_mode=True)
         tool_names = {tool.__name__ for tool in tools}
-        assert "upsert_fts_index" not in tool_names
+        assert "upsert_search_index" not in tool_names
 
-    def test_drop_fts_index_tool_filtered_in_read_only_mode(self):
-        """Verify drop_fts_index is filtered in read-only mode."""
+    def test_drop_search_index_tool_filtered_in_read_only_mode(self):
+        """Verify drop_search_index is filtered in read-only mode."""
         tools = get_tools(read_only_mode=True)
         tool_names = {tool.__name__ for tool in tools}
-        assert "drop_fts_index" not in tool_names
+        assert "drop_search_index" not in tool_names
 
     def test_get_document_always_available(self):
         """Verify get_document_by_id is always available (read operation)."""

@@ -2,7 +2,7 @@
 
 Everything under this directory is auto-tagged ``integration`` and
 ``operational_insights``, and skipped at collection time unless
-``CB_OI_CONNECTION_STRING``/``CB_OI_USERNAME``/``CB_OI_PASSWORD`` are set.
+``CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING``/``CB_OPERATIONAL_INSIGHTS_USERNAME``/``CB_OPERATIONAL_INSIGHTS_PASSWORD`` are set.
 This is what keeps every operational CI cell green: with none of those set,
 the whole directory reports skipped, not failed.
 
@@ -21,7 +21,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import pytest
-from _test_env import build_oi_env, oi_env_available
+from _test_env import build_operational_insights_env, operational_insights_env_available
 from conftest import create_session_for_subcommand, streamable_http_session
 from mcp import ClientSession
 
@@ -30,7 +30,7 @@ def pytest_collection_modifyitems(config, items):
     skip = pytest.mark.skip(
         reason=(
             "Operational Insights integration tests require a live cluster. "
-            "Set CB_OI_CONNECTION_STRING/CB_OI_USERNAME/CB_OI_PASSWORD."
+            "Set CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING/CB_OPERATIONAL_INSIGHTS_USERNAME/CB_OPERATIONAL_INSIGHTS_PASSWORD."
         )
     )
     for item in items:
@@ -39,12 +39,12 @@ def pytest_collection_modifyitems(config, items):
         ):
             item.add_marker(pytest.mark.integration)
             item.add_marker(pytest.mark.operational_insights)
-            if not oi_env_available():
+            if not operational_insights_env_available():
                 item.add_marker(skip)
 
 
 @asynccontextmanager
-async def create_oi_mcp_session() -> AsyncIterator[ClientSession]:
+async def create_operational_insights_mcp_session() -> AsyncIterator[ClientSession]:
     """Create a fresh Operational Insights MCP client session.
 
     Transport selection mirrors ``tests/integration/conftest.py``'s
@@ -52,11 +52,11 @@ async def create_oi_mcp_session() -> AsyncIterator[ClientSession]:
     ``stdio``):
 
     - ``stdio``: spawn a fresh ``mcp_server operational-insights``
-      subprocess per test. ``build_oi_env()`` supplies OI credentials and
+      subprocess per test. ``build_operational_insights_env()`` supplies Operational Insights credentials and
       forces the subprocess's own transport to stdio.
     - ``http`` / ``streamable-http``: connect to an already-running server
       at ``MCP_SERVER_URL``, started outside pytest (by CI or
-      ``scripts/run_oi_matrix_local.sh``) with ``operational-insights`` as
+      ``scripts/run_operational_insights_matrix_local.sh``) with ``operational-insights`` as
       its subcommand. Reuses ``streamable_http_session`` unmodified — it
       is already fully generic (reads only ``MCP_SERVER_URL``), so there is
       no operational-only logic to fork.
@@ -68,6 +68,6 @@ async def create_oi_mcp_session() -> AsyncIterator[ClientSession]:
             yield session
         return
 
-    env = build_oi_env()
+    env = build_operational_insights_env()
     async with create_session_for_subcommand("operational-insights", env) as session:
         yield session

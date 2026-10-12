@@ -395,9 +395,9 @@ async def test_create_query_index_dimension_mismatch_silently_excluded() -> None
                     f"index did not reach online within {INDEX_READY_TIMEOUT}s: {indexes!r}"
                 )
 
-                # Raw SQL++, not run_vector_search: this is a GSI-indexing
+                # Raw SQL++, not run_vector_query: this is a GSI-indexing
                 # behavior check, independent of the embedding pipeline, and
-                # run_vector_search always embeds query_text rather than
+                # run_vector_query always embeds query_text rather than
                 # taking a literal vector.
                 query = (
                     f"SELECT META(doc).id AS id FROM `{collection}` AS doc "

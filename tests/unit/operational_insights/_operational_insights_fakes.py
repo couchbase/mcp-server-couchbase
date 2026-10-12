@@ -2,7 +2,7 @@
 
 Builds a real ``cb_mcp.utils.context.AppContext`` (not a bare
 ``SimpleNamespace``) wrapping a mock ``ClusterProvider``, so each tool test
-exercises the actual ``get_cluster_provider``/``get_oi_cluster`` indirection
+exercises the actual ``get_cluster_provider``/``get_operational_insights_cluster`` indirection
 instead of stubbing it out — and so a rename of ``AppContext``'s fields
 breaks these tests, rather than silently testing nothing.
 """
@@ -14,7 +14,9 @@ from cb_mcp.utils.context import AppContext
 from cb_mcp.utils.operational_insights.handle_registry import QueryResultsRegistry
 
 
-def make_oi_ctx(*, read_only_mode: bool = True) -> tuple[SimpleNamespace, MagicMock]:
+def make_operational_insights_ctx(
+    *, read_only_mode: bool = True
+) -> tuple[SimpleNamespace, MagicMock]:
     """Build a fake ``Context`` plus its underlying cluster mock.
 
     Returns ``(ctx, cluster)`` so each test can program

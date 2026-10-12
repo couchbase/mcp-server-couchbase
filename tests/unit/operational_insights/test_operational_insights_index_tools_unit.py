@@ -12,9 +12,12 @@ forwarded to the server to reject.
 """
 
 import pytest
-from _oi_fakes import make_oi_ctx
+from _operational_insights_fakes import make_operational_insights_ctx
 
-from cb_mcp.tools.operational_insights.index import oi_create_index, oi_list_indexes
+from cb_mcp.tools.operational_insights.index import (
+    operational_insights_create_index,
+    operational_insights_list_indexes,
+)
 from cb_mcp.utils.sqlpp import safe_field_path
 
 
@@ -37,7 +40,7 @@ class TestSafeFieldPath:
 
 
 def _create(ctx, cluster, **overrides):
-    """Call oi_create_index with sensible defaults."""
+    """Call operational_insights_create_index with sensible defaults."""
     kwargs = {
         "database_name": "music",
         "scope_name": "myPlaylist",
@@ -46,12 +49,12 @@ def _create(ctx, cluster, **overrides):
         "fields": [{"name": "title", "type": "string"}],
     }
     kwargs.update(overrides)
-    return oi_create_index(ctx, **kwargs)
+    return operational_insights_create_index(ctx, **kwargs)
 
 
 class TestCreateIndex:
     def test_builds_expected_statement(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         result = _create(ctx, cluster)
 
@@ -65,7 +68,7 @@ class TestCreateIndex:
         assert result["keyspace"] == "`music`.`myPlaylist`.`countrySongs`"
 
     def test_composite_index_joins_fields(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         _create(
             ctx,
@@ -86,7 +89,7 @@ class TestCreateIndex:
         CREATE INDEX name_idx3 ON `travel-sample`.inventory.airline (iata)
         succeeds, despite the published EBNF implying a type is mandatory.
         """
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         result = _create(ctx, cluster, fields=[{"name": "iata"}])
 
@@ -94,7 +97,7 @@ class TestCreateIndex:
         assert result["success"] is True
 
     def test_mixes_typed_and_untyped_fields(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         _create(
             ctx,
@@ -106,7 +109,7 @@ class TestCreateIndex:
         assert "(`artist`, `release_date`: date)" in statement
 
     def test_if_not_exists_clause(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         _create(ctx, cluster, if_not_exists=True)
 
@@ -114,7 +117,7 @@ class TestCreateIndex:
         assert statement.startswith("CREATE INDEX `song_title_idx` IF NOT EXISTS ON ")
 
     def test_exclude_unknown_key_clause(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         _create(ctx, cluster, exclude_unknown_key=True)
 
@@ -123,7 +126,7 @@ class TestCreateIndex:
 
     def test_escapes_backticks_in_keyspace_and_index_name(self) -> None:
         """A backtick in a name must not be able to close the identifier early."""
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         _create(ctx, cluster, database_name="db`.`evil", index_name="idx`x")
 
@@ -133,7 +136,7 @@ class TestCreateIndex:
 
     def test_quotes_names_needing_escaping(self) -> None:
         """Hyphenated names like travel-sample only work because they are quoted."""
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         result = _create(
             ctx,
@@ -146,7 +149,7 @@ class TestCreateIndex:
         assert result["keyspace"] == "`travel-sample`.`inventory`.`airline`"
 
     def test_returns_error_envelope_on_sdk_error(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.side_effect = Exception("index already exists")
 
         result = _create(ctx, cluster)
@@ -162,7 +165,7 @@ class TestCreateIndex:
         and format strings (quote_literal) — nothing escapes it, so it must
         be checked against the documented grammar instead of forwarded.
         """
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         result = _create(ctx, cluster, fields=[{"name": "title", "type": "float"}])
 
@@ -171,7 +174,7 @@ class TestCreateIndex:
         cluster.execute_query.assert_not_called()
 
     def test_rejects_unrecognised_type_on_unnest_field(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         result = _create(
             ctx, cluster, fields=[{"unnest": "public_likes", "type": "float"}]
@@ -182,7 +185,7 @@ class TestCreateIndex:
         cluster.execute_query.assert_not_called()
 
     def test_rejects_unrecognised_type_on_select_subfield(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         result = _create(
             ctx,
@@ -204,7 +207,7 @@ class TestCastDefault:
     """The optional CAST (DEFAULT NULL ...) clause, used for TAV indexes."""
 
     def test_bare_cast_default_null(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         result = _create(ctx, cluster, cast_default_null=True)
 
@@ -212,7 +215,7 @@ class TestCastDefault:
 
     def test_matches_the_documented_example(self) -> None:
         """Docs: CREATE INDEX idx2 ON staff(hiredate:DATE) CAST(DEFAULT NULL DATE "MM/DD/YYYY")"""
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         result = _create(
             ctx,
@@ -228,7 +231,7 @@ class TestCastDefault:
 
     def test_formats_imply_the_clause(self) -> None:
         """cast_formats alone is enough -- no need to also set cast_default_null."""
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         result = _create(ctx, cluster, cast_formats={"date": "MM/DD/YYYY"})
 
@@ -236,7 +239,7 @@ class TestCastDefault:
 
     def test_emits_formats_in_grammar_order(self) -> None:
         """DateTimeFormatSpec fixes the order as DATE, TIME, DATETIME."""
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         result = _create(
             ctx,
@@ -254,7 +257,7 @@ class TestCastDefault:
         )
 
     def test_escapes_quotes_in_a_format_string(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         result = _create(ctx, cluster, cast_formats={"date": 'MM"DD'})
 
@@ -267,7 +270,7 @@ class TestCastDefault:
         caller's trailing backslash pair with the one we add, leaving their
         quote free to close the literal early.
         """
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         result = _create(ctx, cluster, cast_formats={"date": 'a\\"b'})
 
@@ -280,7 +283,7 @@ class TestCastDefault:
         only allowed for B-Tree indexes") for array indexes, but the
         ordering still has to be right for the plain-index case.
         """
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         result = _create(ctx, cluster, exclude_unknown_key=True, cast_default_null=True)
 
@@ -291,7 +294,7 @@ class TestCreateArrayIndex:
     """Array (UNNEST) index elements, verified against a live cluster."""
 
     def test_array_of_primitives(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         _create(
             ctx,
@@ -306,7 +309,7 @@ class TestCreateArrayIndex:
         )
 
     def test_array_of_objects_with_select(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         _create(
             ctx,
@@ -330,7 +333,7 @@ class TestCreateArrayIndex:
 
     def test_mixed_plain_and_array_elements(self) -> None:
         """The docs' composite example: a bare field plus an array element."""
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         _create(
             ctx,
@@ -351,7 +354,7 @@ class TestCreateArrayIndex:
         )
 
     def test_nested_unnest_paths(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         _create(ctx, cluster, fields=[{"unnest": ["a", "b"], "type": "string"}])
 
@@ -366,7 +369,7 @@ class TestCreateArrayIndex:
         specify EXCLUDE UNKNOWN KEY.", so the tool forwards the caller's
         statement rather than rewriting it.
         """
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         result = _create(
             ctx,
@@ -380,7 +383,7 @@ class TestCreateArrayIndex:
 
 class TestListIndexes:
     def test_returns_rows_on_success(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = [
             {
                 "DatabaseName": "travel-sample",
@@ -393,7 +396,7 @@ class TestListIndexes:
             }
         ]
 
-        result = oi_list_indexes(ctx)
+        result = operational_insights_list_indexes(ctx)
 
         assert result[0]["IndexName"] == "name_idx"
         # Field paths are returned as the catalog stores them: an array of
@@ -402,17 +405,17 @@ class TestListIndexes:
 
     def test_raises_on_sdk_error(self) -> None:
         """A read tool raises rather than returning the write-tool error envelope."""
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.side_effect = Exception("boom")
 
         with pytest.raises(Exception, match="boom"):
-            oi_list_indexes(ctx)
+            operational_insights_list_indexes(ctx)
 
     def test_excludes_system_primary_and_sample_indexes(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        oi_list_indexes(ctx)
+        operational_insights_list_indexes(ctx)
 
         query = cluster.execute_query.call_args[0][0]
         # A primary index is the collection itself, and SAMPLE rows are
@@ -422,10 +425,10 @@ class TestListIndexes:
         assert 'i.IndexStructure <> "SAMPLE"' in query
 
     def test_filters_are_bound_as_named_parameters(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        oi_list_indexes(ctx, "travel-sample", "inventory", "airline")
+        operational_insights_list_indexes(ctx, "travel-sample", "inventory", "airline")
 
         query = cluster.execute_query.call_args[0][0]
         query_options = cluster.execute_query.call_args[0][1]
@@ -439,10 +442,10 @@ class TestListIndexes:
         assert "travel-sample" not in query
 
     def test_partial_filter_binds_only_supplied_values(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        oi_list_indexes(ctx, database_name="travel-sample")
+        operational_insights_list_indexes(ctx, database_name="travel-sample")
 
         query = cluster.execute_query.call_args[0][0]
         query_options = cluster.execute_query.call_args[0][1]
@@ -455,7 +458,7 @@ class TestListIndexes:
 
         Both fields are passed through exactly as the catalog stores them.
         """
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         elements = [{"UnnestList": [["schedule"]], "ProjectList": [["day"]]}]
         cluster.execute_query.return_value.get_all_rows.return_value = [
             {
@@ -466,16 +469,16 @@ class TestListIndexes:
             }
         ]
 
-        result = oi_list_indexes(ctx)
+        result = operational_insights_list_indexes(ctx)
 
         assert result[0]["SearchKey"] == []
         assert result[0]["SearchKeyElements"] == elements
 
     def test_selects_both_search_key_encodings(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        oi_list_indexes(ctx)
+        operational_insights_list_indexes(ctx)
 
         query = cluster.execute_query.call_args[0][0]
         # Selecting only SearchKey would report array indexes as fieldless.

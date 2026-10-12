@@ -5,14 +5,14 @@
 # create` needed. Both images are used as-is (no Dockerfile/build step):
 # confirmed by inspection that each already ships curl/wget, which is all
 # the healthchecks below need. Image tags, ports, and the S3Mock bucket name
-# are ${VAR} references, not literals — the caller (oi-integration-tests.yml's
+# are ${VAR} references, not literals — the caller (operational-insights-integration-tests.yml's
 # job-level `env:`, or your own shell for local runs) is expected to set them.
 services:
-  oi:
-    image: ${OI_IMAGE}
+  operational-insights:
+    image: ${OPERATIONAL_INSIGHTS_IMAGE}
     ports:
-      - "${OI_ADMIN_PORT}:8091"
-      - "${OI_ANALYTICS_PORT}:8095"
+      - "${OPERATIONAL_INSIGHTS_ADMIN_PORT}:8091"
+      - "${OPERATIONAL_INSIGHTS_ANALYTICS_PORT}:8095"
     healthcheck:
       # /pools responds before clusterInit too — this only proves the node
       # is up and taking HTTP requests, not that a cluster has been formed.

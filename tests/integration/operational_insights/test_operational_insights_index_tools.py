@@ -3,8 +3,8 @@ cluster (see conftest.py in this directory for connection details).
 
 Ported from the ``analytics-mcp`` prototype (branch
 ``DA-2027/Add-enterprise-tools``). Follows the same pattern as
-test_oi_metadata_tools.py: each test creates its own uniquely-named scope +
-collection via ``oi_run_query_sync`` DDL, exercises ``oi_create_index``, then drops
+test_operational_insights_metadata_tools.py: each test creates its own uniquely-named scope +
+collection via ``operational_insights_run_query_sync`` DDL, exercises ``operational_insights_create_index``, then drops
 the scope in a ``finally`` block so reruns don't collide (dropping the scope
 also drops any indexes on its collections).
 
@@ -23,7 +23,7 @@ import warnings
 import pytest
 from conftest import extract_payload
 
-from .conftest import create_oi_mcp_session
+from .conftest import create_operational_insights_mcp_session
 
 DATABASE = "Default"
 
@@ -31,13 +31,13 @@ DATABASE = "Default"
 async def _create_collection(session, scope_name: str, collection_name: str) -> None:
     """Create a scope + collection to hang test indexes off."""
     await session.call_tool(
-        "oi_run_query_sync",
+        "operational_insights_run_query_sync",
         arguments={
             "statement": f"CREATE SCOPE `{DATABASE}`.`{scope_name}` IF NOT EXISTS;"
         },
     )
     create_coll = await session.call_tool(
-        "oi_run_query_sync",
+        "operational_insights_run_query_sync",
         arguments={
             "statement": (
                 f"CREATE COLLECTION `{DATABASE}`.`{scope_name}`.`{collection_name}` "
@@ -50,7 +50,7 @@ async def _create_collection(session, scope_name: str, collection_name: str) -> 
 
 async def _drop_scope(session, scope_name: str) -> None:
     await session.call_tool(
-        "oi_run_query_sync",
+        "operational_insights_run_query_sync",
         arguments={"statement": f"DROP SCOPE `{DATABASE}`.`{scope_name}` IF EXISTS;"},
     )
 
@@ -79,12 +79,12 @@ async def test_create_index_single_field() -> None:
     collection_name = f"oitest_coll_{uuid.uuid4().hex[:8]}"
     index_name = f"oitest_idx_{uuid.uuid4().hex[:8]}"
 
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         try:
             await _create_collection(session, scope_name, collection_name)
 
             response = await session.call_tool(
-                "oi_create_index",
+                "operational_insights_create_index",
                 arguments={
                     "database_name": DATABASE,
                     "scope_name": scope_name,
@@ -99,7 +99,7 @@ async def test_create_index_single_field() -> None:
 
             # Confirm the index actually landed in the metadata catalog.
             verify = await session.call_tool(
-                "oi_run_query_sync",
+                "operational_insights_run_query_sync",
                 arguments={
                     "statement": (
                         "SELECT i.IndexName FROM System.Metadata.`Index` i "
@@ -120,7 +120,7 @@ async def test_create_index_composite_and_if_not_exists() -> None:
     collection_name = f"oitest_coll_{uuid.uuid4().hex[:8]}"
     index_name = f"oitest_idx_{uuid.uuid4().hex[:8]}"
 
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         try:
             await _create_collection(session, scope_name, collection_name)
 
@@ -135,16 +135,21 @@ async def test_create_index_composite_and_if_not_exists() -> None:
                 ],
             }
 
-            first = await session.call_tool("oi_create_index", arguments=arguments)
+            first = await session.call_tool(
+                "operational_insights_create_index", arguments=arguments
+            )
             assert extract_payload(first)["success"] is True
 
             # Re-creating the same index errors without if_not_exists...
-            second = await session.call_tool("oi_create_index", arguments=arguments)
+            second = await session.call_tool(
+                "operational_insights_create_index", arguments=arguments
+            )
             assert extract_payload(second)["success"] is False
 
             # ...and is a no-op with it.
             third = await session.call_tool(
-                "oi_create_index", arguments={**arguments, "if_not_exists": True}
+                "operational_insights_create_index",
+                arguments={**arguments, "if_not_exists": True},
             )
             assert extract_payload(third)["success"] is True
         finally:
@@ -157,7 +162,7 @@ async def test_create_array_indexes() -> None:
     scope_name = f"oitest_scope_{uuid.uuid4().hex[:8]}"
     collection_name = f"oitest_coll_{uuid.uuid4().hex[:8]}"
 
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         try:
             await _create_collection(session, scope_name, collection_name)
             base = {
@@ -168,7 +173,7 @@ async def test_create_array_indexes() -> None:
             }
 
             primitives = await session.call_tool(
-                "oi_create_index",
+                "operational_insights_create_index",
                 arguments={
                     **base,
                     "index_name": "oitest_arr_prim",
@@ -178,7 +183,7 @@ async def test_create_array_indexes() -> None:
             assert extract_payload(primitives)["success"] is True
 
             objects = await session.call_tool(
-                "oi_create_index",
+                "operational_insights_create_index",
                 arguments={
                     **base,
                     "index_name": "oitest_arr_obj",
@@ -193,7 +198,7 @@ async def test_create_array_indexes() -> None:
             assert extract_payload(objects)["success"] is True
 
             verify = await session.call_tool(
-                "oi_run_query_sync",
+                "operational_insights_run_query_sync",
                 arguments={
                     "statement": (
                         "SELECT i.IndexName FROM System.Metadata.`Index` i "
@@ -216,12 +221,12 @@ async def test_array_index_requires_exclude_unknown_key() -> None:
     scope_name = f"oitest_scope_{uuid.uuid4().hex[:8]}"
     collection_name = f"oitest_coll_{uuid.uuid4().hex[:8]}"
 
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         try:
             await _create_collection(session, scope_name, collection_name)
 
             response = await session.call_tool(
-                "oi_create_index",
+                "operational_insights_create_index",
                 arguments={
                     "database_name": DATABASE,
                     "scope_name": scope_name,
@@ -248,7 +253,7 @@ async def test_create_index_with_cast_default() -> None:
     scope_name = f"oitest_scope_{uuid.uuid4().hex[:8]}"
     collection_name = f"oitest_coll_{uuid.uuid4().hex[:8]}"
 
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         try:
             await _create_collection(session, scope_name, collection_name)
             base = {
@@ -258,7 +263,7 @@ async def test_create_index_with_cast_default() -> None:
             }
 
             bare = await session.call_tool(
-                "oi_create_index",
+                "operational_insights_create_index",
                 arguments={
                     **base,
                     "index_name": "oitest_cast_bare",
@@ -271,7 +276,7 @@ async def test_create_index_with_cast_default() -> None:
             assert payload["statement"].endswith("CAST (DEFAULT NULL);")
 
             formatted = await session.call_tool(
-                "oi_create_index",
+                "operational_insights_create_index",
                 arguments={
                     **base,
                     "index_name": "oitest_cast_fmt",
@@ -292,12 +297,12 @@ async def test_cast_is_rejected_on_an_array_index() -> None:
     scope_name = f"oitest_scope_{uuid.uuid4().hex[:8]}"
     collection_name = f"oitest_coll_{uuid.uuid4().hex[:8]}"
 
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         try:
             await _create_collection(session, scope_name, collection_name)
 
             response = await session.call_tool(
-                "oi_create_index",
+                "operational_insights_create_index",
                 arguments={
                     "database_name": DATABASE,
                     "scope_name": scope_name,
@@ -331,7 +336,7 @@ async def test_backticks_in_names_cannot_break_out() -> None:
     collection_name = f"oitest_coll_{uuid.uuid4().hex[:8]}"
     victim = f"oitest_victim_{uuid.uuid4().hex[:8]}"
 
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         try:
             await _create_collection(session, scope_name, collection_name)
             base = {
@@ -341,7 +346,7 @@ async def test_backticks_in_names_cannot_break_out() -> None:
             }
 
             created = await session.call_tool(
-                "oi_create_index",
+                "operational_insights_create_index",
                 arguments={
                     **base,
                     "index_name": victim,
@@ -352,7 +357,7 @@ async def test_backticks_in_names_cannot_break_out() -> None:
 
             keyspace = f"`{DATABASE}`.`{scope_name}`.`{collection_name}`"
             attack = await session.call_tool(
-                "oi_create_index",
+                "operational_insights_create_index",
                 arguments={
                     **base,
                     "collection_name": (
@@ -365,7 +370,7 @@ async def test_backticks_in_names_cannot_break_out() -> None:
             assert extract_payload(attack)["success"] is False
 
             verify = await session.call_tool(
-                "oi_run_query_sync",
+                "operational_insights_run_query_sync",
                 arguments={
                     "statement": (
                         "SELECT i.IndexName FROM System.Metadata.`Index` i "
@@ -382,9 +387,9 @@ async def test_backticks_in_names_cannot_break_out() -> None:
 
 @pytest.mark.asyncio
 async def test_create_index_on_missing_collection_returns_error_envelope() -> None:
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         response = await session.call_tool(
-            "oi_create_index",
+            "operational_insights_create_index",
             arguments={
                 "database_name": DATABASE,
                 "scope_name": DATABASE,
@@ -401,7 +406,7 @@ async def test_create_index_on_missing_collection_returns_error_envelope() -> No
 
 @pytest.mark.asyncio
 async def test_list_indexes_round_trips_created_indexes() -> None:
-    """Indexes written by oi_create_index read back through oi_list_indexes.
+    """Indexes written by operational_insights_create_index read back through operational_insights_list_indexes.
 
     Covers both encodings the catalog uses: a scalar index (SearchKey) and an
     array index (SearchKeyElements), each returned as stored.
@@ -409,7 +414,7 @@ async def test_list_indexes_round_trips_created_indexes() -> None:
     scope_name = f"oitest_scope_{uuid.uuid4().hex[:8]}"
     collection_name = f"oitest_coll_{uuid.uuid4().hex[:8]}"
 
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         try:
             await _create_collection(session, scope_name, collection_name)
             base = {
@@ -419,7 +424,7 @@ async def test_list_indexes_round_trips_created_indexes() -> None:
             }
 
             scalar = await session.call_tool(
-                "oi_create_index",
+                "operational_insights_create_index",
                 arguments={
                     **base,
                     "index_name": "oitest_scalar_idx",
@@ -429,7 +434,7 @@ async def test_list_indexes_round_trips_created_indexes() -> None:
             assert extract_payload(scalar)["success"] is True
 
             array = await session.call_tool(
-                "oi_create_index",
+                "operational_insights_create_index",
                 arguments={
                     **base,
                     "index_name": "oitest_array_idx",
@@ -444,7 +449,9 @@ async def test_list_indexes_round_trips_created_indexes() -> None:
             )
             assert extract_payload(array)["success"] is True
 
-            listed = await session.call_tool("oi_list_indexes", arguments=base)
+            listed = await session.call_tool(
+                "operational_insights_list_indexes", arguments=base
+            )
             rows = extract_payload(listed)
 
             # A scalar index stores its field path under SearchKey, as an
@@ -476,11 +483,11 @@ async def test_list_indexes_excludes_primary_and_sample_indexes() -> None:
     scope_name = f"oitest_scope_{uuid.uuid4().hex[:8]}"
     collection_name = f"oitest_coll_{uuid.uuid4().hex[:8]}"
 
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         try:
             await _create_collection(session, scope_name, collection_name)
             await session.call_tool(
-                "oi_run_query_sync",
+                "operational_insights_run_query_sync",
                 arguments={
                     "statement": (
                         f"INSERT INTO `{DATABASE}`.`{scope_name}`.`{collection_name}` "
@@ -490,7 +497,7 @@ async def test_list_indexes_excludes_primary_and_sample_indexes() -> None:
             )
             # Generates a SAMPLE index for the cost-based optimizer.
             await session.call_tool(
-                "oi_run_query_sync",
+                "operational_insights_run_query_sync",
                 arguments={
                     "statement": (
                         f"ANALYZE COLLECTION "
@@ -500,7 +507,7 @@ async def test_list_indexes_excludes_primary_and_sample_indexes() -> None:
             )
 
             listed = await session.call_tool(
-                "oi_list_indexes",
+                "operational_insights_list_indexes",
                 arguments={
                     "database_name": DATABASE,
                     "scope_name": scope_name,
@@ -519,11 +526,11 @@ async def test_list_indexes_filters_are_scoped() -> None:
     scope_name = f"oitest_scope_{uuid.uuid4().hex[:8]}"
     collection_name = f"oitest_coll_{uuid.uuid4().hex[:8]}"
 
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         try:
             await _create_collection(session, scope_name, collection_name)
             created = await session.call_tool(
-                "oi_create_index",
+                "operational_insights_create_index",
                 arguments={
                     "database_name": DATABASE,
                     "scope_name": scope_name,
@@ -535,7 +542,9 @@ async def test_list_indexes_filters_are_scoped() -> None:
             assert extract_payload(created)["success"] is True
 
             all_rows = extract_payload(
-                await session.call_tool("oi_list_indexes", arguments={})
+                await session.call_tool(
+                    "operational_insights_list_indexes", arguments={}
+                )
             )
             assert _index_exists(all_rows, "oitest_scoped_idx")
             # No System-database catalog indexes leak into an unfiltered listing.
@@ -543,7 +552,7 @@ async def test_list_indexes_filters_are_scoped() -> None:
 
             scoped_rows = extract_payload(
                 await session.call_tool(
-                    "oi_list_indexes",
+                    "operational_insights_list_indexes",
                     arguments={
                         "database_name": DATABASE,
                         "scope_name": scope_name,

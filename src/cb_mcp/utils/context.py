@@ -4,7 +4,7 @@ Everything here works for any server: the provider, the settings snapshot,
 the server identity, the logging snapshot. Anything that resolves a *cluster*
 lives with its own server's helpers instead —
 ``cb_mcp.utils.operational.context.get_cluster_connection`` and
-``cb_mcp.utils.operational_insights.context.get_oi_cluster`` — since each
+``cb_mcp.utils.operational_insights.context.get_operational_insights_cluster`` — since each
 names a different SDK's type.
 
 That split is why this module no longer imports either SDK, even under
@@ -36,7 +36,7 @@ class AppContext:
             reached through it here is service-specific. A tool that needs
             the cluster itself goes through its own server's accessor
             (``get_cluster_connection`` here,
-            ``cb_mcp.utils.operational_insights.context.get_oi_cluster``
+            ``cb_mcp.utils.operational_insights.context.get_operational_insights_cluster``
             there), which narrows to that service's provider protocol.
             The standalone MCP server populates this with ``OperationalClusterProvider``
             during lifespan startup; other implementations supply their own.
