@@ -54,11 +54,8 @@ def test_category_order_is_the_wire_contract():
         "query",
         "index",
         "performance",
-        # Slot 7, revived from the retired `analytics` category on 2026-10-12
-        # by product decision. Safe only because `analytics` never had a tool
-        # classified to it and so never emitted a record; see RETIRED_SLOTS.
-        "config",
         "search",
+        "config",
     )
 
 
@@ -236,13 +233,8 @@ def test_slot_table_pins_the_shipped_numbers():
         "query": 3,
         "index": 4,
         "performance": 5,
-        # Revived the retired `analytics` slot on 2026-10-12. Permitted
-        # because that category never emitted a record, and taken as an
-        # explicit decision -- next_free_slot still declines to offer it.
+        "search": 6,
         "config": 7,
-        # Added 2026-09-29 with the FTS tools. Slot 8, not the reusable
-        # retired 6, so no number has ever meant two things.
-        "search": 8,
     }
 
 
@@ -293,31 +285,24 @@ def test_retiring_a_category_does_not_move_its_neighbours(monkeypatch):
 def test_next_free_slot_takes_the_lowest_never_allocated(monkeypatch):
     monkeypatch.setattr(catalog, "RETIRED_SLOTS", {})
     monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset())
-    # 0-5 and 8 are allocated, so 6 is the lowest never-allocated slot.
-    assert catalog.next_free_slot() == 6
+    # 0-7 are allocated, so 8 is the lowest never-allocated slot.
+    assert catalog.next_free_slot() == 8
 
 
 def test_next_free_slot_skips_retired_slots(monkeypatch):
     """Retired slots are not offered, even when reuse would be safe.
-
-    Reuse remains *permissible* for a slot that never emitted a record — the
-    rule in ``RETIRED_SLOTS`` still says so. It is simply not automatic. When
-    the search category was added the reusable slot 6 was declined in favour of
-    8, on the grounds that a number which has meant two different things is a
-    trap for anyone reading an old rule. Handing retired slots back from a
-    helper would make the trap the default path.
+    default path, and the day a slot *has* emitted the default would be wrong.
     """
-    monkeypatch.setattr(catalog, "RETIRED_SLOTS", {"operational": {"vector": 6}})
+    monkeypatch.setattr(catalog, "RETIRED_SLOTS", {"operational": {"withdrawn": 9}})
     monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset())
-    # 7 is live (config) and 8 is live (search), so the next never-allocated
-    # slot is 9 -- the helper still refuses to offer the retired 6.
-    assert catalog.next_free_slot() == 9
+    # 0-7 are live and 9 is retired, so the helper offers 8 and skips 9.
+    assert catalog.next_free_slot() == 8
 
 
 def test_permanently_reserved_slots_are_never_reallocated(monkeypatch):
     """A slot that has emitted records must not be handed to a new category."""
-    monkeypatch.setattr(catalog, "RETIRED_SLOTS", {"operational": {"vector": 6}})
-    monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset({6}))
+    monkeypatch.setattr(catalog, "RETIRED_SLOTS", {"operational": {"withdrawn": 8}})
+    monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset({8}))
     assert catalog.next_free_slot() == 9
 
 
@@ -352,34 +337,61 @@ def test_retired_categories_are_gone_but_their_slots_are_recorded():
             catalog.tool_call_event_id(name, "read")
 
 
-def test_retired_ids_are_absent_from_the_catalogue_and_descriptor():
-    """Slot 6 stays dead: 61494 and 61526 must not resolve to anything.
+def test_a_slot_that_ever_emitted_is_never_reallocated():
+    """The one rule that outlives every revival.
 
-    Slot 7 (61495/61527) was retired with `analytics` and later revived for
-    `config`, which the rule permits only because `analytics` never emitted a
-    record. Slot 6 was not revived, so its pair must still resolve to nothing
-    -- and this test is what would catch it being handed out by accident.
+    Both retired slots have now been revived -- 6 for `search`, 7 for
+    `config` -- so there is no longer a list of dead numbers to assert against.
+    What must still hold is the condition that made those revivals legitimate:
+    a slot may only be reused if no record was ever emitted against it.
+
+    PERMANENTLY_RESERVED_SLOTS is where a slot goes once it *has* emitted. It
+    is empty today because nothing has shipped. The day it is not, this test is
+    what stops one of its numbers being handed to a new category and making an
+    existing SIEM rule silently match an unrelated event.
     """
-    retired = {61494, 61526}
-    live = {event.id for event in all_tool_call_events()}
-    assert live & retired == set()
+    for package, slots in catalog.CATEGORY_SLOTS.items():
+        clash = set(slots.values()) & catalog.PERMANENTLY_RESERVED_SLOTS
+        assert clash == set(), f"{package} reallocated slots that have emitted: {clash}"
 
     shipped = json.loads(DESCRIPTOR_PATH.read_text(encoding="utf-8"))
-    assert {entry["id"] for entry in shipped["events"]} & retired == set()
+    dead_ids = {
+        base + catalog.READ_OFFSET + slot + delta
+        for base in catalog.SERVICE_PACKAGE_BLOCKS.values()
+        for slot in catalog.PERMANENTLY_RESERVED_SLOTS
+        for delta in (0, catalog.WRITE_DELTA)
+    }
+    assert {entry["id"] for entry in shipped["events"]} & dead_ids == set()
+
+
+def test_every_revived_slot_was_one_that_never_emitted():
+    """Checks the revivals themselves, not just the rule.
+
+    A slot appearing in both RETIRED_SLOTS and CATEGORY_SLOTS is a revival.
+    Each one is only defensible because its old category never had a tool
+    classified to it, so no record for that id can exist in anyone's logs.
+    """
+    for package, retired in catalog.RETIRED_SLOTS.items():
+        live = catalog.CATEGORY_SLOTS.get(package, {})
+        revived = set(retired.values()) & set(live.values())
+        assert revived == {6, 7}, revived
+        assert revived & catalog.PERMANENTLY_RESERVED_SLOTS == set()
 
 
 def test_the_revived_slot_never_emitted_under_its_old_meaning():
-    """The precondition for reusing slot 7, asserted rather than assumed.
+    """The precondition for reusing slots 6 and 7, asserted rather than assumed.
 
     Reallocating a slot that had ever emitted a record would make an existing
     SIEM rule silently match a new, unrelated event. `analytics` was retired
     with no tool ever classified to it, so no record for 61495 can exist in
     anyone's logs -- which is the only reason `config` may have the number.
     """
+    assert catalog.RETIRED_SLOTS["operational"]["vector"] == 6
     assert catalog.RETIRED_SLOTS["operational"]["analytics"] == 7
+    assert catalog.CATEGORY_SLOTS["operational"]["search"] == 6
     assert catalog.CATEGORY_SLOTS["operational"]["config"] == 7
-    # Permanently reserved slots are the ones that *did* emit; 7 is not one.
-    assert 7 not in catalog.PERMANENTLY_RESERVED_SLOTS
+    # Permanently reserved slots are the ones that *did* emit; neither is one.
+    assert {6, 7} & catalog.PERMANENTLY_RESERVED_SLOTS == set()
 
 
 def test_retirement_did_not_move_the_surviving_ids():
@@ -390,15 +402,15 @@ def test_retirement_did_not_move_the_surviving_ids():
 
 
 def test_a_new_category_takes_the_next_never_allocated_slot():
-    """Slots 6 and 7 stay retired; the next category gets 9, after search's 8."""
-    assert catalog.next_free_slot() == 9
+    """Slots 0-7 are allocated, so the next category gets 8."""
+    assert catalog.next_free_slot() == 8
 
 
 def test_search_ids_are_the_shipped_numbers():
     """Pinned literally, like every other shipped id.
 
-    Search took slot 8 rather than the reusable retired slot 6, so these are
-    61496/61528 and not 61494/61526.
+    Search was moved into the revived slot 6 on 2026-10-12, from the slot 8 it
+    had held since 2026-09-29 without ever shipping.
     """
-    assert tool_call_event_id("search", "read") == 61496
-    assert tool_call_event_id("search", "write") == 61528
+    assert tool_call_event_id("search", "read") == 61494
+    assert tool_call_event_id("search", "write") == 61526

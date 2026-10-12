@@ -137,18 +137,18 @@
       "filterable": true
     },
     {
-      "id": 61495,
-      "name": "config read",
-      "description": "A config read operation was requested through a tool",
+      "id": 61494,
+      "name": "search read",
+      "description": "A search read operation was requested through a tool",
       "category": "tool_call",
       "service_package": "operational",
       "default_enabled": true,
       "filterable": true
     },
     {
-      "id": 61496,
-      "name": "search read",
-      "description": "A search read operation was requested through a tool",
+      "id": 61495,
+      "name": "config read",
+      "description": "A config read operation was requested through a tool",
       "category": "tool_call",
       "service_package": "operational",
       "default_enabled": true,
@@ -209,18 +209,18 @@
       "filterable": false
     },
     {
-      "id": 61527,
-      "name": "config write",
-      "description": "A config write operation was requested through a tool",
+      "id": 61526,
+      "name": "search write",
+      "description": "A search write operation was requested through a tool",
       "category": "tool_call",
       "service_package": "operational",
       "default_enabled": true,
       "filterable": false
     },
     {
-      "id": 61528,
-      "name": "search write",
-      "description": "A search write operation was requested through a tool",
+      "id": 61527,
+      "name": "config write",
+      "description": "A config write operation was requested through a tool",
       "category": "tool_call",
       "service_package": "operational",
       "default_enabled": true,

@@ -115,16 +115,8 @@ CATEGORY_SLOTS: dict[str, dict[str, int]] = {
         "query": 3,
         "index": 4,
         "performance": 5,
-        # Slot 6 is retired (see RETIRED_SLOTS) and deliberately left unused.
-        #
-        # Slot 7 held the retired `analytics` category and was revived for
-        # `config` on 2026-10-12 by product decision. Permitted by the rule
-        # below — `analytics` never had a tool classified to it, so the slot
-        # never emitted a record and no SIEM rule for the old meaning can
-        # exist. `next_free_slot` still declines to offer retired slots, so
-        # this reuse was chosen rather than inherited from a helper.
+        "search": 6,
         "config": 7,
-        "search": 8,
     },
     # Operational Insights. Same axis, its own block: the two servers collide
     # on tool names — `get_server_configuration_status`, `create_index`,
@@ -154,14 +146,7 @@ CATEGORY_SLOTS: dict[str, dict[str, int]] = {
 #: :func:`next_free_slot`'s reusable set.
 RETIRED_SLOTS: dict[str, dict[str, int]] = {
     "operational": {
-        # Retired before release: no tool was ever classified to it, so it
-        # never emitted a record. Left unallocated by choice when the search
-        # category was added on 2026-09-29 — see the note in CATEGORY_SLOTS.
         "vector": 6,
-        # `analytics` held slot 7 and was retired on the same terms. The slot
-        # was then revived for `config` on 2026-10-12; the entry stays here so
-        # the history of the number remains visible, and so the invariant test
-        # can assert that a revived slot was one that never emitted.
         "analytics": 7,
     },
 }
