@@ -28,7 +28,7 @@ dependencies = [
     # specifier (e.g. "couchbase-operational-insights>=1.0.0,<2.0.0") and
     # remove [tool.hatch.metadata] allow-direct-references below.
     "couchbase-operational-insights @ git+https://github.com/couchbaselabs/operational-insights-python-client.git",
-    "openai>=2.0.0,<3.0.0",
+    "openai>=3.0.0,<4.0.0",
 ]
 
 [project.urls]
