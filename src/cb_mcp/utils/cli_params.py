@@ -57,7 +57,7 @@ from ..core.cli.options import (
     transport_options,
 )
 from ..core.spec import Deployment, ServerSpec
-from ..servers.operational_insights.cli import oi_credential_options
+from ..servers.operational_insights.cli import operational_insights_credential_options
 from ..tool_registration import prepare_tools_for_registration
 from .logging import (
     ParsedLogLevel,
@@ -121,7 +121,7 @@ CLUSTER_CREDENTIALS = CredentialProfile(
 #: adding a key here without also adding it there would be an unclassified
 #: settings key (test_settings_classification).
 INSIGHTS_CREDENTIALS = CredentialProfile(
-    options=oi_credential_options,
+    options=operational_insights_credential_options,
     settings_keys=(
         "connection_string",
         "username",
@@ -235,8 +235,8 @@ class OAuthParams:
 class EmbeddingParams:
     """The seven EMBEDDING_* flags, resolved. All optional — see embedding_options
     in core/cli/options.py; validated at tool-call time, not CLI-parse time,
-    since embedding config is unused unless run_vector_search /
-    run_search_vector_search are actually called.
+    since embedding config is unused unless run_vector_query /
+    run_vector_search are actually called.
     """
 
     provider: str | None

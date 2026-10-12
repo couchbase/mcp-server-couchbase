@@ -8,59 +8,59 @@ Insights cluster.
 """
 
 import pytest
-from _oi_fakes import make_oi_ctx
+from _operational_insights_fakes import make_operational_insights_ctx
 
 from cb_mcp.tools.operational_insights.metadata import (
     MAX_SCHEMA_SAMPLE_SIZE,
-    oi_get_collections_in_scope,
-    oi_get_databases_in_cluster,
-    oi_get_schema_for_collection,
-    oi_get_scopes_in_database,
+    operational_insights_get_collections_in_scope,
+    operational_insights_get_databases_in_cluster,
+    operational_insights_get_schema_for_collection,
+    operational_insights_get_scopes_in_database,
 )
 from cb_mcp.utils.sqlpp import safe_ident
 
 
 class TestGetDatabasesInCluster:
     def test_returns_rows_on_success(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = [
             {"DatabaseName": "Default"}
         ]
 
-        result = oi_get_databases_in_cluster(ctx)
+        result = operational_insights_get_databases_in_cluster(ctx)
 
         assert result == [{"DatabaseName": "Default"}]
 
     def test_raises_on_sdk_error(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.side_effect = Exception("connection refused")
 
         with pytest.raises(Exception, match="connection refused"):
-            oi_get_databases_in_cluster(ctx)
+            operational_insights_get_databases_in_cluster(ctx)
 
 
 class TestGetScopesInDatabase:
     def test_returns_rows_on_success(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = [
             {"DatabaseName": "Default", "ScopeName": "Default"}
         ]
 
-        result = oi_get_scopes_in_database(ctx, "Default")
+        result = operational_insights_get_scopes_in_database(ctx, "Default")
 
         assert result == [{"DatabaseName": "Default", "ScopeName": "Default"}]
 
     def test_raises_on_sdk_error(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.side_effect = Exception("boom")
 
         with pytest.raises(Exception, match="boom"):
-            oi_get_scopes_in_database(ctx, "Default")
+            operational_insights_get_scopes_in_database(ctx, "Default")
 
 
 class TestGetCollectionsInScope:
     def test_returns_rows_on_success(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = [
             {
                 "DatabaseName": "Default",
@@ -69,53 +69,59 @@ class TestGetCollectionsInScope:
             }
         ]
 
-        result = oi_get_collections_in_scope(ctx, "Default", "Default")
+        result = operational_insights_get_collections_in_scope(
+            ctx, "Default", "Default"
+        )
 
         assert result[0]["CollectionName"] == "oitest_coll"
 
     def test_raises_on_sdk_error(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.side_effect = Exception("boom")
 
         with pytest.raises(Exception, match="boom"):
-            oi_get_collections_in_scope(ctx, "Default", "Default")
+            operational_insights_get_collections_in_scope(ctx, "Default", "Default")
 
 
 class TestGetSchemaForCollection:
     def test_returns_rows_on_success(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         # SELECT VALUE array_infer_schema(...) yields a single row whose
         # value is the array of detected flavor objects. The exact envelope
         # shape isn't asserted on here — this is a pass-through check.
         flavors = [{"properties": {"id": {"type": ["string"]}}}]
         cluster.execute_query.return_value.get_all_rows.return_value = [flavors]
 
-        result = oi_get_schema_for_collection(ctx, "Default", "Default", "oitest_coll")
+        result = operational_insights_get_schema_for_collection(
+            ctx, "Default", "Default", "oitest_coll"
+        )
 
         assert result == flavors
 
     def test_raises_on_sdk_error(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.side_effect = Exception("boom")
 
         with pytest.raises(Exception, match="boom"):
-            oi_get_schema_for_collection(ctx, "Default", "Default", "oitest_coll")
+            operational_insights_get_schema_for_collection(
+                ctx, "Default", "Default", "oitest_coll"
+            )
 
     def test_rejects_non_positive_sample_size(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         with pytest.raises(ValueError, match="sample_size must be positive"):
-            oi_get_schema_for_collection(
+            operational_insights_get_schema_for_collection(
                 ctx, "Default", "Default", "oitest_coll", sample_size=0
             )
 
         cluster.execute_query.assert_not_called()
 
     def test_clamps_sample_size_to_max(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        oi_get_schema_for_collection(
+        operational_insights_get_schema_for_collection(
             ctx,
             "Default",
             "Default",
@@ -129,10 +135,10 @@ class TestGetSchemaForCollection:
         )
 
     def test_escapes_identifiers_containing_backticks(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        oi_get_schema_for_collection(ctx, "db`.`evil", "s", "c")
+        operational_insights_get_schema_for_collection(ctx, "db`.`evil", "s", "c")
 
         query = cluster.execute_query.call_args[0][0]
         # Each embedded backtick must be doubled (escaped), not left able to
@@ -140,10 +146,12 @@ class TestGetSchemaForCollection:
         assert "`db``.``evil`.`s`.`c`" in query
 
     def test_defaults_to_requesting_no_sample_values(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        oi_get_schema_for_collection(ctx, "Default", "Default", "oitest_coll")
+        operational_insights_get_schema_for_collection(
+            ctx, "Default", "Default", "oitest_coll"
+        )
 
         query = cluster.execute_query.call_args[0][0]
         # num_sample_values is interpolated as a literal, not bound —
@@ -155,10 +163,10 @@ class TestGetSchemaForCollection:
         assert "infer_params" not in query_options["named_parameters"]
 
     def test_passes_through_requested_num_sample_values(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
-        oi_get_schema_for_collection(
+        operational_insights_get_schema_for_collection(
             ctx, "Default", "Default", "oitest_coll", num_sample_values=5
         )
 
@@ -166,10 +174,10 @@ class TestGetSchemaForCollection:
         assert '{"num_sample_values": 5}' in query
 
     def test_rejects_negative_num_sample_values(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
 
         with pytest.raises(ValueError, match="num_sample_values must be non-negative"):
-            oi_get_schema_for_collection(
+            operational_insights_get_schema_for_collection(
                 ctx, "Default", "Default", "oitest_coll", num_sample_values=-1
             )
 
@@ -180,7 +188,7 @@ class TestGetSchemaForCollection:
         "no samples" (verified against a live cluster: 0 behaves like 1) —
         so this tool strips every ``samples`` key itself, at any nesting
         depth, whenever the caller asked for 0."""
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         flavors = [
             {
                 "type": "object",
@@ -196,7 +204,7 @@ class TestGetSchemaForCollection:
         ]
         cluster.execute_query.return_value.get_all_rows.return_value = [flavors]
 
-        result = oi_get_schema_for_collection(
+        result = operational_insights_get_schema_for_collection(
             ctx, "Default", "Default", "oitest_coll", num_sample_values=0
         )
 
@@ -214,11 +222,11 @@ class TestGetSchemaForCollection:
         ]
 
     def test_keeps_samples_when_num_sample_values_is_positive(self) -> None:
-        ctx, cluster = make_oi_ctx()
+        ctx, cluster = make_operational_insights_ctx()
         flavors = [{"properties": {"id": {"type": "string", "samples": ["1"]}}}]
         cluster.execute_query.return_value.get_all_rows.return_value = [flavors]
 
-        result = oi_get_schema_for_collection(
+        result = operational_insights_get_schema_for_collection(
             ctx, "Default", "Default", "oitest_coll", num_sample_values=1
         )
 

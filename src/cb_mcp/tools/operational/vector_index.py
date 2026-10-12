@@ -100,7 +100,7 @@ def _require_vector_fields(
     if not similarity:
         raise ValueError(
             f"similarity is required for index_type={index_type!r} -- it must "
-            "match whatever metric you will query with (run_vector_search's "
+            "match whatever metric you will query with (run_vector_query's "
             "distance_metric), and Couchbase's own default if omitted "
             "(L2_SQUARED) is usually not what an embedding model wants. Valid "
             f"values (case-insensitive): {sorted(_VALID_SIMILARITIES)}. Note "
@@ -345,7 +345,7 @@ def create_query_index(
     similarity is required for both vector shapes, deliberately with no default
     (unlike the raw DDL, which defaults to L2_SQUARED if omitted) -- it must
     match whatever distance_metric you will later query with
-    (run_vector_search), and Couchbase's own default is usually not what an
+    (run_vector_query), and Couchbase's own default is usually not what an
     embedding model wants. Valid values (case-insensitive): EUCLIDEAN_SQUARED,
     EUCLIDEAN, L2_SQUARED, L2, COSINE, DOT. Note 'DOT_PRODUCT' is the Search
     (FTS) service's spelling, not GSI's -- it is rejected here with a message
@@ -364,7 +364,7 @@ def create_query_index(
     condition is an optional WHERE clause for a partial index -- this works for
     the vector shapes too, not just scalar; the planner only selects the index
     for a query whose own predicate implies condition, so a query tool's
-    filter (e.g. run_vector_search's where) must match or imply it, or the
+    filter (e.g. run_vector_query's where) must match or imply it, or the
     index is silently skipped in favor of a full scan rather than erroring.
     num_replicas optionally sets index replica count. By default the index is created
     deferred (not built) -- call build_index afterward, then list_indexes to

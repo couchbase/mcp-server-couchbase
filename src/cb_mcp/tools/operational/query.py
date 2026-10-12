@@ -193,7 +193,7 @@ def run_sql_plus_plus_query(
     relying on it in a query plan.
 
     For relevance-scored, fuzzy, or linguistic full-text search (scoring, highlighting,
-    faceting, fuzzy/phrase/wildcard matching), prefer run_fts_query over SQL++'s SEARCH()
+    faceting, fuzzy/phrase/wildcard matching), prefer run_search over SQL++'s SEARCH()
     function — it keeps FTS-specific result shape (score, fragments, facets) out of
     general query results and gives clearer tracing of what was searched.
     """
@@ -225,7 +225,6 @@ def run_sql_plus_plus_query(
     # It also means a statement the guard refuses is now refused without a
     # connection attempt, so the caller gets the accurate reason (blocked)
     # rather than whatever connection error happened to come first.
-    results: list[dict[str, Any]] = []
     # EXPLAIN statements are always safe to execute and should bypass write checks.
     is_explain = _is_explain_statement(query)
 
@@ -298,25 +297,6 @@ def run_sql_plus_plus_query(
             f"Executing SQL++ query in {bucket_name}.{scope_name} "
             f"(write_blocked={block_query_writes})"
         )
-
-        # EXPLAIN statements are always safe to execute and should bypass write checks.
-        if block_query_writes and not _is_explain_statement(query):
-            parsed_query = parse_sqlpp(query)
-            kind = _blocked_write_kind(parsed_query)
-
-            if kind is not None:
-                if lacks_write_scope and not read_only_mode:
-                    # lacks_write_scope implies token is not None here.
-                    held_scopes = sorted(set(token.scopes or []))
-                    msg = (
-                        f"SQL++ {kind} modification requires the "
-                        f"'{SCOPE_WRITE}' scope; token scopes are {held_scopes}."
-                    )
-                    logger.warning(msg)
-                    raise PermissionError(msg)
-                msg = f"{kind.capitalize()} modification query is not allowed in read-only mode"
-                logger.error(msg)
-                raise ValueError(msg)
 
         # Reached only for read-only queries (or when writes are allowed).
         # Forward named parameters only when provided so existing callers that

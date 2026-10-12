@@ -30,7 +30,7 @@ from cb_mcp.servers.operational.constants import (
     OPERATIONAL_LOGGER_NAMESPACE,
 )
 from cb_mcp.servers.operational_insights.constants import (
-    FASTMCP_SERVER_NAME as OI_FASTMCP_SERVER_NAME,
+    FASTMCP_SERVER_NAME as OPERATIONAL_INSIGHTS_FASTMCP_SERVER_NAME,
 )
 from cb_mcp.servers.operational_insights.constants import (
     OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE,
@@ -172,14 +172,14 @@ def test_fastmcp_name_is_wire_visible():
     assert FASTMCP_SERVER_NAME == "couchbase-operational"
 
 
-def test_oi_fastmcp_name_is_wire_visible():
-    """serverInfo.name for the OI server. Breaking for every connected client.
+def test_operational_insights_fastmcp_name_is_wire_visible():
+    """serverInfo.name for the Operational Insights server. Breaking for every connected client.
 
     Deliberately a separate, literal-asserting test rather than folding into
     the one above via parametrization — reading the value back from the
     constant it's asserting against would test nothing.
     """
-    assert OI_FASTMCP_SERVER_NAME == "couchbase-operational-insights"
+    assert OPERATIONAL_INSIGHTS_FASTMCP_SERVER_NAME == "couchbase-operational-insights"
 
 
 def test_configure_logging_attaches_to_the_root():

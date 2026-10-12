@@ -514,7 +514,7 @@ embedding_options = compose(
             ["couchbase", "openai", "cohere", "voyage", "bedrock"], case_sensitive=False
         ),
         default=None,
-        help="Embedding provider for run_vector_search / run_search_vector_search. "
+        help="Embedding provider for run_vector_query / run_vector_search. "
         "Unset disables both tools' embedding step until configured (they stay "
         "registered and fail with an actionable error at call time, not at startup).",
     ),

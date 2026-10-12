@@ -133,7 +133,7 @@ def test_operational_server_does_not_load_the_insights_sdk() -> None:
 
 
 def test_insights_server_does_not_load_the_couchbase_sdk() -> None:
-    """Importing the OI server's spec + provider loads only the OI SDK.
+    """Importing the Operational Insights server's spec + provider loads only the Operational Insights SDK.
 
     The regression this exists for: ``cb_mcp.core.contracts`` and
     ``cb_mcp.utils.context`` annotated ``-> Cluster`` with a runtime import,

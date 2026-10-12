@@ -54,8 +54,8 @@ from cb_mcp.servers.operational.constants import (
     DEFAULT_OPERATIONAL_PORT,
 )
 from cb_mcp.servers.operational_insights.constants import (
-    DEFAULT_OI_LOG_FILE,
-    DEFAULT_OI_PORT,
+    DEFAULT_OPERATIONAL_INSIGHTS_LOG_FILE,
+    DEFAULT_OPERATIONAL_INSIGHTS_PORT,
 )
 from cb_mcp.utils.cli_params import (
     CLUSTER_CREDENTIALS,
@@ -178,8 +178,8 @@ def operational(**params: Any) -> None:
 )
 @server_options(
     credentials=INSIGHTS_CREDENTIALS,
-    default_port=DEFAULT_OI_PORT,
-    default_log_file=DEFAULT_OI_LOG_FILE,
+    default_port=DEFAULT_OPERATIONAL_INSIGHTS_PORT,
+    default_log_file=DEFAULT_OPERATIONAL_INSIGHTS_LOG_FILE,
 )
 # Also on the subcommand so `couchbase-mcp-server operational-insights --version` works.
 @click.version_option(

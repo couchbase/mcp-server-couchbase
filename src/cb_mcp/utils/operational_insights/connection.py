@@ -45,7 +45,7 @@ def connect_to_operational_insights_cluster(
     if not connection_string:
         raise ValueError(
             "Missing Operational Insights credentials: connection_string. "
-            "Set it via --connection-string or CB_OI_CONNECTION_STRING. "
+            "Set it via --connection-string or CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING. "
             "connection_string is an HTTP(S) URL (e.g. http://localhost:8095), "
             "not a couchbase:// string."
         )
@@ -72,7 +72,7 @@ def connect_to_operational_insights_cluster(
             raise ValueError(
                 "Missing Operational Insights credentials: "
                 f"{', '.join(missing)}. Set them via --username/--password or "
-                "CB_OI_USERNAME/CB_OI_PASSWORD, or use --client-cert-path for "
+                "CB_OPERATIONAL_INSIGHTS_USERNAME/CB_OPERATIONAL_INSIGHTS_PASSWORD, or use --client-cert-path for "
                 "certificate authentication."
             )
         credential = Credential.from_username_and_password(username, password)

@@ -5,13 +5,13 @@
 # docker-compose.yml):
 # https://docs.couchbase.com/enterprise-analytics/current/intro/do-a-quick-install.html
 #
-# Every variable referenced below (OI_ADMIN_PORT, S3MOCK_BUCKET,
+# Every variable referenced below (OPERATIONAL_INSIGHTS_ADMIN_PORT, S3MOCK_BUCKET,
 # BLOB_STORAGE_*, CLUSTER_*) must already be set in the environment — see
-# oi-integration-tests.yml's job-level `env:` for the values this repo uses.
+# operational-insights-integration-tests.yml's job-level `env:` for the values this repo uses.
 set -e
 
 echo "Configuring blob storage (S3Mock)..."
-curl -sf -X POST "http://localhost:${OI_ADMIN_PORT}/settings/analytics" \
+curl -sf -X POST "http://localhost:${OPERATIONAL_INSIGHTS_ADMIN_PORT}/settings/analytics" \
   -d blobStorageScheme="$BLOB_STORAGE_SCHEME" \
   -d blobStorageBucket="$S3MOCK_BUCKET" \
   -d blobStorageRegion="$BLOB_STORAGE_REGION" \
@@ -22,7 +22,7 @@ curl -sf -X POST "http://localhost:${OI_ADMIN_PORT}/settings/analytics" \
 
 echo ""
 echo "Initializing cluster..."
-curl -sf -X POST "http://localhost:${OI_ADMIN_PORT}/clusterInit" \
+curl -sf -X POST "http://localhost:${OPERATIONAL_INSIGHTS_ADMIN_PORT}/clusterInit" \
   -d username="$CLUSTER_USERNAME" \
   -d password="$CLUSTER_PASSWORD" \
   -d port=SAME \
@@ -44,7 +44,7 @@ import time
 from couchbase_operational_insights.cluster import Cluster
 from couchbase_operational_insights.credential import Credential
 
-endpoint = "http://127.0.0.1:${OI_ANALYTICS_PORT}"
+endpoint = "http://127.0.0.1:${OPERATIONAL_INSIGHTS_ANALYTICS_PORT}"
 credential = Credential.from_username_and_password("${CLUSTER_USERNAME}", "${CLUSTER_PASSWORD}")
 
 deadline = time.monotonic() + 60
