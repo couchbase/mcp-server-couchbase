@@ -39,6 +39,9 @@ REST_ONLY_TOOLS = frozenset(
         "get_cluster_health_snapshot",
         "get_cluster_system_events",
         "get_index_stats",
+        "get_cluster_query_vitals",
+        "get_active_queries",
+        "delete_active_query",
     }
 )
 
