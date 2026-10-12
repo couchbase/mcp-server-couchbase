@@ -417,8 +417,11 @@ async def test_create_query_index_dimension_mismatch_silently_excluded() -> None
                         },
                     },
                 )
-                rows = extract_payload(query_response)
-                hit_ids = {row["id"] for row in rows} if rows else set()
+                query_payload = extract_payload(query_response)
+                assert query_payload["success"] is True, (
+                    f"run_sql_plus_plus_query failed: {query_payload}"
+                )
+                hit_ids = {row["id"] for row in query_payload["rows"]}
                 assert bad_doc_id not in hit_ids, (
                     f"dimension-mismatched document {bad_doc_id!r} was indexed "
                     f"(should have been silently excluded): {hit_ids!r}"
