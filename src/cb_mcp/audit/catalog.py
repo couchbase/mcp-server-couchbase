@@ -15,18 +15,6 @@ The ID space is treated as frozen. Adding a tool requires only a new entry in
 :mod:`cb_mcp.audit.classification` — no new event ID, and no change to a SIEM
 rule.
 
-Events defined in code are the source of truth for the server. ``descriptor.json``
-ships the same catalogue for operators and SIEM authors;
-``tests/unit/test_audit_catalog.py`` asserts the two never drift.
-
-Two catalogue entries from the PRD draft are deliberately absent:
-
-* *tool invocation blocked (disabled)* — withheld and disabled tools are never
-  registered with FastMCP, so the model is never told they exist and there is
-  no refusal to record. Removed by product decision on 2026-08-25.
-* *session terminated* — FastMCP 3.x exposes no session-end hook and a stdio
-  client simply closes the pipe, so the event could never be emitted reliably.
-  On hold by product decision.
 """
 
 from __future__ import annotations

@@ -231,7 +231,6 @@ def test_tool_args_warns_only_when_auditing_is_active(tmp_path, caplog):
         ("30d", 30 * DAY),
         ("1w", WEEK),
         ("8w", 8 * WEEK),
-        # The PRD writes "1W" in one of its cases; case must not matter.
         ("1W", WEEK),
         ("  1d  ", DAY),
         ("0", 0),
