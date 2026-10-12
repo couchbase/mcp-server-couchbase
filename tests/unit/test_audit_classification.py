@@ -107,12 +107,12 @@ def test_no_stale_oi_entries():
     ("tool_name", "expected_id"),
     [
         ("get_server_configuration_status", 65591),  # config read
-        ("oi_get_databases_in_cluster", 65585),  # schema read
-        ("oi_get_schema_for_collection", 65585),
-        ("oi_run_query_sync", 65587),  # query read
-        ("oi_cancel_async_query", 65587),
-        ("oi_list_indexes", 65588),  # index read
-        ("oi_create_index", 65620),  # index write
+        ("operational_insights_get_databases_in_cluster", 65585),  # schema read
+        ("operational_insights_get_schema_for_collection", 65585),
+        ("operational_insights_run_query_sync", 65587),  # query read
+        ("operational_insights_cancel_async_query", 65587),
+        ("operational_insights_list_indexes", 65588),  # index read
+        ("operational_insights_create_index", 65620),  # index write
     ],
 )
 def test_oi_tool_maps_to_the_expected_event_id(tool_name, expected_id):
@@ -150,7 +150,7 @@ def test_read_only_tools_are_classified_read(tool_name):
         ("upsert_document_by_id", 61522),
         ("mutate_subdocument", 61522),
         ("delete_document_by_id", 61522),
-        ("get_cluster_diagnostics_report", 61488),
+        ("get_client_connectivity_report", 61488),
         ("test_cluster_connection", 61488),
         ("get_cluster_tasks", 61488),
         ("get_cluster_health_snapshot", 61488),
@@ -182,12 +182,12 @@ def test_read_only_tools_are_classified_read(tool_name):
         ("delete_active_query", 61525),
         # Search keeps its own category rather than folding into index: a
         # reviewer filtering on `index read` must not get FTS traffic, and
-        # `run_fts_query` is a query, not an index operation. Moved into the
+        # `run_search` is a query, not an index operation. Moved into the
         # revived slot 6 on 2026-10-12 (was 61496/61528).
-        ("list_fts_indexes", 61494),
-        ("run_fts_query", 61494),
-        ("upsert_fts_index", 61526),
-        ("drop_fts_index", 61526),
+        ("list_search_indexes", 61494),
+        ("run_search", 61494),
+        ("upsert_search_index", 61526),
+        ("drop_search_index", 61526),
     ],
 )
 def test_tool_maps_to_the_expected_event_id(tool_name, expected_id):

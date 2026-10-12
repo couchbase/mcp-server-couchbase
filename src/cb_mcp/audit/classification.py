@@ -64,7 +64,7 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # -- cluster (Cluster Setup & Health) ------------------------------
         "test_cluster_connection": ("cluster", "read"),
         "get_cluster_health_and_services": ("cluster", "read"),
-        "get_cluster_diagnostics_report": ("cluster", "read"),
+        "get_client_connectivity_report": ("cluster", "read"),
         "get_cluster_metrics": ("cluster", "read"),
         # Both read the cluster's own REST endpoints (/pools/default/tasks and
         # the node topology) and need only ro_admin, so they are cluster reads
@@ -106,7 +106,7 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "explain_sql_plus_plus_query": ("query", "read"),
         # Embeds the query text, then runs a SELECT with APPROX_VECTOR_DISTANCE
         # against a GSI vector index: a Query-service read like its neighbours.
-        "run_vector_search": ("query", "read"),
+        "run_vector_query": ("query", "read"),
         # -- index -----------------------------------------------------------
         "list_indexes": ("index", "read"),
         "get_index_advisor_recommendations": ("index", "read"),
@@ -142,20 +142,20 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # the write class makes it by construction.
         "delete_active_query": ("performance", "write"),
         # -- search (FTS) ------------------------------------------------------
-        # Its own category rather than folded into index: run_fts_query is a
+        # Its own category rather than folded into index: run_search is a
         # query, so a reviewer filtering on `index read` should not get search
         # traffic mixed in. FTS index management has since landed and takes the
         # search *write* id (61528) that the catalogue already reserved — the
         # extension point working as designed: a new tool is a map entry, not a
         # new id and not a SIEM rule change.
-        "list_fts_indexes": ("search", "read"),
-        "get_fts_index_definition": ("search", "read"),
-        "run_fts_query": ("search", "read"),
+        "list_search_indexes": ("search", "read"),
+        "get_search_index_definition": ("search", "read"),
+        "run_search": ("search", "read"),
         # Goes through the Search service, so it books against search rather
-        # than query even though run_vector_search is the GSI counterpart.
-        "run_search_vector_search": ("search", "read"),
-        "upsert_fts_index": ("search", "write"),
-        "drop_fts_index": ("search", "write"),
+        # than query even though run_vector_query is the GSI counterpart.
+        "run_vector_search": ("search", "read"),
+        "upsert_search_index": ("search", "write"),
+        "drop_search_index": ("search", "write"),
     },
     # -- Operational Insights (analytics) ------------------------------------
     #
@@ -184,25 +184,25 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # Analytics names its containers database/scope/collection; they are
         # the same discovery surface as the operational server's bucket/scope/
         # collection reads, so they take the same slot.
-        "oi_get_databases_in_cluster": ("schema", "read"),
-        "oi_get_scopes_in_database": ("schema", "read"),
-        "oi_get_collections_in_scope": ("schema", "read"),
-        "oi_get_schema_for_collection": ("schema", "read"),
+        "operational_insights_get_databases_in_cluster": ("schema", "read"),
+        "operational_insights_get_scopes_in_database": ("schema", "read"),
+        "operational_insights_get_collections_in_scope": ("schema", "read"),
+        "operational_insights_get_schema_for_collection": ("schema", "read"),
         # -- query (SQL++ over Analytics) -----------------------------------
-        "oi_run_query_sync": ("query", "read"),
-        "oi_run_query_async": ("query", "read"),
-        "oi_explain_query": ("query", "read"),
+        "operational_insights_run_query_sync": ("query", "read"),
+        "operational_insights_run_query_async": ("query", "read"),
+        "operational_insights_explain_query": ("query", "read"),
         # The async request lifecycle. Retrieving, discarding and cancelling
         # all act on a handle for a query this caller submitted, so they stay
         # with the query that produced it rather than forming a category of
         # their own — "Async Request API" is a shape of the API, not a
         # different resource.
-        "oi_get_async_query_results": ("query", "read"),
-        "oi_discard_async_query_results": ("query", "read"),
-        "oi_cancel_async_query": ("query", "read"),
+        "operational_insights_get_async_query_results": ("query", "read"),
+        "operational_insights_discard_async_query_results": ("query", "read"),
+        "operational_insights_cancel_async_query": ("query", "read"),
         # -- index -----------------------------------------------------------
-        "oi_list_indexes": ("index", "read"),
-        "oi_create_index": ("index", "write"),
+        "operational_insights_list_indexes": ("index", "read"),
+        "operational_insights_create_index": ("index", "write"),
     },
 }
 
