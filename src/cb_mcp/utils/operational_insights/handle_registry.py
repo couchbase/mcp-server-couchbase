@@ -64,6 +64,13 @@ class HandleEntry:
 
     handle: Any  # BlockingQueryHandle
     statement: str
+    #: Where a ``COPY ... TO`` export writes its rows, or ``None`` for an
+    #: ordinary query. Held here because it cannot be re-derived: when
+    #: ``oi_get_async_query_results`` later reports the query finished, all it
+    #: has is the token, and a completed export comes back as zero rows —
+    #: indistinguishable from a query that matched nothing unless the
+    #: destination travels with the handle.
+    destination: dict[str, Any] | None = None
 
 
 class QueryResultsRegistry:
@@ -77,11 +84,22 @@ class QueryResultsRegistry:
         self._entries: dict[str, HandleEntry] = {}
         self._lock = threading.Lock()
 
-    def register(self, handle: Any, statement: str) -> str:
-        """Store a live handle and return a fresh opaque token for it."""
+    def register(
+        self,
+        handle: Any,
+        statement: str,
+        destination: dict[str, Any] | None = None,
+    ) -> str:
+        """Store a live handle and return a fresh opaque token for it.
+
+        ``destination`` is optional so existing callers that register an
+        ordinary query are unchanged.
+        """
         token = uuid.uuid4().hex
         with self._lock:
-            self._entries[token] = HandleEntry(handle=handle, statement=statement)
+            self._entries[token] = HandleEntry(
+                handle=handle, statement=statement, destination=destination
+            )
         return token
 
     def get(self, token: str) -> HandleEntry:

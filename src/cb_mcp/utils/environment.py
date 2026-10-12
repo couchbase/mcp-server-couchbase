@@ -50,6 +50,9 @@ _SAFE_SETTINGS_KEYS = (
     "port",
     "disabled_tools",
     "confirmation_required_tools",
+    # The effective query result budget in bytes, already clamped. A plain
+    # operational limit, not a credential.
+    "max_query_result_size",
     "connection_string",
     # An identifier, not a credential. Reported verbatim to match
     # get_server_configuration_status, which already returns it to any

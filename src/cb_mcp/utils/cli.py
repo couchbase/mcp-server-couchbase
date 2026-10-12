@@ -16,13 +16,14 @@ from logging import getLogger
 
 import click
 
-from .constants import LOGGER_NAMESPACE
+from .constants import DEFAULT_MAX_QUERY_RESULT_SIZE, LOGGER_NAMESPACE
 from .logging import (
     ParsedLogLevel,
     ParsedLogSinks,
     parse_log_level,
     parse_log_sinks,
 )
+from .query_limits import clamp_max_query_result_size
 
 logger = getLogger(f"{LOGGER_NAMESPACE}.utils.cli")
 
@@ -49,6 +50,28 @@ def validate_log_sinks(
     when nothing valid survives.
     """
     return parse_log_sinks(value)
+
+
+def validate_max_query_result_size(
+    ctx: click.Context, param: click.Parameter, value: int | None
+) -> int:
+    """Click callback for ``--max-query-result-size``.
+
+    Delegates to :func:`clamp_max_query_result_size`, which caps the value
+    into the supported range and warns when it moves it. Clamping rather than
+    raising ``UsageError`` is deliberate — see ``MAX_MAX_QUERY_RESULT_SIZE``
+    in ``constants``: these servers are usually configured through container
+    environment variables, where rejecting a bad value takes the deployment
+    down while clamping only caps a result set.
+
+    A non-numeric value never reaches here (Click's ``type=int`` rejects it
+    first, which is the right behaviour for an explicitly typed flag); the
+    tolerant parsing in ``max_query_result_size_from`` covers the separate
+    case of an embedding host that builds settings without the CLI.
+    """
+    if value is None:
+        return DEFAULT_MAX_QUERY_RESULT_SIZE
+    return clamp_max_query_result_size(value)
 
 
 def validate_log_path(ctx: click.Context, param: click.Parameter, value: str) -> str:

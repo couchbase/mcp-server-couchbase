@@ -26,6 +26,32 @@ DEFAULT_READ_ONLY_MODE = True
 DEFAULT_TRANSPORT = "stdio"
 DEFAULT_HOST = "127.0.0.1"
 
+# Query result size budget
+#
+# Every query tool streams rows from the cluster and stops once the serialized
+# result reaches this many bytes, rather than buffering an unbounded result set
+# (see cb_mcp.utils.query_limits). The budget is measured in *serialized JSON
+# bytes* because what it protects is the payload sent to the MCP client and the
+# model's context window — neither of which cares about Python's in-memory
+# representation.
+#
+# The default is deliberately small. A query tool's output is consumed by an
+# LLM, and 15 kB is already a sizeable fraction of a context window; operators
+# who need more can raise it, but the safe default must not be "whatever the
+# cluster happened to return".
+DEFAULT_MAX_QUERY_RESULT_SIZE = 15 * 1024  # 15 kB
+
+# Hard ceiling. A value above this is clamped (with a warning) rather than
+# rejected: these servers are usually configured through container environment
+# variables, where a startup failure takes the whole deployment down and a
+# clamp merely caps a result set. 1 MB is well past the point where an LLM can
+# use the rows anyway, so the clamp costs nothing in practice.
+MAX_MAX_QUERY_RESULT_SIZE = 1024 * 1024  # 1 MB
+
+# Floor. Below roughly one row's worth of JSON the budget stops being a
+# truncation limit and becomes "return nothing", which no operator intends.
+MIN_MAX_QUERY_RESULT_SIZE = 1024  # 1 kB
+
 # Allowed Transport Types
 ALLOWED_TRANSPORTS = ["stdio", "http", "sse"]
 NETWORK_TRANSPORTS = ["http", "sse"]
