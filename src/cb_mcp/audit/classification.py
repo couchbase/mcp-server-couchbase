@@ -100,6 +100,13 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "get_index_advisor_recommendations": ("index", "read"),
         "get_index_stats": ("index", "read"),
         "create_index": ("index", "write"),
+        # The replacement for the deprecated create_index (#303), creating
+        # scalar *and* vector GSI indexes through SQL++. It takes the same id:
+        # both create a GSI index, and an id that changed when a tool was
+        # superseded would silently break every SIEM rule watching for index
+        # creation. The retired `vector` slot (6) is deliberately not revived
+        # for it — see catalog.next_free_slot.
+        "create_query_index": ("index", "write"),
         "build_index": ("index", "write"),
         "drop_index": ("index", "write"),
         # -- performance -----------------------------------------------------
@@ -110,6 +117,22 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "get_queries_using_primary_index": ("performance", "read"),
         "get_queries_not_using_covering_index": ("performance", "read"),
         "get_queries_not_selective": ("performance", "read"),
+        # The N1QL Admin REST API (/admin/vitals, /admin/active_requests) added
+        # in #308. Booked as performance rather than query: `query read` means
+        # "a caller ran a statement", and a reviewer reconstructing what was
+        # executed must not find listings of other people's requests mixed into
+        # it. Vitals is the query service's own load picture — request rate,
+        # active and queued counts — which is what this category already means;
+        # get_cluster_metrics stays a cluster read because it covers node
+        # hardware rather than the N1QL layer.
+        "get_cluster_query_vitals": ("performance", "read"),
+        "get_active_queries": ("performance", "read"),
+        # The first performance *write*, taking the id (61525) the catalogue
+        # reserved when the category was allocated — a map entry, no new id and
+        # no SIEM-rule change. It is also the only tool in the server that
+        # terminates another caller's work, so it must be non-filterable, which
+        # the write class makes it by construction.
+        "delete_active_query": ("performance", "write"),
         # -- search (FTS) ------------------------------------------------------
         # Its own category rather than folded into index: run_fts_query is a
         # query, so a reviewer filtering on `index read` should not get search

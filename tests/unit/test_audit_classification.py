@@ -102,9 +102,16 @@ def test_read_only_tools_are_classified_read(tool_name):
         ("run_sql_plus_plus_query", 61491),
         ("list_indexes", 61492),
         ("create_index", 61524),
+        # Superseding create_index must not move the id a SIEM rule watches.
+        ("create_query_index", 61524),
         ("drop_index", 61524),
         ("get_longest_running_queries", 61493),
         ("get_queries_not_selective", 61493),
+        ("get_cluster_query_vitals", 61493),
+        ("get_active_queries", 61493),
+        # The first tool to take the performance write id, and the only one in
+        # the server that cancels another caller's in-flight work.
+        ("delete_active_query", 61525),
         # Search keeps its own category rather than folding into index: a
         # reviewer filtering on `index read` must not get FTS traffic, and
         # `run_fts_query` is a query, not an index operation.
