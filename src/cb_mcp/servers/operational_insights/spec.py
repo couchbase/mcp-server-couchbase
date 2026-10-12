@@ -10,8 +10,8 @@ from ...tools.operational_insights import TOOL_ANNOTATIONS, TOOL_SCOPE_HINTS, TO
 from ...utils.constants import SCOPE_READ, SCOPE_WRITE
 from ...utils.operational_insights.sdk_logging import bridge_sdk_logging
 from .constants import (
-    DEFAULT_OI_LOG_FILE,
-    DEFAULT_OI_PORT,
+    DEFAULT_OPERATIONAL_INSIGHTS_LOG_FILE,
+    DEFAULT_OPERATIONAL_INSIGHTS_PORT,
     FASTMCP_SERVER_NAME,
     OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE,
     SERVER_ID,
@@ -26,9 +26,9 @@ SPEC = ServerSpec(
     tools=TOOL_SET,
     # Must differ from every other server's values (see ServerSpec.default_port
     # / default_log_file docstrings).
-    default_port=DEFAULT_OI_PORT,
-    default_log_file=DEFAULT_OI_LOG_FILE,
-    # Reuses the canonical scope labels rather than declaring OI-specific
+    default_port=DEFAULT_OPERATIONAL_INSIGHTS_PORT,
+    default_log_file=DEFAULT_OPERATIONAL_INSIGHTS_LOG_FILE,
+    # Reuses the canonical scope labels rather than declaring Operational Insights-specific
     # ones: this keeps auth.py, scope_enforcement.py and oauth_options
     # entirely unchanged. The tradeoff is that one token's scopes grant
     # across both servers — acceptable for now, revisit if per-service

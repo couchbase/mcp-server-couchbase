@@ -235,7 +235,7 @@ def get_cluster_health_and_services(
         }
 
 
-def get_cluster_diagnostics_report(ctx: Context) -> dict[str, Any]:
+def get_client_connectivity_report(ctx: Context) -> dict[str, Any]:
     """Check whether the client's connections were already broken, and for how long.
 
     Unlike get_cluster_health_and_services (which actively pings each service right now),
@@ -285,7 +285,7 @@ def get_cluster_metrics(
     """Get one or more cluster statistics over a historic time window in a single call.
 
     Use this to quantify a suspected problem (e.g. after get_cluster_health_and_services or
-    get_cluster_diagnostics_report) — is a metric spiking, climbing, or stable over time?
+    get_client_connectivity_report) — is a metric spiking, climbing, or stable over time?
 
     Self-managed Couchbase Server 7.6+ only — rejects Capella connections without a REST call.
     Calls POST /pools/default/stats/range.

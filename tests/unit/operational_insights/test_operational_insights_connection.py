@@ -16,7 +16,7 @@ from cb_mcp.utils.operational_insights.connection import (
 )
 
 
-class TestOiConnectionModule:
+class TestOperationalInsightsConnectionModule:
     def test_connect_with_password(self, caplog: pytest.LogCaptureFixture) -> None:
         mock_cluster = MagicMock()
 

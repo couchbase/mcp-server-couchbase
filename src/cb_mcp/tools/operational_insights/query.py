@@ -1,17 +1,17 @@
 """Query execution tools for Operational Insights.
 
-``oi_run_query_sync`` can carry DDL/DML, so — unlike the metadata tools in
+``operational_insights_run_query_sync`` can carry DDL/DML, so — unlike the metadata tools in
 this package — it follows the operational server's write-tool convention:
 catch Exception, log, and return a ``{"success": False, "error": ...}``
 envelope instead of raising.
 
-``oi_explain_query`` follows the same envelope convention.
+``operational_insights_explain_query`` follows the same envelope convention.
 
-The Server Async Request API tools (``oi_run_query_async``,
-``oi_get_async_query_results``, ``oi_discard_async_query_results``,
-``oi_cancel_async_query``) expose the SDK's handle-based flow for long-running
+The Server Async Request API tools (``operational_insights_run_query_async``,
+``operational_insights_get_async_query_results``, ``operational_insights_discard_async_query_results``,
+``operational_insights_cancel_async_query``) expose the SDK's handle-based flow for long-running
 queries: start -> check/fetch -> discard, or cancel.
-``oi_get_async_query_results`` does double duty as the readiness check, so
+``operational_insights_get_async_query_results`` does double duty as the readiness check, so
 there is no separate status tool.
 
 Design notes (kept out of the tool docstrings, which are sent to the model as
@@ -23,7 +23,7 @@ tool descriptions and are deliberately short):
   ``utils/operational_insights/handle_registry.py`` for the design and its
   single-process caveat.
 * Fetching results does NOT free them: the server serves the same buffers on
-  repeated fetches. So a token stays valid after ``oi_get_async_query_results``;
+  repeated fetches. So a token stays valid after ``operational_insights_get_async_query_results``;
   only discard and cancel evict it. Callers that never discard leave buffers
   allocated until the server times them out.
 * Tools are plain ``def`` (not ``async def``): the SDK's handle calls are
@@ -43,7 +43,10 @@ from ...servers.operational_insights.constants import (
     OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE,
 )
 from ...utils.constants import SCOPE_WRITE
-from ...utils.operational_insights.context import get_oi_cluster, get_oi_handle_registry
+from ...utils.operational_insights.context import (
+    get_operational_insights_cluster,
+    get_operational_insights_handle_registry,
+)
 from ...utils.query_limits import (
     collect_rows_within_budget,
     max_query_result_size_for,
@@ -225,7 +228,7 @@ def _resolve_copy_to(
     }
 
 
-def oi_run_query_sync(
+def operational_insights_run_query_sync(
     ctx: Context,
     statement: str,
     copy_to_link: str | None = None,
@@ -248,7 +251,7 @@ def oi_run_query_sync(
 
     An export here waits for the whole upload to finish before returning, so
     the call takes as long as the copy does. For a large export prefer
-    oi_run_query_async, which returns a handle once the query is submitted and
+    operational_insights_run_query_async, which returns a handle once the query is submitted and
     lets you poll for completion instead of holding the request open.
 
     When the server is in read-only mode, or the caller's token lacks the
@@ -286,7 +289,7 @@ def oi_run_query_sync(
     When exporting, returns {"success": True, "exported": True,
     "destination": {...}} and no rows — the data is in object storage.
     """
-    cluster = get_oi_cluster(ctx)
+    cluster = get_operational_insights_cluster(ctx)
 
     app_context = ctx.request_context.lifespan_context
     read_only_mode = app_context.read_only_mode
@@ -374,7 +377,7 @@ def oi_run_query_sync(
         return tool_error(e, statement=statement)
 
 
-def oi_explain_query(ctx: Context, statement: str) -> dict[str, Any]:
+def operational_insights_explain_query(ctx: Context, statement: str) -> dict[str, Any]:
     """Generate the query plan for a SQL++ statement using EXPLAIN, without executing it.
 
     Whether the plan is cost-based or rule-based depends on whether the
@@ -390,7 +393,7 @@ def oi_explain_query(ctx: Context, statement: str) -> dict[str, Any]:
     Returns {"success": True, "plan": [...]} on success, or
     {"success": False, "error": "..."} on failure.
     """
-    cluster = get_oi_cluster(ctx)
+    cluster = get_operational_insights_cluster(ctx)
     try:
         logger.debug("Running EXPLAIN for SQL++ statement")
         result = cluster.execute_query(f"EXPLAIN {statement}")
@@ -451,7 +454,7 @@ def _extract_metadata(result: Any, query_handle: str) -> dict[str, Any]:
     return metadata
 
 
-def oi_run_query_async(
+def operational_insights_run_query_async(
     ctx: Context,
     statement: str,
     copy_to_link: str | None = None,
@@ -464,23 +467,23 @@ def oi_run_query_async(
     Use for queries expected to take a while. Returns right away with a
     query_handle; it does not return rows. Keep that query_handle: it is
     needed for every follow-up call, and the query holds resources on the
-    server until you finish with oi_discard_async_query_results or
-    oi_cancel_async_query.
+    server until you finish with operational_insights_discard_async_query_results or
+    operational_insights_cancel_async_query.
 
     Pass copy_to_link, copy_to_bucket and copy_to_path to export the results
     to object storage instead of fetching them back. This is the right tool
-    for a large export: oi_run_query_sync would hold the request open for the
+    for a large export: operational_insights_run_query_sync would hold the request open for the
     entire upload, while this returns as soon as the query is submitted and
-    lets you poll for completion. oi_get_async_query_results then reports that
+    lets you poll for completion. operational_insights_get_async_query_results then reports that
     the export finished and names the destination, rather than carrying rows.
 
-    Usual sequence: oi_get_async_query_results until it reports ready, then
-    oi_discard_async_query_results. For quick queries use oi_run_query_sync
+    Usual sequence: operational_insights_get_async_query_results until it reports ready, then
+    operational_insights_discard_async_query_results. For quick queries use operational_insights_run_query_sync
     instead, which returns rows directly.
 
     When the server is in read-only mode, or the caller's token lacks the
     write scope, the query is started with ``QueryOptions(readonly=True)`` —
-    same enforcement as oi_run_query_sync, including the client-side
+    same enforcement as operational_insights_run_query_sync, including the client-side
     ``COPY ... TO`` block, since the same read-only guarantee applies to
     async queries.
 
@@ -500,8 +503,8 @@ def oi_run_query_async(
         response also carries "exported": True and "destination": {...}, and
         the eventual results will be empty — the rows go to object storage.
     """
-    cluster = get_oi_cluster(ctx)
-    registry = get_oi_handle_registry(ctx)
+    cluster = get_operational_insights_cluster(ctx)
+    registry = get_operational_insights_handle_registry(ctx)
 
     app_context = ctx.request_context.lifespan_context
     read_only_mode = app_context.read_only_mode
@@ -545,7 +548,7 @@ def oi_run_query_async(
         )
         # Register the statement actually sent, so the handle registry and any
         # later diagnostics show the COPY that is really running. The
-        # destination rides along so oi_get_async_query_results can say where the
+        # destination rides along so operational_insights_get_async_query_results can say where the
         # rows went — by then it has only the token to work from.
         query_handle = registry.register(handle, statement_to_run, destination)
         logger.info(
@@ -558,7 +561,7 @@ def oi_run_query_async(
                 exported=True,
                 destination=destination,
                 message=(
-                    f"Export submitted. Call oi_get_async_query_results with this "
+                    f"Export submitted. Call operational_insights_get_async_query_results with this "
                     f"query_handle to check whether it has finished; it will "
                     f"return no rows, as the results are written to "
                     f"{destination['bucket']}/{destination['path']}."
@@ -567,7 +570,7 @@ def oi_run_query_async(
         return tool_success(
             query_handle=query_handle,
             message=(
-                "Query submitted. Call oi_get_async_query_results with this "
+                "Query submitted. Call operational_insights_get_async_query_results with this "
                 "query_handle to check whether it has finished and retrieve "
                 "the rows."
             ),
@@ -577,7 +580,9 @@ def oi_run_query_async(
         return tool_error(e, statement=statement)
 
 
-def oi_get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
+def operational_insights_get_async_query_results(
+    ctx: Context, query_handle: str
+) -> dict[str, Any]:
     """Check the status of an async query and get its results once it has finished.
 
     This both reports progress and returns results. If the query is still
@@ -590,11 +595,11 @@ def oi_get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any
     over waiting indefinitely for it.
 
     Safe to call more than once after it is ready: it does not consume the
-    results. When you no longer need them, call oi_discard_async_query_results
+    results. When you no longer need them, call operational_insights_discard_async_query_results
     to free them on the server.
 
     Args:
-        query_handle: The query_handle returned by oi_run_query_async.
+        query_handle: The query_handle returned by operational_insights_run_query_async.
 
     Returns:
         {"success": True, "ready": true, "rows": [...], "row_count": N,
@@ -606,7 +611,7 @@ def oi_get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any
         incomplete and metadata may be empty, since the server reports it
         only once every row has been read.
     """
-    registry = get_oi_handle_registry(ctx)
+    registry = get_operational_insights_handle_registry(ctx)
     try:
         entry = registry.get(query_handle)
         status = entry.handle.fetch_status()
@@ -641,7 +646,7 @@ def oi_get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any
             # A finished export returns zero rows, which on its own reads as
             # "the query matched nothing". Name the destination so the result
             # is self-describing rather than relying on the caller to recall
-            # what oi_run_query_async was asked to do.
+            # what operational_insights_run_query_async was asked to do.
             logger.info(
                 f"Export complete for async query (token={query_handle}) -> "
                 f"{destination['bucket']}/{destination['path']}"
@@ -678,27 +683,29 @@ def oi_get_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any
         return tool_error(e, query_handle=query_handle)
 
 
-def oi_discard_async_query_results(ctx: Context, query_handle: str) -> dict[str, Any]:
+def operational_insights_discard_async_query_results(
+    ctx: Context, query_handle: str
+) -> dict[str, Any]:
     """Free the results of a finished async query on the server.
 
     Call this when done with a query's results — whether or not you fetched
     them, since fetching does not free them. This is the normal cleanup step
-    after oi_get_async_query_results, and the rows cannot be retrieved
+    after operational_insights_get_async_query_results, and the rows cannot be retrieved
     afterwards.
 
     If the query is still running there is nothing to discard: this returns
     discarded: false and the query_handle stays usable, so use
-    oi_cancel_async_query to stop it instead.
+    operational_insights_cancel_async_query to stop it instead.
 
     Args:
-        query_handle: The query_handle returned by oi_run_query_async.
+        query_handle: The query_handle returned by operational_insights_run_query_async.
 
     Returns:
         {"success": True, "query_handle": "...", "discarded": true}; or
         {"success": True, "discarded": false, "ready": false} if the query has
         not finished; or {"success": False, "error": "..."} on failure.
     """
-    registry = get_oi_handle_registry(ctx)
+    registry = get_operational_insights_handle_registry(ctx)
     try:
         entry = registry.get(query_handle)
         status = entry.handle.fetch_status()
@@ -709,7 +716,7 @@ def oi_discard_async_query_results(ctx: Context, query_handle: str) -> dict[str,
                 ready=False,
                 message=(
                     "Results are not ready yet; nothing to discard. Cancel "
-                    "the query with oi_cancel_async_query to stop it."
+                    "the query with operational_insights_cancel_async_query to stop it."
                 ),
             )
 
@@ -722,7 +729,9 @@ def oi_discard_async_query_results(ctx: Context, query_handle: str) -> dict[str,
         return tool_error(e, query_handle=query_handle)
 
 
-def oi_cancel_async_query(ctx: Context, query_handle: str) -> dict[str, Any]:
+def operational_insights_cancel_async_query(
+    ctx: Context, query_handle: str
+) -> dict[str, Any]:
     """Stop an async query that is still running.
 
     Use this to abandon a query you no longer want to wait for. On success the
@@ -730,16 +739,16 @@ def oi_cancel_async_query(ctx: Context, query_handle: str) -> dict[str, Any]:
 
     A query that has already finished cannot be cancelled: this returns
     cancelled: false and the query_handle stays usable, so call
-    oi_discard_async_query_results to free its results.
+    operational_insights_discard_async_query_results to free its results.
 
     Args:
-        query_handle: The query_handle returned by oi_run_query_async.
+        query_handle: The query_handle returned by operational_insights_run_query_async.
 
     Returns:
         {"success": True, "query_handle": "...", "cancelled": true}, or
         {"success": False, "error": "..."} on failure.
     """
-    registry = get_oi_handle_registry(ctx)
+    registry = get_operational_insights_handle_registry(ctx)
     try:
         entry = registry.get(query_handle)
 
@@ -760,7 +769,7 @@ def oi_cancel_async_query(ctx: Context, query_handle: str) -> dict[str, Any]:
                 cancelled=False,
                 message=(
                     "Query has already completed, so it cannot be cancelled. "
-                    "Call oi_discard_async_query_results to free its results."
+                    "Call operational_insights_discard_async_query_results to free its results."
                 ),
             )
 

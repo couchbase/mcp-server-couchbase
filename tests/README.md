@@ -12,7 +12,7 @@ tests/
 ├── unit/                # pure Python, no Couchbase, no LLM
 │   ├── <cross-server>        # shared machinery + invariants over every spec
 │   ├── operational/          # unit tests exclusive to the operational server
-│   └── operational_insights/ # unit tests exclusive to the OI server
+│   └── operational_insights/ # unit tests exclusive to the Operational Insights server
 ├── integration/         # needs a live cluster
 │   ├── conftest.py           # server-agnostic session plumbing + response helpers
 │   ├── operational/          # needs a live Couchbase cluster
@@ -56,23 +56,23 @@ applied automatically by directory — test files carry no `@pytest.mark.accurac
 - **Integration (Operational Insights)** — spawn `mcp_server operational-insights`
   (stdio, the default), or connect to an already-running instance over HTTP
   when `CB_MCP_TRANSPORT=http`/`MCP_SERVER_URL` are set
-  (`create_oi_mcp_session`, defined in that directory's own `conftest.py`,
+  (`create_operational_insights_mcp_session`, defined in that directory's own `conftest.py`,
   mirrors the operational tier's `create_mcp_session` transport branching)
   — and talk to a running Operational Insights cluster. Requires
-  `CB_OI_CONNECTION_STRING`, `CB_OI_USERNAME`, `CB_OI_PASSWORD` (see
+  `CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING`, `CB_OPERATIONAL_INSIGHTS_USERNAME`, `CB_OPERATIONAL_INSIGHTS_PASSWORD` (see
   `tests/_test_env.py`). The whole directory is
   skipped at collection time, not per-test, when those are unset — see its
   `conftest.py`. Local setup uses the same containers and config CI does
-  (`scripts/oi_ci_cluster/` — steps 2-5 of
+  (`scripts/operational_insights_ci_cluster/` — steps 2-5 of
   https://docs.couchbase.com/enterprise-analytics/current/intro/do-a-quick-install.html):
   ```bash
-  export OI_IMAGE=couchbase/enterprise-analytics:2.2.1
+  export OPERATIONAL_INSIGHTS_IMAGE=couchbase/enterprise-analytics:2.2.1
   export S3MOCK_IMAGE=adobe/s3mock:5.2.3
   export S3MOCK_BUCKET=cloud-storage-container
   export S3MOCK_STORE_ROOT=fs
   export S3MOCK_RETAIN_FILES_ON_EXIT=true
-  export OI_ADMIN_PORT=8091      # already in use? pick a free port (e.g. 9091) —
-  export OI_ANALYTICS_PORT=8095  # a local Couchbase Server install claims these
+  export OPERATIONAL_INSIGHTS_ADMIN_PORT=8091      # already in use? pick a free port (e.g. 9091) —
+  export OPERATIONAL_INSIGHTS_ANALYTICS_PORT=8095  # a local Couchbase Server install claims these
   export BLOB_STORAGE_SCHEME=s3
   export BLOB_STORAGE_REGION=us-east-1
   export BLOB_STORAGE_ENDPOINT=http://s3mock:9090
@@ -82,26 +82,26 @@ applied automatically by directory — test files carry no `@pytest.mark.accurac
   export CLUSTER_USERNAME=Administrator
   export CLUSTER_PASSWORD=password
   export CLUSTER_MEMORY_QUOTA=100
-  export CLUSTER_NAME="OI Local Cluster"
+  export CLUSTER_NAME="Operational Insights Local Cluster"
 
-  docker compose -f scripts/oi_ci_cluster/docker-compose.yml up -d --wait
-  ./scripts/oi_ci_cluster/configure_cluster.sh
+  docker compose -f scripts/operational_insights_ci_cluster/docker-compose.yml up -d --wait
+  ./scripts/operational_insights_ci_cluster/configure_cluster.sh
 
   # 127.0.0.1, not localhost: the couchbase_operational_insights SDK picks
   # a random address when a hostname resolves to more than one (localhost
   # -> 127.0.0.1 and ::1), and about half the time that's an ::1 this
   # container's port publishing doesn't forward, causing an immediate
   # connection reset. A literal IP isn't looked up, so it can't happen.
-  export CB_OI_CONNECTION_STRING=http://127.0.0.1:${OI_ANALYTICS_PORT}
-  export CB_OI_USERNAME=$CLUSTER_USERNAME
-  export CB_OI_PASSWORD=$CLUSTER_PASSWORD
+  export CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING=http://127.0.0.1:${OPERATIONAL_INSIGHTS_ANALYTICS_PORT}
+  export CB_OPERATIONAL_INSIGHTS_USERNAME=$CLUSTER_USERNAME
+  export CB_OPERATIONAL_INSIGHTS_PASSWORD=$CLUSTER_PASSWORD
   uv run --extra dev pytest tests/integration/operational_insights -v
 
-  docker compose -f scripts/oi_ci_cluster/docker-compose.yml down -v
+  docker compose -f scripts/operational_insights_ci_cluster/docker-compose.yml down -v
   ```
   To exercise every transport x server-binary combination (mirroring
   `scripts/run_matrix_local.sh` for the operational server), use
-  `scripts/run_oi_matrix_local.sh` instead, which manages this same
+  `scripts/run_operational_insights_matrix_local.sh` instead, which manages this same
   container lifecycle itself.
 - **Perf** — in-process performance tests, opt-in via `CB_MCP_PERF=1`; not run in CI.
 - **Accuracy** — drive an OpenAI tool-calling agent against the live MCP
@@ -181,7 +181,7 @@ any laptop.
 
 - [`_test_env.py`](_test_env.py) — env builders (`_build_env`,
   `require_test_bucket`, `get_test_scope`, `get_test_collection`, and their
-  `oi_env_available` / `build_oi_env` / `get_oi_test_*` equivalents for the
+  `operational_insights_env_available` / `build_operational_insights_env` / `get_operational_insights_test_*` equivalents for the
   Operational Insights tier). Imported by the integration and accuracy
   conftests.
 - [`_all_specs.py`](_all_specs.py) — test-only `ALL_SPECS` registry (every
@@ -200,7 +200,7 @@ any laptop.
   than in the shared conftest, so the Operational Insights tier no longer
   imports ~170 lines describing a tool set its server does not register.
 - [`integration/operational_insights/conftest.py`](integration/operational_insights/conftest.py) —
-  the Operational Insights tier's own session helper (`create_oi_mcp_session`,
+  the Operational Insights tier's own session helper (`create_operational_insights_mcp_session`,
   built on `create_session_for_subcommand` for stdio and on
   `integration/conftest.py`'s `streamable_http_session` for http) and its
   directory-based auto-marking + env-gated skip.

@@ -11,14 +11,14 @@ from __future__ import annotations
 import pytest
 from conftest import extract_payload
 
-from .conftest import create_oi_mcp_session
+from .conftest import create_operational_insights_mcp_session
 
 
 @pytest.mark.asyncio
 async def test_run_query_sync_select_one():
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         response = await session.call_tool(
-            "oi_run_query_sync", {"statement": "SELECT 1 AS one"}
+            "operational_insights_run_query_sync", {"statement": "SELECT 1 AS one"}
         )
         payload = extract_payload(response)
 
@@ -29,9 +29,9 @@ async def test_run_query_sync_select_one():
 
 @pytest.mark.asyncio
 async def test_run_query_sync_invalid_statement_returns_error_envelope():
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         response = await session.call_tool(
-            "oi_run_query_sync", {"statement": "SELECT bad("}
+            "operational_insights_run_query_sync", {"statement": "SELECT bad("}
         )
         payload = extract_payload(response)
 
@@ -41,9 +41,9 @@ async def test_run_query_sync_invalid_statement_returns_error_envelope():
 
 @pytest.mark.asyncio
 async def test_explain_query_returns_a_plan():
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         response = await session.call_tool(
-            "oi_explain_query", {"statement": "SELECT 1 AS one"}
+            "operational_insights_explain_query", {"statement": "SELECT 1 AS one"}
         )
         payload = extract_payload(response)
 
@@ -55,9 +55,9 @@ async def test_explain_query_returns_a_plan():
 async def test_explain_query_does_not_execute_the_statement():
     """EXPLAIN plans a statement without running it — dividing by zero here
     would only fail if the statement were actually executed."""
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         response = await session.call_tool(
-            "oi_explain_query", {"statement": "SELECT 1 / 0 AS boom"}
+            "operational_insights_explain_query", {"statement": "SELECT 1 / 0 AS boom"}
         )
         payload = extract_payload(response)
 
@@ -66,9 +66,9 @@ async def test_explain_query_does_not_execute_the_statement():
 
 @pytest.mark.asyncio
 async def test_explain_query_invalid_statement_returns_error_envelope():
-    async with create_oi_mcp_session() as session:
+    async with create_operational_insights_mcp_session() as session:
         response = await session.call_tool(
-            "oi_explain_query", {"statement": "SELECT bad("}
+            "operational_insights_explain_query", {"statement": "SELECT bad("}
         )
         payload = extract_payload(response)
 

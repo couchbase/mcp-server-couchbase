@@ -34,7 +34,7 @@ SHARED_TOOL_NAMES = frozenset({"get_server_configuration_status"})
 # Empty today: the Operational Insights server's tool names that used to
 # collide with the operational server's (get_collections_in_scope,
 # get_schema_for_collection, create_index, list_indexes — the ported
-# prototype's original names) were all prefixed with ``oi_`` instead.
+# prototype's original names) were all prefixed with ``operational_insights_`` instead.
 KNOWN_DUPLICATE_TOOL_NAMES: frozenset[str] = frozenset()
 
 #: Both kinds are permitted to appear on more than one server; only the

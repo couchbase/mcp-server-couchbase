@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Local OI Test Matrix Runner
+# Local Operational Insights Test Matrix Runner
 # =============================================================================
 # Runs Operational Insights integration tests across transport x server
 # binary combinations. Structural mirror of scripts/run_matrix_local.sh, but
-# drives the OI cluster's docker-compose lifecycle (scripts/oi_ci_cluster/)
-# instead of a raw Couchbase Server container. No cb_version axis: the OI
+# drives the Operational Insights cluster's docker-compose lifecycle (scripts/operational_insights_ci_cluster/)
+# instead of a raw Couchbase Server container. No cb_version axis: the Operational Insights
 # image is pinned, not swept.
 #
 # Prerequisites:
@@ -14,10 +14,10 @@
 #   - Project dependencies installed (uv sync --extra dev)
 #
 # Usage:
-#   ./scripts/run_oi_matrix_local.sh
+#   ./scripts/run_operational_insights_matrix_local.sh
 #
 # Optional: run a subset for debugging:
-#   TRANSPORTS="http" SERVER_BINARIES="docker" ./scripts/run_oi_matrix_local.sh
+#   TRANSPORTS="http" SERVER_BINARIES="docker" ./scripts/run_operational_insights_matrix_local.sh
 #
 # Server binaries:
 #   source  - run directly from source via uv
@@ -34,14 +34,14 @@ TRANSPORTS="${TRANSPORTS:-stdio http}"
 SERVER_BINARIES="${SERVER_BINARIES:-source docker pypi}"
 
 # docker-compose.yml's ${VAR} references (steps 2-3) — same defaults as
-# oi-integration-tests.yml and tests/README.md's local-setup snippet.
-export OI_IMAGE="${OI_IMAGE:-couchbase/enterprise-analytics:2.2.1}"
+# operational-insights-integration-tests.yml and tests/README.md's local-setup snippet.
+export OPERATIONAL_INSIGHTS_IMAGE="${OPERATIONAL_INSIGHTS_IMAGE:-couchbase/enterprise-analytics:2.2.1}"
 export S3MOCK_IMAGE="${S3MOCK_IMAGE:-adobe/s3mock:5.2.3}"
 export S3MOCK_BUCKET="${S3MOCK_BUCKET:-cloud-storage-container}"
 export S3MOCK_STORE_ROOT="${S3MOCK_STORE_ROOT:-fs}"
 export S3MOCK_RETAIN_FILES_ON_EXIT="${S3MOCK_RETAIN_FILES_ON_EXIT:-true}"
-export OI_ADMIN_PORT="${OI_ADMIN_PORT:-8091}"
-export OI_ANALYTICS_PORT="${OI_ANALYTICS_PORT:-8095}"
+export OPERATIONAL_INSIGHTS_ADMIN_PORT="${OPERATIONAL_INSIGHTS_ADMIN_PORT:-8091}"
+export OPERATIONAL_INSIGHTS_ANALYTICS_PORT="${OPERATIONAL_INSIGHTS_ANALYTICS_PORT:-8095}"
 
 # configure_cluster.sh's blob storage settings (step 4).
 export BLOB_STORAGE_SCHEME="${BLOB_STORAGE_SCHEME:-s3}"
@@ -55,18 +55,18 @@ export NUM_STORAGE_PARTITIONS="${NUM_STORAGE_PARTITIONS:-16}"
 export CLUSTER_USERNAME="${CLUSTER_USERNAME:-Administrator}"
 export CLUSTER_PASSWORD="${CLUSTER_PASSWORD:-password}"
 export CLUSTER_MEMORY_QUOTA="${CLUSTER_MEMORY_QUOTA:-100}"
-export CLUSTER_NAME="${CLUSTER_NAME:-OI Local Cluster}"
+export CLUSTER_NAME="${CLUSTER_NAME:-Operational Insights Local Cluster}"
 
-COMPOSE_PROJECT="oi-mcp-test"
-MCP_CONTAINER_NAME="mcp-server-oi-http-test"
-PYPI_VENV="/tmp/cb-mcp-oi-pypi-venv"
+COMPOSE_PROJECT="operational-insights-mcp-test"
+MCP_CONTAINER_NAME="mcp-server-operational-insights-http-test"
+PYPI_VENV="/tmp/cb-mcp-operational-insights-pypi-venv"
 MCP_PORT=8001
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_ROOT"
-COMPOSE_FILE="scripts/oi_ci_cluster/docker-compose.yml"
+COMPOSE_FILE="scripts/operational_insights_ci_cluster/docker-compose.yml"
 
-# Resolved once the OI cluster is up (see start_oi_cluster) — the network
+# Resolved once the Operational Insights cluster is up (see start_operational_insights_cluster) — the network
 # Compose actually created for this project, looked up rather than assumed:
 # Compose's default-network-naming convention isn't worth hardcoding blind.
 COMPOSE_NETWORK=""
@@ -105,9 +105,9 @@ record_result() {
 }
 
 # ---------------------------------------------------------------------------
-# OI cluster lifecycle helpers
+# Operational Insights cluster lifecycle helpers
 # ---------------------------------------------------------------------------
-start_oi_cluster() {
+start_operational_insights_cluster() {
     echo ""
     echo "============================================"
     echo " Starting Operational Insights cluster"
@@ -124,12 +124,12 @@ start_oi_cluster() {
     echo "  Compose network: $COMPOSE_NETWORK"
 }
 
-configure_oi_cluster() {
+configure_operational_insights_cluster() {
     echo "Configuring Operational Insights cluster..."
-    ./scripts/oi_ci_cluster/configure_cluster.sh
+    ./scripts/operational_insights_ci_cluster/configure_cluster.sh
 }
 
-stop_oi_cluster() {
+stop_operational_insights_cluster() {
     docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" down -v 2>/dev/null || true
 }
 
@@ -162,9 +162,9 @@ build_pypi_wheel() {
 # ---------------------------------------------------------------------------
 run_stdio_tests() {
     echo "  [stdio/source] Running tests..."
-    CB_OI_CONNECTION_STRING="http://127.0.0.1:${OI_ANALYTICS_PORT}" \
-    CB_OI_USERNAME="$CLUSTER_USERNAME" \
-    CB_OI_PASSWORD="$CLUSTER_PASSWORD" \
+    CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING="http://127.0.0.1:${OPERATIONAL_INSIGHTS_ANALYTICS_PORT}" \
+    CB_OPERATIONAL_INSIGHTS_USERNAME="$CLUSTER_USERNAME" \
+    CB_OPERATIONAL_INSIGHTS_PASSWORD="$CLUSTER_PASSWORD" \
     CB_MCP_TRANSPORT="stdio" \
     PYTHONPATH=src \
         uv run pytest tests/integration/operational_insights -v --tb=short
@@ -172,12 +172,12 @@ run_stdio_tests() {
 
 run_http_source_tests() {
     echo "  [http/source] Starting MCP server..."
-    # Not containerized, so it reaches the OI cluster the same way a local
+    # Not containerized, so it reaches the Operational Insights cluster the same way a local
     # dev shell would: via the host-published Analytics port. 127.0.0.1, not
     # localhost — see tests/README.md's note on the SDK's ::1 fallback.
-    CB_OI_CONNECTION_STRING="http://127.0.0.1:${OI_ANALYTICS_PORT}" \
-    CB_OI_USERNAME="$CLUSTER_USERNAME" \
-    CB_OI_PASSWORD="$CLUSTER_PASSWORD" \
+    CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING="http://127.0.0.1:${OPERATIONAL_INSIGHTS_ANALYTICS_PORT}" \
+    CB_OPERATIONAL_INSIGHTS_USERNAME="$CLUSTER_USERNAME" \
+    CB_OPERATIONAL_INSIGHTS_PASSWORD="$CLUSTER_PASSWORD" \
     CB_MCP_TRANSPORT="http" \
     CB_MCP_HOST="127.0.0.1" \
     CB_MCP_PORT="$MCP_PORT" \
@@ -194,9 +194,9 @@ run_http_source_tests() {
 
     echo "  [http/source] Running tests..."
     local ret=0
-    CB_OI_CONNECTION_STRING="http://127.0.0.1:${OI_ANALYTICS_PORT}" \
-    CB_OI_USERNAME="$CLUSTER_USERNAME" \
-    CB_OI_PASSWORD="$CLUSTER_PASSWORD" \
+    CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING="http://127.0.0.1:${OPERATIONAL_INSIGHTS_ANALYTICS_PORT}" \
+    CB_OPERATIONAL_INSIGHTS_USERNAME="$CLUSTER_USERNAME" \
+    CB_OPERATIONAL_INSIGHTS_PASSWORD="$CLUSTER_PASSWORD" \
     CB_MCP_TRANSPORT="http" \
     MCP_SERVER_URL="http://127.0.0.1:${MCP_PORT}/mcp" \
     PYTHONPATH=src \
@@ -210,17 +210,17 @@ run_http_source_tests() {
 run_http_docker_tests() {
     echo "  [http/docker] Starting MCP server container..."
     docker rm -f "$MCP_CONTAINER_NAME" 2>/dev/null || true
-    # Join the compose stack's own network and reach the OI cluster by its
-    # service name ("oi") on the container-internal Analytics port (8095) —
+    # Join the compose stack's own network and reach the Operational Insights cluster by its
+    # service name ("operational-insights") on the container-internal Analytics port (8095) —
     # not --network host (unreliable on Docker Desktop for macOS/Windows)
-    # and not the host-published OI_ANALYTICS_PORT (only meaningful from the
+    # and not the host-published OPERATIONAL_INSIGHTS_ANALYTICS_PORT (only meaningful from the
     # host's own network namespace, not from inside another container).
     docker run -d --name "$MCP_CONTAINER_NAME" \
         --network "$COMPOSE_NETWORK" \
         -p "${MCP_PORT}:${MCP_PORT}" \
-        -e CB_OI_CONNECTION_STRING="http://oi:8095" \
-        -e CB_OI_USERNAME="$CLUSTER_USERNAME" \
-        -e CB_OI_PASSWORD="$CLUSTER_PASSWORD" \
+        -e CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING="http://operational-insights:8095" \
+        -e CB_OPERATIONAL_INSIGHTS_USERNAME="$CLUSTER_USERNAME" \
+        -e CB_OPERATIONAL_INSIGHTS_PASSWORD="$CLUSTER_PASSWORD" \
         -e CB_MCP_TRANSPORT="http" \
         -e CB_MCP_HOST="0.0.0.0" \
         -e CB_MCP_PORT="$MCP_PORT" \
@@ -239,9 +239,9 @@ run_http_docker_tests() {
 
     echo "  [http/docker] Running tests..."
     local ret=0
-    CB_OI_CONNECTION_STRING="http://127.0.0.1:${OI_ANALYTICS_PORT}" \
-    CB_OI_USERNAME="$CLUSTER_USERNAME" \
-    CB_OI_PASSWORD="$CLUSTER_PASSWORD" \
+    CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING="http://127.0.0.1:${OPERATIONAL_INSIGHTS_ANALYTICS_PORT}" \
+    CB_OPERATIONAL_INSIGHTS_USERNAME="$CLUSTER_USERNAME" \
+    CB_OPERATIONAL_INSIGHTS_PASSWORD="$CLUSTER_PASSWORD" \
     CB_MCP_TRANSPORT="http" \
     MCP_SERVER_URL="http://127.0.0.1:${MCP_PORT}/mcp" \
     PYTHONPATH=src \
@@ -253,9 +253,9 @@ run_http_docker_tests() {
 
 run_http_pypi_tests() {
     echo "  [http/pypi] Starting MCP server (PyPI binary)..."
-    CB_OI_CONNECTION_STRING="http://127.0.0.1:${OI_ANALYTICS_PORT}" \
-    CB_OI_USERNAME="$CLUSTER_USERNAME" \
-    CB_OI_PASSWORD="$CLUSTER_PASSWORD" \
+    CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING="http://127.0.0.1:${OPERATIONAL_INSIGHTS_ANALYTICS_PORT}" \
+    CB_OPERATIONAL_INSIGHTS_USERNAME="$CLUSTER_USERNAME" \
+    CB_OPERATIONAL_INSIGHTS_PASSWORD="$CLUSTER_PASSWORD" \
     CB_MCP_TRANSPORT="http" \
     CB_MCP_HOST="127.0.0.1" \
     CB_MCP_PORT="$MCP_PORT" \
@@ -272,9 +272,9 @@ run_http_pypi_tests() {
 
     echo "  [http/pypi] Running tests..."
     local ret=0
-    CB_OI_CONNECTION_STRING="http://127.0.0.1:${OI_ANALYTICS_PORT}" \
-    CB_OI_USERNAME="$CLUSTER_USERNAME" \
-    CB_OI_PASSWORD="$CLUSTER_PASSWORD" \
+    CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING="http://127.0.0.1:${OPERATIONAL_INSIGHTS_ANALYTICS_PORT}" \
+    CB_OPERATIONAL_INSIGHTS_USERNAME="$CLUSTER_USERNAME" \
+    CB_OPERATIONAL_INSIGHTS_PASSWORD="$CLUSTER_PASSWORD" \
     CB_MCP_TRANSPORT="http" \
     MCP_SERVER_URL="http://127.0.0.1:${MCP_PORT}/mcp" \
     PYTHONPATH=src \
@@ -296,17 +296,17 @@ for binary in $SERVER_BINARIES; do
 done
 
 # ---------------------------------------------------------------------------
-# Cluster lifecycle (once — no cb_version axis for OI)
+# Cluster lifecycle (once — no cb_version axis for Operational Insights)
 # ---------------------------------------------------------------------------
-start_oi_cluster
-configure_oi_cluster
+start_operational_insights_cluster
+configure_operational_insights_cluster
 
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 echo ""
 echo "======================================================"
-echo " OI MCP Server Local Test Matrix"
+echo " Operational Insights MCP Server Local Test Matrix"
 echo " Transports: $TRANSPORTS"
 echo " Binaries:   $SERVER_BINARIES"
 echo "======================================================"
@@ -336,7 +336,7 @@ for transport in $TRANSPORTS; do
     done
 done
 
-stop_oi_cluster
+stop_operational_insights_cluster
 
 # ---------------------------------------------------------------------------
 # Summary table
