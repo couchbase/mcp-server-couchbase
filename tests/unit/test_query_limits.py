@@ -120,22 +120,50 @@ class TestTruncation:
 
 
 class TestOversizedSingleRow:
-    """One row larger than the whole budget is kept, and flagged."""
+    """The budget is a hard ceiling: a row that would overrun it is dropped."""
 
-    def test_first_row_is_kept_even_when_it_overruns(self) -> None:
-        """Returning [] here would read as "no matches" rather than "too big"."""
-        big = {"blob": "x" * 50_000}
-        bounded = _collect([big], 1024)
-        assert bounded.rows == [big]
+    def test_oversized_first_row_is_not_returned(self) -> None:
+        """An operator capping the payload at N bytes must get at most N bytes.
+
+        Returning the row anyway was the earlier behaviour, on the grounds
+        that an empty list reads like "no matches". The flag carries that
+        distinction instead — see ``truncation_message`` — so the limit can
+        stay absolute.
+        """
+        bounded = _collect([{"blob": "x" * 50_000}], 1024)
+        assert bounded.rows == []
         assert bounded.truncated is True
-        # The documented exception: this is the one case where the returned
-        # payload exceeds the budget.
-        assert bounded.bytes_returned > 1024
+        assert bounded.bytes_returned <= 1024
 
     def test_oversized_row_followed_by_more(self) -> None:
         bounded = _collect([{"blob": "x" * 50_000}, ROW], 1024)
-        assert bounded.row_count == 1
+        assert bounded.row_count == 0
         assert bounded.truncated is True
+
+    def test_rows_before_an_oversized_one_are_kept(self) -> None:
+        """Only the overrunning row is dropped, not what preceded it."""
+        bounded = _collect([ROW, {"blob": "x" * 50_000}], ROW_BYTES + 1024)
+        assert bounded.rows == [ROW]
+        assert bounded.truncated is True
+
+    def test_empty_truncated_is_distinguishable_from_empty_complete(self) -> None:
+        """Zero rows means two opposite things; only ``truncated`` separates them.
+
+        A caller that reads emptiness as "no matches" would report the wrong
+        answer for a collection whose rows are merely too wide.
+        """
+        too_wide = _collect([{"blob": "x" * 50_000}], 1024)
+        no_matches = _collect([], 1024)
+
+        assert too_wide.row_count == no_matches.row_count == 0
+        assert too_wide.truncated is True
+        assert no_matches.truncated is False
+
+    def test_zero_row_message_does_not_read_as_an_empty_result(self) -> None:
+        """ "Returned the first 0 row(s)" would describe the wrong failure."""
+        message = _collect([{"blob": "x" * 50_000}], 1024).truncation_message()
+        assert "not an empty result" in message
+        assert "too wide" in message
 
 
 class TestLaziness:
