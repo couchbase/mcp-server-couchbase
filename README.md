@@ -348,6 +348,7 @@ The [Operational Insights server](#operational-insights-server) accepts the same
 | `CB_MCP_ALLOWED_HOSTS` | `--allowed-hosts` | Comma-separated host names (no scheme or port) the `http`/`sse` endpoint may be reached by; see [Restricting hosts](#restricting-hosts). Unset, empty or `*` adds no restriction | unset |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Requiring confirmation](#requiring-confirmation-elicitation)) | None |
+| `CB_MCP_SESSION_POSTURE` | `--session-posture` | Declare `workstation` or `enterprise`; the server refuses to start on a configuration that contradicts it (see [Declaring the session posture](#declaring-the-session-posture)) | Unset (nothing checked) |
 | `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
 | `CB_MCP_LOG_SINKS` | `--log-sinks` | Comma-separated log destinations: `stderr`, `file`, or both (see [Logging](#logging)) | `stderr` |
 | `CB_MCP_LOG_FILE` | `--log-file` | Base path for per-level log files (only used when the `file` sink is enabled) | `mcp_server.log` |
@@ -564,6 +565,17 @@ CB_MCP_CONFIRMATION_REQUIRED_TOOLS="delete_document_by_id,replace_document_by_id
 - If the client supports elicitation, the user is prompted before the tool runs.
 - If it doesn't, the tool runs without confirmation, for backward compatibility.
 - Confirmation needs an MCP session, so it cannot be combined with stateless HTTP (`CB_MCP_STATELESS_HTTP=true` or `CB_MCP_WORKERS` above 1). The server refuses to start with that combination. Behind a load balancer, confirmation needs sticky sessions — see [Load balancers](#load-balancers).
+
+#### Declaring the session posture
+
+`CB_MCP_SESSION_POSTURE` states what kind of deployment this is, and the server refuses to start if the rest of the configuration contradicts it. It is optional. Left unset, nothing is checked, which is the behavior before this option existed, and the server logs one INFO line saying so.
+
+| Value | Meaning | Refused at startup when |
+| --- | --- | --- |
+| `workstation` | A person is at the MCP client | The transport is a network transport. Use `stdio`. |
+| `enterprise` | An unattended service principal over a network transport, where OAuth scopes rather than confirmation prompts are the control | The transport is `stdio`, OAuth is not active, or `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` names a tool that will be registered |
+
+Confirmation is refused under `enterprise` because, with no person present, the model that asked for the tool also answers the prompt, so it gates nothing. Withhold those tools with `CB_MCP_DISABLED_TOOLS` or by not granting the write scope.
 
 ### Transports
 

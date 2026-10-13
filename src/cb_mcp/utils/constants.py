@@ -80,6 +80,16 @@ HEALTH_CHECK_PATH = "/health"
 # network transport but is explicitly out of scope for OAuth in this build.
 STREAMABLE_HTTP_TRANSPORT = "http"
 
+# Deployment postures (--session-posture). These name the two shapes this
+# server actually runs in, which differ in whether a human is at the MCP
+# client when a tool is called -- and therefore in which controls are real.
+# See cb_mcp.utils.posture, which owns the checks; these live here because
+# the CLI's click.Choice needs them and cb_mcp.core.cli may not import from
+# a module that is only about one flag's meaning.
+SESSION_POSTURE_WORKSTATION = "workstation"
+SESSION_POSTURE_ENTERPRISE = "enterprise"
+ALLOWED_SESSION_POSTURES = (SESSION_POSTURE_WORKSTATION, SESSION_POSTURE_ENTERPRISE)
+
 # Logging Configuration
 # Change this to DEBUG, WARNING, ERROR as needed
 DEFAULT_LOG_LEVEL = "INFO"
