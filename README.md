@@ -220,10 +220,10 @@ Write tools (marked ✏️) are **not loaded** while [read-only mode](#read-only
 | --- | --- |
 | `get_document_by_id` | Get a document by ID |
 | `lookup_subdocument` | Read specific paths, existence checks or counts without fetching the whole document |
-| `upsert_document_by_id` ✏️ | Upsert a document by ID |
-| `insert_document_by_id` ✏️ | Insert a new document (fails if it exists) |
-| `replace_document_by_id` ✏️ | Replace an existing document (fails if it doesn't exist) |
-| `delete_document_by_id` ✏️ | Delete a document by ID |
+| `upsert_document_by_id` ✏️ | Upsert a document by ID, or up to 100 at once with `documents` (a map of ID to document) |
+| `insert_document_by_id` ✏️ | Insert a new document (fails if it exists), or up to 100 at once with `documents` |
+| `replace_document_by_id` ✏️ | Replace an existing document (fails if it doesn't exist), or up to 100 at once with `documents` |
+| `delete_document_by_id` ✏️ | Delete a document by ID, or up to 100 at once with `document_ids` |
 | `mutate_subdocument` ✏️ | Modify paths in an existing document (upsert, insert, replace, remove, array ops, counters) |
 
 #### Query and indexing

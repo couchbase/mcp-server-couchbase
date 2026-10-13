@@ -184,33 +184,10 @@ TOOL_REQUIRED_PARAMS = {
         "collection_name",
         "document_id",
     ],
-    "upsert_document_by_id": [
-        "bucket_name",
-        "scope_name",
-        "collection_name",
-        "document_id",
-        "document_content",
-    ],
-    "delete_document_by_id": [
-        "bucket_name",
-        "scope_name",
-        "collection_name",
-        "document_id",
-    ],
-    "insert_document_by_id": [
-        "bucket_name",
-        "scope_name",
-        "collection_name",
-        "document_id",
-        "document_content",
-    ],
-    "replace_document_by_id": [
-        "bucket_name",
-        "scope_name",
-        "collection_name",
-        "document_id",
-        "document_content",
-    ],
+    "upsert_document_by_id": ["bucket_name", "scope_name", "collection_name"],
+    "delete_document_by_id": ["bucket_name", "scope_name", "collection_name"],
+    "insert_document_by_id": ["bucket_name", "scope_name", "collection_name"],
+    "replace_document_by_id": ["bucket_name", "scope_name", "collection_name"],
     "get_schema_for_collection": ["bucket_name", "scope_name", "collection_name"],
     "run_sql_plus_plus_query": ["bucket_name", "scope_name", "query"],
     "explain_sql_plus_plus_query": ["bucket_name", "scope_name", "query"],
@@ -249,4 +226,15 @@ TOOL_REQUIRED_PARAMS = {
     ],
     "run_vector_search": ["index_name", "vector_field", "vector_query_text"],
     "delete_active_query": ["request_id"],
+}
+
+# Tools that take EITHER one document (the single-document parameters) OR a batch
+# (the batch parameter). Neither side is required on its own, so the check is that
+# every parameter exists and that the server rejects a call supplying neither, which
+# the tool's own integration tests cover.
+TOOL_SINGLE_OR_BATCH_PARAMS = {
+    "upsert_document_by_id": ("documents", ["document_id", "document_content"]),
+    "insert_document_by_id": ("documents", ["document_id", "document_content"]),
+    "replace_document_by_id": ("documents", ["document_id", "document_content"]),
+    "delete_document_by_id": ("document_ids", ["document_id"]),
 }

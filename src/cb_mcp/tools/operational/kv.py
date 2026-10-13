@@ -25,6 +25,100 @@ from ...utils.responses import tool_error, tool_success
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.kv")
 
 
+#: Upper bound on a single batch. Enforced before anything is written, so an
+#: oversized request changes nothing. 100 is the same cap the four-tool version
+#: of this proposal used, kept so the two shapes are comparable.
+MAX_BULK_DOCS = 100
+
+
+def _reject(message: str, **fields: Any) -> dict[str, Any]:
+    """A refusal that happens before any write. Shaped like every other failure."""
+    return tool_error(message, **fields)
+
+
+def _check_batch(
+    *,
+    single: Any,
+    batch: Any,
+    single_param: str,
+    batch_param: str,
+    keyspace: str,
+) -> dict[str, Any] | None:
+    """Validate the single/batch choice. Returns an error envelope, or None if fine.
+
+    The two modes are mutually exclusive on purpose. Accepting both and silently
+    preferring one is how a caller ends up writing a document it did not mean to
+    write, and a model that has produced both arguments has not decided what it
+    is doing. Better to say so.
+    """
+    if batch is None:
+        if single is None:
+            return _reject(
+                f"Provide either {single_param} for a single document, or "
+                f"{batch_param} for several. Neither was given.",
+                keyspace=keyspace,
+            )
+        return None
+
+    if single is not None:
+        return _reject(
+            f"Provide either {single_param} or {batch_param}, not both. "
+            "Nothing was written.",
+            keyspace=keyspace,
+        )
+
+    if not batch:
+        return _reject(
+            f"{batch_param} is empty. Nothing to do.",
+            keyspace=keyspace,
+        )
+
+    if len(batch) > MAX_BULK_DOCS:
+        return _reject(
+            f"{batch_param} holds {len(batch)} entries, which is more than the "
+            f"limit of {MAX_BULK_DOCS}. Nothing was written. Split the work into "
+            "smaller batches.",
+            keyspace=keyspace,
+            requested=len(batch),
+            limit=MAX_BULK_DOCS,
+        )
+    return None
+
+
+def _shape_multi_result(result: Any, requested_ids: list[str]) -> dict[str, Any]:
+    """Turn an SDK multi-result into a complete account of the batch.
+
+    Every requested id lands in exactly one of ``succeeded`` and ``errors``, so
+    the caller never has to diff what it asked for against what it got back.
+    That is the property the single-document path cannot offer across several
+    calls, and it is the reason this is worth having at all: an agent that has
+    to reconstruct which of fifty writes failed, from fifty turns of its own
+    history, is an agent that will get it wrong.
+
+    An id that the SDK reports neither way is recorded as an error rather than
+    quietly dropped. A missing outcome is not a success.
+    """
+    exceptions = dict(getattr(result, "exceptions", None) or {})
+    succeeded: list[str] = []
+    errors: dict[str, str] = {}
+
+    for doc_id in requested_ids:
+        if doc_id in exceptions:
+            exc = exceptions[doc_id]
+            errors[doc_id] = f"{type(exc).__name__}: {exc}".strip(": ")
+            continue
+        results = getattr(result, "results", None) or {}
+        if doc_id in results:
+            succeeded.append(doc_id)
+        else:
+            errors[doc_id] = (
+                "The server returned no outcome for this document. Treat it as "
+                "not written and retry it."
+            )
+
+    return tool_success(succeeded=succeeded, errors=errors)
+
+
 def get_document_by_id(
     ctx: Context,
     bucket_name: str,
@@ -54,8 +148,9 @@ def upsert_document_by_id(
     bucket_name: str,
     scope_name: str,
     collection_name: str,
-    document_id: str,
-    document_content: dict[str, Any],
+    document_id: str | None = None,
+    document_content: dict[str, Any] | None = None,
+    documents: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Insert or update a document by its ID.
 
@@ -64,14 +159,46 @@ def upsert_document_by_id(
 
     DO NOT use this as a fallback when insert_document_by_id or replace_document_by_id fails.
 
-    Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. permission denied, network error, invalid content)."""
+    Pass EITHER document_id and document_content for one document, OR documents
+    as a mapping of document ID to content for up to 100 documents in a
+    single call. Prefer the batch form whenever you have more than one document:
+    it costs one tool call instead of one per document, and it returns a single
+    complete account of which documents were written and which were not.
+
+    Single form returns {"success": True}, or {"success": False, "error": "..."}.
+    Batch form returns {"success": True, "succeeded": [...], "errors": {...}},
+    where every requested ID appears in exactly one of the two."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    invalid = _check_batch(
+        single=document_id,
+        batch=documents,
+        single_param="document_id",
+        batch_param="documents",
+        keyspace=keyspace,
+    )
+    if invalid is not None:
+        return invalid
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
-        logger.debug(f"Upserting document in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
+        if documents is not None:
+            logger.debug(f"Upserting {len(documents)} document(s) in {keyspace}")
+            result = collection.upsert_multi(documents, return_exceptions=True)
+            shaped = _shape_multi_result(result, list(documents))
+            logger.info(
+                f"Upserting batch in {keyspace}: "
+                f"{len(shaped['succeeded'])} ok, {len(shaped['errors'])} failed"
+            )
+            return shaped
+
+        if document_content is None:
+            return _reject(
+                "document_content is required when writing a single document.",
+                keyspace=keyspace,
+            )
+        logger.debug(f"Upserting document in {keyspace}")
         collection.upsert(document_id, document_content)
         logger.info(f"Successfully upserted document in {keyspace}")
         return tool_success()
@@ -85,18 +212,50 @@ def delete_document_by_id(
     bucket_name: str,
     scope_name: str,
     collection_name: str,
-    document_id: str,
+    document_id: str | None = None,
+    document_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Delete a document by its ID.
 
-    Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document not found, permission denied, network error)."""
+    Pass EITHER document_id for one document, OR document_ids for up to
+    100 documents in a single call.
+
+    Single form returns {"success": True}, or {"success": False, "error": "..."}.
+    Batch form returns {"success": True, "succeeded": [...], "errors": {...}},
+    where every requested ID appears in exactly one of the two. A document that
+    was already absent is reported in errors rather than silently counted as a
+    deletion, because "it is gone now" and "it was never there" are different
+    answers to the question the caller asked."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    invalid = _check_batch(
+        single=document_id,
+        batch=document_ids,
+        single_param="document_id",
+        batch_param="document_ids",
+        keyspace=keyspace,
+    )
+    if invalid is not None:
+        return invalid
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
-        logger.debug(f"Deleting document from {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
+        if document_ids is not None:
+            # Deduplicated, order preserved. A repeated id is one deletion, and
+            # reporting the repeat as "not found" would be an artefact of the
+            # caller's typing rather than a fact about the collection.
+            unique_ids = list(dict.fromkeys(document_ids))
+            logger.debug(f"Deleting {len(unique_ids)} document(s) from {keyspace}")
+            result = collection.remove_multi(unique_ids, return_exceptions=True)
+            shaped = _shape_multi_result(result, unique_ids)
+            logger.info(
+                f"Delete batch in {keyspace}: "
+                f"{len(shaped['succeeded'])} ok, {len(shaped['errors'])} failed"
+            )
+            return shaped
+
+        logger.debug(f"Deleting document from {keyspace}")
         collection.remove(document_id)
         logger.info(f"Successfully deleted document from {keyspace}")
         return tool_success()
@@ -110,22 +269,58 @@ def insert_document_by_id(
     bucket_name: str,
     scope_name: str,
     collection_name: str,
-    document_id: str,
-    document_content: dict[str, Any],
+    document_id: str | None = None,
+    document_content: dict[str, Any] | None = None,
+    documents: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Insert a new document by its ID. This operation will FAIL if the document already exists.
 
     IMPORTANT: If this operation fails, DO NOT automatically try replace or upsert.
     Report the failure to the user. They can choose to 'replace' or 'upsert' if desired.
+    In the batch form this matters more, not less: a partial failure must NOT be followed
+    by an upsert of the whole batch unless the user asked for the existing documents to be
+    overwritten. That would destroy the documents the insert correctly refused to touch.
 
-    Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document already exists, permission denied, network error)."""
+    Pass EITHER document_id and document_content for one document, OR documents
+    as a mapping of document ID to content for up to 100 documents in a
+    single call. Prefer the batch form whenever you have more than one document:
+    it costs one tool call instead of one per document, and it returns a single
+    complete account of which documents were written and which were not.
+
+    Single form returns {"success": True}, or {"success": False, "error": "..."}.
+    Batch form returns {"success": True, "succeeded": [...], "errors": {...}},
+    where every requested ID appears in exactly one of the two."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    invalid = _check_batch(
+        single=document_id,
+        batch=documents,
+        single_param="document_id",
+        batch_param="documents",
+        keyspace=keyspace,
+    )
+    if invalid is not None:
+        return invalid
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
-        logger.debug(f"Inserting document in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
+        if documents is not None:
+            logger.debug(f"Inserting {len(documents)} document(s) in {keyspace}")
+            result = collection.insert_multi(documents, return_exceptions=True)
+            shaped = _shape_multi_result(result, list(documents))
+            logger.info(
+                f"Inserting batch in {keyspace}: "
+                f"{len(shaped['succeeded'])} ok, {len(shaped['errors'])} failed"
+            )
+            return shaped
+
+        if document_content is None:
+            return _reject(
+                "document_content is required when writing a single document.",
+                keyspace=keyspace,
+            )
+        logger.debug(f"Inserting document in {keyspace}")
         collection.insert(document_id, document_content)
         logger.info(f"Successfully inserted document in {keyspace}")
         return tool_success()
@@ -139,22 +334,55 @@ def replace_document_by_id(
     bucket_name: str,
     scope_name: str,
     collection_name: str,
-    document_id: str,
-    document_content: dict[str, Any],
+    document_id: str | None = None,
+    document_content: dict[str, Any] | None = None,
+    documents: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Replace an existing document by its ID. This operation will FAIL if the document does not exist.
 
     IMPORTANT: If this operation fails, DO NOT automatically try insert or upsert.
     Report the failure to the user. They can choose to 'insert' or 'upsert' if desired.
 
-    Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document does not exist, permission denied, network error)."""
+    Pass EITHER document_id and document_content for one document, OR documents
+    as a mapping of document ID to content for up to 100 documents in a
+    single call. Prefer the batch form whenever you have more than one document:
+    it costs one tool call instead of one per document, and it returns a single
+    complete account of which documents were written and which were not.
+
+    Single form returns {"success": True}, or {"success": False, "error": "..."}.
+    Batch form returns {"success": True, "succeeded": [...], "errors": {...}},
+    where every requested ID appears in exactly one of the two."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    invalid = _check_batch(
+        single=document_id,
+        batch=documents,
+        single_param="document_id",
+        batch_param="documents",
+        keyspace=keyspace,
+    )
+    if invalid is not None:
+        return invalid
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
-        logger.debug(f"Replacing document in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
+        if documents is not None:
+            logger.debug(f"Replacing {len(documents)} document(s) in {keyspace}")
+            result = collection.replace_multi(documents, return_exceptions=True)
+            shaped = _shape_multi_result(result, list(documents))
+            logger.info(
+                f"Replacing batch in {keyspace}: "
+                f"{len(shaped['succeeded'])} ok, {len(shaped['errors'])} failed"
+            )
+            return shaped
+
+        if document_content is None:
+            return _reject(
+                "document_content is required when writing a single document.",
+                keyspace=keyspace,
+            )
+        logger.debug(f"Replacing document in {keyspace}")
         collection.replace(document_id, document_content)
         logger.info(f"Successfully replaced document in {keyspace}")
         return tool_success()
