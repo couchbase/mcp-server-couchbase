@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import random
+import uuid
 
 import pytest
 
@@ -135,9 +136,13 @@ def _drop_vector_index(
 
 
 def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]:
-    index_name = "product_vector_index"
-    gsi_vector_index_name = "acc_vec_idx_embedding"
-    gsi_probe_doc_prefix = "acc_vec_probe"
+    # Unique per test run (matching test_fts.py/test_index.py's convention) --
+    # fixed names could collide with real data or a concurrent accuracy run
+    # sharing the same cluster, since seeding/cleanup upsert/drop/delete these
+    # unconditionally.
+    index_name = f"product_vector_index_{uuid.uuid4().hex[:8]}"
+    gsi_vector_index_name = f"acc_vec_idx_embedding_{uuid.uuid4().hex[:8]}"
+    gsi_probe_doc_prefix = f"acc_vec_probe_{uuid.uuid4().hex[:8]}"
     seed_gsi_vector_index = _seed_vector_index(
         bucket, scope, collection, gsi_vector_index_name, gsi_probe_doc_prefix
     )
