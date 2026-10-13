@@ -115,7 +115,7 @@ if a single MCP client registers both servers at once.
 | `oi_get_collections_in_scope` | List all collections (datasets) in a scope. |
 | `oi_get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. |
 | `oi_list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog. |
-| `oi_run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return its result rows, up to `CB_MCP_MAX_QUERY_RESULT_SIZE` (a larger result reports `truncated: true`). Pass `copy_to_link`/`copy_to_bucket`/`copy_to_path` to export the rows to object storage instead. Enforces read-only mode server-side; there is no client-side SQL++ parser. |
+| `oi_run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return its result rows, up to `CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE` (a larger result reports `truncated: true`). Pass `copy_to_link`/`copy_to_bucket`/`copy_to_path` to export the rows to object storage instead. Enforces read-only mode server-side; there is no client-side SQL++ parser. |
 | `oi_explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
 | `oi_create_index` | Create a secondary index via `CREATE INDEX`. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `oi_run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Accepts the same `copy_to_*` export arguments, and is preferred for a large export. Same read-only enforcement as `oi_run_query_sync`. |

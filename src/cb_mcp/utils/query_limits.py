@@ -46,7 +46,7 @@ logger = logging.getLogger(f"{LOGGER_NAMESPACE}.utils.query_limits")
 #: Settings key holding the resolved budget. Read through
 #: :func:`max_query_result_size_from` rather than indexed directly, so a host
 #: that never set it still gets the default.
-MAX_QUERY_RESULT_SIZE_KEY = "max_query_result_size"
+MAX_QUERY_RESULT_SIZE_KEY = "operational_insights_query_result_max_size"
 
 #: Sentinel for "the iterator had nothing more", distinct from a legitimate
 #: ``None`` row.
@@ -97,7 +97,7 @@ class BoundedRows:
                 f"row alone exceeds the {self.limit_bytes}-byte limit. This is "
                 f"not an empty result — matching rows exist but are too wide to "
                 f"return. Project fewer or smaller fields, or ask an operator to "
-                f"raise CB_MCP_MAX_QUERY_RESULT_SIZE."
+                f"raise CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE."
             )
         return (
             f"Result truncated: returned the first {self.row_count} row(s) "
@@ -106,7 +106,7 @@ class BoundedRows:
             f"and cannot be retrieved by calling again — narrow the query with "
             f"a LIMIT, fewer projected fields, or a more selective WHERE "
             f"clause. An operator can raise the limit with "
-            f"CB_MCP_MAX_QUERY_RESULT_SIZE."
+            f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE."
         )
 
     def as_envelope_fields(self) -> dict[str, Any]:
@@ -138,14 +138,16 @@ def clamp_max_query_result_size(value: int) -> int:
     """
     if value > MAX_MAX_QUERY_RESULT_SIZE:
         logger.warning(
-            f"max_query_result_size {value} exceeds the maximum "
+            f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE {value} exceeds the "
+            f"maximum "
             f"{MAX_MAX_QUERY_RESULT_SIZE}; clamping to "
             f"{MAX_MAX_QUERY_RESULT_SIZE}."
         )
         return MAX_MAX_QUERY_RESULT_SIZE
     if value < MIN_MAX_QUERY_RESULT_SIZE:
         logger.warning(
-            f"max_query_result_size {value} is below the minimum "
+            f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE {value} is below the "
+            f"minimum "
             f"{MIN_MAX_QUERY_RESULT_SIZE}; clamping to "
             f"{MIN_MAX_QUERY_RESULT_SIZE}."
         )

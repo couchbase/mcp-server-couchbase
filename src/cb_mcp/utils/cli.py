@@ -55,7 +55,7 @@ def validate_log_sinks(
 def validate_max_query_result_size(
     ctx: click.Context, param: click.Parameter, value: int | None
 ) -> int:
-    """Click callback for ``--max-query-result-size``.
+    """Click callback for ``--operational-insights-query-result-max-size``.
 
     Delegates to :func:`clamp_max_query_result_size`, which caps the value
     into the supported range and warns when it moves it. Clamping rather than

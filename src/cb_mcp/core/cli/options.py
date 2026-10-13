@@ -162,9 +162,9 @@ tool_gating_options = compose(
         "Requires the MCP client to support elicitation.",
     ),
     click.option(
-        "--max-query-result-size",
-        "max_query_result_size",
-        envvar="CB_MCP_MAX_QUERY_RESULT_SIZE",
+        "--operational-insights-query-result-max-size",
+        "operational_insights_query_result_max_size",
+        envvar="CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE",
         callback=validate_max_query_result_size,
         type=int,
         default=DEFAULT_MAX_QUERY_RESULT_SIZE,

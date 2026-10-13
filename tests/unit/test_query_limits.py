@@ -253,23 +253,23 @@ class TestSettingsLookup:
 
     def test_none_uses_the_default(self) -> None:
         assert (
-            max_query_result_size_from({"max_query_result_size": None})
+            max_query_result_size_from({"operational_insights_query_result_max_size": None})
             == DEFAULT_MAX_QUERY_RESULT_SIZE
         )
 
     def test_configured_value_is_honoured(self) -> None:
-        assert max_query_result_size_from({"max_query_result_size": 20_480}) == 20_480
+        assert max_query_result_size_from({"operational_insights_query_result_max_size": 20_480}) == 20_480
 
     def test_out_of_range_value_is_clamped_on_read(self) -> None:
         """An embedding host never passes through the CLI validator."""
         assert (
-            max_query_result_size_from({"max_query_result_size": 99_999_999})
+            max_query_result_size_from({"operational_insights_query_result_max_size": 99_999_999})
             == MAX_MAX_QUERY_RESULT_SIZE
         )
 
     def test_non_numeric_value_falls_back(self) -> None:
         assert (
-            max_query_result_size_from({"max_query_result_size": "abc"})
+            max_query_result_size_from({"operational_insights_query_result_max_size": "abc"})
             == DEFAULT_MAX_QUERY_RESULT_SIZE
         )
 
@@ -284,7 +284,7 @@ class TestContextLookup:
         ctx = SimpleNamespace(
             request_context=SimpleNamespace(
                 lifespan_context=SimpleNamespace(
-                    settings={"max_query_result_size": 20_480}
+                    settings={"operational_insights_query_result_max_size": 20_480}
                 )
             )
         )
