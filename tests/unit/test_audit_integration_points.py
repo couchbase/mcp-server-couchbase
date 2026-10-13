@@ -754,3 +754,55 @@ def test_an_explicit_client_context_id_is_not_overwritten():
         audit_state._AUDIT_STATE.reset(token)
 
     assert captured["kwargs"]["client_context_id"] == "callers-own-id"
+
+
+# ---------------------------------------------------------------------------
+# statement-level scope gate
+# ---------------------------------------------------------------------------
+
+
+def test_statement_scope_denial_records_a_refusal():
+    """The only place a statement-level scope denial is decided.
+
+    It is also the only refusal that passes an explicit ``required_scope`` into
+    the state channel, because the class depends on the statement rather than
+    on the tool. Without this test, deleting the ``record_refusal`` call leaves
+    the suite green while a policy denial is recorded as
+    ``query write / error / execution_error`` -- an execution failure, not a
+    refusal, and filterable rather than a security event.
+    """
+    token = SimpleNamespace(scopes=["couchbase-mcp:read"], claims={}, client_id="c")
+    ctx = SimpleNamespace(
+        request_context=SimpleNamespace(
+            lifespan_context=SimpleNamespace(
+                cluster_provider=SimpleNamespace(
+                    get_cluster=lambda _c: pytest.fail("must refuse before connecting")
+                ),
+                read_only_mode=False,
+            )
+        )
+    )
+    state_token = audit_state.install()
+    try:
+        with (
+            patch(
+                "cb_mcp.tools.operational.query.get_access_token", return_value=token
+            ),
+            patch(
+                "cb_mcp.tools.operational.query.get_audit_logger",
+                return_value=SimpleNamespace(active=True),
+            ),
+            pytest.raises(StatementScopeDeniedError),
+        ):
+            run_sql_plus_plus_query(ctx, "b", "s", "UPDATE users SET age = 25")
+
+        refusal = audit_state.current()["refusal"]
+    finally:
+        audit_state.reset(state_token)
+
+    assert refusal["event_id"] == StatementScopeDeniedError.audit_event.id
+    assert refusal["outcome"] == StatementScopeDeniedError.audit_outcome
+    assert refusal["reason"] == StatementScopeDeniedError.audit_reason
+    # The two fields only this gate contributes.
+    assert refusal["required_scope"] == "write"
+    assert refusal["statement_kind"]

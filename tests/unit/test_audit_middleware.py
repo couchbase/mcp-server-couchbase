@@ -571,7 +571,7 @@ async def test_withheld_or_unknown_tool_produces_no_record(tmp_path):
 
     Read-only mode and the disabled set both work by withholding the tool from
     registration, so a client is never told it exists and there is no refusal to
-    record — that was the product decision behind dropping event 57489. Emitting
+    record — which is why event 57489 does not exist. Emitting
     a tool-call record here would also assert an ``execution_error`` that never
     happened, because nothing ran. The enforced tool surface is captured once by
     the server-configuration record at startup instead.
@@ -928,3 +928,55 @@ async def test_an_oauth_caller_is_named_on_the_tool_call_record(tmp_path):
     # The cluster-side account is recorded separately and must not be mistaken
     # for the caller.
     assert calls[0]["cb_userid"] == "mcp_service"
+
+
+@pytest.mark.asyncio
+async def test_scope_denial_record_carries_client_id_scopes_and_required_scope(
+    tmp_path,
+):
+    """The three fields a SIEM rule reads off event 57377.
+
+    The sibling test above runs under stdio, where both token helpers return
+    None and ``as_dict`` drops the fields, and it passes its own
+    ``required_scope``, which suppresses the ``setdefault`` under test. All
+    three ``setdefault`` lines in the middleware could be deleted and it would
+    still pass. This one patches the token helpers and passes no
+    ``required_scope``, so each field has to be supplied by the middleware.
+    """
+    audit = _build_logger(tmp_path)
+    mcp = _server(audit)
+
+    @mcp.tool
+    def upsert_document_by_id(ctx: Context, bucket_name: str) -> str:
+        """denied before it runs"""
+        audit_state.record_refusal(
+            event_id=ScopeDeniedError.audit_event.id,
+            event_name=ScopeDeniedError.audit_event.event_name,
+            outcome=ScopeDeniedError.audit_outcome,
+            reason=ScopeDeniedError.audit_reason,
+        )
+        raise ScopeDeniedError("missing scope")
+
+    with (
+        patch(
+            "cb_mcp.audit.middleware.client_id_of_current_token",
+            return_value="agent-svc-7",
+        ),
+        patch(
+            "cb_mcp.audit.middleware.scopes_of_current_token",
+            return_value=["couchbase-mcp:read"],
+        ),
+    ):
+        async with Client(mcp) as client:
+            with pytest.raises(ToolError):
+                await client.call_tool("upsert_document_by_id", {"bucket_name": "b"})
+
+    denials = [
+        r for r in _records(audit) if r["id"] == AuditEvent.SCOPE_CHECK_DENIED.id
+    ]
+    assert len(denials) == 1
+    record = denials[0]
+    assert record["client_id"] == "agent-svc-7"
+    assert record["scopes"] == ["couchbase-mcp:read"]
+    # Derived from the tool's own class, not passed in: upsert is a write.
+    assert record["required_scope"] == "write"

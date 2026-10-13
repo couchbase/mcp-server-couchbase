@@ -198,6 +198,12 @@ def init_audit(config: ResolvedAuditConfig) -> AuditLogger:
     """Build and install the audit logger for this process."""
     global _active  # noqa: PLW0603
 
+    # One lifespan per process makes a second call unreachable today, but if it
+    # ever became reachable the old sink would keep running: its idle rotation
+    # would rename the live file out from under the new sink, whose records
+    # would then go to an unlinked inode and still be counted as written.
+    shutdown_audit()
+
     if not config.enabled or not config.sinks:
         _active = AuditLogger(config, sink=None)
         return _active
@@ -227,7 +233,28 @@ def init_audit(config: ResolvedAuditConfig) -> AuditLogger:
         return _active
 
     sink: AuditSinkProtocol = sinks[0] if len(sinks) == 1 else CompositeAuditSink(sinks)
-    sink.start()
+    try:
+        sink.start()
+    except Exception:
+        # Starting a writer thread can fail for reasons that have nothing to do
+        # with this server -- at a container's pids.max, Thread.start raises
+        # RuntimeError. Letting that propagate would abort startup because
+        # auditing could not start, which is the one outcome the design
+        # forbids. Close what did start so the console thread and the file
+        # handle do not leak, and run with auditing off.
+        logger.exception(
+            "Could not start the audit writer; the server will run with "
+            "auditing disabled. Audit records will NOT be written."
+        )
+        try:
+            sink.close()
+        except Exception:
+            logger.debug(
+                "Audit sink cleanup failed after a failed start", exc_info=True
+            )
+        _active = AuditLogger(replace(config, enabled=False), sink=None)
+        return _active
+
     _active = AuditLogger(config, sink=sink)
     # Only once auditing is actually running: a server with auditing off has no
     # reason to touch the process's signal disposition.

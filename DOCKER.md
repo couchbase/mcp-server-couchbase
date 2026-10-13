@@ -443,7 +443,7 @@ Records are JSON Lines, one immutable record per line, in the same field vocabul
 - **`CB_MCP_AUDIT_LOG_TOOL_ARGS`** — off by default, and warns at startup when enabled. There is no redaction in this release, so arguments are written verbatim, including full document bodies.
 - **Fail-open** — if the audit file cannot be written, the server keeps serving and records are dropped and counted. `get_server_configuration_status` reports the live `written` / `dropped` / `write_errors` counters.
 
-Auditing applies to the **operational** server. The `operational-insights` server accepts the same variables and reports them, but records nothing.
+Auditing applies to **both** servers. Each has its own Tier-2 event block, so an id names the server that emitted it: operational uses `0xF000` (61440), `operational-insights` `0x10000` (65536). The two share the core block `0xE000` (57344) for lifecycle, session, authorization and guardrail events.
 
 ```bash
 docker run --rm \

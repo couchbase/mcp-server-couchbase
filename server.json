@@ -883,7 +883,7 @@
         },
         {
           "name": "CB_MCP_AUDIT_LOG_ENABLED",
-          "description": "Enable audit logging. Audit output is a separate sink from the CB_MCP_LOG_* operational logs, with a stable schema, its own retention, and events that cannot be filtered out. Default is false. This server does not emit audit records in this release: the setting is accepted and reported so one configuration can be shared with the operational server, which does.",
+          "description": "Enable audit logging. Audit output is a separate sink from the CB_MCP_LOG_* operational logs, with a stable schema, its own retention, and events that cannot be filtered out. Default is false. This server emits audit records under its own event block, 0x10000 (65536), so an event id names the server that produced it.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
@@ -1830,7 +1830,7 @@
         },
         {
           "name": "CB_MCP_AUDIT_LOG_ENABLED",
-          "description": "Enable audit logging. Audit output is a separate sink from the CB_MCP_LOG_* operational logs, with a stable schema, its own retention, and events that cannot be filtered out. Default is false. This server does not emit audit records in this release: the setting is accepted and reported so one configuration can be shared with the operational server, which does.",
+          "description": "Enable audit logging. Audit output is a separate sink from the CB_MCP_LOG_* operational logs, with a stable schema, its own retention, and events that cannot be filtered out. Default is false. This server emits audit records under its own event block, 0x10000 (65536), so an event id names the server that produced it.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false

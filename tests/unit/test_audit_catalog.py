@@ -134,13 +134,16 @@ def test_ids_are_unique():
     assert len(ids) == len(set(ids))
 
 
-def test_removed_and_deferred_events_are_absent():
-    """Two PRD draft entries are deliberately not implemented.
+def test_events_named_in_the_prd_but_not_emitted_are_absent():
+    """Two ids the PRD names are deliberately not in the catalogue.
 
-    57489 (tool invocation blocked - disabled) was removed by product decision:
-    withheld tools are never registered, so the model is never told they exist
-    and there is no refusal to record. 57361 (session terminated) is on hold
-    because FastMCP exposes no session-end hook.
+    57489 (tool invocation blocked - disabled): withheld tools are never
+    registered, so the model is never told they exist and there is no refusal
+    to record. 57361 (session terminated): FastMCP exposes no session-end hook,
+    so the event cannot be emitted reliably.
+
+    Both must stay absent rather than be defined and never fired — an id in the
+    catalogue is an id a SIEM rule can be written against.
     """
     ids = {event.id for event in AuditEvent}
     assert 57489 not in ids
@@ -233,6 +236,9 @@ def test_slot_table_pins_the_shipped_numbers():
         "query": 3,
         "index": 4,
         "performance": 5,
+        # Both reuse retired slots, which is permitted only because neither
+        # retired category ever emitted a record. The allocation is contiguous
+        # across 0-7.
         "search": 6,
         "config": 7,
     }
@@ -245,7 +251,9 @@ def test_operational_insights_slots_match_the_shared_axis():
     A package omits the slots it has no tools for; it never renumbers.
     """
     oi = catalog.CATEGORY_SLOTS["operational_insights"]
-    assert oi == {"schema": 1, "query": 3, "index": 4, "config": 7}
+    # `cluster` carries no OI tool; it is allocated because it is the
+    # fail-closed category and every package must be able to resolve it.
+    assert oi == {"cluster": 0, "schema": 1, "query": 3, "index": 4, "config": 7}
     shared = catalog.CATEGORY_SLOTS["operational"]
     for category, slot in oi.items():
         assert shared[category] == slot, category
@@ -291,12 +299,20 @@ def test_next_free_slot_takes_the_lowest_never_allocated(monkeypatch):
 
 def test_next_free_slot_skips_retired_slots(monkeypatch):
     """Retired slots are not offered, even when reuse would be safe.
-    default path, and the day a slot *has* emitted the default would be wrong.
+
+    Reuse remains *permissible* for a slot that never emitted a record — the
+    rule in ``RETIRED_SLOTS`` says so, and both retired slots are in fact
+    reused. It is simply never *automatic*: reuse has to be chosen with the
+    evidence that the slot never emitted in front of you. Handing retired slots
+    back from a helper would make that the default path, and the day a slot
+    *has* emitted the default would be wrong.
     """
-    monkeypatch.setattr(catalog, "RETIRED_SLOTS", {"operational": {"withdrawn": 9}})
+    monkeypatch.setattr(catalog, "RETIRED_SLOTS", {"operational": {"withdrawn": 8}})
     monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset())
-    # 0-7 are live and 9 is retired, so the helper offers 8 and skips 9.
-    assert catalog.next_free_slot() == 8
+    # 0-7 are live and 8 is retired, so the helper must skip past it to 9.
+    # Retiring a slot *above* the first free one would make this pass
+    # whether or not RETIRED_SLOTS were consulted at all.
+    assert catalog.next_free_slot() == 9
 
 
 def test_permanently_reserved_slots_are_never_reallocated(monkeypatch):
@@ -337,61 +353,55 @@ def test_retired_categories_are_gone_but_their_slots_are_recorded():
             catalog.tool_call_event_id(name, "read")
 
 
-def test_a_slot_that_ever_emitted_is_never_reallocated():
-    """The one rule that outlives every revival.
+def test_a_slot_that_ever_emitted_is_never_reallocated(monkeypatch):
+    """The rule that governs slot reuse, exercised rather than assumed.
 
-    Both retired slots have now been revived -- 6 for `search`, 7 for
-    `config` -- so there is no longer a list of dead numbers to assert against.
-    What must still hold is the condition that made those revivals legitimate:
-    a slot may only be reused if no record was ever emitted against it.
+    Both retired slots are reused -- 6 by `search`, 7 by `config` -- so there
+    is no list of dead numbers to assert against. What must hold is the
+    condition that permits the reuse: a slot may only be reused if no record
+    was ever emitted against it.
 
-    PERMANENTLY_RESERVED_SLOTS is where a slot goes once it *has* emitted. It
-    is empty today because nothing has shipped. The day it is not, this test is
-    what stops one of its numbers being handed to a new category and making an
-    existing SIEM rule silently match an unrelated event.
+    PERMANENTLY_RESERVED_SLOTS is where a slot goes once it *has* emitted, and
+    it is empty today because nothing has shipped. Asserting against it as it
+    stands is vacuously true and would pass even if the rule were deleted, so
+    this test populates it with a slot that is live and checks the violation is
+    actually caught.
     """
+    live = catalog.CATEGORY_SLOTS["operational"]
+    occupied = live["kv"]
+
+    def reserved_slots_clash(reserved):
+        monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset(reserved))
+        return {
+            package: set(slots.values()) & catalog.PERMANENTLY_RESERVED_SLOTS
+            for package, slots in catalog.CATEGORY_SLOTS.items()
+        }
+
+    # The guard must fire when a slot that emitted is also live.
+    clashes = reserved_slots_clash({occupied})
+    assert clashes["operational"] == {occupied}
+
+    # And must be quiet for a slot nobody has allocated.
+    free = catalog.next_free_slot()
+    assert all(not c for c in reserved_slots_clash({free}).values())
+
+    # The real table, which must be clean.
+    monkeypatch.undo()
     for package, slots in catalog.CATEGORY_SLOTS.items():
-        clash = set(slots.values()) & catalog.PERMANENTLY_RESERVED_SLOTS
-        assert clash == set(), f"{package} reallocated slots that have emitted: {clash}"
-
-    shipped = json.loads(DESCRIPTOR_PATH.read_text(encoding="utf-8"))
-    dead_ids = {
-        base + catalog.READ_OFFSET + slot + delta
-        for base in catalog.SERVICE_PACKAGE_BLOCKS.values()
-        for slot in catalog.PERMANENTLY_RESERVED_SLOTS
-        for delta in (0, catalog.WRITE_DELTA)
-    }
-    assert {entry["id"] for entry in shipped["events"]} & dead_ids == set()
+        assert set(slots.values()) & catalog.PERMANENTLY_RESERVED_SLOTS == set(), (
+            package
+        )
 
 
-def test_every_revived_slot_was_one_that_never_emitted():
-    """Checks the revivals themselves, not just the rule.
-
-    A slot appearing in both RETIRED_SLOTS and CATEGORY_SLOTS is a revival.
-    Each one is only defensible because its old category never had a tool
-    classified to it, so no record for that id can exist in anyone's logs.
-    """
+def test_every_reused_slot_is_one_that_never_emitted():
+    """Checks the reuses themselves: both must be absent from the emitted set."""
     for package, retired in catalog.RETIRED_SLOTS.items():
         live = catalog.CATEGORY_SLOTS.get(package, {})
-        revived = set(retired.values()) & set(live.values())
-        assert revived == {6, 7}, revived
-        assert revived & catalog.PERMANENTLY_RESERVED_SLOTS == set()
-
-
-def test_the_revived_slot_never_emitted_under_its_old_meaning():
-    """The precondition for reusing slots 6 and 7, asserted rather than assumed.
-
-    Reallocating a slot that had ever emitted a record would make an existing
-    SIEM rule silently match a new, unrelated event. `analytics` was retired
-    with no tool ever classified to it, so no record for 61495 can exist in
-    anyone's logs -- which is the only reason `config` may have the number.
-    """
-    assert catalog.RETIRED_SLOTS["operational"]["vector"] == 6
-    assert catalog.RETIRED_SLOTS["operational"]["analytics"] == 7
+        reused = set(retired.values()) & set(live.values())
+        assert reused == {6, 7}, reused
+        assert reused & catalog.PERMANENTLY_RESERVED_SLOTS == set()
     assert catalog.CATEGORY_SLOTS["operational"]["search"] == 6
     assert catalog.CATEGORY_SLOTS["operational"]["config"] == 7
-    # Permanently reserved slots are the ones that *did* emit; neither is one.
-    assert {6, 7} & catalog.PERMANENTLY_RESERVED_SLOTS == set()
 
 
 def test_retirement_did_not_move_the_surviving_ids():
@@ -409,8 +419,7 @@ def test_a_new_category_takes_the_next_never_allocated_slot():
 def test_search_ids_are_the_shipped_numbers():
     """Pinned literally, like every other shipped id.
 
-    Search was moved into the revived slot 6 on 2026-10-12, from the slot 8 it
-    had held since 2026-09-29 without ever shipping.
+    Search occupies slot 6, one of the two reused from RETIRED_SLOTS.
     """
     assert tool_call_event_id("search", "read") == 61494
     assert tool_call_event_id("search", "write") == 61526

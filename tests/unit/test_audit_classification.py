@@ -18,8 +18,14 @@ from __future__ import annotations
 
 import pytest
 
-from cb_mcp.audit.catalog import CATEGORIES, SERVICE_PACKAGE_BLOCKS
+from cb_mcp.audit.catalog import (
+    CATEGORIES,
+    CATEGORY_SLOTS,
+    FAILSAFE_SLOT_REQUIRED,
+    SERVICE_PACKAGE_BLOCKS,
+)
 from cb_mcp.audit.classification import (
+    FAILSAFE_CATEGORY,
     TOOL_CLASSIFICATION,
     classify_tool,
     is_classified,
@@ -32,7 +38,7 @@ from cb_mcp.tools.operational_insights import ALL_TOOLS as OI_ALL_TOOLS
 from cb_mcp.tools.operational_insights import WRITE_TOOLS as OI_WRITE_TOOLS
 
 #: The operational package. Operational Insights has its own block and table
-#: since 2026-10-12; constants for it are defined alongside these.
+#: its own block and table; constants for it are defined alongside these.
 PACKAGE = "operational"
 
 #: Main collapsed the four per-area tool groups into read-only and write when
@@ -43,8 +49,7 @@ REGISTERED = {tool.__name__ for tool in ALL_TOOLS}
 WRITE_TOOL_NAMES = {tool.__name__ for tool in WRITE_TOOLS}
 READ_ONLY_NAMES = {tool.__name__ for tool in READ_ONLY_TOOLS}
 
-#: The Operational Insights server, audited under its own block since
-#: 2026-10-12.
+#: The Operational Insights server, audited under its own block.
 OI_REGISTERED = {tool.__name__ for tool in OI_ALL_TOOLS}
 OI_WRITE_NAMES = {tool.__name__ for tool in OI_WRITE_TOOLS}
 
@@ -155,9 +160,8 @@ def test_read_only_tools_are_classified_read(tool_name):
         ("get_cluster_tasks", 61488),
         ("get_cluster_health_snapshot", 61488),
         ("get_cluster_system_events", 61488),
-        # Moved into Cluster Setup & Health on 2026-10-12: both describe how a
-        # service is holding up rather than the query workload or the index
-        # inventory.
+        # Cluster Setup & Health: both describe how a service is holding up
+        # rather than the query workload or the index inventory.
         ("get_cluster_query_vitals", 61488),
         ("get_index_stats", 61488),
         # The server's own surface, split out of cluster on the same date.
@@ -183,7 +187,7 @@ def test_read_only_tools_are_classified_read(tool_name):
         # Search keeps its own category rather than folding into index: a
         # reviewer filtering on `index read` must not get FTS traffic, and
         # `run_search` is a query, not an index operation. Moved into the
-        # revived slot 6 on 2026-10-12 (was 61496/61528).
+        # slot 6.
         ("list_search_indexes", 61494),
         ("run_search", 61494),
         ("upsert_search_index", 61526),
@@ -213,6 +217,32 @@ def test_sqlpp_write_statement_moves_to_the_query_write_id():
     assert read_event.filterable is True
     # A successful mutation must not be filed under a filterable read id.
     assert write_event.filterable is False
+
+
+@pytest.mark.parametrize("package", sorted(SERVICE_PACKAGE_BLOCKS))
+def test_fail_closed_resolves_in_every_package(package):
+    """The fail-closed path must produce a record, not an exception.
+
+    An unclassified tool resolves to the failsafe category. If a package does
+    not allocate that category, the resolution raises -- and the audit
+    middleware swallows exceptions on purpose, so the call succeeds and
+    *nothing is recorded*. That is silence in the one case fail-closed exists
+    to make loud, and no counter moves: the operator sees dropped: 0.
+
+    """
+    event = resolve_tool_call_event("a_tool_nobody_classified", package=package)
+    assert event.operation_class == "write"
+    assert event.filterable is False
+    base = SERVICE_PACKAGE_BLOCKS[package]
+    assert base <= event.id < base + 4096
+    assert is_classified("a_tool_nobody_classified", package) is False
+
+
+def test_the_failsafe_category_is_allocated_everywhere():
+    """Pins the invariant the import-time guard enforces."""
+    assert FAILSAFE_CATEGORY == FAILSAFE_SLOT_REQUIRED
+    for package, slots in CATEGORY_SLOTS.items():
+        assert FAILSAFE_CATEGORY in slots, package
 
 
 def test_unknown_tool_fails_closed_to_a_non_filterable_write():

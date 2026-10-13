@@ -39,8 +39,7 @@ counted rather than applying back-pressure to tool execution.
 
 Runtime failures — disk full, permissions revoked, the file unmounted — are
 reported loudly to the operational log as errors and counted, and the server
-keeps serving. That is a deliberate product decision: audit unavailability
-should not become an outage.
+keeps serving: audit unavailability must not become an outage.
 """
 
 from __future__ import annotations
@@ -90,6 +89,15 @@ _POLL_SECONDS = 0.2
 
 _SENTINEL = object()
 
+
+class _WriterExitError(Exception):
+    """Raised inside the writer loop to end it deliberately.
+
+    Distinct from an error so the loop's blanket handler can tell "stop now"
+    from "something broke"; only the former ends the thread.
+    """
+
+
 #: Timestamp appended to a rotated file. Compact ISO 8601 basic format in UTC,
 #: to the microsecond: filename-safe on every platform and fixed-width. The
 #: sub-second part is not decoration — a small size cap rotates many times a
@@ -121,6 +129,12 @@ def _host_token(host: str | None = None) -> str:
     return token[:64] or "unknown"
 
 
+#: Filename used when CB_MCP_AUDIT_LOG_FILE_PATH names a directory rather
+#: than a file, so a trailing slash writes inside the directory instead of
+#: beside it.
+DEFAULT_AUDIT_FILENAME = "audit.log"
+
+
 def process_scoped_path(
     path: str | os.PathLike[str],
     pid: int | None = None,
@@ -137,6 +151,30 @@ def process_scoped_path(
     and a shared volume would otherwise give every container ``audit.1.log``.
     """
     resolved = Path(path)
+
+    # A path that names a directory rather than a file gets the default
+    # filename inside it. Two shapes reach here from an operator's
+    # CB_MCP_AUDIT_LOG_FILE_PATH, and without this guard each fails badly:
+    #
+    #   "/"              with_name() raises ValueError on a path with no name,
+    #                    and resolve_audit_config does not catch it, so the
+    #                    server would refuse to start -- contradicting this
+    #                    module's rule that a broken file sink degrades rather
+    #                    than aborts.
+    #   "/var/log/cbmcp/" would yield /var/log/cbmcp.<host>.<pid>, a *sibling*
+    #                    of the directory the operator mounted and chmod'ed
+    #                    rather than a file inside it. Silent, and the likelier
+    #                    typo of the two.
+    # The trailing separator has to be read off the original string: Path()
+    # normalises it away, so Path("/var/log/cbmcp/").name is already "cbmcp"
+    # and nothing downstream can tell it from a filename.
+    raw = os.fspath(path)
+    looks_like_a_directory = raw.endswith((os.sep, "/")) or (
+        os.altsep and raw.endswith(os.altsep)
+    )
+    if looks_like_a_directory or resolved.name == "" or resolved.is_dir():
+        resolved = resolved / DEFAULT_AUDIT_FILENAME
+
     actual_pid = os.getpid() if pid is None else pid
     scope = f"{_host_token(host)}.{actual_pid}"
     if resolved.suffix:
@@ -243,7 +281,22 @@ class _QueuedSink:
             # accounting for them.
             self._drain_remaining()
 
-        abandoned = self._queue.qsize()
+        # Drain rather than measure. qsize() only reads the queue, and on a
+        # timed-out join the writer is still alive -- which is the case this
+        # branch exists for. It would then pull these same records, fail to
+        # write them against a closed stream, and count them a second time: 500
+        # lost records reported as dropped: 1000. Since `dropped` is the only
+        # way an operator learns records were lost, a doubled figure is exactly
+        # what they would act on. Taking the items out makes the count exact
+        # and leaves the writer nothing to re-count.
+        abandoned = 0
+        while True:
+            try:
+                item = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if item is not _SENTINEL:
+                abandoned += 1
         if abandoned:
             # The join timed out on a wedged destination. Those records are
             # gone; say so, because an audit gap nobody can see is the one
@@ -284,6 +337,36 @@ class _QueuedSink:
     # -- writer thread ----------------------------------------------------
 
     def _run(self) -> None:
+        """Writer loop. Must not exit on an unexpected error.
+
+        Every exit from this method is permanent: :meth:`start` returns early
+        when ``self._thread is not None``, so nothing restarts the writer. An
+        exception escaping ``_write_batch`` or ``_on_idle`` therefore stops all
+        audit delivery for the life of the process, silently, with no counter
+        moving.
+
+        ``_write_batch`` guards the errors it expects (``OSError``,
+        ``ValueError``). The ones it cannot expect are what this wrapper is
+        for: ``sys.stderr`` is ``None`` under pythonw and under hosts that
+        detach stdio, so the console sink's ``stream.write`` raises
+        ``AttributeError`` -- and console is the default sink.
+        """
+        while True:
+            try:
+                self._run_once()
+            except _WriterExitError:
+                return
+            except Exception:  # the loop must outlive any error
+                # Already-dequeued records are gone; count them so the loss is
+                # visible rather than silent.
+                self._dropped += 1
+                self._log_failure(
+                    "audit writer hit an unexpected error; the record was "
+                    "dropped and the writer is continuing"
+                )
+
+    def _run_once(self) -> None:
+        """One iteration of the writer loop. Raises :class:`_WriterExitError` to stop."""
         while True:
             try:
                 item = self._queue.get(timeout=_POLL_SECONDS)
@@ -292,12 +375,12 @@ class _QueuedSink:
                 # which is what lets the thread finish when ``close`` could not
                 # post the sentinel into a full queue.
                 if self._closed.is_set():
-                    return
+                    raise _WriterExitError from None
                 self._on_idle()
                 continue
             if item is _SENTINEL:
                 self._drain_remaining()
-                return
+                raise _WriterExitError from None
             batch = [item]
             # Coalesce whatever else is already waiting into one write+flush.
             while len(batch) < _WRITE_BATCH:
@@ -308,7 +391,7 @@ class _QueuedSink:
                 if nxt is _SENTINEL:
                     self._write_batch(batch)
                     self._drain_remaining()
-                    return
+                    raise _WriterExitError from None
                 batch.append(nxt)
             self._write_batch(batch)
 
@@ -414,6 +497,16 @@ class ConsoleAuditSink(_QueuedSink):
         # Resolved per batch rather than held: pytest's capsys, and a host that
         # redirects output, both replace ``sys.stderr`` after construction.
         stream = self._stream if self._stream is not None else sys.stderr
+        if stream is None:
+            # sys.stderr is None under pythonw and under hosts that detach
+            # stdio. Without this the write raises AttributeError, which the
+            # except clause below does not cover; on the default sink that
+            # would take the writer thread down permanently.
+            self._dropped += len(lines)
+            self._log_failure(
+                f"no console stream available; dropped {len(lines)} audit record(s)"
+            )
+            return
         buffered = 0
         try:
             for line in lines:

@@ -506,7 +506,7 @@ def test_enabling_auditing_on_an_unaudited_server_warns(tmp_path, caplog):
     buried in the status tool.
 
     Every server this repository ships is audited since Operational Insights
-    got its own block on 2026-10-12, so the spec is synthesised rather than
+    has its own block, so the spec is synthesised rather than
     found. The warning is kept, and kept tested, because the next server added
     starts out exactly like this one — and the day it does, an operator must be
     told rather than left reading an empty file.

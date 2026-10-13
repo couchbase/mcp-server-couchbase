@@ -41,10 +41,10 @@ from .catalog import DEFAULT_SERVICE_PACKAGE, ToolCallEvent, tool_call_event
 #: and booking one server's tool against another's block would put records in a
 #: block whose ids mean something else.
 #:
-#: Only ``operational`` is populated today; the Operational Insights server is
-#: not audited (see :data:`cb_mcp.audit.catalog.DEFAULT_SERVICE_PACKAGE`).
-#: Adding it later means a table here and a block in
-#: :data:`~cb_mcp.audit.catalog.SERVICE_PACKAGE_BLOCKS`, and renumbers nothing.
+#: Both shipped servers have a table. Adding a further package means a table
+#: here and a block in :data:`~cb_mcp.audit.catalog.SERVICE_PACKAGE_BLOCKS`,
+#: and renumbers nothing. Every package must allocate the fail-closed
+#: category -- see :data:`~cb_mcp.audit.catalog.FAILSAFE_SLOT_REQUIRED`.
 #:
 #: Within a package, ordered by category to match the catalogue layout rather
 #: than alphabetically, so a reviewer can check a whole block in one pass.
@@ -76,9 +76,8 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "get_cluster_system_events": ("cluster", "read"),
         # Query-engine vitals (/admin/vitals) and GSI indexer stats. Both
         # describe how a *service* in the cluster is holding up rather than
-        # what a caller queried or which indexes exist, which is what Cluster
-        # Setup & Health means; get_cluster_query_vitals moved here from
-        # performance and get_index_stats from index on 2026-10-12.
+        # what a caller queried or which indexes exist, which is what this
+        # category covers.
         "get_cluster_query_vitals": ("cluster", "read"),
         "get_index_stats": ("cluster", "read"),
         # -- schema / discovery --------------------------------------------
@@ -111,12 +110,11 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "list_indexes": ("index", "read"),
         "get_index_advisor_recommendations": ("index", "read"),
         "create_index": ("index", "write"),
-        # The replacement for the deprecated create_index (#303), creating
-        # scalar *and* vector GSI indexes through SQL++. It takes the same id:
-        # both create a GSI index, and an id that changed when a tool was
-        # superseded would silently break every SIEM rule watching for index
-        # creation. The retired `vector` slot (6) is deliberately not revived
-        # for it — see catalog.next_free_slot.
+        # The replacement for the deprecated create_index, creating scalar
+        # *and* vector GSI indexes through SQL++. It takes the same id as the
+        # tool it supersedes: both create a GSI index, and an id that moved
+        # would silently break every SIEM rule watching for index creation.
+        # Vector index creation is an index write, not a category of its own.
         "create_query_index": ("index", "write"),
         "build_index": ("index", "write"),
         "drop_index": ("index", "write"),
@@ -128,12 +126,12 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "get_queries_using_primary_index": ("performance", "read"),
         "get_queries_not_using_covering_index": ("performance", "read"),
         "get_queries_not_selective": ("performance", "read"),
-        # The N1QL Admin REST API's active-request surface (#308). Booked as
+        # The N1QL Admin REST API's active-request surface. Booked as
         # performance rather than query: `query read` means "a caller ran a
         # statement", and a reviewer reconstructing what was executed must not
         # find listings of other callers' in-flight requests mixed into it.
-        # The vitals half of that API moved to cluster — it describes service
-        # health rather than the query workload.
+        # The vitals half of that API is a cluster read instead: it describes
+        # service health rather than the query workload.
         "get_active_queries": ("performance", "read"),
         # The first performance *write*, taking the id (61525) the catalogue
         # reserved when the category was allocated — a map entry, no new id and
@@ -144,10 +142,10 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # -- search (FTS) ------------------------------------------------------
         # Its own category rather than folded into index: run_search is a
         # query, so a reviewer filtering on `index read` should not get search
-        # traffic mixed in. FTS index management has since landed and takes the
-        # search *write* id (61528) that the catalogue already reserved — the
-        # extension point working as designed: a new tool is a map entry, not a
-        # new id and not a SIEM rule change.
+        # traffic mixed in. Index management for FTS takes the search *write*
+        # id (61526) the catalogue reserves — the extension point working as
+        # designed: a new tool is a map entry, not a new id and not a SIEM
+        # rule change.
         "list_search_indexes": ("search", "read"),
         "get_search_index_definition": ("search", "read"),
         "run_search": ("search", "read"),

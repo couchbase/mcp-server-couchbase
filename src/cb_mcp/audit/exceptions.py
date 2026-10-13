@@ -1,16 +1,14 @@
 """Typed exceptions for auditable MCP-layer refusals.
 
-Three semantically different refusals used to surface as a bare
-``PermissionError`` carrying only a human-readable message, and a read-only
-DML block surfaced as ``ValueError`` — the same type a malformed query raises.
-An audit middleware that assigned ``outcome``/``reason`` by matching on those
-message strings would silently mis-attribute records after the next copy edit,
-and a mis-attributed audit record is worse than a missing one.
+Each refusal below needs an ``outcome`` and a ``reason`` on its audit record.
+Deriving those by matching exception message strings would mis-attribute
+records after any copy edit, and a mis-attributed audit record is worse than a
+missing one, so each refusal carries its own type and its own metadata.
 
-Every class here **subclasses the exception type the call site raised before**,
-so existing ``pytest.raises`` assertions and any client-visible behaviour stay
-exactly as they were. The public message text is unchanged too; only the type
-is narrowed.
+Every class **subclasses the broader exception type its call site raises**
+(``PermissionError``, or ``ValueError`` for a read-only DML block), so callers
+catching the broad type are unaffected and the public message text is
+unchanged; only the type is narrowed.
 
 Note that FastMCP wraps a tool's exception in ``ToolError`` before it reaches
 middleware (the original is preserved on ``__cause__``). Middleware therefore

@@ -33,6 +33,7 @@ import io
 import json
 import os
 import re
+import sys
 import threading
 import time
 from pathlib import Path
@@ -1056,7 +1057,7 @@ def test_records_abandoned_at_shutdown_are_counted(tmp_path):
 
 
 def test_records_queued_before_start_are_not_silently_discarded(tmp_path):
-    """``emit`` before ``start`` used to be a no-op that lost records quietly."""
+    """``emit`` before ``start`` must not lose records quietly."""
     stream = io.StringIO()
     sink = ConsoleAuditSink(stream)
     # Deliberately no start().
@@ -1066,3 +1067,70 @@ def test_records_queued_before_start_are_not_silently_discarded(tmp_path):
     assert stream.getvalue() == '{"early":1}\n'
     assert sink.stats["written"] == 1
     assert sink.stats["dropped"] == 0
+
+
+class TestPathShapesAndWriterSurvival:
+    """Failure modes an operator cannot see from the outside.
+
+    Each would otherwise present as a server that refuses to start, records
+    written beside the mounted directory rather than inside it, a writer thread
+    that dies for good, or a loss figure reported at twice its real size.
+    """
+
+    @pytest.mark.parametrize(
+        "given",
+        ["/", "/var/log/cbmcp/", "logs/", "."],
+    )
+    def test_a_directory_shaped_path_resolves_inside_the_directory(self, given):
+        """A trailing slash must not produce a *sibling* of the directory.
+
+        Without the guard, /var/log/cbmcp/ resolves to
+        /var/log/cbmcp.<host>.<pid> -- next to the volume the operator mounted
+        and chmod'ed rather than in it, with no warning. "/" raises instead,
+        and nothing catches it, so a path typo would stop the server starting.
+        """
+        resolved = process_scoped_path(given, pid=7, host="h")
+        assert resolved.name.startswith("audit.")
+        assert resolved.suffix == ".log"
+        assert resolved.parent == Path(given.rstrip("/") or "/")
+
+    def test_a_file_shaped_path_is_left_alone(self):
+        assert process_scoped_path("/var/log/cbmcp/audit.log", pid=7, host="h") == Path(
+            "/var/log/cbmcp/audit.h.7.log"
+        )
+
+    def test_the_writer_survives_an_unexpected_error(self):
+        """Every exit from the writer loop is permanent: start() will not restart it.
+
+        sys.stderr is None under pythonw and under hosts that detach stdio, so
+        the console sink -- the default -- raised AttributeError, which was not
+        in its except clause. The thread died and all audit delivery stopped
+        for the process lifetime, silently.
+        """
+        sink = ConsoleAuditSink()
+        sink.start()
+        real = sys.stderr
+        sys.stderr = None
+        try:
+            for _ in range(3):
+                sink.emit('{"id": 1}')
+            _settle(sink)
+            assert sink._thread is not None and sink._thread.is_alive()
+            assert sink.stats["dropped"] == 3
+        finally:
+            sys.stderr = real
+            sink.close()
+
+    def test_abandoned_records_are_counted_once(self):
+        """dropped is the only signal that records were lost; 2x is actionable.
+
+        close() must drain the backlog rather than measure it with qsize().
+        On a timed-out join the writer is still running, so records left in the
+        queue would be pulled by it, fail against the closed stream, and be
+        counted a second time.
+        """
+        sink = ConsoleAuditSink()
+        for _ in range(5):
+            sink.emit('{"id": 1}')  # queued before start, so never written
+        sink.close()
+        assert sink.stats["dropped"] + sink.stats["written"] == 5

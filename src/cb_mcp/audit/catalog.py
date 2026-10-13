@@ -19,14 +19,13 @@ Events defined in code are the source of truth for the server. ``descriptor.json
 ships the same catalogue for operators and SIEM authors;
 ``tests/unit/test_audit_catalog.py`` asserts the two never drift.
 
-Two catalogue entries from the PRD draft are deliberately absent:
+Two catalogue entries named in the PRD are deliberately absent:
 
 * *tool invocation blocked (disabled)* — withheld and disabled tools are never
   registered with FastMCP, so the model is never told they exist and there is
-  no refusal to record. Removed by product decision on 2026-08-25.
+  no refusal to record.
 * *session terminated* — FastMCP 3.x exposes no session-end hook and a stdio
-  client simply closes the pipe, so the event could never be emitted reliably.
-  On hold by product decision.
+  client simply closes the pipe, so the event cannot be emitted reliably.
 """
 
 from __future__ import annotations
@@ -115,6 +114,9 @@ CATEGORY_SLOTS: dict[str, dict[str, int]] = {
         "query": 3,
         "index": 4,
         "performance": 5,
+        # The allocation is therefore contiguous across slots 0-7, with 8-15
+        # free. The block has no retired numbers left in reserve: once a
+        # category has emitted, its number is dead permanently.
         "search": 6,
         "config": 7,
     },
@@ -125,12 +127,37 @@ CATEGORY_SLOTS: dict[str, dict[str, int]] = {
     # against the other's block would put records under ids that mean a
     # different server.
     "operational_insights": {
+        # `cluster` carries no Operational Insights tool today. It is allocated
+        # anyway because it is the fail-closed category: an unclassified tool
+        # resolves to (cluster, write), and a package without the slot made
+        # that resolution raise. The raise was swallowed by the middleware's
+        # "auditing must never break a call" guard, so the call succeeded and
+        # *nothing was recorded* -- silence in the one case fail-closed exists
+        # to make loud. See FAILSAFE_SLOT_REQUIRED below.
+        "cluster": 0,
         "schema": 1,
         "query": 3,
         "index": 4,
         "config": 7,
     },
 }
+
+#: The category every package must allocate, whatever its tool surface.
+#:
+#: Kept here rather than in :mod:`cb_mcp.audit.classification` because this is
+#: the module that owns slot allocation, and the check below has to run where
+#: the tables are defined. classification.FAILSAFE_CATEGORY must equal it; a
+#: test asserts the two agree.
+FAILSAFE_SLOT_REQUIRED = "cluster"
+
+for _package, _slots in CATEGORY_SLOTS.items():
+    if FAILSAFE_SLOT_REQUIRED not in _slots:  # pragma: no cover - import guard
+        raise RuntimeError(
+            f"Service package {_package!r} does not allocate the fail-closed "
+            f"category {FAILSAFE_SLOT_REQUIRED!r}. An unclassified tool in that "
+            "package would raise inside the audit middleware, which swallows the "
+            "error, and the call would go unrecorded entirely."
+        )
 
 #: Slots retired from use, kept here so their history is visible — ``category
 #: -> n``, using the number the category held.
@@ -146,6 +173,11 @@ CATEGORY_SLOTS: dict[str, dict[str, int]] = {
 #: :func:`next_free_slot`'s reusable set.
 RETIRED_SLOTS: dict[str, dict[str, int]] = {
     "operational": {
+        # Neither ever had a tool classified to it, so neither number has
+        # appeared in a record. Both are reused in CATEGORY_SLOTS above, which
+        # that fact is what permits. The entries stay here because they record
+        # what each number has meant, and the invariant test reads them to
+        # check that a reused slot is one that never emitted.
         "vector": 6,
         "analytics": 7,
     },
@@ -189,14 +221,13 @@ def category_index(category: str, package: str = DEFAULT_SERVICE_PACKAGE) -> int
 def next_free_slot(package: str = DEFAULT_SERVICE_PACKAGE) -> int:
     """Return the slot a newly added category should take.
 
-    Returns the lowest **never-allocated** slot. Retired slots are deliberately
-    not offered, even the ones :data:`RETIRED_SLOTS` records as safe to reuse:
-    when the search category was added on 2026-09-29 the reusable slots 6 and 7
-    were declined in favour of slot 8, on the grounds that two dead numbers cost
-    nothing in a 16-slot block while a slot that has meant two different things
-    is a trap for anyone reading an old rule. Reuse remains permissible, but it
-    is a decision someone must take deliberately rather than inherit from a
-    helper.
+    Returns the lowest **never-allocated** slot. Retired slots are never
+    offered, even the ones :data:`RETIRED_SLOTS` marks as safe to reuse.
+
+    Reuse is permissible when the slot has never emitted a record, but it is
+    never automatic: it has to be chosen with that fact established, because
+    handing back a slot that *has* emitted would make an existing SIEM rule
+    silently match an unrelated event.
 
     Raises:
         ValueError: when the block's category template is exhausted. A new
@@ -377,8 +408,7 @@ _CATEGORY_LABELS: dict[str, str] = {
     "performance": "performance",
     # Labels are shared across packages, so a slot reads the same wherever it
     # appears. "config" covers the server's own status and configuration
-    # surface, which is MCP-level rather than cluster-level — the distinction
-    # that took it out of `cluster`.
+    # surface, which is MCP-level rather than cluster-level.
     "config": "config",
     "search": "search",
 }
@@ -447,9 +477,9 @@ def build_descriptor() -> dict:
     ]
     entries.sort(key=lambda entry: entry["id"])
     return {
-        # Kept for readers that expect a single value, and meaning what it
-        # always did: the package a build audits by default. The authoritative
-        # list is `service_packages`, and every tool-call entry names its own.
+        # A single value, for readers that expect one: the package this build
+        # audits by default. The authoritative list is `service_packages`, and
+        # every tool-call entry names its own.
         "service_package": DEFAULT_SERVICE_PACKAGE,
         "service_packages": sorted(SERVICE_PACKAGE_BLOCKS),
         "blocks": {"core": CORE_BLOCK, **SERVICE_PACKAGE_BLOCKS},

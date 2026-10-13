@@ -227,6 +227,15 @@
       "filterable": false
     },
     {
+      "id": 65584,
+      "name": "cluster read",
+      "description": "A cluster read operation was requested through a tool",
+      "category": "tool_call",
+      "service_package": "operational_insights",
+      "default_enabled": true,
+      "filterable": true
+    },
+    {
       "id": 65585,
       "name": "schema read",
       "description": "A schema read operation was requested through a tool",
@@ -261,6 +270,15 @@
       "service_package": "operational_insights",
       "default_enabled": true,
       "filterable": true
+    },
+    {
+      "id": 65616,
+      "name": "cluster write",
+      "description": "A cluster write operation was requested through a tool",
+      "category": "tool_call",
+      "service_package": "operational_insights",
+      "default_enabled": true,
+      "filterable": false
     },
     {
       "id": 65617,
