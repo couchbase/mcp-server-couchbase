@@ -25,6 +25,7 @@ from ...utils.cli import (
 )
 from ...utils.constants import (
     ALLOWED_OAUTH_ALGORITHMS,
+    ALLOWED_SESSION_POSTURES,
     ALLOWED_TRANSPORTS,
     DEFAULT_AUDIT_ENABLED,
     DEFAULT_AUDIT_FILE,
@@ -184,6 +185,24 @@ def transport_options(*, default_port: int) -> Callable:
             hidden=True,
         ),
     )
+
+
+session_posture_option = compose(
+    click.option(
+        "--session-posture",
+        "session_posture",
+        envvar="CB_MCP_SESSION_POSTURE",
+        type=click.Choice(ALLOWED_SESSION_POSTURES),
+        default=None,
+        help="Declare which deployment this is, so the server refuses to start "
+        "on a configuration that contradicts the declaration. 'workstation' "
+        "means a human is at the MCP client, which requires stdio. 'enterprise' "
+        "means an unattended service principal over a network transport, where "
+        "OAuth scopes rather than confirmation prompts are the control. Unset "
+        "means nothing is checked, which is the existing behaviour.",
+    ),
+)
+"""The declared shape of this deployment. Shared by every server; optional, and checked only when set."""
 
 
 tool_gating_options = compose(

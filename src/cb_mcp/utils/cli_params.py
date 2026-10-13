@@ -54,6 +54,7 @@ from ..core.cli.options import (
     logging_options,
     oauth_options,
     read_only_option,
+    session_posture_option,
     tool_gating_options,
     transport_options,
 )
@@ -71,6 +72,7 @@ from .logging import (
     configure_logging,
     get_resolved_logging_config,
 )
+from .posture import PostureConfigError, validate_posture
 from .query_limits import clamp_max_query_result_size
 
 __all__ = [
@@ -233,6 +235,23 @@ class GatingParams:
             ),
             max_query_result_size_requested=requested,
         )
+
+
+@dataclass(frozen=True)
+class PostureParams:
+    """``--session-posture``: which deployment this is, or ``None`` if undeclared.
+
+    One flag, and a group of its own rather than a field on
+    ``GatingParams``, because it is not gating: it decides nothing about
+    which tools load. It is a claim about the deployment that the other
+    stacks are then checked against (see ``cb_mcp.utils.posture``).
+    """
+
+    posture: str | None
+
+    @classmethod
+    def from_click(cls, params: Mapping[str, Any]) -> "PostureParams":
+        return cls(posture=params["session_posture"])
 
 
 @dataclass(frozen=True)
@@ -432,6 +451,7 @@ class CliParams:
     gating: GatingParams
     oauth: OAuthParams
     embedding: EmbeddingParams
+    posture: PostureParams
     #: Raw audit flags, resolved lazily by :attr:`audit`.
     audit_params: Mapping[str, Any] = field(default_factory=dict, repr=False)
     #: One-slot cache for :attr:`audit`. A list because this dataclass is
@@ -485,6 +505,7 @@ class CliParams:
             gating=GatingParams.from_click(params),
             oauth=OAuthParams.from_click(params),
             embedding=EmbeddingParams.from_click(params),
+            posture=PostureParams.from_click(params),
             # Carried raw, not resolved: see :attr:`audit` for why resolution
             # must happen after logging is configured. Narrowed to the audit
             # flags rather than the whole mapping, which would keep the cluster
@@ -515,6 +536,32 @@ class CliParams:
                 resource_name=spec.display_name,
             )
         except OAuthConfigError as e:
+            raise click.UsageError(str(e)) from e
+
+    def resolve_posture(
+        self, *, confirmation_required_tools: set[str], oauth_enabled: bool
+    ) -> str | None:
+        """The declared deployment posture, once the configuration agrees with it.
+
+        Needs the transport, OAuth's resolved state and the gated tool names
+        as well as the flag itself, which is why it lives here rather than on
+        ``PostureParams`` -- the same reason ``resolve_auth`` does. A
+        contradiction is translated into a Click error so the operator gets a
+        usage message rather than a traceback, also as ``resolve_auth`` does.
+
+        ``confirmation_required_tools`` is the resolved name set from gating,
+        not the string the operator typed: a name matching no tool has already
+        been dropped by then, so no start is refused over a typo with no
+        effect.
+        """
+        try:
+            return validate_posture(
+                self.posture.posture,
+                transport=self.transport.transport,
+                oauth_enabled=oauth_enabled,
+                confirmation_required_tools=confirmation_required_tools,
+            )
+        except PostureConfigError as e:
             raise click.UsageError(str(e)) from e
 
 
@@ -582,6 +629,7 @@ def build_settings(
     gated: GatedTools,
     oauth_enabled: bool,
     serving: ServingConfig,
+    posture: str | None,
 ) -> dict[str, Any]:
     """Assemble the ``settings`` mapping the whole runtime reads.
 
@@ -613,6 +661,10 @@ def build_settings(
             "disabled_tools": gated.disabled,
             "confirmation_required_tools": gated.confirmation_required,
             "operational_insights_query_result_max_size": cli.gating.max_query_result_size,
+            # The validated declaration, not the raw flag: reporting what was
+            # merely typed would put a posture in the support bundle that the
+            # server refused to start under.
+            "session_posture": posture,
         }
     )
     return settings
@@ -657,6 +709,10 @@ def server_options(
         oauth_options,
         audit_options,
         embedding_options,
+        # Appended last, deliberately: every existing row of --help keeps its
+        # position, so the historical ordering this factory exists to preserve
+        # is preserved by adding to it rather than inserting into it.
+        session_posture_option,
     )
 
 

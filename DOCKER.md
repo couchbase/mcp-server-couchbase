@@ -119,6 +119,7 @@ The most common variables are below. Every option — including logging rotation
 | `CB_MCP_WORKERS` | Worker processes for `http` (`operational` only) | `1` |
 | `CB_MCP_DISABLED_TOOLS` | Tools to hide — comma-separated list or a file path | |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | Tools that ask the user to confirm first — comma-separated list or a file path | |
+| `CB_MCP_SESSION_POSTURE` | `workstation` (stdio, a person present) or `enterprise` (network transport, OAuth, no confirmation prompts); startup fails on a contradiction | |
 | `CB_MCP_LOG_LEVEL` | `off`, `error`, `warning`, `info`, `debug` | `info` |
 | `CB_MCP_LOG_SINKS` | `stderr`, `file`, or both | `stderr` |
 | `CB_MCP_LOG_FILE` | Base path for log files when the `file` sink is on | `mcp_server.log` |

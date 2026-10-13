@@ -109,6 +109,13 @@
           "isSecret": false
         },
         {
+          "name": "CB_MCP_SESSION_POSTURE",
+          "description": "Declare the deployment: 'workstation' (a person at the client, stdio) or 'enterprise' (unattended service over a network transport with OAuth and no confirmation-required tools). The server refuses to start if the configuration contradicts it. Unset checks nothing.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
           "name": "CB_MCP_CONFIRMATION_REQUIRED_TOOLS",
           "description": "Comma-separated tool names that require user confirmation before execution. Also accepts a file path containing one tool name per line. Requires the MCP client to support elicitation.",
           "isRequired": false,
@@ -476,6 +483,14 @@
           "type": "named",
           "name": "--disabled-tools",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--session-posture",
+          "description": "Declare the deployment: 'workstation' (a person at the client, stdio) or 'enterprise' (unattended service over a network transport with OAuth and no confirmation-required tools). The server refuses to start if the configuration contradicts it. Unset checks nothing.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -886,6 +901,13 @@
           "isSecret": false
         },
         {
+          "name": "CB_MCP_SESSION_POSTURE",
+          "description": "Declare the deployment: 'workstation' (a person at the client, stdio) or 'enterprise' (unattended service over a network transport with OAuth and no confirmation-required tools). The server refuses to start if the configuration contradicts it. Unset checks nothing.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
           "name": "CB_MCP_CONFIRMATION_REQUIRED_TOOLS",
           "description": "Comma-separated tool names that require user confirmation before execution. Also accepts a file path containing one tool name per line. Requires the MCP client to support elicitation.",
           "isRequired": false,
@@ -1204,6 +1226,14 @@
           "type": "named",
           "name": "--disabled-tools",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--session-posture",
+          "description": "Declare the deployment: 'workstation' (a person at the client, stdio) or 'enterprise' (unattended service over a network transport with OAuth and no confirmation-required tools). The server refuses to start if the configuration contradicts it. Unset checks nothing.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -1553,6 +1583,13 @@
         {
           "name": "CB_MCP_DISABLED_TOOLS",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_SESSION_POSTURE",
+          "description": "Declare the deployment: 'workstation' (a person at the client, stdio) or 'enterprise' (unattended service over a network transport with OAuth and no confirmation-required tools). The server refuses to start if the configuration contradicts it. Unset checks nothing.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -1929,6 +1966,13 @@
         {
           "name": "CB_MCP_DISABLED_TOOLS",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_SESSION_POSTURE",
+          "description": "Declare the deployment: 'workstation' (a person at the client, stdio) or 'enterprise' (unattended service over a network transport with OAuth and no confirmation-required tools). The server refuses to start if the configuration contradicts it. Unset checks nothing.",
           "isRequired": false,
           "format": "string",
           "isSecret": false

@@ -60,6 +60,10 @@ _SAFE_SETTINGS_KEYS = (
     # The effective query result budget in bytes, already clamped. A plain
     # operational limit, not a credential.
     "operational_insights_query_result_max_size",
+    # An operator's declaration about the deployment, not a credential, and
+    # the first thing worth knowing when a support bundle shows a control
+    # that did not do what somebody expected.
+    "session_posture",
     "connection_string",
     # An identifier, not a credential. Reported verbatim to match
     # get_server_configuration_status, which already returns it to any
