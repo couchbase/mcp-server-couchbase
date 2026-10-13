@@ -212,6 +212,9 @@ def _build_server(
             # so a deployment relying on it keeps working and the checks see
             # the mode that will actually run.
             runtime_default_stateless=fastmcp.settings.stateless_http,
+            # Selection is kept per MCP session, so it cannot run stateless.
+            tool_set_selection=cli.gating.enable_tool_set_selection
+            and bool(spec.tool_sets),
         )
     except ServingConfigError as e:
         raise click.UsageError(str(e)) from e
@@ -234,6 +237,7 @@ def _build_server(
         audit_config=cli.audit,
         thread_pool_size=serving.thread_pool_size,
         send_startup_ping=send_startup_ping,
+        enable_tool_set_selection=cli.gating.enable_tool_set_selection,
     )
     return _BuiltServer(mcp, cli, spec, serving)
 

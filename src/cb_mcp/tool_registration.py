@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable, Mapping
 
 from .core.spec import Deployment, ServerSpec, ToolSet
+from .tools.selection import make_select_tool_sets
 from .utils.config import parse_tool_names
 from .utils.constants import LOGGER_NAMESPACE
 from .utils.elicitation import wrap_with_confirmation
@@ -97,6 +98,7 @@ def prepare_tools_for_registration(
     enforce_scopes: bool = False,
     deployment: Deployment | None = None,
     tool_sets: str | None = None,
+    enable_tool_set_selection: bool = False,
 ) -> tuple[list[Callable], set[str], set[str]]:
     """Prepare final tool list and confirmation configuration for registration.
 
@@ -146,6 +148,25 @@ def prepare_tools_for_registration(
     # When read_only_mode is True, write tools (KV, collection management, and
     # index management) are not loaded.
     tools = spec.tools.tools_for(read_only_mode=read_only_mode)
+
+    if enable_tool_set_selection and spec.tool_sets:
+        # Added to the list BEFORE the disabled, confirmation, deployment and
+        # scope steps below, so every operator control applies to it exactly as
+        # it does to any other tool: ``--disabled-tools select_tool_sets``
+        # removes it, ``--confirmation-required-tools select_tool_sets`` gates
+        # it, and the scope check wraps it. It is built per spec and added only
+        # when the operator opts in, so a deployment that leaves selection off
+        # registers exactly the tools it does today and every count is
+        # untouched.
+        #
+        # It is deliberately absent from TOOL_CLASSIFICATION. That table is
+        # asserted to cover the package's registered tool list exactly, and
+        # this tool is not in that list. So it takes classification's
+        # fail-closed path and is recorded as a non-filterable write, which is
+        # the correct reading of it in audit terms regardless: it changes which
+        # tools the session offers, so no deployment should be able to filter
+        # the record of it away.
+        tools = [*tools, make_select_tool_sets(spec)]
 
     loaded_tool_names = {tool.__name__ for tool in tools}
 
