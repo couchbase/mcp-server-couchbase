@@ -27,6 +27,7 @@ index_name there stays a plausible, not necessarily-existing, name.
 from __future__ import annotations
 
 import json
+import random
 
 import pytest
 
@@ -43,15 +44,47 @@ from accuracy.sdk.client import AccuracyTestingClient
 from accuracy.sdk.runner import SetupHook
 from accuracy.sdk.types import ExpectedToolCall
 
+_VECTOR_DIMENSION = 1536
+# Empirically the minimum that reliably clears Couchbase's IVF centroid
+# training floor (32 centroids by default) for an immediate (non-deferred)
+# vector index build -- fewer qualifying vectors than centroids fails the
+# build outright with ErrTraining.
+_PROBE_DOC_COUNT = 50
 
-def _create_vector_index(
-    bucket: str, scope: str, collection: str, index_name: str
+
+def _seed_vector_index(
+    bucket: str, scope: str, collection: str, index_name: str, doc_prefix: str
 ) -> SetupHook:
-    """Return a hook that creates a real (built) Composite Vector Index on
-    `embedding`, so run_vector_query's list_indexes-first guidance has a
-    real `similarity` to read instead of finding nothing."""
+    """Return a hook that seeds real embedding-bearing documents and then
+    creates a built Composite Vector Index on them.
+
+    A Composite/Hyperscale Vector Index build trains IVF centroids from the
+    collection's actual vectors -- creating one with deferred=False (needed
+    so run_vector_query's list_indexes-first guidance finds it `online`,
+    not just `deferred`) against a collection with no matching vectors
+    fails outright with ErrTraining ("fewer qualifying vectors than
+    centroids"). _PROBE_DOC_COUNT throwaway documents with a real
+    `embedding` float array give it enough vectors to train on.
+    """
 
     async def _hook(client: AccuracyTestingClient) -> None:
+        rng = random.Random(1234567)
+        for i in range(_PROBE_DOC_COUNT):
+            await client.call_tool_silent(
+                "upsert_document_by_id",
+                {
+                    "bucket_name": bucket,
+                    "scope_name": scope,
+                    "collection_name": collection,
+                    "document_id": f"{doc_prefix}_{i}",
+                    "document_content": {
+                        "type": doc_prefix,
+                        "embedding": [
+                            rng.uniform(-1, 1) for _ in range(_VECTOR_DIMENSION)
+                        ],
+                    },
+                },
+            )
         await client.call_tool_silent(
             "create_query_index",
             {
@@ -61,7 +94,7 @@ def _create_vector_index(
                 "index_name": index_name,
                 "index_type": "composite_vector",
                 "vector_field": "embedding",
-                "dimension": 1536,
+                "dimension": _VECTOR_DIMENSION,
                 "similarity": "COSINE",
                 "deferred": False,
             },
@@ -71,9 +104,10 @@ def _create_vector_index(
 
 
 def _drop_vector_index(
-    bucket: str, scope: str, collection: str, index_name: str
+    bucket: str, scope: str, collection: str, index_name: str, doc_prefix: str
 ) -> SetupHook:
-    """Return a hook that drops the GSI vector index (silently, best-effort)."""
+    """Return a hook that drops the vector index and its probe documents
+    (silently, best-effort)."""
 
     async def _hook(client: AccuracyTestingClient) -> None:
         await client.call_tool_silent(
@@ -86,6 +120,16 @@ def _drop_vector_index(
                 "ignore_if_not_exists": True,
             },
         )
+        for i in range(_PROBE_DOC_COUNT):
+            await client.call_tool_silent(
+                "delete_document_by_id",
+                {
+                    "bucket_name": bucket,
+                    "scope_name": scope,
+                    "collection_name": collection,
+                    "document_id": f"{doc_prefix}_{i}",
+                },
+            )
 
     return _hook
 
@@ -93,11 +137,12 @@ def _drop_vector_index(
 def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]:
     index_name = "product_vector_index"
     gsi_vector_index_name = "acc_vec_idx_embedding"
-    seed_gsi_vector_index = _create_vector_index(
-        bucket, scope, collection, gsi_vector_index_name
+    gsi_probe_doc_prefix = "acc_vec_probe"
+    seed_gsi_vector_index = _seed_vector_index(
+        bucket, scope, collection, gsi_vector_index_name, gsi_probe_doc_prefix
     )
     drop_gsi_vector_index = _drop_vector_index(
-        bucket, scope, collection, gsi_vector_index_name
+        bucket, scope, collection, gsi_vector_index_name, gsi_probe_doc_prefix
     )
     seed_fts_vector_index = seed_fts_index(bucket, scope, collection, index_name)
     drop_fts_vector_index = drop_fts_index(bucket, scope, index_name)
