@@ -1,17 +1,17 @@
 """Accuracy tests for the Operational Insights async query lifecycle.
 
 Covers:
-  - oi_get_async_query_results
-  - oi_discard_async_query_results
-  - oi_cancel_async_query
+  - operational_insights_get_async_query_results
+  - operational_insights_discard_async_query_results
+  - operational_insights_cancel_async_query
 
 These three are stateful in a way the other OI tools are not: each takes a
-``query_handle`` that only exists after ``oi_run_query_async`` has actually
+``query_handle`` that only exists after ``operational_insights_run_query_async`` has actually
 started a query on the server. So a case here cannot be a pure prompt — the
 handle has to be minted first and then named in the prompt.
 
 How that is done: the test body starts the query itself (via
-``oi_run_query_async`` through ``call_tool_silent``, so starting it is not
+``operational_insights_run_query_async`` through ``call_tool_silent``, so starting it is not
 scored as a model tool call), reads back the handle, and only then builds the
 ``AccuracyCase`` with that handle interpolated into the prompt. The case is
 therefore constructed per-test rather than in a fixture.
@@ -103,7 +103,8 @@ def _discard_handle(holder: _Handle) -> SetupHook:
         if not holder.seeded:
             return
         await client.call_tool_silent(
-            "oi_discard_async_query_results", {"query_handle": holder.value}
+            "operational_insights_discard_async_query_results",
+            {"query_handle": holder.value},
         )
 
     return _hook
@@ -139,7 +140,7 @@ async def _score_handle_case(
 
     async with accuracy_client() as client:
         start = await client.call_tool_silent(
-            "oi_run_query_async", {"statement": statement}
+            "operational_insights_run_query_async", {"statement": statement}
         )
         handle = _extract_handle(start)
         if not handle:
@@ -211,7 +212,7 @@ async def _await_ready(
     """
     for _ in range(attempts):
         result = await client.call_tool_silent(
-            "oi_get_async_query_results", {"query_handle": handle}
+            "operational_insights_get_async_query_results", {"query_handle": handle}
         )
         for block in getattr(result, "content", None) or []:
             text = getattr(block, "text", None)
@@ -241,7 +242,7 @@ async def test_oi_get_async_query_results_accuracy(
     commit_sha: str,
 ) -> None:
     await _score_handle_case(
-        test_id="oi_get_async_query_results",
+        test_id="operational_insights_get_async_query_results",
         prompt_template=(
             "I started an async SQL++ query earlier and its query handle is "
             f"'{_PLACEHOLDER}'. Check whether it has finished and, if it has, "
@@ -249,7 +250,7 @@ async def test_oi_get_async_query_results_accuracy(
         ),
         expected_tools=[
             ExpectedToolCall(
-                tool_name="oi_get_async_query_results",
+                tool_name="operational_insights_get_async_query_results",
                 parameters={"query_handle": Matcher.string()},
             ),
         ],
@@ -275,7 +276,7 @@ async def test_oi_discard_async_query_results_accuracy(
 ) -> None:
     """Discard, not cancel: the prompt says the query has already finished."""
     await _score_handle_case(
-        test_id="oi_discard_async_query_results",
+        test_id="operational_insights_discard_async_query_results",
         prompt_template=(
             f"My async query with handle '{_PLACEHOLDER}' has already finished "
             "and I've read everything I need from it. Free its results on the "
@@ -283,13 +284,13 @@ async def test_oi_discard_async_query_results_accuracy(
         ),
         expected_tools=[
             ExpectedToolCall(
-                tool_name="oi_discard_async_query_results",
+                tool_name="operational_insights_discard_async_query_results",
                 parameters={"query_handle": Matcher.string()},
             ),
             # Checking status first is a reasonable way to confirm it really
             # has finished, so it is allowed but not required.
             ExpectedToolCall(
-                tool_name="oi_get_async_query_results",
+                tool_name="operational_insights_get_async_query_results",
                 parameters=Matcher.any_value(),
                 optional=True,
             ),
@@ -320,14 +321,14 @@ async def test_oi_cancel_async_query_accuracy(
     only the described state distinguishes them.
     """
     await _score_handle_case(
-        test_id="oi_cancel_async_query",
+        test_id="operational_insights_cancel_async_query",
         prompt_template=(
             f"The async query with handle '{_PLACEHOLDER}' is still running and "
             "I don't want to wait for it any more. Stop it."
         ),
         expected_tools=[
             ExpectedToolCall(
-                tool_name="oi_cancel_async_query",
+                tool_name="operational_insights_cancel_async_query",
                 parameters={"query_handle": Matcher.string()},
             ),
         ],

@@ -1,9 +1,9 @@
 """Accuracy tests for the Operational Insights query tools.
 
 Covers:
-  - oi_run_query_sync (plain SELECT, count, and the copy_to_* export form)
-  - oi_explain_query
-  - oi_run_query_async
+  - operational_insights_run_query_sync (plain SELECT, count, and the copy_to_* export form)
+  - operational_insights_explain_query
+  - operational_insights_run_query_async
 
 The async *lifecycle* tools (get results / discard / cancel) take a
 ``query_handle`` that only exists after a real async query has been started,
@@ -53,7 +53,7 @@ def _contains(*needles: str) -> Matcher:
 
 
 def _plan_statement(collection: str) -> Matcher:
-    """Match the statement handed to ``oi_explain_query``.
+    """Match the statement handed to ``operational_insights_explain_query``.
 
     Two conditions in one predicate (the Matcher hierarchy has ``any_of`` but
     no ``all_of``, so they are combined here rather than composed): it must
@@ -114,7 +114,7 @@ def _build_cases(database: str, scope: str, collection: str) -> list[AccuracyCas
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="oi_run_query_sync",
+                    tool_name="operational_insights_run_query_sync",
                     parameters={
                         "statement": _contains("select", collection),
                         # The export arguments must stay unset for a plain read:
@@ -144,7 +144,7 @@ def _build_cases(database: str, scope: str, collection: str) -> list[AccuracyCas
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="oi_run_query_sync",
+                    tool_name="operational_insights_run_query_sync",
                     parameters={"statement": _contains("count", collection)},
                 ),
             ],
@@ -152,14 +152,14 @@ def _build_cases(database: str, scope: str, collection: str) -> list[AccuracyCas
             cleanup=cleanup,
         ),
         AccuracyCase(
-            test_id="oi_explain_query",
+            test_id="operational_insights_explain_query",
             prompt=(
                 f"Show me the query execution plan for SELECT * FROM {ks} "
                 "WHERE rating > 3 — just the plan, do not actually run it."
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="oi_explain_query",
+                    tool_name="operational_insights_explain_query",
                     parameters={
                         "statement": _plan_statement(collection),
                     },
@@ -181,7 +181,7 @@ def _build_cases(database: str, scope: str, collection: str) -> list[AccuracyCas
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="oi_run_query_async",
+                    tool_name="operational_insights_run_query_async",
                     parameters={"statement": _contains("select", collection)},
                 ),
             ],
@@ -191,9 +191,9 @@ def _build_cases(database: str, scope: str, collection: str) -> list[AccuracyCas
         # The export form. Scored on the copy_to_* arguments rather than on
         # which of the two query tools carries them: both accept the same
         # export parameters, and their docstrings actively point at each
-        # other ("For a large export prefer oi_run_query_async" /
+        # other ("For a large export prefer operational_insights_run_query_async" /
         # "This is the right tool for a large export"), so either choice is
-        # correct here. Pinning this to oi_run_query_sync would be testing a
+        # correct here. Pinning this to operational_insights_run_query_sync would be testing a
         # coin flip the docs deliberately leave open.
         #
         # Both tools are mocked: a real COPY ... TO needs an external S3 link
@@ -215,8 +215,8 @@ def _build_cases(database: str, scope: str, collection: str) -> list[AccuracyCas
             seed=seed,
             cleanup=cleanup,
             mocks={
-                "oi_run_query_sync": _mock_export,
-                "oi_run_query_async": _mock_export,
+                "operational_insights_run_query_sync": _mock_export,
+                "operational_insights_run_query_async": _mock_export,
             },
         ),
     ]
@@ -234,7 +234,7 @@ def query_cases(oi_database: str, oi_scope: str):
 QUERY_CASE_IDS = [
     "oi_run_query_sync_select",
     "oi_run_query_sync_count",
-    "oi_explain_query",
+    "operational_insights_explain_query",
     "oi_run_query_async_long_running",
 ]
 
@@ -308,7 +308,11 @@ async def test_oi_export_accuracy(
     export_calls = [
         call
         for call in result.actual_calls
-        if call.tool_name in ("oi_run_query_sync", "oi_run_query_async")
+        if call.tool_name
+        in (
+            "operational_insights_run_query_sync",
+            "operational_insights_run_query_async",
+        )
     ]
     assert export_calls, f"No query tool was called at all. Actual: {actual}"
 

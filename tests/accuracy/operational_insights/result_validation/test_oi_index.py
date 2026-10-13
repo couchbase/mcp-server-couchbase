@@ -1,6 +1,6 @@
 """Result-validation evals for the OI index tools (LLM-as-judge).
 
-Covers oi_list_indexes and oi_create_index.
+Covers operational_insights_list_indexes and operational_insights_create_index.
 
 Both cases have real ground truth rather than being faithfulness-only: the
 seed creates an index with a known name on a known collection, so "what

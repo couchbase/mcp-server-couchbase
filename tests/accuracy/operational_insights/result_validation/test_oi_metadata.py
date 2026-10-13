@@ -1,7 +1,7 @@
 """Result-validation evals for the OI metadata tools (LLM-as-judge).
 
-Covers oi_get_databases_in_cluster, oi_get_scopes_in_database,
-oi_get_collections_in_scope and oi_get_schema_for_collection.
+Covers operational_insights_get_databases_in_cluster, operational_insights_get_scopes_in_database,
+operational_insights_get_collections_in_scope and operational_insights_get_schema_for_collection.
 
 Each case seeds its own scope/collection (and, for the schema case,
 documents with known fields), so the correct answer is deterministic ground

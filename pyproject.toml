@@ -28,7 +28,7 @@ dependencies = [
     # specifier (e.g. "couchbase-operational-insights>=1.0.0,<2.0.0") and
     # remove [tool.hatch.metadata] allow-direct-references below.
     "couchbase-operational-insights @ git+https://github.com/couchbaselabs/operational-insights-python-client.git",
-    "openai>=2.0.0,<3.0.0",
+    "openai>=3.0.0,<4.0.0",
 ]
 
 [project.urls]
@@ -48,7 +48,7 @@ dev = [
     "pytest-asyncio==1.4.0",
     "pytest-cov>=7.0.0",
 ]
-# Only needed for run_vector_search / run_search_vector_search with
+# Only needed for run_vector_query / run_vector_search with
 # EMBEDDING_PROVIDER=bedrock — openai/couchbase/voyage use the openai SDK (a
 # core dependency, see above); cohere still hand-rolls its request via httpx
 # (already a transitive dependency via fastmcp) since its wire format isn't
@@ -181,7 +181,7 @@ markers = [
     "accuracy: AI-in-the-loop accuracy tests. Require OPENAI_API_KEY and a Couchbase cluster.",
     "result_eval: LLM-as-judge answer-correctness evals. Require OPENAI_API_KEY and a Couchbase cluster.",
     "perf: In-process performance tests. Opt-in via CB_MCP_PERF=1; not run in CI.",
-    "operational_insights: Tests that need a live Couchbase Operational Insights cluster. Auto-applied by directory; skipped unless CB_OI_CONNECTION_STRING is set.",
+    "operational_insights: Tests that need a live Couchbase Operational Insights cluster. Auto-applied by directory; skipped unless CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING is set.",
 ]
 
 # Build system configuration

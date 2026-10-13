@@ -23,6 +23,8 @@ from .constants import (
     INDEX_REST_PORT_TLS,
     MANAGEMENT_REST_PORT_PLAIN,
     MANAGEMENT_REST_PORT_TLS,
+    QUERY_REST_PORT_PLAIN,
+    QUERY_REST_PORT_TLS,
 )
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.utils.index_utils")
@@ -52,6 +54,61 @@ def clean_index_definition(definition: Any) -> str:
     if isinstance(definition, str) and definition:
         return definition.strip('"').replace('\\"', '"')
     return ""
+
+
+def classify_vector_index(
+    index_key: list[Any] | None, definition: str | None
+) -> tuple[bool, str | None]:
+    """Classify a ``system:indexes`` row as vector or not, and if vector, as
+    "hyperscale" or "composite" -- with zero extra round trips, unlike the
+    REST-only path's getIndexStatus fields.
+
+    ``index_key`` alone is NOT enough to distinguish Hyperscale from
+    Composite: a Composite Vector Index created with zero scalar keys has
+    exactly one entry (the vector key alone), identical in shape to a
+    Hyperscale index's ``index_key`` -- confirmed live against Couchbase
+    Server 8.0.1. The reliable signal is ``definition``'s leading keyword
+    instead: a Hyperscale index is always created via the dedicated
+    ``CREATE VECTOR INDEX ...`` statement, a Composite index always via
+    ``CREATE INDEX ... VECTOR ... USING GSI`` -- which statement form was
+    used is definitionally what selects the type (there is no ``USING
+    HYPERSCALE`` clause), so this holds for every case, not just the common
+    one. (Couchbase reformats some casing when it echoes the definition back
+    -- e.g. ``ON`` becomes lowercase ``on`` -- so the check is
+    case-insensitive.)
+
+    Returns ``(is_vector, vector_type)`` -- ``vector_type`` is None when not
+    a vector index.
+    """
+    keys = [str(key) for key in (index_key or [])]
+    if not any(key.rstrip().upper().endswith("VECTOR") for key in keys):
+        return False, None
+    is_hyperscale = bool(definition) and definition.strip().lower().startswith(
+        "create vector index"
+    )
+    return True, ("hyperscale" if is_hyperscale else "composite")
+
+
+def normalize_vector_type(index_type: str | None) -> str:
+    """Map the REST getIndexStatus endpoint's ``indexType`` field to
+    "hyperscale" or "composite".
+
+    Confirmed against a live Couchbase Server 8.0.1 cluster: a Hyperscale
+    Vector Index reports ``indexType="Hyperscale Vector Index"``, while a
+    Composite Vector Index reports its storage engine name instead (e.g.
+    "plasma") -- the exact same generic value an ordinary scalar GSI index
+    would report, with no distinct vector-aware label at all. So "composite"
+    never actually appears in this field. By elimination, any confirmed
+    vector index (``isVectorIndex`` True) whose ``indexType`` doesn't mention
+    "hyperscale" IS a Composite Vector Index -- those are the only two vector
+    index shapes in Couchbase 8.0. Callers must only call this once is_vector
+    is already known to be True; it never returns "unknown" itself -- that
+    outcome belongs to the caller, for when it couldn't reach this field at
+    all (e.g. REST unavailable), not for an ambiguous value here.
+    """
+    if index_type and "hyperscale" in index_type.lower():
+        return "hyperscale"
+    return "composite"
 
 
 def _raw_fallback(idx: dict[str, Any], reason: str) -> dict[str, Any]:
@@ -127,6 +184,7 @@ def process_index_data_from_rest_api(
 
     name = idx.get("indexName") or idx.get("name")
     raw_definition = idx["definition"]
+    is_vector = bool(idx.get("isVectorIndex", False))
 
     index_info: dict[str, Any] = {
         "name": name,
@@ -134,7 +192,12 @@ def process_index_data_from_rest_api(
         "status": idx["status"],
         "isPrimary": bool(idx.get("isPrimary", False)),
         "bucket": idx["bucket"],
+        "is_vector": is_vector,
     }
+    if is_vector:
+        # getIndexStatus already reports isVectorIndex/indexType directly --
+        # no extra round trip needed on this path.
+        index_info["vector_type"] = normalize_vector_type(idx.get("indexType"))
 
     if "scope" in idx:
         index_info["scope"] = idx["scope"]
@@ -173,8 +236,11 @@ def process_index_data_from_query(
         return _raw_fallback(idx, warning)
 
     metadata = idx["metadata"]
+    is_vector, vector_type = classify_vector_index(
+        idx.get("index_key"), metadata["definition"]
+    )
 
-    return {
+    index_info: dict[str, Any] = {
         "name": idx["name"],
         "definition": metadata["definition"],
         "status": idx["state"],
@@ -183,7 +249,11 @@ def process_index_data_from_query(
         "collection": idx["collection"],
         "isPrimary": bool(idx.get("is_primary", False)),
         "lastScanTime": metadata["last_scan_time"],
+        "is_vector": is_vector,
     }
+    if is_vector:
+        index_info["vector_type"] = vector_type
+    return index_info
 
 
 def _build_query_params(
@@ -415,6 +485,48 @@ def resolve_management_endpoints(cluster: Any, connection_string: str) -> list[s
     # ordinary deployment even though it cannot cover a remapped one.
     is_tls = connection_string.lower().startswith("couchbases://")
     port = MANAGEMENT_REST_PORT_TLS if is_tls else MANAGEMENT_REST_PORT_PLAIN
+    return [
+        f"{_bracket_ipv6(host)}:{port}"
+        for host in extract_hosts_from_connection_string(connection_string)
+    ]
+
+
+def resolve_query_endpoints(cluster: Any, connection_string: str) -> list[str]:
+    """List the cluster's query-service endpoints as ``host:port``.
+
+    The N1QL query service serves both the client query protocol and the
+    ``/admin/*`` endpoints on the same port, so wherever the SDK can reach the
+    query service for a SQL++ request is also where its admin API lives.
+    Mirrors ``resolve_management_endpoints``: uses ``ping`` (cheap, limited to
+    the query service) rather than ``diagnostics`` (which only reports sockets
+    already open, and a freshly opened cluster has none), falling back to the
+    connection string's hosts on the default port when the SDK reports
+    nothing.
+
+    Unlike the management endpoint, every node that comes back here matters:
+    ``/admin/vitals`` and ``/admin/active_requests`` are answered per node, so
+    callers should query every endpoint this returns rather than the first
+    one that works.
+    """
+    endpoints: list[str] = []
+    try:
+        report = json.loads(
+            cluster.ping(PingOptions(service_types=[ServiceType.Query])).as_json()
+        )
+        for endpoint in report.get("services", {}).get("query", []):
+            remote = endpoint.get("remote")
+            if remote and remote not in endpoints:
+                endpoints.append(remote)
+    except Exception as e:
+        logger.warning(f"Could not ping the query service: {e}")
+
+    if endpoints:
+        return endpoints
+
+    # Nothing to go on — assume the default port, which is right for an
+    # ordinary deployment even though it cannot cover a remapped one.
+    is_tls = connection_string.lower().startswith("couchbases://")
+    port = QUERY_REST_PORT_TLS if is_tls else QUERY_REST_PORT_PLAIN
     return [
         f"{_bracket_ipv6(host)}:{port}"
         for host in extract_hosts_from_connection_string(connection_string)

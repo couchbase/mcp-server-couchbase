@@ -1,15 +1,15 @@
-"""Unit tests for the vector search tools (run_vector_search, run_search_vector_search).
+"""Unit tests for the vector search tools (run_vector_query, run_vector_search).
 
 Covers:
-- run_vector_search: SQL++ query construction (named-parameter vector,
+- run_vector_query: SQL++ query construction (named-parameter vector,
   distance_metric/select_fields/where interpolation, Composite vs Hyperscale
   arity), embedding-provider resolution and failure handling, the
   num_probes/rerank/top_n_scan all-or-nothing guard, cluster-connection-
   failure propagation vs. everything-else returning tool_error.
-- run_search_vector_search: VectorQuery/VectorSearch/SearchRequest
+- run_vector_search: VectorQuery/VectorSearch/SearchRequest
   construction, hybrid (scalar_query present) vs. vector-only branching,
   cluster-level vs. scoped search branching, the bucket/scope invalid-combo
-  guard, and the same raise-vs-error-dict split as run_vector_search.
+  guard, and the same raise-vs-error-dict split as run_vector_query.
 
 Follows tests/unit/operational/test_fts_tools_unit.py's pattern: a fake
 Context via SimpleNamespace (tools only touch ctx through patched
@@ -26,7 +26,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from cb_mcp.tools.operational.vector_search import (
-    run_search_vector_search,
+    run_vector_query,
     run_vector_search,
 )
 from cb_mcp.utils.operational.embeddings import EmbeddingConfigError
@@ -62,12 +62,12 @@ def _patch_embedding(
                 yield mock
 
 
-class TestRunVectorSearchValidation:
+class TestRunVectorQueryValidation:
     """Guards that fire before any cluster/embedding call."""
 
     def test_partial_hyperscale_params_is_error(self) -> None:
         ctx = _make_ctx()
-        result = run_vector_search(
+        result = run_vector_query(
             ctx,
             "b",
             "s",
@@ -92,7 +92,7 @@ class TestRunVectorSearchValidation:
             ),
             pytest.raises(Exception, match="cluster down"),
         ):
-            run_vector_search(
+            run_vector_query(
                 ctx,
                 "b",
                 "s",
@@ -115,7 +115,7 @@ class TestRunVectorSearchValidation:
             ),
             pytest.raises(Exception, match="no bucket 'b'"),
         ):
-            run_vector_search(
+            run_vector_query(
                 ctx,
                 "b",
                 "s",
@@ -126,7 +126,7 @@ class TestRunVectorSearchValidation:
             )
 
 
-class TestRunVectorSearchQueryConstruction:
+class TestRunVectorQueryConstruction:
     """SQL++ built against a GSI vector index, embedding-provider driven."""
 
     def _cluster_with_scope_query(self, rows):
@@ -149,7 +149,7 @@ class TestRunVectorSearchQueryConstruction:
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
             _patch_embedding(vector=[0.1, 0.2, 0.3]),
         ):
-            result = run_vector_search(
+            result = run_vector_query(
                 ctx,
                 "b",
                 "s",
@@ -190,7 +190,7 @@ class TestRunVectorSearchQueryConstruction:
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
             _patch_embedding(),
         ):
-            run_vector_search(
+            run_vector_query(
                 ctx,
                 "b",
                 "s",
@@ -218,7 +218,7 @@ class TestRunVectorSearchQueryConstruction:
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
             _patch_embedding(),
         ):
-            run_vector_search(
+            run_vector_query(
                 ctx,
                 "b",
                 "s",
@@ -247,7 +247,7 @@ class TestRunVectorSearchQueryConstruction:
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
             _patch_embedding(),
         ):
-            result = run_vector_search(
+            result = run_vector_query(
                 ctx, "b", "s", "c", "embedding", "query", distance_metric="l2_squared"
             )
 
@@ -269,7 +269,7 @@ class TestRunVectorSearchQueryConstruction:
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
             _patch_embedding(),
         ):
-            result = run_vector_search(
+            result = run_vector_query(
                 ctx, "b", "s", "c", "embedding", "query", distance_metric="l2_squared"
             )
 
@@ -290,7 +290,7 @@ class TestRunVectorSearchQueryConstruction:
                 )
             ),
         ):
-            result = run_vector_search(
+            result = run_vector_query(
                 ctx, "b", "s", "c", "embedding", "query", distance_metric="l2_squared"
             )
 
@@ -298,10 +298,10 @@ class TestRunVectorSearchQueryConstruction:
         assert "EMBEDDING_PROVIDER" in result["error"]
 
 
-class TestRunSearchVectorSearchValidation:
+class TestRunVectorSearchValidation:
     def test_bucket_without_scope_is_error(self) -> None:
         ctx = _make_ctx()
-        result = run_search_vector_search(
+        result = run_vector_search(
             ctx, "idx1", "embedding", "query text", bucket_name="b"
         )
         assert result["success"] is False
@@ -312,7 +312,7 @@ class TestRunSearchVectorSearchValidation:
         than silently becoming a vector-only search that still claims
         is_hybrid=True (the truthy-vs-is-not-None mismatch this guards)."""
         ctx = _make_ctx()
-        result = run_search_vector_search(
+        result = run_vector_search(
             ctx, "idx1", "embedding", "query text", scalar_query={}
         )
         assert result["success"] is False
@@ -320,9 +320,7 @@ class TestRunSearchVectorSearchValidation:
 
     def test_empty_prefilter_is_rejected(self) -> None:
         ctx = _make_ctx()
-        result = run_search_vector_search(
-            ctx, "idx1", "embedding", "query text", prefilter={}
-        )
+        result = run_vector_search(ctx, "idx1", "embedding", "query text", prefilter={})
         assert result["success"] is False
         assert "prefilter" in result["error"]
 
@@ -336,7 +334,7 @@ class TestRunSearchVectorSearchValidation:
             ),
             pytest.raises(Exception, match="cluster down"),
         ):
-            run_search_vector_search(ctx, "idx1", "embedding", "query text")
+            run_vector_search(ctx, "idx1", "embedding", "query text")
 
     def test_bucket_connection_failure_propagates(self) -> None:
         """Same class of problem as an unreachable cluster -- must raise,
@@ -352,12 +350,12 @@ class TestRunSearchVectorSearchValidation:
             ),
             pytest.raises(Exception, match="no bucket 'b'"),
         ):
-            run_search_vector_search(
+            run_vector_search(
                 ctx, "idx1", "embedding", "query text", bucket_name="b", scope_name="s"
             )
 
 
-class TestRunSearchVectorSearchConstruction:
+class TestRunVectorSearchConstruction:
     def _make_search_result(self, rows=None):
         result = MagicMock()
         result.rows.return_value = rows or []
@@ -385,7 +383,7 @@ class TestRunSearchVectorSearchConstruction:
             patch(f"{_MODULE}.SearchOptions") as mock_options,
             _patch_embedding(vector=[0.1, 0.2]),
         ):
-            result = run_search_vector_search(ctx, "idx1", "embedding", "find widgets")
+            result = run_vector_search(ctx, "idx1", "embedding", "find widgets")
 
         mock_vq.assert_called_once_with(
             "embedding", [0.1, 0.2], num_candidates=10, prefilter=None
@@ -421,7 +419,7 @@ class TestRunSearchVectorSearchConstruction:
             patch(f"{_MODULE}.RawQuery") as mock_raw_query,
             _patch_embedding(vector=[0.1, 0.2]),
         ):
-            result = run_search_vector_search(
+            result = run_vector_search(
                 ctx,
                 "idx1",
                 "embedding",
@@ -455,7 +453,7 @@ class TestRunSearchVectorSearchConstruction:
             patch(f"{_MODULE}.RawQuery") as mock_raw_query,
             _patch_embedding(),
         ):
-            result = run_search_vector_search(
+            result = run_vector_search(
                 ctx,
                 "idx1",
                 "embedding",
@@ -494,7 +492,7 @@ class TestRunSearchVectorSearchConstruction:
             patch(f"{_MODULE}.RawQuery") as mock_raw_query,
             _patch_embedding(),
         ):
-            result = run_search_vector_search(
+            result = run_vector_search(
                 ctx,
                 "idx1",
                 "embedding",
@@ -527,7 +525,7 @@ class TestRunSearchVectorSearchConstruction:
             patch(f"{_MODULE}.SearchOptions") as mock_options,
             _patch_embedding(),
         ):
-            run_search_vector_search(
+            run_vector_search(
                 ctx, "idx1", "embedding", "query", bucket_name="b", scope_name="s"
             )
 
@@ -544,7 +542,7 @@ class TestRunSearchVectorSearchConstruction:
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             _patch_embedding(side_effect=RuntimeError("upstream 500")),
         ):
-            result = run_search_vector_search(ctx, "idx1", "embedding", "query")
+            result = run_vector_search(ctx, "idx1", "embedding", "query")
 
         assert result["success"] is False
         assert "upstream 500" in result["error"]

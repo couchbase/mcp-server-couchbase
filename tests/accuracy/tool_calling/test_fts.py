@@ -1,11 +1,11 @@
 """Accuracy tests for the FTS tools.
 
 Covers:
-  - list_fts_indexes (no filter, bucket+scope filter)
-  - get_fts_index_definition
-  - run_fts_query (normal query, explain=True)
+  - list_search_indexes (no filter, bucket+scope filter)
+  - get_search_index_definition
+  - run_search (normal query, explain=True)
   - Disambiguation: a full-text relevance-search prompt should select
-    run_fts_query rather than run_sql_plus_plus_query's SEARCH() function.
+    run_search rather than run_sql_plus_plus_query's SEARCH() function.
 """
 
 from __future__ import annotations
@@ -39,11 +39,11 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
 
     cases.append(
         AccuracyCase(
-            test_id="list_fts_indexes_no_filter",
+            test_id="list_search_indexes_no_filter",
             prompt="List every Search (full-text search) index in the cluster.",
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="list_fts_indexes",
+                    tool_name="list_search_indexes",
                     parameters={
                         "bucket_name": _optional(),
                         "scope_name": _optional(),
@@ -57,14 +57,14 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
 
     cases.append(
         AccuracyCase(
-            test_id="list_fts_indexes_scoped",
+            test_id="list_search_indexes_scoped",
             prompt=(
                 f"List the Search indexes defined in scope '{scope}' of bucket "
                 f"'{bucket}'."
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="list_fts_indexes",
+                    tool_name="list_search_indexes",
                     parameters={
                         "bucket_name": bucket,
                         "scope_name": scope,
@@ -78,14 +78,14 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
 
     cases.append(
         AccuracyCase(
-            test_id="get_fts_index_definition",
+            test_id="get_search_index_definition",
             prompt=(
                 f"Show me the full definition of the Search index named "
                 f"'{index_name}' in scope '{scope}' of bucket '{bucket}'."
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="get_fts_index_definition",
+                    tool_name="get_search_index_definition",
                     parameters={
                         "index_name": index_name,
                         "bucket_name": bucket,
@@ -100,7 +100,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
 
     cases.append(
         AccuracyCase(
-            test_id="run_fts_query",
+            test_id="run_search",
             prompt=(
                 f"Using the Search index '{index_name}' in scope '{scope}' of "
                 f"bucket '{bucket}', run a search query that matches all "
@@ -108,7 +108,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="run_fts_query",
+                    tool_name="run_search",
                     parameters={
                         "index_name": index_name,
                         "bucket_name": bucket,
@@ -124,7 +124,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
 
     cases.append(
         AccuracyCase(
-            test_id="run_fts_query_explain",
+            test_id="run_search_explain",
             prompt=(
                 f"Explain the execution plan for a match_all query against the "
                 f"Search index '{index_name}' in scope '{scope}' of bucket "
@@ -132,7 +132,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="run_fts_query",
+                    tool_name="run_search",
                     parameters={
                         "index_name": index_name,
                         "bucket_name": bucket,
@@ -149,7 +149,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
 
     cases.append(
         AccuracyCase(
-            test_id="run_fts_query_over_sql_plus_plus",
+            test_id="run_search_over_sql_plus_plus",
             prompt=(
                 f"Search the '{index_name}' Search index in scope '{scope}' of "
                 f"bucket '{bucket}' for documents whose text fuzzily matches "
@@ -157,7 +157,7 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="run_fts_query",
+                    tool_name="run_search",
                     parameters={
                         "index_name": index_name,
                         "bucket_name": bucket,
@@ -180,12 +180,12 @@ def fts_cases(test_bucket: str, test_scope: str, test_collection: str):
 
 
 FTS_CASE_IDS = [
-    "list_fts_indexes_no_filter",
-    "list_fts_indexes_scoped",
-    "get_fts_index_definition",
-    "run_fts_query",
-    "run_fts_query_explain",
-    "run_fts_query_over_sql_plus_plus",
+    "list_search_indexes_no_filter",
+    "list_search_indexes_scoped",
+    "get_search_index_definition",
+    "run_search",
+    "run_search_explain",
+    "run_search_over_sql_plus_plus",
 ]
 
 

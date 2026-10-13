@@ -28,11 +28,11 @@ from contextlib import asynccontextmanager
 
 import pytest
 from _test_env import (
-    build_oi_env,
-    get_oi_test_collection,
-    get_oi_test_database,
-    get_oi_test_scope,
-    oi_env_available,
+    build_operational_insights_env,
+    get_operational_insights_test_collection,
+    get_operational_insights_test_database,
+    get_operational_insights_test_scope,
+    operational_insights_env_available,
 )
 from mcp import ClientSession, StdioServerParameters, stdio_client
 
@@ -60,7 +60,7 @@ def pytest_collection_modifyitems(config, items):
             "Set CB_OI_CONNECTION_STRING/CB_OI_USERNAME/CB_OI_PASSWORD."
         )
     )
-    available = oi_env_available()
+    available = operational_insights_env_available()
     for item in items:
         path = str(item.fspath).replace(os.sep, "/")
         if _OI_ACCURACY_DIR not in path:
@@ -74,7 +74,7 @@ def pytest_collection_modifyitems(config, items):
 
 #: Fallback keyspace for the cases that need a collection of real documents
 #: they did not create themselves — currently only the schema-inference ones,
-#: since ``oi_get_schema_for_collection`` samples actual document content.
+#: since ``operational_insights_get_schema_for_collection`` samples actual document content.
 #:
 #: travel-sample is the sample dataset the OI docs walk you through loading,
 #: and ``inventory.airline`` is its most stable collection: a flat, fully
@@ -96,12 +96,12 @@ TRAVEL_SAMPLE_COLLECTION = "airline"
 
 @pytest.fixture()
 def oi_database() -> str:
-    return get_oi_test_database()
+    return get_operational_insights_test_database()
 
 
 @pytest.fixture()
 def oi_scope() -> str:
-    return get_oi_test_scope()
+    return get_operational_insights_test_scope()
 
 
 @pytest.fixture()
@@ -112,7 +112,7 @@ def oi_collection() -> str | None:
     back"; cases that just need *a* populated collection should use
     ``schema_keyspace`` instead.
     """
-    return get_oi_test_collection()
+    return get_operational_insights_test_collection()
 
 
 @pytest.fixture()
@@ -126,7 +126,11 @@ def schema_keyspace(oi_collection: str | None) -> tuple[str, str, str]:
     cluster.
     """
     if oi_collection:
-        return get_oi_test_database(), get_oi_test_scope(), oi_collection
+        return (
+            get_operational_insights_test_database(),
+            get_operational_insights_test_scope(),
+            oi_collection,
+        )
     return (
         TRAVEL_SAMPLE_DATABASE,
         TRAVEL_SAMPLE_SCOPE,
@@ -167,7 +171,7 @@ async def _create_oi_mcp_session() -> AsyncIterator[ClientSession]:
     from the accuracy tier would pull in that package's collection hooks.
     The spawn itself is four lines, so it is duplicated rather than shared.
     """
-    env = build_oi_env()
+    env = build_operational_insights_env()
     params = StdioServerParameters(
         command=sys.executable,
         args=["-m", "mcp_server", "operational-insights"],

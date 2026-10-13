@@ -2,18 +2,18 @@
 Integration tests for fts.py (FTS/Search) tools.
 
 Tests for:
-- list_fts_indexes (cluster-level and scope-level listing)
-- get_fts_index_definition (single-index full definition)
-- run_fts_query (query mode and explain mode via explain=True)
-- upsert_fts_index / drop_fts_index (create/update/drop, cluster- and
+- list_search_indexes (cluster-level and scope-level listing)
+- get_search_index_definition (single-index full definition)
+- run_search (query mode and explain mode via explain=True)
+- upsert_search_index / drop_search_index (create/update/drop, cluster- and
   scope-level, exercised through the MCP tools themselves)
 
 The list/get/query fixtures below still seed/drop their Search indexes
 directly via the Couchbase Python SDK rather than through
-upsert_fts_index/drop_fts_index, mirroring how ``test_index.py``'s local
+upsert_search_index/drop_search_index, mirroring how ``test_index.py``'s local
 ``_create_index``/``_drop_index`` helpers work: keeping fixture setup on the
 raw SDK keeps those tests' data independent of the write tools under test
-elsewhere in this module. The upsert_fts_index/drop_fts_index tests
+elsewhere in this module. The upsert_search_index/drop_search_index tests
 themselves call the MCP tools directly, with SDK-direct cleanup as a
 fallback in case a tool call fails mid-test.
 """
@@ -206,7 +206,7 @@ def seeded_fts_index() -> Iterator[dict[str, Any]]:
 @pytest.fixture(scope="module")
 def seeded_cluster_level_fts_index() -> Iterator[dict[str, str]]:
     """Create a cluster-level (legacy) Search index for the duration of the
-    module, and drop it afterward. Ensures test_list_fts_indexes_no_filters
+    module, and drop it afterward. Ensures test_list_search_indexes_no_filters
     always has a cluster-level index to find instead of skipping.
 
     The index deliberately matches **zero documents**: it is only ever listed,
@@ -265,13 +265,13 @@ def seeded_cluster_level_fts_index() -> Iterator[dict[str, str]]:
 
 
 @pytest.mark.asyncio
-async def test_list_fts_indexes_no_filters(
+async def test_list_search_indexes_no_filters(
     seeded_cluster_level_fts_index: dict[str, str],
 ) -> None:
     """No-filter call must return cluster-level (legacy) indexes only, and
     must surface the seeded cluster-level index."""
     async with create_mcp_session() as session:
-        response = await session.call_tool("list_fts_indexes", arguments={})
+        response = await session.call_tool("list_search_indexes", arguments={})
         payload = extract_payload(response)
 
     assert isinstance(payload, list)
@@ -283,13 +283,13 @@ async def test_list_fts_indexes_no_filters(
 
 
 @pytest.mark.asyncio
-async def test_list_fts_indexes_by_bucket_and_scope(
+async def test_list_search_indexes_by_bucket_and_scope(
     seeded_fts_index: dict[str, Any],
 ) -> None:
     """Filtering by bucket_name + scope_name must return the seeded index."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "list_fts_indexes",
+            "list_search_indexes",
             arguments={
                 "bucket_name": seeded_fts_index["bucket_name"],
                 "scope_name": seeded_fts_index["scope_name"],
@@ -306,14 +306,14 @@ async def test_list_fts_indexes_by_bucket_and_scope(
 
 
 @pytest.mark.asyncio
-async def test_list_fts_indexes_by_bucket_only(
+async def test_list_search_indexes_by_bucket_only(
     seeded_fts_index: dict[str, Any],
 ) -> None:
     """Filtering by bucket_name only must enumerate across all scopes and
     still surface the seeded index."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "list_fts_indexes",
+            "list_search_indexes",
             arguments={"bucket_name": seeded_fts_index["bucket_name"]},
         )
         payload = extract_payload(response)
@@ -324,12 +324,12 @@ async def test_list_fts_indexes_by_bucket_only(
 
 
 @pytest.mark.asyncio
-async def test_list_fts_indexes_scope_without_bucket_returns_error() -> None:
+async def test_list_search_indexes_scope_without_bucket_returns_error() -> None:
     """scope_name without bucket_name must be rejected with a descriptive
     error entry, not a raised MCP error."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "list_fts_indexes", arguments={"scope_name": get_test_scope()}
+            "list_search_indexes", arguments={"scope_name": get_test_scope()}
         )
         payload = extract_payload(response)
 
@@ -338,14 +338,14 @@ async def test_list_fts_indexes_scope_without_bucket_returns_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_fts_index_definition_scope_level(
+async def test_get_search_index_definition_scope_level(
     seeded_fts_index: dict[str, Any],
 ) -> None:
     """Fetching the seeded scope-level index must return its definition with
     native nested dicts for params (not JSON-encoded strings)."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "get_fts_index_definition",
+            "get_search_index_definition",
             arguments={
                 "index_name": seeded_fts_index["index_name"],
                 "bucket_name": seeded_fts_index["bucket_name"],
@@ -362,12 +362,12 @@ async def test_get_fts_index_definition_scope_level(
 
 
 @pytest.mark.asyncio
-async def test_get_fts_index_definition_partial_pair_returns_error() -> None:
+async def test_get_search_index_definition_partial_pair_returns_error() -> None:
     """Passing only bucket_name (no scope_name) must return a descriptive
     error dict, not a raised MCP error."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "get_fts_index_definition",
+            "get_search_index_definition",
             arguments={"index_name": "whatever", "bucket_name": "b"},
         )
         payload = extract_payload(response)
@@ -377,14 +377,14 @@ async def test_get_fts_index_definition_partial_pair_returns_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_fts_index_definition_not_found_returns_error(
+async def test_get_search_index_definition_not_found_returns_error(
     seeded_fts_index: dict[str, Any],
 ) -> None:
     """Looking up a nonexistent index name must return an error dict
     rather than raising or returning None."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "get_fts_index_definition",
+            "get_search_index_definition",
             arguments={
                 "index_name": f"does_not_exist_{uuid.uuid4().hex[:8]}",
                 "bucket_name": seeded_fts_index["bucket_name"],
@@ -400,17 +400,17 @@ async def test_get_fts_index_definition_not_found_returns_error(
 def _assert_query_succeeded(payload: object) -> dict[str, Any]:
     """Fail with the tool's own error message rather than a bare KeyError.
 
-    run_fts_query reports Search-service failures as {"error": ...}, so
+    run_search reports Search-service failures as {"error": ...}, so
     indexing into a success key first turns a real, readable server error
     (e.g. "pindex not available") into an opaque KeyError.
     """
     assert isinstance(payload, dict), f"Expected a dict payload, got: {payload!r}"
-    assert "error" not in payload, f"run_fts_query failed: {payload['error']}"
+    assert "error" not in payload, f"run_search failed: {payload['error']}"
     return payload
 
 
 @pytest.mark.asyncio
-async def test_run_fts_query_match_all(seeded_fts_index: dict[str, Any]) -> None:
+async def test_run_search_match_all(seeded_fts_index: dict[str, Any]) -> None:
     """A match_all query against the seeded index must return real hits with
     a well-formed shape.
 
@@ -419,7 +419,7 @@ async def test_run_fts_query_match_all(seeded_fts_index: dict[str, Any]) -> None
     Note this deliberately does not assert *which* document comes back first:
     the index covers the whole test collection, which in CI holds ~1500
     travel-sample documents, so match_all returns arbitrary ones.
-    test_run_fts_query_matches_seeded_document covers document identity.
+    test_run_search_matches_seeded_document covers document identity.
     """
     assert seeded_fts_index["indexed"], (
         f"Search index never picked up the seeded document within "
@@ -429,7 +429,7 @@ async def test_run_fts_query_match_all(seeded_fts_index: dict[str, Any]) -> None
 
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "run_fts_query",
+            "run_search",
             arguments={
                 "index_name": seeded_fts_index["index_name"],
                 "bucket_name": seeded_fts_index["bucket_name"],
@@ -449,7 +449,7 @@ async def test_run_fts_query_match_all(seeded_fts_index: dict[str, Any]) -> None
 
 
 @pytest.mark.asyncio
-async def test_run_fts_query_matches_seeded_document(
+async def test_run_search_matches_seeded_document(
     seeded_fts_index: dict[str, Any],
 ) -> None:
     """Querying the seeded document's unique marker must return exactly that
@@ -463,7 +463,7 @@ async def test_run_fts_query_matches_seeded_document(
 
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "run_fts_query",
+            "run_search",
             arguments={
                 "index_name": seeded_fts_index["index_name"],
                 "bucket_name": seeded_fts_index["bucket_name"],
@@ -479,10 +479,10 @@ async def test_run_fts_query_matches_seeded_document(
 
 
 @pytest.mark.asyncio
-async def test_run_fts_query_explain_default_limit(
+async def test_run_search_explain_default_limit(
     seeded_fts_index: dict[str, Any],
 ) -> None:
-    """run_fts_query with explain=True and no limit must default to 1 and
+    """run_search with explain=True and no limit must default to 1 and
     return an explanation for the single returned hit."""
     assert seeded_fts_index["indexed"], (
         f"Search index never picked up the seeded document within "
@@ -492,7 +492,7 @@ async def test_run_fts_query_explain_default_limit(
 
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "run_fts_query",
+            "run_search",
             arguments={
                 "index_name": seeded_fts_index["index_name"],
                 "bucket_name": seeded_fts_index["bucket_name"],
@@ -514,14 +514,14 @@ async def test_run_fts_query_explain_default_limit(
 
 
 @pytest.mark.asyncio
-async def test_list_fts_indexes_entries_have_expected_keys(
+async def test_list_search_indexes_entries_have_expected_keys(
     seeded_fts_index: dict[str, Any],
 ) -> None:
-    """Schema contract: every list_fts_indexes entry must carry the keys
+    """Schema contract: every list_search_indexes entry must carry the keys
     our summary formatter promises, so an SDK-shape change is caught early."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "list_fts_indexes",
+            "list_search_indexes",
             arguments={
                 "bucket_name": seeded_fts_index["bucket_name"],
                 "scope_name": seeded_fts_index["scope_name"],
@@ -545,7 +545,7 @@ async def test_list_fts_indexes_entries_have_expected_keys(
 
 
 # ---------------------------------------------------------------------------
-# upsert_fts_index / drop_fts_index
+# upsert_search_index / drop_search_index
 # ---------------------------------------------------------------------------
 
 # Minimal, cheap-to-serve mappings: they deliberately match zero documents
@@ -598,9 +598,9 @@ def _minimal_scope_level_fts_index_params(
 
 
 @pytest.mark.asyncio
-async def test_upsert_and_drop_fts_index_cluster_level_round_trip() -> None:
-    """upsert_fts_index creates a cluster-level index that
-    get_fts_index_definition can then see, and drop_fts_index removes it
+async def test_upsert_and_drop_search_index_cluster_level_round_trip() -> None:
+    """upsert_search_index creates a cluster-level index that
+    get_search_index_definition can then see, and drop_search_index removes it
     again — the full write-tool round trip through the MCP server itself."""
     bucket_name = require_test_bucket()
     index_name = f"test_fts_upsert_cluster_idx_{uuid.uuid4().hex[:8]}"
@@ -608,7 +608,7 @@ async def test_upsert_and_drop_fts_index_cluster_level_round_trip() -> None:
     try:
         async with create_mcp_session() as session:
             upsert_response = await session.call_tool(
-                "upsert_fts_index",
+                "upsert_search_index",
                 arguments={
                     "index_name": index_name,
                     "source_name": bucket_name,
@@ -622,20 +622,20 @@ async def test_upsert_and_drop_fts_index_cluster_level_round_trip() -> None:
             assert upsert_payload["scope"] is None
 
             get_response = await session.call_tool(
-                "get_fts_index_definition", arguments={"index_name": index_name}
+                "get_search_index_definition", arguments={"index_name": index_name}
             )
             get_payload = extract_payload(get_response)
             assert get_payload["name"] == index_name
             assert get_payload["source_name"] == bucket_name
 
             drop_response = await session.call_tool(
-                "drop_fts_index", arguments={"index_name": index_name}
+                "drop_search_index", arguments={"index_name": index_name}
             )
             drop_payload = extract_payload(drop_response)
             assert drop_payload["success"] is True, drop_payload.get("error")
 
             confirm_response = await session.call_tool(
-                "get_fts_index_definition", arguments={"index_name": index_name}
+                "get_search_index_definition", arguments={"index_name": index_name}
             )
             confirm_payload = extract_payload(confirm_response)
             assert "error" in confirm_payload
@@ -650,7 +650,7 @@ async def test_upsert_and_drop_fts_index_cluster_level_round_trip() -> None:
 
 
 @pytest.mark.asyncio
-async def test_upsert_and_drop_fts_index_scope_level_round_trip() -> None:
+async def test_upsert_and_drop_search_index_scope_level_round_trip() -> None:
     """Same round trip as the cluster-level test, but for a scope-level
     (scoped) index, addressed via bucket_name + scope_name."""
     bucket_name = require_test_bucket()
@@ -661,7 +661,7 @@ async def test_upsert_and_drop_fts_index_scope_level_round_trip() -> None:
     try:
         async with create_mcp_session() as session:
             upsert_response = await session.call_tool(
-                "upsert_fts_index",
+                "upsert_search_index",
                 arguments={
                     "index_name": index_name,
                     "source_name": bucket_name,
@@ -678,7 +678,7 @@ async def test_upsert_and_drop_fts_index_scope_level_round_trip() -> None:
             assert upsert_payload["scope"] == scope_name
 
             get_response = await session.call_tool(
-                "get_fts_index_definition",
+                "get_search_index_definition",
                 arguments={
                     "index_name": index_name,
                     "bucket_name": bucket_name,
@@ -689,7 +689,116 @@ async def test_upsert_and_drop_fts_index_scope_level_round_trip() -> None:
             assert get_payload["name"] == index_name
 
             drop_response = await session.call_tool(
-                "drop_fts_index",
+                "drop_search_index",
+                arguments={
+                    "index_name": index_name,
+                    "bucket_name": bucket_name,
+                    "scope_name": scope_name,
+                },
+            )
+            drop_payload = extract_payload(drop_response)
+            assert drop_payload["success"] is True, drop_payload.get("error")
+    finally:
+        cluster = _direct_cluster()
+        try:
+            bucket = cluster.bucket(bucket_name)
+            with contextlib.suppress(Exception):
+                bucket.scope(scope_name).search_indexes().drop_index(index_name)
+        finally:
+            with contextlib.suppress(Exception):
+                cluster.close()
+
+
+def _minimal_scope_level_vector_fts_index_params(
+    scope_name: str, collection_name: str
+) -> dict:
+    """Same shape as _minimal_scope_level_fts_index_params, but with a vector
+    field mapped on "embedding" -- upsert_search_index needs no code change to
+    support this (confirmed live against Couchbase Server 8.0.1): params is
+    passed through to the SDK's SearchIndex untouched."""
+    return {
+        "doc_config": {"mode": "scope.collection.type_field", "type_field": "type"},
+        "mapping": {
+            "default_mapping": {"enabled": False},
+            "types": {
+                f"{scope_name}.{collection_name}": {
+                    "enabled": True,
+                    "dynamic": False,
+                    "properties": {
+                        "embedding": {
+                            "enabled": True,
+                            "dynamic": False,
+                            "fields": [
+                                {
+                                    "name": "embedding",
+                                    "type": "vector",
+                                    "dims": 4,
+                                    "similarity": "dot_product",
+                                    "index": True,
+                                }
+                            ],
+                        }
+                    },
+                }
+            },
+            "default_analyzer": "standard",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_upsert_search_index_with_vector_field_round_trip() -> None:
+    """upsert_search_index already supports creating a Search (FTS) vector
+    index -- no code change was needed, only docstring/disclaimer
+    corrections (see fts.py's module docstring). This confirms the vector
+    field mapping survives the round trip through get_search_index_definition
+    exactly as submitted (the Search service fills in its own defaults
+    around it, same as it would for any non-vector index)."""
+    bucket_name = require_test_bucket()
+    scope_name = get_test_scope()
+    collection_name = get_test_collection()
+    index_name = f"test_fts_upsert_vector_idx_{uuid.uuid4().hex[:8]}"
+    vector_field = {
+        "name": "embedding",
+        "type": "vector",
+        "dims": 4,
+        "similarity": "dot_product",
+        "index": True,
+    }
+
+    try:
+        async with create_mcp_session() as session:
+            upsert_response = await session.call_tool(
+                "upsert_search_index",
+                arguments={
+                    "index_name": index_name,
+                    "source_name": bucket_name,
+                    "bucket_name": bucket_name,
+                    "scope_name": scope_name,
+                    "params": _minimal_scope_level_vector_fts_index_params(
+                        scope_name, collection_name
+                    ),
+                },
+            )
+            upsert_payload = extract_payload(upsert_response)
+            assert upsert_payload["success"] is True, upsert_payload.get("error")
+
+            get_response = await session.call_tool(
+                "get_search_index_definition",
+                arguments={
+                    "index_name": index_name,
+                    "bucket_name": bucket_name,
+                    "scope_name": scope_name,
+                },
+            )
+            get_payload = extract_payload(get_response)
+            properties = get_payload["params"]["mapping"]["types"][
+                f"{scope_name}.{collection_name}"
+            ]["properties"]
+            assert properties["embedding"]["fields"] == [vector_field]
+
+            drop_response = await session.call_tool(
+                "drop_search_index",
                 arguments={
                     "index_name": index_name,
                     "bucket_name": bucket_name,
@@ -710,8 +819,8 @@ async def test_upsert_and_drop_fts_index_scope_level_round_trip() -> None:
 
 
 @pytest.mark.asyncio
-async def test_upsert_fts_index_updates_existing_index() -> None:
-    """Calling upsert_fts_index a second time with the same name updates the
+async def test_upsert_search_index_updates_existing_index() -> None:
+    """Calling upsert_search_index a second time with the same name updates the
     existing index (replace semantics) instead of failing as a duplicate
     create — the defining behavior of an upsert."""
     bucket_name = require_test_bucket()
@@ -720,7 +829,7 @@ async def test_upsert_fts_index_updates_existing_index() -> None:
     try:
         async with create_mcp_session() as session:
             first = await session.call_tool(
-                "upsert_fts_index",
+                "upsert_search_index",
                 arguments={
                     "index_name": index_name,
                     "source_name": bucket_name,
@@ -731,12 +840,12 @@ async def test_upsert_fts_index_updates_existing_index() -> None:
             assert first_payload["success"] is True, first_payload.get("error")
 
             get_response = await session.call_tool(
-                "get_fts_index_definition", arguments={"index_name": index_name}
+                "get_search_index_definition", arguments={"index_name": index_name}
             )
             current = extract_payload(get_response)
 
             second = await session.call_tool(
-                "upsert_fts_index",
+                "upsert_search_index",
                 arguments={
                     "index_name": index_name,
                     "source_name": bucket_name,
@@ -757,12 +866,12 @@ async def test_upsert_fts_index_updates_existing_index() -> None:
 
 
 @pytest.mark.asyncio
-async def test_upsert_fts_index_partial_pair_returns_error() -> None:
+async def test_upsert_search_index_partial_pair_returns_error() -> None:
     """Passing only bucket_name (no scope_name) must return a descriptive
     error dict, not a raised MCP error."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "upsert_fts_index",
+            "upsert_search_index",
             arguments={
                 "index_name": "whatever",
                 "source_name": "b",
@@ -776,12 +885,12 @@ async def test_upsert_fts_index_partial_pair_returns_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_drop_fts_index_partial_pair_returns_error() -> None:
+async def test_drop_search_index_partial_pair_returns_error() -> None:
     """Passing only scope_name (no bucket_name) must return a descriptive
     error dict, not a raised MCP error."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "drop_fts_index",
+            "drop_search_index",
             arguments={"index_name": "whatever", "scope_name": get_test_scope()},
         )
         payload = extract_payload(response)
@@ -791,12 +900,12 @@ async def test_drop_fts_index_partial_pair_returns_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_drop_fts_index_not_found_returns_error() -> None:
+async def test_drop_search_index_not_found_returns_error() -> None:
     """Dropping a nonexistent index name must return an error dict rather
     than raising or returning None."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "drop_fts_index",
+            "drop_search_index",
             arguments={"index_name": f"does_not_exist_{uuid.uuid4().hex[:8]}"},
         )
         payload = extract_payload(response)

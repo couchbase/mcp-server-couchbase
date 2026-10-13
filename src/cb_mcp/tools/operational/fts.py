@@ -3,15 +3,16 @@ Tools for Full Text Search (FTS / Search service) index discovery, querying, and
 management.
 
 This module covers listing Search indexes, reading a single index's definition,
-executing/explaining FTS queries, and creating/updating (upsert_fts_index) or
-dropping (drop_fts_index) an index definition. Both scope-level (scoped) indexes and
-cluster-level ("legacy") indexes are supported. Vector search is explicitly out of
-scope here — a raw FTS query body (match, match_phrase, term, conjuncts, disjuncts,
-geo, date/numeric range, query_string, ...) is supported via a raw-JSON passthrough,
-but vector queries require the SDK's SearchRequest + VectorSearch combination, which
-these tools do not build.
+executing/explaining FTS queries, and creating/updating (upsert_search_index) or
+dropping (drop_search_index) an index definition. Both scope-level (scoped) indexes and
+cluster-level ("legacy") indexes are supported. Vector search querying is out of
+scope here (see run_vector_search) — a raw FTS query body (match, match_phrase,
+term, conjuncts, disjuncts, geo, date/numeric range, query_string, ...) is supported
+via a raw-JSON passthrough, but vector queries require the SDK's SearchRequest +
+VectorSearch combination, which these tools do not build. A vector field mapping in
+upsert_search_index's params is unaffected by this — see its own docstring.
 
-upsert_fts_index and drop_fts_index are write operations — not loaded when
+upsert_search_index and drop_search_index are write operations — not loaded when
 READ_ONLY_MODE is True — and require the couchbase-mcp:write OAuth scope.
 
 Error handling: these tools only let an exception propagate when the cluster itself
@@ -37,7 +38,7 @@ from ...utils.responses import tool_error, tool_success
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.fts")
 
 
-def list_fts_indexes(
+def list_search_indexes(
     ctx: Context,
     bucket_name: str | None = None,
     scope_name: str | None = None,
@@ -56,10 +57,10 @@ def list_fts_indexes(
     Each entry contains: name, uuid, source_name, source_type, idx_type, bucket, scope.
     bucket/scope are None for cluster-level (legacy) entries. This is a summary view — to
     get one index's full definition (mappings, analyzers, plan params), call
-    get_fts_index_definition with that entry's name and its own bucket/scope values
+    get_search_index_definition with that entry's name and its own bucket/scope values
     (both, for a scoped entry; neither, when they're None). Don't reuse this call's
     filters: listing by bucket_name alone spans several scopes, and
-    get_fts_index_definition rejects a bucket without a scope.
+    get_search_index_definition rejects a bucket without a scope.
     """
     if scope_name and not bucket_name:
         return [tool_error("bucket_name is required when filtering by scope_name")]
@@ -115,7 +116,7 @@ def list_fts_indexes(
         return [tool_error(e)]
 
 
-def get_fts_index_definition(
+def get_search_index_definition(
     ctx: Context,
     index_name: str,
     bucket_name: str | None = None,
@@ -132,7 +133,7 @@ def get_fts_index_definition(
     "params" (mapping/analyzer configuration), "source_uuid", "source_params",
     "plan_params" (num replicas/partitions), "bucket", "scope"}. If no index with this
     name exists at the given location, returns {"success": False, "error": ...} —
-    confirm the exact name and location first with list_fts_indexes.
+    confirm the exact name and location first with list_search_indexes.
     """
     if bool(bucket_name) != bool(scope_name):
         return tool_error(
@@ -171,7 +172,7 @@ def get_fts_index_definition(
         return tool_error(e, index_name=index_name)
 
 
-def run_fts_query(
+def run_search(
     ctx: Context,
     index_name: str,
     query: dict[str, Any],
@@ -204,9 +205,9 @@ def run_fts_query(
 
     Pass both bucket_name and scope_name together to query a scope-level (scoped) index,
     or omit both to query a cluster-level ("legacy") index. Passing only one is invalid.
-    Confirm the index's exact name/location first with list_fts_indexes. Don't guess which
+    Confirm the index's exact name/location first with list_search_indexes. Don't guess which
     fields a query body can target — if you don't already know what the index maps and how
-    those fields are analyzed, call get_fts_index_definition first; a field-scoped query
+    those fields are analyzed, call get_search_index_definition first; a field-scoped query
     against an unmapped field matches nothing rather than erroring. Note this only works for
     indexes with explicit static field mappings — a dynamically mapped index (dynamic: true)
     has no fixed field list to inspect, since it indexes whatever fields appear in each
@@ -288,7 +289,7 @@ def run_fts_query(
         metadata = result.metadata()
         metrics = metadata.metrics()
         logger.info(
-            f"run_fts_query on {index_name!r} (explain={explain}) returned "
+            f"run_search on {index_name!r} (explain={explain}) returned "
             f"{len(hits)} hit(s)"
         )
         return tool_success(
@@ -319,7 +320,7 @@ def run_fts_query(
         return tool_error(e, index_name=index_name)
 
 
-def upsert_fts_index(
+def upsert_search_index(
     ctx: Context,
     index_name: str,
     source_name: str,
@@ -339,7 +340,7 @@ def upsert_fts_index(
     is created; otherwise its definition is fully REPLACED (not merged) with what you
     pass here. Updating an existing index triggers a rebuild, which can disrupt search
     availability while it reindexes. The recommended workflow for modifying an
-    existing index is: call get_fts_index_definition first, change only the fields you
+    existing index is: call get_search_index_definition first, change only the fields you
     need, and pass everything (including its uuid) back to this tool — passing uuid
     for an update tells the Search service which revision you started from, so it can
     detect and reject a conflicting concurrent modification rather than silently
@@ -355,12 +356,16 @@ def upsert_fts_index(
     cluster-level index has no bucket_name to infer it from.
 
     params holds the mapping/analyzer configuration (as returned by
-    get_fts_index_definition's "params" field) — e.g. {"doc_config": {"mode":
+    get_search_index_definition's "params" field) — e.g. {"doc_config": {"mode":
     "scope.collection.type_field"}, "mapping": {...}}. Omitting it produces the Search
     service's default mapping (typically dynamic — indexes every field it finds);
-    pass an explicit params.mapping for anything more specific. plan_params controls
-    index partitioning/replicas (e.g. numReplicas); source_params and source_uuid are
-    passed through to the SDK as-is and rarely need to be set.
+    pass an explicit params.mapping for anything more specific. A mapped field can be
+    a vector field (type: "vector", with dims/similarity) — similarity here is
+    "dot_product"/"cosine"/"l2_norm", not GSI's DOT/COSINE/L2; for the vector field
+    mapping JSON shape, see
+    https://docs.couchbase.com/server/current/vector-search/create-vector-search-index-rest-api.html.
+    plan_params controls index partitioning/replicas (e.g. numReplicas); source_params
+    and source_uuid are passed through to the SDK as-is and rarely need to be set.
 
     Returns {"success": True, "index_name", "bucket", "scope"} on success, or
     {"success": False, "error": ...} on failure — e.g. an invalid mapping or a stale
@@ -403,7 +408,7 @@ def upsert_fts_index(
         return tool_error(e, index_name=index_name)
 
 
-def drop_fts_index(
+def drop_search_index(
     ctx: Context,
     index_name: str,
     bucket_name: str | None = None,
@@ -417,7 +422,7 @@ def drop_fts_index(
 
     This permanently removes the index and cannot be undone — queries and
     applications that relied on it will fail until it is recreated (and rebuilt).
-    Prefer confirming the index's exact name and location with list_fts_indexes first.
+    Prefer confirming the index's exact name and location with list_search_indexes first.
 
     Pass both bucket_name and scope_name together to drop a scope-level (scoped)
     index, or omit both to drop a cluster-level ("legacy") index. Passing only one is

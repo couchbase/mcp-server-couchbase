@@ -59,7 +59,7 @@ jobs:
   # Operational server only: this job provisions a Couchbase Server container
   # and runs tests/integration/operational. The Operational Insights tier
   # needs a different product and its own two-container setup, so it has its
-  # own workflow (oi-integration-tests.yml).
+  # own workflow (operational-insights-integration-tests.yml).
   integration-tests:
     name: 'Integration: operational (${{ matrix.transport }} / cb-${{ matrix.cb_version }} / ${{ matrix.server_binary }})'
     runs-on: ubuntu-latest

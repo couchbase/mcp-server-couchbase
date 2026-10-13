@@ -15,7 +15,7 @@ from cb_mcp.utils.operational_insights.sdk_logging import bridge_sdk_logging
 
 
 def test_bridge_routes_sdk_records_into_the_target_root():
-    target_root = logging.getLogger("test.oi.target")
+    target_root = logging.getLogger("test.operational_insights.target")
     buf = io.StringIO()
     handler = logging.StreamHandler(buf)
     handler.setFormatter(logging.Formatter("%(message)s"))
@@ -50,8 +50,8 @@ def test_bridge_sets_propagate_false_on_the_sdk_logger():
         sdk_logger.propagate = True
 
 
-def test_importing_the_oi_spec_adds_no_handler_to_the_stdlib_root():
-    """Clean-interpreter check: importing the spec (and therefore every OI
+def test_importing_the_operational_insights_spec_adds_no_handler_to_the_stdlib_root():
+    """Clean-interpreter check: importing the spec (and therefore every Operational Insights
     tool module) at server startup / tool-discovery time — before anything
     ever connects to a cluster — must not leave a stray handler on the bare
     root logger."""

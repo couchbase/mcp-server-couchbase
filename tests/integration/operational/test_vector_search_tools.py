@@ -1,5 +1,5 @@
 """
-Integration tests for vector_search.py (run_vector_search, run_search_vector_search).
+Integration tests for vector_search.py (run_vector_query, run_vector_search).
 
 Requires, in addition to the usual CB_CONNECTION_STRING/CB_USERNAME/CB_PASSWORD/
 CB_MCP_TEST_BUCKET: a configured embedding provider (EMBEDDING_PROVIDER plus
@@ -22,8 +22,8 @@ this project's own embedding-provider abstraction (bypassing MCP, same
 spirit as _direct_cluster() bypassing MCP for seeding), both to learn the
 real vector dimension for the index DDL/mapping (deploy-time dimension is
 provider/model-dependent, so it can't be hardcoded) and to guarantee the
-seeded document's vector is IDENTICAL to what run_vector_search /
-run_search_vector_search will compute for the same marker text -- giving a
+seeded document's vector is IDENTICAL to what run_vector_query /
+run_vector_search will compute for the same marker text -- giving a
 deterministic, distance ~ 0 top-1 match to assert on, the vector-space
 equivalent of test_fts_tools.py's unique-marker proof.
 
@@ -358,7 +358,7 @@ def _assert_tool_succeeded(payload: object) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_run_vector_search_finds_seeded_document(
+async def test_run_vector_query_finds_seeded_document(
     seeded_gsi_vector_index: dict[str, Any],
 ) -> None:
     """Querying the seeded marker text must return the seeded document as
@@ -371,7 +371,7 @@ async def test_run_vector_search_finds_seeded_document(
 
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "run_vector_search",
+            "run_vector_query",
             arguments={
                 "bucket_name": fixture["bucket_name"],
                 "scope_name": fixture["scope_name"],
@@ -379,7 +379,7 @@ async def test_run_vector_search_finds_seeded_document(
                 "vector_field": fixture["vector_field"],
                 "query_text": fixture["marker"],
                 # distance_metric is required (no default, see
-                # run_vector_search's docstring) -- must match the fixture's
+                # run_vector_query's docstring) -- must match the fixture's
                 # index "similarity": "cosine" (see below).
                 "distance_metric": "cosine",
                 "limit": 1,
@@ -394,12 +394,12 @@ async def test_run_vector_search_finds_seeded_document(
     assert payload["hits"][0]["distance"] < 1e-3
     # The document is nested under "document", not flattened into the hit --
     # proves the id/distance metadata fields can't collide with same-named
-    # document fields (see the "document" projection in run_vector_search).
+    # document fields (see the "document" projection in run_vector_query).
     assert payload["hits"][0]["document"]["name"] == fixture["marker"]
 
 
 @pytest.mark.asyncio
-async def test_run_vector_search_missing_provider_returns_error(
+async def test_run_vector_query_missing_provider_returns_error(
     seeded_gsi_vector_index: dict[str, Any],
 ) -> None:
     """A cluster reachable but a subprocess started with no EMBEDDING_PROVIDER
@@ -407,7 +407,7 @@ async def test_run_vector_search_missing_provider_returns_error(
     fixture = seeded_gsi_vector_index
     async with create_mcp_session(extra_env={"EMBEDDING_PROVIDER": ""}) as session:
         response = await session.call_tool(
-            "run_vector_search",
+            "run_vector_query",
             arguments={
                 "bucket_name": fixture["bucket_name"],
                 "scope_name": fixture["scope_name"],
@@ -425,7 +425,7 @@ async def test_run_vector_search_missing_provider_returns_error(
 
 
 @pytest.mark.asyncio
-async def test_run_search_vector_search_finds_seeded_document(
+async def test_run_vector_search_finds_seeded_document(
     seeded_search_vector_index: dict[str, Any],
 ) -> None:
     """Vector-only (no scalar_query) search against the seeded Search index
@@ -438,7 +438,7 @@ async def test_run_search_vector_search_finds_seeded_document(
 
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "run_search_vector_search",
+            "run_vector_search",
             arguments={
                 "index_name": fixture["index_name"],
                 "bucket_name": fixture["bucket_name"],
@@ -456,7 +456,7 @@ async def test_run_search_vector_search_finds_seeded_document(
 
 
 @pytest.mark.asyncio
-async def test_run_search_vector_search_hybrid_with_scalar_query(
+async def test_run_vector_search_hybrid_with_scalar_query(
     seeded_search_vector_index: dict[str, Any],
 ) -> None:
     """Passing scalar_query alongside the embedded vector query must set
@@ -470,7 +470,7 @@ async def test_run_search_vector_search_hybrid_with_scalar_query(
 
     async with create_mcp_session() as session:
         response = await session.call_tool(
-            "run_search_vector_search",
+            "run_vector_search",
             arguments={
                 "index_name": fixture["index_name"],
                 "bucket_name": fixture["bucket_name"],

@@ -6,12 +6,12 @@ its own module docstring says vector queries "require the SDK's SearchRequest
 feature." That separate feature lives here, as two tools built on two
 genuinely different Couchbase mechanisms:
 
-- run_vector_search: Couchbase 8.0's GSI vector indexes (Composite Vector
+- run_vector_query: Couchbase 8.0's GSI vector indexes (Composite Vector
   Index / Hyperscale Vector Index), queried via plain SQL++'s
   APPROX_VECTOR_DISTANCE() in an ORDER BY. GSI selects the index
   automatically from the vector field referenced in the query, the same way
   ordinary scalar GSI queries do -- no index name is ever passed.
-- run_search_vector_search: the FTS/Search service's VectorQuery/VectorSearch/
+- run_vector_search: the FTS/Search service's VectorQuery/VectorSearch/
   SearchRequest API, which always targets a *named* Search index and is the
   only mechanism that supports true hybrid search (a scalar FTS query and a
   vector query combined into one ranked result set).
@@ -57,7 +57,7 @@ logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.vector_search"
 
 
 def _best_effort_cluster_major_version(cluster: Any) -> int | None:
-    """Detect the cluster's major version for run_vector_search's advisory
+    """Detect the cluster's major version for run_vector_query's advisory
     "warning" field (see its docstring). Purely informational -- a pre-8.0
     cluster already fails APPROX_VECTOR_DISTANCE with its own clear "unknown
     function" error, so version detection failing here must never fail the
@@ -70,7 +70,7 @@ def _best_effort_cluster_major_version(cluster: Any) -> int | None:
         return None
 
 
-def run_vector_search(
+def run_vector_query(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
@@ -112,13 +112,19 @@ def run_vector_search(
 
     num_probes/rerank/top_n_scan are Hyperscale Vector Index tuning
     parameters (centroids to probe, rerank count, top-N scan). Pass all three
-    together or none -- a Composite Vector Index doesn't use them, and this
-    tool has no way to tell which index type will actually serve the query.
+    together or none -- a Composite Vector Index doesn't use them. This tool
+    itself has no index_name to check, but list_indexes now reports each
+    index's `vector_type` ("hyperscale" or "composite") -- check that first
+    if you need to know which shape will actually serve the query.
 
     where is an optional raw SQL++ boolean expression (e.g. "doc.status =
     'active'") appended to prefilter candidates before the vector ordering --
     this tool only ever emits a SELECT, so, unlike run_sql_plus_plus_query,
-    there is no write-guard for it to bypass.
+    there is no write-guard for it to bypass. If the index was created with a
+    partial-index condition (create_query_index's condition), where must match
+    or imply it for the planner to actually use that index -- otherwise it
+    falls back to a full scan silently (confirmed via EXPLAIN), the same
+    footgun documented above for a mismatched distance_metric.
 
     select_fields limits the projected document fields; omit it to return
     the full document. limit defaults to 10, matching the other query/search
@@ -149,7 +155,7 @@ def run_vector_search(
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     logger.debug(
-        f"run_vector_search on {bucket_name}.{scope_name}.{collection_name} "
+        f"run_vector_query on {bucket_name}.{scope_name}.{collection_name} "
         f"(vector_field={vector_field!r}, distance_metric={distance_metric!r}, "
         f"limit={limit}, hyperscale_tuning={num_probes is not None})"
     )
@@ -212,7 +218,7 @@ def run_vector_search(
                 "the cluster doesn't actually support APPROX_VECTOR_DISTANCE."
             )
         logger.info(
-            f"run_vector_search on {bucket_name}.{scope_name}.{collection_name} "
+            f"run_vector_query on {bucket_name}.{scope_name}.{collection_name} "
             f"returned {len(hits)} hit(s)"
         )
         return response
@@ -226,7 +232,7 @@ def run_vector_search(
         )
 
 
-def run_search_vector_search(
+def run_vector_search(
     ctx: Context,
     index_name: str,
     vector_field: str,
@@ -246,16 +252,16 @@ def run_search_vector_search(
     (plus EMBEDDING_AWS_* for provider=bedrock). If no provider is configured,
     this tool returns {"success": False, "error": ...} explaining what to set
 
-    Unlike run_vector_search's GSI-backed search, this tool always targets a
+    Unlike run_vector_query's GSI-backed search, this tool always targets a
     *named* Search (FTS) index -- index_name is required. Pass both
     bucket_name and scope_name together to query a scope-level (scoped)
     index, or omit both to query a cluster-level ("legacy") index. Confirm
-    the index's exact name/location first with list_fts_indexes if unsure --
+    the index's exact name/location first with list_search_indexes if unsure --
     this tool does not pre-validate index_name; a wrong or non-vector index
     name fails naturally at the Search service with its own error.
 
     scalar_query and prefilter are both optional and both take the same raw
-    FTS query JSON body run_fts_query accepts (e.g. {"match": "jacket",
+    FTS query JSON body run_search accepts (e.g. {"match": "jacket",
     "field": "description"}), but they do different things -- do not confuse
     them:
     - scalar_query makes this a genuinely hybrid search: both the vector
@@ -266,14 +272,14 @@ def run_search_vector_search(
     - prefilter narrows which documents the vector search is even allowed to
       consider as nearest-neighbor candidates, evaluated *before* the
       k-nearest-neighbor search runs -- the Search-service equivalent of
-      run_vector_search's `where` prefilter on a GSI Composite Vector Index.
+      run_vector_query's `where` prefilter on a GSI Composite Vector Index.
       A document that doesn't match prefilter is never returned, regardless
       of vector similarity.
 
     Both can be set together (prefilter narrows the candidate pool, then
     scalar_query's relevance signal still contributes to ranking within it).
     Omit both for a plain vector-only search through this tool (equivalent
-    in intent to run_vector_search, but against a named Search index instead
+    in intent to run_vector_query, but against a named Search index instead
     of a GSI vector index).
 
     num_candidates bounds how many nearest-neighbor candidates the vector
@@ -286,7 +292,7 @@ def run_search_vector_search(
     fields per hit.
 
     This tool does not fetch full document bodies -- a Search hit carries
-    whatever fields the index stores (row.fields), the same as run_fts_query,
+    whatever fields the index stores (row.fields), the same as run_search,
     not a KV-fetched document (a hit has no reliable per-row collection name
     to fetch against). Follow up with get_document_by_id for any hit you need
     the full document for.
@@ -317,7 +323,7 @@ def run_search_vector_search(
         connect_to_bucket(cluster, bucket_name) if bucket_name and scope_name else None
     )
     logger.debug(
-        f"run_search_vector_search on {index_name!r} (vector_field={vector_field!r}, "
+        f"run_vector_search on {index_name!r} (vector_field={vector_field!r}, "
         f"num_candidates={num_candidates}, hybrid={bool(scalar_query)}, "
         f"prefiltered={bool(prefilter)})"
     )
@@ -364,7 +370,7 @@ def run_search_vector_search(
         ]
 
         logger.info(
-            f"run_search_vector_search on {index_name!r} (hybrid={bool(scalar_query)}, "
+            f"run_vector_search on {index_name!r} (hybrid={bool(scalar_query)}, "
             f"prefiltered={bool(prefilter)}) returned {len(hits)} hit(s)"
         )
         return tool_success(

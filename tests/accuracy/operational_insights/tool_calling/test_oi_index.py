@@ -1,10 +1,10 @@
 """Accuracy tests for the Operational Insights index tools.
 
 Covers:
-  - oi_list_indexes (cluster-wide and filtered)
-  - oi_create_index (scalar, composite, and the array/UNNEST form)
+  - operational_insights_list_indexes (cluster-wide and filtered)
+  - operational_insights_create_index (scalar, composite, and the array/UNNEST form)
 
-``oi_create_index`` has the most structured input of any OI tool: ``fields``
+``operational_insights_create_index`` has the most structured input of any OI tool: ``fields``
 is a list of index elements whose shape changes with what is being indexed —
 ``{"name", "type"}`` for a scalar, ``{"unnest", "type"}`` or
 ``{"unnest", "select"}`` for an array. The array form additionally *requires*
@@ -113,7 +113,7 @@ def _build_cases(database: str, scope: str, collection: str) -> list[AccuracyCas
             prompt="List every secondary index on this cluster.",
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="oi_list_indexes",
+                    tool_name="operational_insights_list_indexes",
                     # All three filters are optional and should be omitted for
                     # a cluster-wide listing.
                     parameters={
@@ -140,7 +140,7 @@ def _build_cases(database: str, scope: str, collection: str) -> list[AccuracyCas
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="oi_list_indexes",
+                    tool_name="operational_insights_list_indexes",
                     parameters={
                         "database_name": database,
                         "scope_name": scope,
@@ -160,7 +160,7 @@ def _build_cases(database: str, scope: str, collection: str) -> list[AccuracyCas
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="oi_create_index",
+                    tool_name="operational_insights_create_index",
                     parameters={
                         "database_name": database,
                         "scope_name": scope,
@@ -182,7 +182,7 @@ def _build_cases(database: str, scope: str, collection: str) -> list[AccuracyCas
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="oi_create_index",
+                    tool_name="operational_insights_create_index",
                     parameters={
                         "database_name": database,
                         "scope_name": scope,
@@ -206,7 +206,7 @@ def _build_cases(database: str, scope: str, collection: str) -> list[AccuracyCas
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="oi_create_index",
+                    tool_name="operational_insights_create_index",
                     parameters={
                         "database_name": database,
                         "scope_name": scope,

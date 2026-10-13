@@ -14,14 +14,14 @@ What these pin down, in order of what it would cost to get wrong:
 from unittest.mock import patch
 
 import pytest
-from _oi_fakes import make_oi_ctx
+from _operational_insights_fakes import make_operational_insights_ctx
 
 from cb_mcp.tools.operational_insights.query import (
     CopyToError,
     build_copy_to_statement,
-    oi_get_async_query_results,
-    oi_run_query_async,
-    oi_run_query_sync,
+    operational_insights_get_async_query_results,
+    operational_insights_run_query_async,
+    operational_insights_run_query_sync,
 )
 
 STATEMENT = "SELECT a.name, a.country FROM `travel-sample`.inventory.airline a LIMIT 10"
@@ -129,11 +129,11 @@ class TestRunQuerySyncExport:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            return oi_run_query_sync(ctx, STATEMENT, **kwargs)
+            return operational_insights_run_query_sync(ctx, STATEMENT, **kwargs)
 
     def test_export_returns_confirmation_and_no_rows(self) -> None:
         """The point of exporting is to keep the result out of the context."""
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
         result = self._run(ctx, cluster, **DESTINATION)
@@ -149,7 +149,7 @@ class TestRunQuerySyncExport:
         }
 
     def test_export_sends_the_wrapped_statement(self) -> None:
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
         cluster.execute_query.return_value.get_all_rows.return_value = []
 
         self._run(ctx, cluster, **DESTINATION)
@@ -161,7 +161,7 @@ class TestRunQuerySyncExport:
 
     def test_without_copy_args_the_query_is_unchanged(self) -> None:
         """The arguments are optional: omitting them must not alter behaviour."""
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
         cluster.execute_query.return_value.rows.side_effect = lambda: iter([{"a": 1}])
 
         result = self._run(ctx, cluster)
@@ -186,7 +186,7 @@ class TestRunQuerySyncExport:
         That would return rows the caller did not ask for, write nothing, and
         give no sign the export never happened.
         """
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
 
         result = self._run(ctx, cluster, **partial)
 
@@ -214,7 +214,7 @@ class TestRunQuerySyncExport:
         the silent downgrade ``_resolve_copy_to`` exists to prevent, so
         presence is tested with ``is not None``.
         """
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
 
         result = self._run(ctx, cluster, **blank)
 
@@ -223,7 +223,7 @@ class TestRunQuerySyncExport:
         cluster.execute_query.assert_not_called()
 
     def test_format_without_destination_is_rejected(self) -> None:
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
 
         result = self._run(ctx, cluster, copy_to_format="parquet")
 
@@ -232,7 +232,7 @@ class TestRunQuerySyncExport:
         cluster.execute_query.assert_not_called()
 
     def test_invalid_link_is_an_error_envelope_not_a_raise(self) -> None:
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
 
         result = self._run(
             ctx,
@@ -251,26 +251,26 @@ class TestExportUnderReadOnlyMode:
     """An export writes to external storage, so read-only mode must block it."""
 
     def test_blocked_when_read_only(self) -> None:
-        ctx, cluster = make_oi_ctx(read_only_mode=True)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=True)
 
         with patch(
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            result = oi_run_query_sync(ctx, STATEMENT, **DESTINATION)
+            result = operational_insights_run_query_sync(ctx, STATEMENT, **DESTINATION)
 
         assert result["success"] is False
         assert "blocked under read-only mode" in result["error"]
         cluster.execute_query.assert_not_called()
 
     def test_async_blocked_when_read_only(self) -> None:
-        ctx, cluster = make_oi_ctx(read_only_mode=True)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=True)
 
         with patch(
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            result = oi_run_query_async(ctx, STATEMENT, **DESTINATION)
+            result = operational_insights_run_query_async(ctx, STATEMENT, **DESTINATION)
 
         assert result["success"] is False
         assert "blocked under read-only mode" in result["error"]
@@ -283,10 +283,10 @@ class TestRunQueryAsyncExport:
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            return oi_run_query_async(ctx, STATEMENT, **kwargs)
+            return operational_insights_run_query_async(ctx, STATEMENT, **kwargs)
 
     def test_export_returns_handle_and_destination(self) -> None:
-        ctx, _cluster = make_oi_ctx(read_only_mode=False)
+        ctx, _cluster = make_operational_insights_ctx(read_only_mode=False)
 
         result = self._run(ctx, **DESTINATION)
 
@@ -297,7 +297,7 @@ class TestRunQueryAsyncExport:
         assert "no rows" in result["message"]
 
     def test_export_starts_the_wrapped_statement(self) -> None:
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
 
         self._run(ctx, **DESTINATION)
 
@@ -306,7 +306,7 @@ class TestRunQueryAsyncExport:
         assert STATEMENT in sent
 
     def test_without_copy_args_the_statement_is_unchanged(self) -> None:
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
 
         result = self._run(ctx)
 
@@ -325,12 +325,14 @@ class TestAsyncExportCompletion:
 
     def _finished_export(self):
         """Submit an export and force its handle to report results ready."""
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
         with patch(
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            submitted = oi_run_query_async(ctx, STATEMENT, **DESTINATION)
+            submitted = operational_insights_run_query_async(
+                ctx, STATEMENT, **DESTINATION
+            )
 
         handle = cluster.start_query.return_value
         status = handle.fetch_status.return_value
@@ -343,7 +345,7 @@ class TestAsyncExportCompletion:
     def test_completion_names_the_destination(self) -> None:
         ctx, token = self._finished_export()
 
-        done = oi_get_async_query_results(ctx, token)
+        done = operational_insights_get_async_query_results(ctx, token)
 
         assert done["ready"] is True
         assert done["exported"] is True
@@ -354,7 +356,7 @@ class TestAsyncExportCompletion:
         """Without this the caller cannot tell an export from an empty result."""
         ctx, token = self._finished_export()
 
-        done = oi_get_async_query_results(ctx, token)
+        done = operational_insights_get_async_query_results(ctx, token)
 
         assert "Export complete" in done["message"]
         assert "copyto-test/run1" in done["message"]
@@ -362,26 +364,28 @@ class TestAsyncExportCompletion:
     def test_completion_returns_no_rows(self) -> None:
         ctx, token = self._finished_export()
 
-        done = oi_get_async_query_results(ctx, token)
+        done = operational_insights_get_async_query_results(ctx, token)
 
         assert done["row_count"] == 0
         assert "rows" not in done
 
     def test_non_export_completion_is_unchanged(self) -> None:
         """An ordinary async query must not grow export fields."""
-        ctx, cluster = make_oi_ctx(read_only_mode=False)
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
         with patch(
             "cb_mcp.tools.operational_insights.query.get_access_token",
             return_value=None,
         ):
-            submitted = oi_run_query_async(ctx, STATEMENT)
+            submitted = operational_insights_run_query_async(ctx, STATEMENT)
 
         status = cluster.start_query.return_value.fetch_status.return_value
         status.results_ready.return_value = True
         result = status.result_handle.return_value.fetch_results.return_value
         result.rows.side_effect = lambda: iter([{"a": 1}])
 
-        done = oi_get_async_query_results(ctx, submitted["query_handle"])
+        done = operational_insights_get_async_query_results(
+            ctx, submitted["query_handle"]
+        )
 
         assert "exported" not in done
         assert "destination" not in done

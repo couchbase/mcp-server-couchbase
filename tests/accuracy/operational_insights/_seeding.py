@@ -3,12 +3,12 @@
 Kept separate from ``accuracy/sdk/seeding.py``: that module's helpers speak
 buckets and call operational tool names (``create_scope``,
 ``upsert_document_by_id``, ...), none of which the OI server registers. Every
-hook here goes through ``oi_run_query_sync`` DDL/DML instead, which is the
+hook here goes through ``operational_insights_run_query_sync`` DDL/DML instead, which is the
 same approach the OI integration tests take.
 
 All hooks use ``call_tool_silent`` so setup and teardown never land in the
 recorded LLM tool-call log — otherwise seeding a collection would itself
-count as the model "calling" oi_run_query_sync and inflate every score.
+count as the model "calling" operational_insights_run_query_sync and inflate every score.
 """
 
 from __future__ import annotations
@@ -33,7 +33,9 @@ def unique_name(prefix: str) -> str:
 
 
 async def _run(client: AccuracyTestingClient, statement: str) -> None:
-    await client.call_tool_silent("oi_run_query_sync", {"statement": statement})
+    await client.call_tool_silent(
+        "operational_insights_run_query_sync", {"statement": statement}
+    )
 
 
 def seed_scope(database: str, scope: str) -> SetupHook:
@@ -99,7 +101,7 @@ def seed_index(
 ) -> SetupHook:
     """Create a secondary index, for cases that must find an existing one.
 
-    Goes through DDL rather than ``oi_create_index`` so that seeding a
+    Goes through DDL rather than ``operational_insights_create_index`` so that seeding a
     precondition never depends on the very tool a case is scoring.
     """
 
