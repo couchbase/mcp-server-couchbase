@@ -68,7 +68,7 @@ def _seed_vector_index(
     """
 
     async def _hook(client: AccuracyTestingClient) -> None:
-        rng = random.Random(1234567)
+        rng = random.Random(1234567)  # noqa: S311 -- deterministic test fixture data, not security-sensitive
         for i in range(_PROBE_DOC_COUNT):
             await client.call_tool_silent(
                 "upsert_document_by_id",
