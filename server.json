@@ -109,6 +109,13 @@
           "isSecret": false
         },
         {
+          "name": "CB_MCP_TOOL_SETS",
+          "description": "Comma-separated tool sets to load, as an allow list applied before disabled tools (e.g., 'kv,query'). Operational server only. Unset loads every tool.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
           "name": "CB_MCP_CONFIRMATION_REQUIRED_TOOLS",
           "description": "Comma-separated tool names that require user confirmation before execution. Also accepts a file path containing one tool name per line. Requires the MCP client to support elicitation.",
           "isRequired": false,
@@ -476,6 +483,14 @@
           "type": "named",
           "name": "--disabled-tools",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--tool-sets",
+          "description": "Comma-separated tool sets to load, as an allow list applied before disabled tools (e.g., 'kv,query'). Operational server only. Unset loads every tool.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -1553,6 +1568,13 @@
         {
           "name": "CB_MCP_DISABLED_TOOLS",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_TOOL_SETS",
+          "description": "Comma-separated tool sets to load, as an allow list applied before disabled tools (e.g., 'kv,query'). Operational server only. Unset loads every tool.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
