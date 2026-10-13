@@ -106,6 +106,10 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "replace_document_by_id": ("kv", "write"),
         "delete_document_by_id": ("kv", "write"),
         "mutate_subdocument": ("kv", "write"),
+        # Commits or rolls back a list of document operations as a unit.
+        # Every operation it can carry is a kv write, so the transaction
+        # that wraps them is one too.
+        "run_kv_transaction": ("kv", "write"),
         # -- query (SQL++) ---------------------------------------------------
         # `query` is an unsplit category: one event per call, whatever the
         # statement does. The class below no longer reaches the id, the

@@ -25,6 +25,7 @@ EXPECTED_TOOLS = {
     "get_document_by_id",
     "lookup_subdocument",
     "mutate_subdocument",
+    "run_kv_transaction",
     "upsert_document_by_id",
     "insert_document_by_id",
     "replace_document_by_id",
@@ -96,6 +97,7 @@ TOOLS_BY_CATEGORY = {
         "get_document_by_id",
         "lookup_subdocument",
         "mutate_subdocument",
+        "run_kv_transaction",
         "upsert_document_by_id",
         "insert_document_by_id",
         "replace_document_by_id",
@@ -173,6 +175,9 @@ ON_PREM_ONLY_TOOLS = frozenset(
 
 # Expected required parameters for tools that need them
 TOOL_REQUIRED_PARAMS = {
+    # The keyspace travels inside each operation rather than as tool-level
+    # arguments, because a transaction may span collections.
+    "run_kv_transaction": ["operations"],
     # tool_name is the only required argument -- omitting search_keywords is browse mode.
     "discover_tool_input_values": ["tool_name"],
     "get_scopes_in_bucket": ["bucket_name"],

@@ -54,6 +54,7 @@ from .kv import (
     lookup_subdocument,
     mutate_subdocument,
     replace_document_by_id,
+    run_kv_transaction,
     upsert_document_by_id,
 )
 
@@ -169,6 +170,7 @@ TOOL_SET = ToolSet(
         replace_document_by_id,
         delete_document_by_id,
         mutate_subdocument,
+        run_kv_transaction,
         # Scope/collection management write tools
         create_scope,
         create_collection,
@@ -212,6 +214,11 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_active_queries": ToolAnnotations(readOnlyHint=True),
     # KV read tools
     "get_document_by_id": ToolAnnotations(readOnlyHint=True),
+    # Not idempotent: re-running a committed transaction that contains an
+    # insert fails on the second attempt, so a client must not retry it blindly.
+    "run_kv_transaction": ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True, idempotentHint=False
+    ),
     "lookup_subdocument": ToolAnnotations(readOnlyHint=True),
     # Query tools
     "get_schema_for_collection": ToolAnnotations(readOnlyHint=True),
@@ -343,6 +350,7 @@ __all__ = [
     "get_document_by_id",
     "lookup_subdocument",
     "mutate_subdocument",
+    "run_kv_transaction",
     "upsert_document_by_id",
     "insert_document_by_id",
     "replace_document_by_id",

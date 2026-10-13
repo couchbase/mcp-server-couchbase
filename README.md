@@ -224,6 +224,7 @@ Write tools (marked ✏️) are **not loaded** while [read-only mode](#read-only
 | `insert_document_by_id` ✏️ | Insert a new document (fails if it exists) |
 | `replace_document_by_id` ✏️ | Replace an existing document (fails if it doesn't exist) |
 | `delete_document_by_id` ✏️ | Delete a document by ID |
+| `run_kv_transaction` ✏️ | Run up to 50 insert, replace, remove and get operations across documents in one transaction that commits or rolls back as a unit |
 | `mutate_subdocument` ✏️ | Modify paths in an existing document (upsert, insert, replace, remove, array ops, counters) |
 
 #### Query and indexing

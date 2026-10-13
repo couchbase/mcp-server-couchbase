@@ -24,6 +24,7 @@ WRITE_TOOL_NAMES = {
     "replace_document_by_id",
     "delete_document_by_id",
     "mutate_subdocument",
+    "run_kv_transaction",
     # Scope/collection management write tools
     "create_scope",
     "create_collection",
@@ -101,7 +102,7 @@ class TestToolCategories:
 
     def test_write_tools_defined(self):
         """Verify WRITE_TOOLS list is properly defined."""
-        assert len(WRITE_TOOLS) == 16
+        assert len(WRITE_TOOLS) == 17
         tool_names = {tool.__name__ for tool in WRITE_TOOLS}
         assert tool_names == WRITE_TOOL_NAMES
 
@@ -198,12 +199,12 @@ class TestToolCounts:
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (36 read-only + 16 write)
-        assert len(tools) == 52
+        # Expected total count (36 read-only + 17 write)
+        assert len(tools) == 53
 
     def test_write_tools_count(self):
         """Verify exactly 16 write tools exist."""
-        assert len(WRITE_TOOLS) == 16
+        assert len(WRITE_TOOLS) == 17
 
 
 class TestReadOnlyModeToolFiltering:

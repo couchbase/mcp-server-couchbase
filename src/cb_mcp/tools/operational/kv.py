@@ -11,10 +11,12 @@ This module contains tools for document operations by ID:
 
 import json
 import logging
+from datetime import timedelta
 from typing import Any
 
 import couchbase.subdocument as subdoc
-from couchbase.exceptions import CouchbaseException
+from couchbase.exceptions import CouchbaseException, DocumentNotFoundException
+from couchbase.options import TransactionOptions
 from fastmcp import Context
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
@@ -476,3 +478,187 @@ def mutate_subdocument(
 
     logger.info(f"Successfully performed sub-document mutation in {keyspace}")
     return response
+
+
+#: Upper bound on one transaction. A transaction holds resources on the cluster
+#: for its duration, so an unbounded list is a way for one agent call to hurt
+#: everyone else. Smaller than the bulk-write cap on purpose: these are not the
+#: same operation and should not invite the same batch size.
+MAX_TRANSACTION_OPS = 50
+
+#: The operations a transaction can carry. Read-then-conditional-write is
+#: deliberately absent: the read would have to come back to the model and
+#: return inside the same transaction, and the transaction holds its resources
+#: for that whole round trip.
+_TRANSACTION_OPS = ("insert", "upsert", "replace", "remove")
+
+
+def _validate_transaction_operation(index: int, op: Any) -> str | None:
+    """Return a problem with one operation, or None.
+
+    Split from the batch check so neither half grows a long tail of early
+    returns, and so the message always names the index the caller gave.
+    """
+    if not isinstance(op, dict):
+        return f"operations[{index}] must be an object."
+
+    kind = op.get("op")
+    if kind not in _TRANSACTION_OPS:
+        return (
+            f"operations[{index}] has unsupported op {kind!r}; expected one of: "
+            f"{', '.join(_TRANSACTION_OPS)}."
+        )
+
+    missing = [
+        key
+        for key in ("bucket_name", "scope_name", "collection_name", "document_id")
+        if not op.get(key)
+    ]
+    if kind in ("insert", "upsert", "replace") and "content" not in op:
+        missing.append("content")
+    if missing:
+        return f"operations[{index}] is missing {', '.join(missing)}."
+    return None
+
+
+def _validate_transaction_operations(operations: Any) -> str | None:
+    """Return a human-readable problem with ``operations``, or None if it is fine.
+
+    Runs before anything connects, so a malformed batch costs nothing and the
+    message names the offending index rather than leaving the caller to guess.
+    """
+    if not isinstance(operations, list) or not operations:
+        return "operations must be a non-empty list."
+
+    if len(operations) > MAX_TRANSACTION_OPS:
+        return (
+            f"operations holds {len(operations)} entries, which is more than "
+            f"the limit of {MAX_TRANSACTION_OPS}. Nothing was executed."
+        )
+
+    for index, op in enumerate(operations):
+        problem = _validate_transaction_operation(index, op)
+        if problem is not None:
+            return problem
+    return None
+
+
+def _apply_transaction_operation(
+    ctx_txn: Any, cluster: Any, op: dict[str, Any]
+) -> None:
+    """Apply one operation inside the transaction context.
+
+    ``upsert`` is a get followed by a replace, or an insert when the document is
+    absent, because the SDK's transaction context offers no upsert of its own.
+    ``replace`` and ``remove`` issue an implicit get first: the SDK's
+    transaction API is built around a ``TransactionGetResult`` rather than a
+    raw key. Doing it for the caller means a missing document fails the whole
+    transaction rather than the caller discovering it halfway through, which is
+    the guarantee this tool exists to give.
+    """
+    collection = (
+        cluster.bucket(op["bucket_name"])
+        .scope(op["scope_name"])
+        .collection(op["collection_name"])
+    )
+    kind = op["op"]
+    document_id = op["document_id"]
+
+    if kind == "insert":
+        ctx_txn.insert(collection, document_id, op["content"])
+    elif kind == "upsert":
+        # The SDK's transaction context has no upsert, only insert, replace and
+        # remove. An upsert is therefore a get that decides between the two. A
+        # missing document on this get is the expected case, not a failure, and
+        # catching it here leaves the transaction running.
+        try:
+            existing = ctx_txn.get(collection, document_id)
+        except DocumentNotFoundException:
+            ctx_txn.insert(collection, document_id, op["content"])
+        else:
+            ctx_txn.replace(existing, op["content"])
+    elif kind == "replace":
+        existing = ctx_txn.get(collection, document_id)
+        ctx_txn.replace(existing, op["content"])
+    elif kind == "remove":
+        existing = ctx_txn.get(collection, document_id)
+        ctx_txn.remove(existing)
+
+
+def run_kv_transaction(
+    ctx: Context,
+    operations: list[dict[str, Any]],
+    timeout_seconds: int | None = None,
+) -> dict[str, Any]:
+    """Run several document operations as one atomic transaction.
+
+    Use this when the operations MUST all succeed or all be undone together,
+    for example correcting a set of related records. Every operation commits or
+    none of them does.
+
+    For documents that are independent of each other, prefer the ordinary
+    single-document write tools: this one costs more, holds cluster resources
+    for its duration, and reports one outcome for the whole set rather than
+    telling you which individual documents succeeded.
+
+    Each entry in operations is an object with:
+      op                one of insert, upsert, replace, remove
+      bucket_name, scope_name, collection_name, document_id
+      content           the document body, required for insert/upsert/replace
+
+    Operations may span different buckets, scopes and collections.
+    A replace or remove of a document that does not exist fails the whole
+    transaction and nothing is committed.
+
+    Returns {"success": True, "committed": True, ...} when the transaction
+    commits, or {"success": False, "committed": False, "error": "..."} when it
+    rolls back. A rollback means NOTHING was written."""
+    problem = _validate_transaction_operations(operations)
+    if problem is not None:
+        return tool_error(
+            problem,
+            committed=False,
+            operations_requested=len(operations) if isinstance(operations, list) else 0,
+        )
+
+    cluster = get_cluster_connection(ctx)
+
+    def _body(ctx_txn: Any) -> None:
+        for op in operations:
+            _apply_transaction_operation(ctx_txn, cluster, op)
+
+    options = None
+    if timeout_seconds is not None:
+        if timeout_seconds <= 0:
+            return tool_error(
+                "timeout_seconds must be greater than zero.", committed=False
+            )
+        options = TransactionOptions(timeout=timedelta(seconds=int(timeout_seconds)))
+
+    try:
+        logger.debug(f"Running a transaction over {len(operations)} operation(s)")
+        result = (
+            cluster.transactions.run(_body, options)
+            if options is not None
+            else cluster.transactions.run(_body)
+        )
+    except Exception as e:
+        logger.error(f"Transaction rolled back: {e}", exc_info=True)
+        return tool_error(
+            f"{type(e).__name__}: {e}",
+            committed=False,
+            operations_requested=len(operations),
+            # Stated rather than implied. A partially-applied transaction is the
+            # thing this tool exists to make impossible, and a caller that reads
+            # a failure as "some of it may have landed" will go looking for
+            # damage that is not there, or worse, try to clean it up.
+            detail="The transaction rolled back. No operation was committed.",
+        )
+
+    logger.info(f"Transaction committed {len(operations)} operation(s)")
+    return tool_success(
+        committed=True,
+        operations_committed=len(operations),
+        transaction_id=getattr(result, "transaction_id", None),
+        unstaging_complete=getattr(result, "unstaging_complete", None),
+    )
