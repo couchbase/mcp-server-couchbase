@@ -9,12 +9,19 @@ Covers:
     run_search, not one of these two, and a "find similar/semantically
     related" prompt should select run_vector_query over run_search.
 
-No seed/cleanup hooks: these cases score tool selection and parameters (see
-accuracy/sdk/scorer.py), not whether the underlying index exists or the call
-actually returns hits, so no live vector index is required — matching the
-"conversational" style cases in the other accuracy test files. index_name in
-the run_vector_search cases is a plausible, not necessarily-existing,
-name for the same reason.
+run_vector_query_no_index_name and conversational_plain_fts_not_vector_search
+seed a real GSI vector index / Search index respectively: both
+run_vector_query (distance_metric has no default -- its docstring says to
+read `similarity` off a matching index via list_indexes) and run_search
+(its docstring says to confirm the index first via list_search_indexes /
+get_search_index_definition) instruct the model to verify the index exists
+before querying. Without a real index to find, the model correctly refuses
+to guess and never calls the expected tool at all -- matching every other
+index/FTS-backed accuracy test file (test_fts.py, test_index.py), which
+seed real state for the same reason. The other two cases don't need this:
+run_vector_search's docstring explicitly says it's safe to call without
+confirming first ("this tool does not pre-validate index_name"), so
+index_name there stays a plausible, not necessarily-existing, name.
 """
 
 from __future__ import annotations
@@ -28,13 +35,72 @@ from accuracy.sdk import (
     DiskResultStorage,
     Matcher,
     OpenAIAgent,
+    drop_fts_index,
     run_accuracy_case,
+    seed_fts_index,
 )
+from accuracy.sdk.client import AccuracyTestingClient
+from accuracy.sdk.runner import SetupHook
 from accuracy.sdk.types import ExpectedToolCall
+
+
+def _create_vector_index(
+    bucket: str, scope: str, collection: str, index_name: str
+) -> SetupHook:
+    """Return a hook that creates a real (built) Composite Vector Index on
+    `embedding`, so run_vector_query's list_indexes-first guidance has a
+    real `similarity` to read instead of finding nothing."""
+
+    async def _hook(client: AccuracyTestingClient) -> None:
+        await client.call_tool_silent(
+            "create_query_index",
+            {
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "index_name": index_name,
+                "index_type": "composite_vector",
+                "vector_field": "embedding",
+                "dimension": 1536,
+                "similarity": "COSINE",
+                "deferred": False,
+            },
+        )
+
+    return _hook
+
+
+def _drop_vector_index(
+    bucket: str, scope: str, collection: str, index_name: str
+) -> SetupHook:
+    """Return a hook that drops the GSI vector index (silently, best-effort)."""
+
+    async def _hook(client: AccuracyTestingClient) -> None:
+        await client.call_tool_silent(
+            "drop_index",
+            {
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+                "index_name": index_name,
+                "ignore_if_not_exists": True,
+            },
+        )
+
+    return _hook
 
 
 def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]:
     index_name = "product_vector_index"
+    gsi_vector_index_name = "acc_vec_idx_embedding"
+    seed_gsi_vector_index = _create_vector_index(
+        bucket, scope, collection, gsi_vector_index_name
+    )
+    drop_gsi_vector_index = _drop_vector_index(
+        bucket, scope, collection, gsi_vector_index_name
+    )
+    seed_fts_vector_index = seed_fts_index(bucket, scope, collection, index_name)
+    drop_fts_vector_index = drop_fts_index(bucket, scope, index_name)
 
     return [
         AccuracyCase(
@@ -56,6 +122,8 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
                     },
                 ),
             ],
+            seed=seed_gsi_vector_index,
+            cleanup=drop_gsi_vector_index,
         ),
         AccuracyCase(
             test_id="run_vector_search_named_index",
@@ -109,6 +177,8 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
                     parameters=Matcher.any_value(),
                 ),
             ],
+            seed=seed_fts_vector_index,
+            cleanup=drop_fts_vector_index,
         ),
     ]
 
