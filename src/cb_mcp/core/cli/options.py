@@ -188,6 +188,17 @@ def transport_options(*, default_port: int) -> Callable:
 
 tool_gating_options = compose(
     click.option(
+        "--enable-tool-set-selection",
+        "enable_tool_set_selection",
+        is_flag=True,
+        default=False,
+        envvar="CB_MCP_ENABLE_TOOL_SET_SELECTION",
+        help="Offer the select_tool_sets tool so an agent can narrow its own "
+        "tool list mid-session via tools/listChanged. Selection can only "
+        "narrow: an agent can never gain a tool its credential or this "
+        "server's configuration does not already permit. Off by default.",
+    ),
+    click.option(
         "--tool-sets",
         "tool_sets",
         envvar="CB_MCP_TOOL_SETS",

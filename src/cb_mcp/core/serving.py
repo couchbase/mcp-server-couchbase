@@ -89,6 +89,7 @@ def resolve_serving(
     supports_multiple_workers: bool,
     confirmation_required: Collection[str],
     runtime_default_stateless: bool = False,
+    tool_set_selection: bool = False,
 ) -> ServingConfig:
     """Resolve the serving options, or raise :class:`ServingConfigError`.
 
@@ -171,6 +172,16 @@ def resolve_serving(
             "MCP elicitation, which needs a session, and stateless mode keeps "
             "none. Remove the confirmation-required tools (or disable them "
             "with --disabled-tools), or run a single worker without "
+            "--stateless-http or FASTMCP_STATELESS_HTTP."
+        )
+
+    if resolved_stateless and tool_set_selection:
+        raise ServingConfigError(
+            f"Stateless HTTP (enabled by {source}) cannot be combined with "
+            "--enable-tool-set-selection: the selection is remembered against "
+            "the MCP session, and stateless mode keeps none, so every call "
+            "would silently see the full tool list. Remove "
+            "--enable-tool-set-selection, or run a single worker without "
             "--stateless-http or FASTMCP_STATELESS_HTTP."
         )
 

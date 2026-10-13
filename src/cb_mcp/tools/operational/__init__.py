@@ -279,6 +279,11 @@ TOOL_SETS: dict[str, frozenset[str]] = {
 
 # Tool annotations for MCP clients (readOnlyHint, destructiveHint, etc.)
 TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
+    # Registered only under --enable-tool-set-selection, so it is not in
+    # TOOL_SET. The annotation lives here so that when it is registered it
+    # carries one, and the spec invariant (every tool in TOOL_SET has an
+    # annotation) is a subset check that this extra key does not disturb.
+    "select_tool_sets": ToolAnnotations(readOnlyHint=True),
     # Server/Cluster management tools (read-only)
     "get_server_configuration_status": ToolAnnotations(readOnlyHint=True),
     "test_cluster_connection": ToolAnnotations(readOnlyHint=True),
