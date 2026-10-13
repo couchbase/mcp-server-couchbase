@@ -35,7 +35,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from .constants import (
-    DEFAULT_MAX_QUERY_RESULT_SIZE,
     LOGGER_NAMESPACE,
     MAX_MAX_QUERY_RESULT_SIZE,
     MIN_MAX_QUERY_RESULT_SIZE,
@@ -131,6 +130,11 @@ class BoundedRows:
 def clamp_max_query_result_size(value: int) -> int:
     """Clamp a configured budget into the supported range, warning if it moved.
 
+    Only an upper bound applies. ``0`` is a real budget of zero bytes and any
+    positive value is honoured as given — a budget below one row's worth of
+    JSON returns no rows, which ``truncation_message`` reports explicitly
+    rather than letting it look like an empty result.
+
     Clamping rather than raising is a deliberate deployment choice: see
     ``MAX_MAX_QUERY_RESULT_SIZE`` in ``constants``. The warning names both the
     requested and effective values so an operator reading the log is never
@@ -138,56 +142,57 @@ def clamp_max_query_result_size(value: int) -> int:
     """
     if value > MAX_MAX_QUERY_RESULT_SIZE:
         logger.warning(
-            f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE {value} exceeds the "
-            f"maximum "
-            f"{MAX_MAX_QUERY_RESULT_SIZE}; clamping to "
+            f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE {value} exceeds "
+            f"the maximum {MAX_MAX_QUERY_RESULT_SIZE}; clamping to "
             f"{MAX_MAX_QUERY_RESULT_SIZE}."
         )
         return MAX_MAX_QUERY_RESULT_SIZE
     if value < MIN_MAX_QUERY_RESULT_SIZE:
         logger.warning(
-            f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE {value} is below the "
-            f"minimum "
-            f"{MIN_MAX_QUERY_RESULT_SIZE}; clamping to "
+            f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE {value} is below "
+            f"the minimum {MIN_MAX_QUERY_RESULT_SIZE}; clamping to "
             f"{MIN_MAX_QUERY_RESULT_SIZE}."
         )
         return MIN_MAX_QUERY_RESULT_SIZE
     return value
 
 
-def max_query_result_size_from(settings: Any) -> int:
-    """Read the budget out of a settings mapping, falling back to the default.
+def max_query_result_size_from(settings: Any) -> int | None:
+    """Read the budget out of a settings mapping, or ``None`` when unset.
 
-    Tolerant of a missing or ``None`` value because an embedding host builds
-    its own settings mapping and may predate this key; such a host gets the
-    default rather than a ``KeyError`` at query time. The value is clamped on
-    read as well as at startup, since that host never passed through the CLI.
+    ``None`` means *no truncation*: the result is returned whole, as it was
+    before this budget existed. Capping results is an operator's decision, so
+    an unconfigured server must not impose one.
+
+    Tolerant of a missing key because an embedding host builds its own settings
+    mapping and may predate it; such a host gets no truncation rather than a
+    ``KeyError`` at query time. The value is clamped on read as well as at
+    startup, since that host never passed through the CLI.
     """
     try:
         value = settings.get(MAX_QUERY_RESULT_SIZE_KEY)
     except AttributeError:
         value = None
     if value is None:
-        return DEFAULT_MAX_QUERY_RESULT_SIZE
+        return None
     try:
         return clamp_max_query_result_size(int(value))
     except (TypeError, ValueError):
         logger.warning(
             f"Ignoring non-numeric {MAX_QUERY_RESULT_SIZE_KEY} {value!r}; "
-            f"using {DEFAULT_MAX_QUERY_RESULT_SIZE}."
+            f"no result-size limit will be applied."
         )
-        return DEFAULT_MAX_QUERY_RESULT_SIZE
+        return None
 
 
-def max_query_result_size_for(ctx: Any) -> int:
-    """The budget for this request, from the lifespan context.
+def max_query_result_size_for(ctx: Any) -> int | None:
+    """The budget for this request, or ``None`` when no limit is configured.
 
     Reaches the settings mapping with ``getattr`` rather than
     ``get_settings``, matching ``get_logging_config`` and ``get_server_id`` in
     ``utils.context``: an embedding host may supply a lifespan-context type
     that carries no ``settings`` at all, and a *limit* lookup must never be
-    the thing that fails an otherwise valid query. Such a host gets the
-    default budget, which is the safe direction to err.
+    the thing that fails an otherwise valid query.
     """
     lifespan = getattr(getattr(ctx, "request_context", None), "lifespan_context", None)
     return max_query_result_size_from(getattr(lifespan, "settings", None))
@@ -212,7 +217,7 @@ def _encoded_size(row: Any) -> int:
 def collect_rows_within_budget(
     rows: Iterable[Any],
     *,
-    limit_bytes: int,
+    limit_bytes: int | None,
     service: str,
 ) -> BoundedRows:
     """Read from ``rows`` until the serialized budget is reached.
@@ -233,8 +238,23 @@ def collect_rows_within_budget(
     empty-and-complete one (a query that matched nothing): callers must read
     ``truncated`` rather than inferring emptiness means "no matches".
 
+    ``limit_bytes`` of ``None`` means no limit: every row is returned and no
+    row is measured, so an unconfigured server pays none of the per-row
+    ``json.dumps`` cost.
+
     ``service`` appears only in the log line that records a truncation.
     """
+    if limit_bytes is None:
+        collected_all = list(rows)
+        return BoundedRows(
+            rows=collected_all,
+            truncated=False,
+            # Not measured: computing it would cost a json.dumps per row for a
+            # number nothing reads when there is no budget to report against.
+            bytes_returned=0,
+            limit_bytes=0,
+        )
+
     iterator: Iterator[Any] = iter(rows)
     collected: list[Any] = []
     total = 0

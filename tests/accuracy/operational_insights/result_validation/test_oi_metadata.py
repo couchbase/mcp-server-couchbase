@@ -69,8 +69,7 @@ def _build_cases(database: str, scope: str, collection: str) -> list[ResultCase]
         ResultCase(
             test_id="collections_include_seeded_collection",
             prompt=(
-                f"What collections are in scope '{scope}' of database "
-                f"'{database}'?"
+                f"What collections are in scope '{scope}' of database '{database}'?"
             ),
             expectation=(
                 f"The answer must name the collection '{collection}'. PASS if "

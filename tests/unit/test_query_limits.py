@@ -220,31 +220,53 @@ class TestRowMeasurement:
 
 
 class TestClamping:
+    """Only an upper bound applies; small values are honoured as given."""
+
     def test_above_maximum_is_clamped(self, caplog) -> None:
         with caplog.at_level(logging.WARNING):
             assert (
-                clamp_max_query_result_size(5 * 1024 * 1024)
+                clamp_max_query_result_size(8 * 1024 * 1024)
                 == MAX_MAX_QUERY_RESULT_SIZE
             )
-        assert "exceeds the maximum" in caplog.text
+        assert "exceeds" in caplog.text
 
-    def test_below_minimum_is_clamped(self, caplog) -> None:
-        with caplog.at_level(logging.WARNING):
-            assert clamp_max_query_result_size(10) == MIN_MAX_QUERY_RESULT_SIZE
-        assert "below the minimum" in caplog.text
+    def test_maximum_is_four_megabytes(self) -> None:
+        assert MAX_MAX_QUERY_RESULT_SIZE == 4 * 1024 * 1024
+
+    def test_there_is_no_floor(self) -> None:
+        assert MIN_MAX_QUERY_RESULT_SIZE == 0
 
     @pytest.mark.parametrize(
-        "value",
-        [
-            MIN_MAX_QUERY_RESULT_SIZE,
-            DEFAULT_MAX_QUERY_RESULT_SIZE,
-            MAX_MAX_QUERY_RESULT_SIZE,
-        ],
+        "value", [0, 1, 512, 1024, 15360, MAX_MAX_QUERY_RESULT_SIZE]
     )
-    def test_in_range_values_pass_through(self, value: int, caplog) -> None:
+    def test_values_up_to_the_maximum_pass_through(self, value: int, caplog) -> None:
+        """A tiny budget is a valid choice, not a misconfiguration to correct."""
         with caplog.at_level(logging.WARNING):
             assert clamp_max_query_result_size(value) == value
         assert caplog.text == ""
+
+
+class TestNoLimitConfigured:
+    """Unset means no truncation — the behaviour before the budget existed."""
+
+    def test_there_is_no_default_budget(self) -> None:
+        assert DEFAULT_MAX_QUERY_RESULT_SIZE is None
+
+    def test_none_returns_every_row(self) -> None:
+        bounded = _collect([ROW] * 1000, None)
+        assert bounded.row_count == 1000
+        assert bounded.truncated is False
+
+    def test_none_never_truncates_however_wide_the_rows(self) -> None:
+        bounded = _collect([{"blob": "x" * 500_000}], None)
+        assert bounded.row_count == 1
+        assert bounded.truncated is False
+
+    def test_zero_is_a_real_budget_not_an_absent_one(self) -> None:
+        """0 means zero bytes, which is distinct from 'no limit'."""
+        bounded = _collect([ROW] * 5, 0)
+        assert bounded.row_count == 0
+        assert bounded.truncated is True
 
 
 class TestSettingsLookup:
@@ -253,23 +275,34 @@ class TestSettingsLookup:
 
     def test_none_uses_the_default(self) -> None:
         assert (
-            max_query_result_size_from({"operational_insights_query_result_max_size": None})
+            max_query_result_size_from(
+                {"operational_insights_query_result_max_size": None}
+            )
             == DEFAULT_MAX_QUERY_RESULT_SIZE
         )
 
     def test_configured_value_is_honoured(self) -> None:
-        assert max_query_result_size_from({"operational_insights_query_result_max_size": 20_480}) == 20_480
+        assert (
+            max_query_result_size_from(
+                {"operational_insights_query_result_max_size": 20_480}
+            )
+            == 20_480
+        )
 
     def test_out_of_range_value_is_clamped_on_read(self) -> None:
         """An embedding host never passes through the CLI validator."""
         assert (
-            max_query_result_size_from({"operational_insights_query_result_max_size": 99_999_999})
+            max_query_result_size_from(
+                {"operational_insights_query_result_max_size": 99_999_999}
+            )
             == MAX_MAX_QUERY_RESULT_SIZE
         )
 
     def test_non_numeric_value_falls_back(self) -> None:
         assert (
-            max_query_result_size_from({"operational_insights_query_result_max_size": "abc"})
+            max_query_result_size_from(
+                {"operational_insights_query_result_max_size": "abc"}
+            )
             == DEFAULT_MAX_QUERY_RESULT_SIZE
         )
 

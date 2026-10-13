@@ -61,8 +61,7 @@ def _build_cases(
         AccuracyCase(
             test_id="oi_get_collections_in_scope",
             prompt=(
-                f"What collections are in scope '{scope}' of database "
-                f"'{database}'?"
+                f"What collections are in scope '{scope}' of database '{database}'?"
             ),
             expected_tools=[
                 ExpectedToolCall(

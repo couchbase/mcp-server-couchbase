@@ -167,7 +167,7 @@ if a single MCP client registers both servers at once.
 | `oi_get_collections_in_scope` | List all collections (datasets) in a scope. |
 | `oi_get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. |
 | `oi_list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog (the SDK has no index manager). |
-| `oi_run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return its result rows, up to `CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE`; a larger result is cut short and reported with `truncated: true`. Pass `copy_to_link`, `copy_to_bucket` and `copy_to_path` to export the rows to object storage instead of returning them (see [Exporting large results](#exporting-large-results-operational-insights)). Enforces read-only mode server-side via `QueryOptions(readonly=True)` — there is no client-side SQL++ parser here. |
+| `oi_run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return its result rows, up to `CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE` when that is set (unset means no limit); a larger result is cut short and reported with `truncated: true`. Pass `copy_to_link`, `copy_to_bucket` and `copy_to_path` to export the rows to object storage instead of returning them (see [Exporting large results](#exporting-large-results-operational-insights)). Enforces read-only mode server-side via `QueryOptions(readonly=True)` — there is no client-side SQL++ parser here. |
 | `oi_explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
 | `oi_create_index` | Create a secondary index via `CREATE INDEX` (the SDK has no index manager). **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `oi_run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Accepts the same `copy_to_*` export arguments as `oi_run_query_sync`, and is the better choice for a large export since it does not hold the request open for the upload. Same read-only enforcement as `oi_run_query_sync`. |
@@ -295,7 +295,7 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_PORT` | `--port` | Port for HTTP/SSE transport modes | `8000` |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Elicitation/Confirmation Required Tools](#elicitationconfirmation-for-tool-calls)) | None |
-| `CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE` | `--operational-insights-query-result-max-size` | Maximum size **in bytes** of a query tool's result. Rows are streamed from the cluster and reading stops once the budget is reached; the response then reports `truncated: true` along with a `truncation` object explaining what happened. Applies to the Operational Insights query tools (`oi_run_query_sync`, `oi_get_async_query_results`). Values above `1048576` (1 MB) or below `1024` (1 kB) are clamped with a startup warning | `15360` (15 kB) |
+| `CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE` | `--operational-insights-query-result-max-size` | Maximum size **in bytes** of an Operational Insights query tool's result. **Unset means no limit** — the full result is returned. When set, rows are streamed from the cluster and reading stops once the budget is reached; the response then reports `truncated: true` along with a `truncation` object explaining what happened. The budget is a hard ceiling: a row that would overrun it is not returned, so a budget smaller than a single row yields no rows (reported explicitly, not as an empty result). Applies to `oi_run_query_sync` and `oi_get_async_query_results`. Values above `4194304` (4 MB) are clamped with a startup warning; there is no minimum | Unset (no limit) |
 | `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
 | `CB_MCP_LOG_SINKS` | `--log-sinks` | Comma-separated log destinations: `stderr`, `file`, or both (see [Logging](#logging)) | `stderr` |
 | `CB_MCP_LOG_FILE` | `--log-file` | Base path for per-level log files (only used when the `file` sink is enabled) | `mcp_server.log` |
@@ -740,7 +740,7 @@ operational server.
 
 ### Exporting large results (Operational Insights)
 
-A query whose result exceeds `CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE` comes back
+A query whose result exceeds `CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE` (when that limit is set) comes back
 truncated, which is the right default for a tool whose output is read by an
 LLM — but sometimes the full data is what you need. `oi_run_query_sync` and
 `oi_run_query_async` can write the rows to external object storage instead of

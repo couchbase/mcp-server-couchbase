@@ -166,7 +166,7 @@ class GatingParams:
     read_only_mode: bool
     disabled_tools: str | None
     confirmation_required_tools: str | None
-    max_query_result_size: int
+    max_query_result_size: int | None
 
     @classmethod
     def from_click(cls, params: Mapping[str, Any]) -> "GatingParams":
