@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable, Mapping
 
 from .core.spec import Deployment, ServerSpec, ToolSet
+from .tools.selection import make_select_tool_sets
 from .utils.config import parse_tool_names
 from .utils.constants import LOGGER_NAMESPACE
 from .utils.elicitation import wrap_with_confirmation
@@ -97,6 +98,7 @@ def prepare_tools_for_registration(
     enforce_scopes: bool = False,
     deployment: Deployment | None = None,
     tool_sets: str | None = None,
+    enable_tool_set_selection: bool = False,
 ) -> tuple[list[Callable], set[str], set[str]]:
     """Prepare final tool list and confirmation configuration for registration.
 
@@ -229,6 +231,40 @@ def prepare_tools_for_registration(
         logger.info(
             "Per-tool OAuth scope enforcement enabled for %d tool(s).",
             len(enabled_tools),
+        )
+
+    if enable_tool_set_selection and spec.tool_sets:
+        # Appended rather than declared in the spec's ToolSet, so a deployment
+        # that leaves selection off registers exactly the tools it does today
+        # and every existing count is untouched. It is wrapped like any other
+        # tool: it is read-side, so a write-only token cannot reach it either.
+        selector = make_select_tool_sets(spec)
+        # Wrapped exactly as the loop above wraps the spec's own tools. v1.1
+        # moved per-call telemetry into the audit middleware, so there is no
+        # telemetry wrapper to apply here any more.
+        #
+        # It is deliberately absent from TOOL_CLASSIFICATION. That table is
+        # asserted to cover the package's registered tool list exactly, and
+        # this tool is not in that list: it is built per spec and appended
+        # here, only when the operator opts in. So it takes classification's
+        # fail-closed path and is recorded as a non-filterable write, which is
+        # the correct reading of it in audit terms regardless -- it changes
+        # which tools the session offers, so no deployment should be able to
+        # filter the record of it away.
+        wrapped = selector
+        if enforce_scopes:
+            wrapped = wrap_with_scope_check(
+                wrapped,
+                required_scopes_for_tool(
+                    selector.__name__,
+                    write_tool_names=write_tool_names,
+                    scopes=spec.scopes,
+                ),
+                hint=spec.scope_hints.get(selector.__name__),
+            )
+        final_tools.append(wrapped)
+        logger.info(
+            "Agent-declared tool set selection enabled for server '%s'.", spec.id
         )
 
     return final_tools, configured_confirmation_tool_names, disabled_tool_names

@@ -118,6 +118,7 @@ The most common variables are below. Every option — including logging rotation
 | `CB_MCP_PORT` | Port for HTTP | `8000` / `8001` |
 | `CB_MCP_WORKERS` | Worker processes for `http` (`operational` only) | `1` |
 | `CB_MCP_TOOL_SETS` | Tool sets to load, comma-separated (`operational` only), e.g. `kv,query`. Unset loads everything | |
+| `CB_MCP_ENABLE_TOOL_SET_SELECTION` | `true` registers `select_tool_sets` so an agent can narrow its own session (`operational` only; needs a stateful session) | `false` |
 | `CB_MCP_DISABLED_TOOLS` | Tools to hide — comma-separated list or a file path | |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | Tools that ask the user to confirm first — comma-separated list or a file path | |
 | `CB_MCP_LOG_LEVEL` | `off`, `error`, `warning`, `info`, `debug` | `info` |
