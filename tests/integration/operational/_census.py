@@ -178,12 +178,7 @@ TOOL_REQUIRED_PARAMS = {
     "get_scopes_in_bucket": ["bucket_name"],
     "get_scopes_and_collections_in_bucket": ["bucket_name"],
     "get_collections_in_scope": ["bucket_name", "scope_name"],
-    "get_document_by_id": [
-        "bucket_name",
-        "scope_name",
-        "collection_name",
-        "document_id",
-    ],
+    "get_document_by_id": ["bucket_name", "scope_name", "collection_name"],
     "upsert_document_by_id": [
         "bucket_name",
         "scope_name",
@@ -249,4 +244,12 @@ TOOL_REQUIRED_PARAMS = {
     ],
     "run_vector_search": ["index_name", "vector_field", "vector_query_text"],
     "delete_active_query": ["request_id"],
+}
+
+# Tools that take EITHER one document (the single-document parameters) OR a batch
+# (the batch parameter). Neither side is required on its own, so the check is that
+# every parameter exists and that the server rejects a call supplying neither, which
+# the tool's own integration tests cover.
+TOOL_SINGLE_OR_BATCH_PARAMS = {
+    "get_document_by_id": ("document_ids", ["document_id"]),
 }

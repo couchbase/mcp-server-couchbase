@@ -218,7 +218,7 @@ Write tools (marked ✏️) are **not loaded** while [read-only mode](#read-only
 
 | Tool | Description |
 | --- | --- |
-| `get_document_by_id` | Get a document by ID |
+| `get_document_by_id` | Get a document by ID, or up to 50 at once with `document_ids`; a batch reports what happened to every id, and the returned documents are limited to 64 KiB together (set `CB_MCP_BULK_READ_MAX_BYTES` to change it, up to 128 KiB); ids that did not fit are listed in `not_returned` |
 | `lookup_subdocument` | Read specific paths, existence checks or counts without fetching the whole document |
 | `upsert_document_by_id` ✏️ | Upsert a document by ID |
 | `insert_document_by_id` ✏️ | Insert a new document (fails if it exists) |
