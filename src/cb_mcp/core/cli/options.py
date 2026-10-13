@@ -226,6 +226,15 @@ def transport_options(*, default_port: int) -> Callable:
 
 tool_gating_options = compose(
     click.option(
+        "--tool-sets",
+        "tool_sets",
+        envvar="CB_MCP_TOOL_SETS",
+        help="Comma-separated names of the tool sets to load (e.g. 'kv,query'). "
+        "An allow list: only tools in the named sets are registered. Omit to "
+        "load everything, which is the default and the existing behaviour. "
+        "--disabled-tools still applies, as a subtraction afterwards.",
+    ),
+    click.option(
         "--disabled-tools",
         "disabled_tools",
         envvar="CB_MCP_DISABLED_TOOLS",

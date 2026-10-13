@@ -119,6 +119,7 @@ The most common variables are below. Every option — including logging rotation
 | `CB_MCP_WORKERS` | Worker processes for `http` (`operational` only) | `1` |
 | `CB_MCP_ALLOWED_ORIGINS` | Comma-separated web origins allowed to call the HTTP endpoint (e.g. `https://app.example.com`). When set, requests carrying an unlisted `Origin` header are rejected with 403; requests with no `Origin` (non-browser clients, health probes) are admitted. Unset or `*` allows all | |
 | `CB_MCP_ALLOWED_HOSTS` | Comma-separated host names (no scheme or port, e.g. `mcp.example.com`) the HTTP endpoint may be reached by. When set, requests whose `Host` header is not listed are rejected with 421 (loopback names and the bound address are always allowed), but `Origin` is not restricted: set `CB_MCP_ALLOWED_ORIGINS` as well to restrict which web pages may call the server. List the public name your proxy or load balancer forwards, or all requests fail. Unset or `*` adds no restriction | |
+| `CB_MCP_TOOL_SETS` | Tool sets to load, comma-separated (`operational` only), e.g. `kv,query`. Unset loads everything | |
 | `CB_MCP_DISABLED_TOOLS` | Tools to hide — comma-separated list or a file path | |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | Tools that ask the user to confirm first — comma-separated list or a file path | |
 | `CB_MCP_LOG_LEVEL` | `off`, `error`, `warning`, `info`, `debug` | `info` |

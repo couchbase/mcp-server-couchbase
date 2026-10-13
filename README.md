@@ -346,6 +346,7 @@ The [Operational Insights server](#operational-insights-server) accepts the same
 | `CB_MCP_STATELESS_HTTP` | `--stateless-http` | Handle each HTTP request without per-session state. Only honored with `http`; cannot be combined with confirmation-required tools (see [Multiple Workers](#multiple-workers)) | `true` when workers > 1, otherwise `false` |
 | `CB_MCP_ALLOWED_ORIGINS` | `--allowed-origins` | Comma-separated origins (`scheme://host[:port]`) allowed to call the `http`/`sse` endpoint; see [Restricting browser origins](#restricting-browser-origins). Unset, empty or `*` allows every origin | unset |
 | `CB_MCP_ALLOWED_HOSTS` | `--allowed-hosts` | Comma-separated host names (no scheme or port) the `http`/`sse` endpoint may be reached by; see [Restricting hosts](#restricting-hosts). Unset, empty or `*` adds no restriction | unset |
+| `CB_MCP_TOOL_SETS` | `--tool-sets` | Comma-separated tool sets to load, as an allow list applied before disabled tools (operational server only; see [Tool sets](#tool-sets)) | All tools |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Requiring confirmation](#requiring-confirmation-elicitation)) | None |
 | `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
@@ -552,6 +553,29 @@ get_index_advisor_recommendations
 ```
 
 On Capella, the operational server also [disables some admin tools automatically](#tools-disabled-automatically-on-capella).
+
+#### Tool sets
+
+`CB_MCP_TOOL_SETS` loads only the tools in the named sets, so an agent that does one kind of job is offered one kind of tool. It is an allow list, applied before `CB_MCP_DISABLED_TOOLS`, which still subtracts afterwards. Leave it unset to load everything, which is the default.
+
+```bash
+CB_MCP_TOOL_SETS="kv,query"
+```
+
+The operational server declares these sets:
+
+| Set | Covers |
+| --- | --- |
+| `kv` | Document and sub-document reads and writes |
+| `query` | SQL++ queries, query plans and collection schemas |
+| `search` | Search (FTS) indexes and `run_search` |
+| `vector` | Vector queries, vector search and vector index creation |
+| `indexes` | Query index management and advisor tools |
+| `diagnostics` | Cluster health, metrics and slow-query diagnostics |
+| `provisioning` | Buckets, scopes and collections |
+| `reference` | `discover_tool_input_values` |
+
+A tool can belong to more than one set (`create_query_index` is in both `vector` and `indexes`). An unknown set name stops the server at startup and names the sets that exist. Tool sets only narrow: read-only mode, scopes and `CB_MCP_DISABLED_TOOLS` apply on top, and a set can never add a tool they remove. The Operational Insights server declares no tool sets.
 
 #### Requiring confirmation (elicitation)
 
