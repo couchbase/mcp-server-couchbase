@@ -2,7 +2,8 @@
 Tools for key-value operations.
 
 This module contains tools for document operations by ID:
-- get: Retrieve a document
+- get: Retrieve a document, optionally falling back to a replica when the
+  active node is unavailable
 - upsert: Insert or update a document (creates if not exists, updates if exists)
 - insert: Create a document only if it does NOT exist (fails if exists)
 - replace: Update a document only if it exists (fails if missing)
@@ -11,10 +12,16 @@ This module contains tools for document operations by ID:
 
 import json
 import logging
+from datetime import timedelta
 from typing import Any
 
 import couchbase.subdocument as subdoc
-from couchbase.exceptions import CouchbaseException
+from couchbase.exceptions import (
+    CouchbaseException,
+    DocumentNotFoundException,
+    DocumentUnretrievableException,
+    TimeoutException,
+)
 from fastmcp import Context
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
@@ -25,25 +32,149 @@ from ...utils.responses import tool_error, tool_success
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.kv")
 
 
+#: Ceiling on the replica attempt. A failing read must not sit for the full
+#: failover window, which can run to minutes.
+REPLICA_FALLBACK_TIMEOUT_SECONDS = 5.0
+
+
+def _configured_replica_count(cluster: Any, bucket_name: str) -> int | None:
+    """Replicas the bucket is configured for, or None if it cannot be read.
+
+    Called ONLY on the inconclusive path, after a read has already failed, so
+    it never adds a request to a read that is working. On a cluster already
+    unwell enough to lose every copy of a document this call may fail too; that
+    costs one reported fact, not the result.
+    """
+    try:
+        settings = cluster.buckets().get_bucket(bucket_name)
+    # Broad by intent: this is diagnostic only and must never be fatal.
+    except Exception as e:
+        logger.debug(f"Could not read replica count for '{bucket_name}': {e}")
+        return None
+    return getattr(settings, "num_replicas", None)
+
+
+def _read_from_replica(
+    *,
+    cluster: Any,
+    collection: Any,
+    bucket_name: str,
+    keyspace: str,
+    document_id: str,
+    active_error: Exception,
+) -> dict[str, Any]:
+    """Try any replica, and report an inconclusive result as a stated outcome.
+
+    The SDK raises DocumentUnretrievableException when no copy is available
+    anywhere, and does so whether the document is absent or the replicas are
+    merely unreachable. That ambiguity is the SDK's documented contract rather
+    than a defect, so it cannot be resolved here. What can be done, and is the
+    reason this exists, is to stop the ambiguity reaching the model as
+    something it will read as absence and then insert over.
+    """
+    try:
+        result = collection.get_any_replica(
+            document_id,
+            timeout=timedelta(seconds=REPLICA_FALLBACK_TIMEOUT_SECONDS),
+        )
+    # Broad by intent: whatever went wrong is reported as data, not raised.
+    except Exception as replica_error:
+        replicas = _configured_replica_count(cluster, bucket_name)
+        logger.warning(f"Replica read inconclusive for {keyspace}: {replica_error}")
+        return tool_error(
+            "No copy of this document could be read. The active node failed "
+            f"with {type(active_error).__name__} and no replica responded. "
+            "This does NOT establish that the document is absent: it may exist "
+            "and be unreachable. Do not insert or upsert on the basis of this "
+            "result.",
+            keyspace=keyspace,
+            document_id=document_id,
+            absence_established=False,
+            is_replica=None,
+            configured_replicas=replicas,
+            # Qualified with the type name: a bare SDK exception often
+            # stringifies to nothing at all, and "" tells a reader less than
+            # nothing. The type is the part that says what actually happened.
+            active_error=f"{type(active_error).__name__}: {active_error}".strip(": "),
+            replica_error=f"{type(replica_error).__name__}: {replica_error}".strip(
+                ": "
+            ),
+        )
+
+    logger.info(f"Retrieved document from a replica for {keyspace}")
+    return {
+        "content": result.content_as[dict],
+        # True by construction on this path: the active node already failed.
+        # The SDK also reports it, so prefer what it says if it says anything.
+        "is_replica": bool(getattr(result, "is_replica", True)),
+        # Stated rather than implied, and deliberately not a CAS: a replica CAS
+        # belongs to the replica's version of the document, and handing it back
+        # as a write guard is worse than handing back nothing.
+        "stale_read_warning": (
+            "This value came from a replica and may predate the most recent "
+            "write. Do not use it as the basis for a write."
+        ),
+    }
+
+
 def get_document_by_id(
     ctx: Context,
     bucket_name: str,
     scope_name: str,
     collection_name: str,
     document_id: str,
+    allow_replica_fallback: bool = False,
 ) -> dict[str, Any]:
     """Get a document by its ID from the specified scope and collection.
-    If the document is not found, it will raise an exception."""
+    If the document is not found, it will raise an exception.
+
+    Set allow_replica_fallback=True ONLY when availability matters more than
+    freshness, for example while a node is down and this tool is timing out.
+    It changes the return shape to {"content": ..., "is_replica": ...} so the
+    caller can always tell an authoritative read from a possibly stale one.
+    A value read from a replica may predate the most recent write and MUST NOT
+    be used as the basis for a write.
+    """
 
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
+    collection = bucket.scope(scope_name).collection(collection_name)
+
     try:
         logger.debug(f"Getting document from {keyspace}")
-        collection = bucket.scope(scope_name).collection(collection_name)
         result = collection.get(document_id)
         logger.info(f"Retrieved document from {keyspace}")
-        return result.content_as[dict]
+        content = result.content_as[dict]
+        if not allow_replica_fallback:
+            # Unchanged contract: the bare document, exactly as before.
+            return content
+        return {"content": content, "is_replica": False}
+    except DocumentNotFoundException:
+        # An authoritative answer, not a failure to reach anything. Falling
+        # back here would turn a correct "no" into a replica round trip and,
+        # worse, into a possibly stale "yes".
+        logger.info(f"Document not found in {keyspace}")
+        raise
+    except (DocumentUnretrievableException, TimeoutException, CouchbaseException) as e:
+        # DocumentNotFoundException is handled above and never reaches here, so
+        # every error on this path is a failure to reach a copy rather than an
+        # answer about whether one exists.
+        if not allow_replica_fallback:
+            logger.error(f"Error getting document from {keyspace}: {e}", exc_info=True)
+            raise
+        logger.warning(
+            f"Active read failed for {keyspace} ({type(e).__name__}); "
+            "attempting replica read"
+        )
+        return _read_from_replica(
+            cluster=cluster,
+            collection=collection,
+            bucket_name=bucket_name,
+            keyspace=keyspace,
+            document_id=document_id,
+            active_error=e,
+        )
     except Exception as e:
         logger.error(f"Error getting document from {keyspace}: {e}", exc_info=True)
         raise

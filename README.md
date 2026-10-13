@@ -218,7 +218,7 @@ Write tools (marked ✏️) are **not loaded** while [read-only mode](#read-only
 
 | Tool | Description |
 | --- | --- |
-| `get_document_by_id` | Get a document by ID |
+| `get_document_by_id` | Get a document by ID. Set `allow_replica_fallback` to read from a replica when the active node cannot answer; the default is off, so reads stay strongly consistent |
 | `lookup_subdocument` | Read specific paths, existence checks or counts without fetching the whole document |
 | `upsert_document_by_id` ✏️ | Upsert a document by ID |
 | `insert_document_by_id` ✏️ | Insert a new document (fails if it exists) |
