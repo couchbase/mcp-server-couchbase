@@ -63,6 +63,7 @@ EXPECTED_LOGGER_NAMES = {
     "cb_mcp.utils.logging": "couchbase.mcp.utils.logging",
     "cb_mcp.utils.query_limits": "couchbase.mcp.utils.query_limits",
     "cb_mcp.utils.scope_enforcement": "couchbase.mcp.utils.scope_enforcement",
+    "cb_mcp.utils.scope_listing": "couchbase.mcp.utils.scope_listing",
     "cb_mcp.utils.telemetry": "couchbase.mcp.utils.telemetry",
     # operational server
     "cb_mcp.tools.operational.collection_management": "couchbase.mcp.operational.tools.collection_management",

@@ -43,6 +43,7 @@ from ..utils.constants import (
 )
 from ..utils.context import AppContext
 from ..utils.environment import log_environment_info
+from ..utils.scope_listing import ScopeFilteredListing
 from ..utils.telemetry import send_install_ping
 from ..version import server_version
 from .contracts import ProviderLifecycle
@@ -128,6 +129,7 @@ def build_app(
     audit_config: ResolvedAuditConfig | None = None,
     thread_pool_size: int | None = None,
     send_startup_ping: bool = True,
+    enforce_scopes: bool = False,
 ) -> FastMCP:
     """Build the ``FastMCP`` application for ``spec``, ready to ``run()``.
 
@@ -164,6 +166,13 @@ def build_app(
     the host supplies a config *and* ``spec.audit_package`` names a Tier-2
     block, so a server that has not been given an audit block cannot have its
     records booked against another server's ids.
+
+    ``enforce_scopes`` mirrors the flag of the same name on
+    :func:`cb_mcp.tool_registration.prepare_tools_for_registration`. When set,
+    ``tools/list`` is filtered through the same predicate the call path uses, so
+    a tool is advertised if and only if the caller's token could invoke it. It
+    is passed rather than inferred from ``auth`` so that listing and calling are
+    switched on by one decision in the host, not two that can disagree.
 
     The returned server is *not* started; the caller chooses the transport and
     calls ``run()``. See :func:`run_app` for the standard invocation.
@@ -302,6 +311,21 @@ def build_app(
                 cb_userid=settings.get("username"),
                 service_package=spec.audit_package,  # type: ignore[arg-type]
             )
+        )
+
+    if enforce_scopes:
+        # Listing and calling now share one predicate rather than two
+        # intentions. Registered here rather than inside the tool loop because
+        # it filters the response to tools/list, not any individual tool.
+        mcp.add_middleware(
+            ScopeFilteredListing(
+                write_tool_names=spec.tools.write_tool_names,
+                scopes=spec.scopes,
+                server_id=spec.id,
+            )
+        )
+        logger.info(
+            "Authorization-scoped tool listing enabled for server '%s'.", spec.id
         )
 
     logger.info(
