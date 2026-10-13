@@ -52,12 +52,7 @@ class TestGetIndexAdvisorRecommendations:
 
         with patch(
             "cb_mcp.tools.operational.index.run_sql_plus_plus_query",
-            return_value={
-                "success": True,
-                "rows": [],
-                "row_count": 0,
-                "truncated": False,
-            },
+            return_value=[],
         ):
             result = get_index_advisor_recommendations(
                 mock_ctx, "b", "s", "SELECT * FROM x"
@@ -88,12 +83,7 @@ class TestGetIndexAdvisorRecommendations:
 
         with patch(
             "cb_mcp.tools.operational.index.run_sql_plus_plus_query",
-            return_value={
-                "success": True,
-                "rows": advisor_payload,
-                "row_count": len(advisor_payload),
-                "truncated": False,
-            },
+            return_value=advisor_payload,
         ):
             result = get_index_advisor_recommendations(
                 mock_ctx, "b", "s", "SELECT * FROM x"
@@ -119,12 +109,7 @@ class TestGetIndexAdvisorRecommendations:
 
         with patch(
             "cb_mcp.tools.operational.index.run_sql_plus_plus_query",
-            return_value={
-                "success": True,
-                "rows": advisor_payload,
-                "row_count": len(advisor_payload),
-                "truncated": False,
-            },
+            return_value=advisor_payload,
         ):
             result = get_index_advisor_recommendations(
                 mock_ctx, "b", "s", "SELECT * FROM x"
@@ -163,12 +148,7 @@ class TestGetIndexAdvisorRecommendations:
 
         with patch(
             "cb_mcp.tools.operational.index.run_sql_plus_plus_query",
-            return_value={
-                "success": True,
-                "rows": [],
-                "row_count": 0,
-                "truncated": False,
-            },
+            return_value=[],
         ) as mock_run:
             get_index_advisor_recommendations(mock_ctx, "b", "s", user_query)
 
