@@ -29,6 +29,7 @@ import uuid
 import pytest
 from conftest import (
     create_mcp_session,
+    ensure_list,
     extract_payload,
     get_test_collection,
     get_test_scope,
@@ -417,11 +418,12 @@ async def test_create_query_index_dimension_mismatch_silently_excluded() -> None
                         },
                     },
                 )
-                query_payload = extract_payload(query_response)
-                assert query_payload["success"] is True, (
-                    f"run_sql_plus_plus_query failed: {query_payload}"
+                # run_sql_plus_plus_query returns the rows as a bare list.
+                query_rows = ensure_list(extract_payload(query_response))
+                assert isinstance(query_rows, list), (
+                    f"run_sql_plus_plus_query failed: {query_rows}"
                 )
-                hit_ids = {row["id"] for row in query_payload["rows"]}
+                hit_ids = {row["id"] for row in query_rows}
                 assert bad_doc_id not in hit_ids, (
                     f"dimension-mismatched document {bad_doc_id!r} was indexed "
                     f"(should have been silently excluded): {hit_ids!r}"
