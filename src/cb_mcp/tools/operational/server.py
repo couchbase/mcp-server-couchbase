@@ -149,6 +149,10 @@ def get_bucket_config(
     stay CAO-owned. get_buckets_in_cluster lists bucket names via the SDK but exposes none
     of this; use this tool once a specific bucket needs explaining.
 
+    bucket_name must be omitted (not passed as "") to get every bucket — an empty string
+    is rejected rather than silently treated the same as omitting it, since a caller that
+    meant to name a bucket should not get back every bucket's configuration instead.
+
     Calls GET /pools/default/buckets/<bucket_name> (one bucket) or GET /pools/default/buckets
     (every bucket, when bucket_name is omitted). Self-managed Couchbase Server 7.6+ only
     (Capella is rejected without a REST call); needs the Read-Only Admin (ro_admin) role.
@@ -175,6 +179,11 @@ def get_bucket_config(
     buckets. Raises on failure, including a 404 for an unknown bucket name.
     """
     try:
+        if bucket_name == "":
+            raise ValueError(
+                "bucket_name must not be empty; omit it entirely to get every bucket"
+            )
+
         settings = get_settings(ctx)
         validate_connection_settings(settings)
         connection_string = settings["connection_string"]
@@ -200,7 +209,7 @@ def get_bucket_config(
             )
 
         path = "/pools/default/buckets"
-        if bucket_name:
+        if bucket_name is not None:
             path = f"{path}/{quote(bucket_name, safe='')}"
 
         # Failover, not fan-out: bucket config is tracked cluster-wide and every node

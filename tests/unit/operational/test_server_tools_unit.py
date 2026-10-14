@@ -802,6 +802,20 @@ class TestGetBucketConfig:
 
         mock_client_cls.assert_not_called()
 
+    def test_rejects_empty_bucket_name_without_rest_call(self) -> None:
+        """An explicit "" must not be silently treated as "omitted" (every
+        bucket) — a caller that meant to name a bucket should get a clear
+        rejection, not every bucket's configuration instead."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+
+        with (
+            patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
+            pytest.raises(ValueError, match="bucket_name must not be empty"),
+        ):
+            get_bucket_config(ctx, bucket_name="")
+
+        mock_client_cls.assert_not_called()
+
     def test_single_bucket_happy_path_is_unchanged(self) -> None:
         """A bucket_name argument hits /pools/default/buckets/<name> and the
         raw response comes back exactly as received — nothing stripped."""
