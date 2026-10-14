@@ -101,7 +101,7 @@ def workers_server(tmp_path):
     )
     try:
         _wait_for_port(port, proc)
-        yield f"http://127.0.0.1:{port}/mcp", tmp_path
+        yield f"http://127.0.0.1:{port}/mcp", tmp_path, proc.pid
     finally:
         proc.send_signal(signal.SIGINT)
         try:
@@ -112,7 +112,7 @@ def workers_server(tmp_path):
 
 
 def test_workers_serve_fresh_connections_and_log_per_process(workers_server):
-    url, log_dir = workers_server
+    url, log_dir, supervisor_pid = workers_server
 
     async def run() -> list[list[str]]:
         return [await _list_tools_once(url) for _ in range(CONNECTIONS)]
@@ -131,8 +131,10 @@ def test_workers_serve_fresh_connections_and_log_per_process(workers_server):
         "workers registered different tool sets"
     )
 
-    # Each worker writes its own files, named for this host and its pid; the
-    # supervisor keeps the base name. Give slow workers a moment to log.
+    # Every process writes its own files, named for this host and its pid:
+    # one set for the supervisor and one per worker. Nothing writes the shared
+    # base name, which replicas on one log volume would otherwise all rotate.
+    # Give slow workers a moment to log.
     pattern = re.compile(r"^mcp_server\.[A-Za-z0-9_-]+\.(\d+)\.info\.log$")
     deadline = time.monotonic() + 10
     pids: set[str] = set()
@@ -140,7 +142,10 @@ def test_workers_serve_fresh_connections_and_log_per_process(workers_server):
         pids = {
             m.group(1) for path in log_dir.iterdir() if (m := pattern.match(path.name))
         }
-        if len(pids) >= WORKERS:
+        if len(pids) >= WORKERS + 1:
             break
         time.sleep(0.2)
-    assert len(pids) == WORKERS, sorted(p.name for p in log_dir.iterdir())
+    names = sorted(p.name for p in log_dir.iterdir())
+    assert len(pids) == WORKERS + 1, names
+    assert str(supervisor_pid) in pids, names
+    assert "mcp_server.info.log" not in names, names

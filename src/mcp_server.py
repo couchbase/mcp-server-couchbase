@@ -235,9 +235,31 @@ def _build_server(
     return _BuiltServer(mcp, cli, spec, serving)
 
 
+def _per_process_log_file(params: Mapping[str, Any]) -> dict[str, Any]:
+    """``params`` with ``log_file`` scoped to this host and process.
+
+    Used by every process of a ``--workers`` deployment — the supervisor and
+    each worker — so none of them writes the shared base path.
+    ``RotatingFileHandler`` is not multi-process safe, and replicas sharing a
+    log volume would otherwise rotate one base file concurrently.
+    """
+    return {
+        **params,
+        "log_file": worker_log_file(
+            params["log_file"], host=socket.gethostname(), pid=os.getpid()
+        ),
+    }
+
+
 def _start_server(server_id: str, params: Mapping[str, Any]) -> None:
     """Run one server, from parsed flags to a listening process (or N)."""
-    built = _build_server(server_id, params)
+    # The supervisor's own files are scoped before logging is configured.
+    # Workers are still handed the original ``params``: each scopes the base
+    # path to its own pid, which a path already carrying ours would not give.
+    supervisor_params = (
+        _per_process_log_file(params) if params["workers"] > 1 else params
+    )
+    built = _build_server(server_id, supervisor_params)
     transport = built.cli.transport
 
     if built.serving.workers > 1:
@@ -303,10 +325,9 @@ def create_app() -> StarletteWithLifespan:
             "pointing an ASGI server at mcp_server:create_app."
         )
     server_id, params = decode_worker_config(raw)
-    params["log_file"] = worker_log_file(
-        params["log_file"], host=socket.gethostname(), pid=os.getpid()
+    built = _build_server(
+        server_id, _per_process_log_file(params), send_startup_ping=False
     )
-    built = _build_server(server_id, params, send_startup_ping=False)
     # The supervisor already resolved this configuration as stateless.
     return built.mcp.http_app(stateless_http=built.serving.stateless_http)
 

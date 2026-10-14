@@ -388,10 +388,17 @@ class TestFastMCPStatelessSetting:
         ("http", True, {"host": "h", "port": 1, "stateless_http": True}),
         ("sse", True, {"host": "h", "port": 1, "stateless_http": False}),
         ("stdio", True, {}),
+        # Omitted: nothing forwarded, so FastMCP keeps its own default — an
+        # embedding host written before this parameter existed is unchanged.
+        ("http", None, {"host": "h", "port": 1}),
+        ("sse", None, {"host": "h", "port": 1}),
+        ("stdio", None, {}),
     ],
 )
-def test_run_app_always_passes_the_resolved_mode(transport, requested, expected):
-    """Never left unset, so FastMCP cannot fall back to its own env var."""
+def test_run_app_forwards_exactly_what_the_host_resolved(
+    transport, requested, expected
+):
+    """A given mode is always forwarded (False too); an omitted one never is."""
     mcp = MagicMock()
     run_app(mcp, transport=transport, host="h", port=1, stateless_http=requested)
     kwargs = mcp.run.call_args.kwargs
@@ -450,3 +457,48 @@ def test_disabled_confirmation_tools_are_still_reported_as_configured():
     settings = _settings_from(cap["lifespan"])
     assert "upsert_document_by_id" in settings["confirmation_required_tools"]
     assert "upsert_document_by_id" in settings["disabled_tools"]
+
+
+def test_run_app_default_leaves_fastmcp_to_decide():
+    """Callers that predate ``stateless_http`` pass nothing, and get nothing."""
+    mcp = MagicMock()
+    run_app(mcp, transport="http", host="h", port=1)
+    assert "stateless_http" not in mcp.run.call_args.kwargs
+
+
+class TestSupervisorLogFile:
+    """The --workers supervisor scopes its own log files; workers scope theirs."""
+
+    @staticmethod
+    def _built_with(args: list[str], tmp_path) -> tuple[dict, str]:
+        built: dict = {}
+        real_build = mcp_server._build_server
+
+        def spy(server_id, params, **kwargs):
+            built.setdefault("params", dict(params))
+            return real_build(server_id, params, **kwargs)
+
+        with (
+            patch("mcp_server._build_server", side_effect=spy),
+            patch("mcp_server.socket.gethostname", return_value="web-1"),
+        ):
+            result, _ = _invoke([*args, "--log-file", str(tmp_path / "mcp_server.log")])
+        assert result.exit_code == 0, result.output
+        return built["params"], str(tmp_path / "mcp_server.log")
+
+    def test_supervisor_writes_host_pid_files_not_the_base_path(self, tmp_path):
+        params, base = self._built_with(
+            ["--transport", "http", "--workers", "2"], tmp_path
+        )
+        assert params["log_file"] == str(
+            tmp_path / f"mcp_server.web-1.{os.getpid()}.log"
+        )
+        # Workers still receive the base path, to scope to their own pid.
+        _, handed_over = decode_worker_config(
+            os.environ[mcp_server.WORKER_CONFIG_ENV_VAR]
+        )
+        assert handed_over["log_file"] == base
+
+    def test_single_process_keeps_the_base_path(self, tmp_path):
+        params, base = self._built_with(["--transport", "http"], tmp_path)
+        assert params["log_file"] == base

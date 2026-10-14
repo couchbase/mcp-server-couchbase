@@ -336,27 +336,29 @@ def run_app(
     transport: str,
     host: str | None = None,
     port: int | None = None,
-    stateless_http: bool = False,
+    stateless_http: bool | None = None,
 ) -> None:
     """Run ``mcp`` on ``transport``, translating our transport names to the SDK's.
 
     ``host``/``port`` are forwarded only for network transports; passing them
     for stdio is an error in the SDK rather than a no-op.
 
-    ``stateless_http`` is always forwarded on network transports, true or
-    false, so FastMCP runs exactly the mode the host resolved and validated.
-    Leaving it unset would let FastMCP fall back to its own
-    ``FASTMCP_STATELESS_HTTP`` setting behind the host's back; a host that
-    wants to honour that setting folds it in when resolving (see
-    ``cb_mcp.core.serving.resolve_serving``). SSE has no stateless mode, so
-    it only ever receives ``False``.
+    ``stateless_http``, when given, is forwarded on network transports as
+    the exact mode the host resolved and validated — ``False`` included, so
+    FastMCP cannot fall back to its own ``FASTMCP_STATELESS_HTTP`` setting
+    behind the host's back. The standalone CLI always passes it (it folds
+    that setting in when resolving; see
+    ``cb_mcp.core.serving.resolve_serving``). Omitted (``None``), nothing is
+    forwarded and FastMCP decides as it always has, so an embedding host
+    written before this parameter existed keeps its behaviour. SSE has no
+    stateless mode, so it only ever receives ``False``.
     """
     sdk_transport = NETWORK_TRANSPORTS_SDK_MAPPING.get(transport, transport)
     run_kwargs: dict[str, Any] = {}
     if transport in NETWORK_TRANSPORTS:
-        run_kwargs = {
-            "host": host,
-            "port": port,
-            "stateless_http": stateless_http and transport == STREAMABLE_HTTP_TRANSPORT,
-        }
+        run_kwargs = {"host": host, "port": port}
+        if stateless_http is not None:
+            run_kwargs["stateless_http"] = (
+                stateless_http and transport == STREAMABLE_HTTP_TRANSPORT
+            )
     mcp.run(transport=sdk_transport, show_banner=False, **run_kwargs)  # type: ignore[arg-type]
