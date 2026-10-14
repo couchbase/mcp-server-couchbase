@@ -29,13 +29,8 @@ from ...utils.operational.cluster_health import (
 from ...utils.operational.connection import connect_to_bucket
 from ...utils.operational.connection_string import (
     determine_ssl_verification,
-    extract_hosts_from_connection_string,
     is_capella_connection,
     validate_connection_settings,
-)
-from ...utils.operational.constants import (
-    MANAGEMENT_REST_PORT_PLAIN,
-    MANAGEMENT_REST_PORT_TLS,
 )
 from ...utils.operational.context import get_cluster_connection
 from ...utils.operational.index_utils import resolve_management_endpoints
@@ -330,30 +325,33 @@ def get_cluster_metrics(
                     f"(step={step!r}, start={start!r}, end={end!r}); all three must be integers."
                 )
 
-        is_tls = connection_string.lower().startswith("couchbases://")
-        protocol, port = (
-            ("https", MANAGEMENT_REST_PORT_TLS)
-            if is_tls
-            else ("http", MANAGEMENT_REST_PORT_PLAIN)
+        protocol = (
+            "https" if connection_string.lower().startswith("couchbases://") else "http"
         )
         verify_ssl = determine_ssl_verification(
             connection_string, settings.get("ca_cert_path")
         )
-        hosts = [
-            f"[{host}]" if ":" in host else host
-            for host in extract_hosts_from_connection_string(connection_string)
-        ]
-        if not hosts:
+        # Ask the SDK where management actually listens rather than appending the
+        # default port to the connection string's hosts: the port it carries is a KV
+        # one, and a port-mapped or NAT'd cluster serves management elsewhere. Same
+        # resolution get_index_stats uses.
+        endpoints = resolve_management_endpoints(
+            get_cluster_connection(ctx), connection_string
+        )
+        if not endpoints:
             raise ValueError(
-                f"No hosts found in connection_string: {connection_string!r}"
+                f"No management endpoints found for connection_string: "
+                f"{connection_string!r}"
             )
 
+        # Failover, not fan-out: stats/range answers for the whole cluster from any
+        # node, so the first host that responds is the complete answer.
         last_error: Exception | None = None
         with httpx.Client(verify=verify_ssl, timeout=timeout) as client:
-            for host in hosts:
+            for host in endpoints:
                 try:
                     response = client.post(
-                        f"{protocol}://{host}:{port}/pools/default/stats/range",
+                        f"{protocol}://{host}/pools/default/stats/range",
                         json=metrics,
                         auth=(settings["username"], settings["password"]),
                     )
@@ -365,7 +363,7 @@ def get_cluster_metrics(
                     return {"status": "success", "data": data}
                 except Exception as e:
                     last_error = e
-        raise RuntimeError(f"Failed to reach any host in {hosts}: {last_error}")
+        raise RuntimeError(f"Failed to reach any host in {endpoints}: {last_error}")
     except ValueError as e:
         # Up-front, documented rejections (bad input, Capella, no hosts) — not a
         # system fault, so no traceback noise in the logs.
@@ -419,22 +417,23 @@ def get_cluster_tasks(ctx: Context, timeout: int = 30) -> list[dict[str, Any]]:
         if is_capella_connection(connection_string):
             raise ValueError("get_cluster_tasks is not supported on Capella clusters")
 
-        is_tls = connection_string.lower().startswith("couchbases://")
-        protocol, port = (
-            ("https", MANAGEMENT_REST_PORT_TLS)
-            if is_tls
-            else ("http", MANAGEMENT_REST_PORT_PLAIN)
+        protocol = (
+            "https" if connection_string.lower().startswith("couchbases://") else "http"
         )
         verify_ssl = determine_ssl_verification(
             connection_string, settings.get("ca_cert_path")
         )
-        hosts = [
-            f"[{host}]" if ":" in host else host
-            for host in extract_hosts_from_connection_string(connection_string)
-        ]
-        if not hosts:
+        # Ask the SDK where management actually listens rather than appending the
+        # default port to the connection string's hosts: the port it carries is a KV
+        # one, and a port-mapped or NAT'd cluster serves management elsewhere. Same
+        # resolution get_index_stats uses.
+        endpoints = resolve_management_endpoints(
+            get_cluster_connection(ctx), connection_string
+        )
+        if not endpoints:
             raise ValueError(
-                f"No hosts found in connection_string: {connection_string!r}"
+                f"No management endpoints found for connection_string: "
+                f"{connection_string!r}"
             )
 
         # Failover, not fan-out: tasks are tracked by the orchestrator and every node
@@ -444,10 +443,10 @@ def get_cluster_tasks(ctx: Context, timeout: int = 30) -> list[dict[str, Any]]:
         # index node because each one knows only its own indexes.)
         last_error: Exception | None = None
         with httpx.Client(verify=verify_ssl, timeout=timeout) as client:
-            for host in hosts:
+            for host in endpoints:
                 try:
                     response = client.get(
-                        f"{protocol}://{host}:{port}/pools/default/tasks",
+                        f"{protocol}://{host}/pools/default/tasks",
                         auth=(settings["username"], settings["password"]),
                     )
                     response.raise_for_status()
@@ -464,7 +463,7 @@ def get_cluster_tasks(ctx: Context, timeout: int = 30) -> list[dict[str, Any]]:
                 except Exception as e:
                     logger.warning(f"Failed to fetch cluster tasks from {host}: {e}")
                     last_error = e
-        raise RuntimeError(f"Failed to reach any host in {hosts}: {last_error}")
+        raise RuntimeError(f"Failed to reach any host in {endpoints}: {last_error}")
     except Exception as e:
         logger.error(f"Error getting cluster tasks: {e}", exc_info=True)
         raise
