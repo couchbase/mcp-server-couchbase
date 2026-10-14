@@ -12,7 +12,11 @@ jobs:
     # workflow_run chains always execute on the default branch, so head_branch is always
     # "main" by this point — we use the artifact to recover the original tag name instead.
     runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion == 'success'
+    # workflow_run matches by name only, so reject runs from forks or PR events.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      contains(fromJSON('["workflow_run", "workflow_dispatch"]'), github.event.workflow_run.event)
     permissions:
       actions: read
     outputs:
