@@ -48,6 +48,10 @@ class AppContext:
             management) are disabled and KV and index write tools are not loaded.
         logging_config: Optional snapshot of the active logging configuration,
             populated by the server entrypoint after configuring its loggers.
+        audit_config: Optional snapshot of the active audit configuration,
+            populated by the server entrypoint after initialising the audit
+            sink. Reported by ``get_server_configuration_status`` so the tool
+            output and the audit file always agree on what is running.
         server_id: Which server this process is running (e.g. "operational").
             An identity, not configuration — nobody sets it, so it is kept off
             ``settings``, which holds operator-resolved values only. Populated
@@ -59,6 +63,7 @@ class AppContext:
     settings: Mapping[str, Any] = field(default_factory=dict)
     read_only_mode: bool = True
     logging_config: Mapping[str, Any] | None = None
+    audit_config: Mapping[str, Any] | None = None
     server_id: str | None = None
     server_name: str | None = None
 
@@ -97,3 +102,15 @@ def get_logging_config(ctx: Context) -> Mapping[str, Any] | None:
     context type doesn't carry a ``logging_config`` attribute at all.
     """
     return getattr(ctx.request_context.lifespan_context, "logging_config", None)  # type: ignore
+
+
+def get_audit_config(ctx: Context) -> Mapping[str, Any] | None:
+    """Return the audit-config snapshot attached to the lifespan context.
+
+    Returns ``None`` when the server entrypoint doesn't populate the field —
+    including host servers whose lifespan context type doesn't carry an
+    ``audit_config`` attribute at all — so a host that has not adopted auditing
+    is indistinguishable from one running with it switched off, which is the
+    correct report in both cases.
+    """
+    return getattr(ctx.request_context.lifespan_context, "audit_config", None)  # type: ignore
