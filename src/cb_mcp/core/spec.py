@@ -187,6 +187,23 @@ class ServerSpec:
     #: Settings keys whose *presence* may be logged but never their value.
     secret_settings_keys: tuple[str, ...] = ()
 
+    #: Tier-2 audit service package this server's tools are classified under,
+    #: or ``None`` when this server is not audited.
+    #:
+    #: Auditing is opt-in per server rather than automatic, because a Tier-2
+    #: block and its category slots are a wire contract: once records exist
+    #: against an id, that id can never mean anything else. A server with no
+    #: package would otherwise have every tool fall through classification's
+    #: fail-closed path and be recorded against *another* server's block —
+    #: same numbers, different meaning, which is the one failure the two-tier
+    #: catalogue exists to prevent.
+    #:
+    #: ``None`` costs nothing: the audit middleware is simply not registered,
+    #: and the resolved audit configuration is still reported by
+    #: ``get_server_configuration_status`` so an operator can see that the
+    #: flags were honored and nothing is being recorded.
+    audit_package: str | None = None
+
     #: Whether this server may run as several worker processes behind one
     #: socket (``--workers > 1``). ``False`` for a server that keeps state in
     #: process memory which a follow-up request may need, because the next
@@ -194,8 +211,8 @@ class ServerSpec:
     #: question here — multi-worker mode is always stateless HTTP — this is
     #: about state the server's *own* tools keep between calls.
     #:
-    #: Kept last on purpose: ``ServerSpec`` is a shared ``cb_mcp.core``
-    #: contract, and a new field inserted mid-class would shift the positional
-    #: index of every field after it for any consumer constructing it
-    #: positionally. Add future fields after this one for the same reason.
+    #: Appended after ``audit_package`` on purpose: ``ServerSpec`` is a shared
+    #: ``cb_mcp.core`` contract, and a new field inserted mid-class would shift
+    #: the positional index of every field after it for any consumer
+    #: constructing it positionally. Add future fields after this one.
     supports_multiple_workers: bool = True

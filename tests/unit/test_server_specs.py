@@ -280,6 +280,7 @@ def test_server_spec_fields_are_append_only():
         "reported_dependencies",
         "safe_settings_keys",
         "secret_settings_keys",
+        "audit_package",
         "supports_multiple_workers",
     ]
     names = [f.name for f in dataclasses.fields(ServerSpec)]

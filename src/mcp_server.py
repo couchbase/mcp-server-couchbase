@@ -228,6 +228,7 @@ def _build_server(
         auth=auth,
         read_only_mode=cli.gating.read_only_mode,
         logging_config=resolved_logging_snapshot(),
+        audit_config=cli.audit,
         thread_pool_size=serving.thread_pool_size,
         send_startup_ping=send_startup_ping,
     )

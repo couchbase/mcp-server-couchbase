@@ -85,4 +85,5 @@ SPEC = ServerSpec(
         "embedding_aws_access_key_id",
         "embedding_aws_secret_access_key",
     ),
+    audit_package="operational",
 )
