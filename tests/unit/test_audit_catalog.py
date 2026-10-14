@@ -292,7 +292,6 @@ def test_retiring_a_category_does_not_move_its_neighbours(monkeypatch):
 
 def test_next_free_slot_takes_the_lowest_never_allocated(monkeypatch):
     monkeypatch.setattr(catalog, "RETIRED_SLOTS", {})
-    monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset())
     # 0-7 are allocated, so 8 is the lowest never-allocated slot.
     assert catalog.next_free_slot("operational") == 8
 
@@ -300,25 +299,16 @@ def test_next_free_slot_takes_the_lowest_never_allocated(monkeypatch):
 def test_next_free_slot_skips_retired_slots(monkeypatch):
     """Retired slots are not offered, even when reuse would be safe.
 
-    Reuse remains *permissible* for a slot that never emitted a record — the
-    rule in ``RETIRED_SLOTS`` says so, and both retired slots are in fact
-    reused. It is simply never *automatic*: reuse has to be chosen with the
-    evidence that the slot never emitted in front of you. Handing retired slots
-    back from a helper would make that the default path, and the day a slot
-    *has* emitted the default would be wrong.
+    Reuse remains *permissible* for a slot that never emitted a record. It is
+    simply never *automatic*: reuse has to be chosen with the evidence that the
+    slot never emitted in front of you, and written into ``CATEGORY_SLOTS`` by
+    hand. Handing retired slots back from a helper would make that the default
+    path, and the day a slot *has* emitted the default would be wrong.
     """
     monkeypatch.setattr(catalog, "RETIRED_SLOTS", {"operational": {"withdrawn": 8}})
-    monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset())
     # 0-7 are live and 8 is retired, so the helper must skip past it to 9.
     # Retiring a slot *above* the first free one would make this pass
     # whether or not RETIRED_SLOTS were consulted at all.
-    assert catalog.next_free_slot("operational") == 9
-
-
-def test_permanently_reserved_slots_are_never_reallocated(monkeypatch):
-    """A slot that has emitted records must not be handed to a new category."""
-    monkeypatch.setattr(catalog, "RETIRED_SLOTS", {"operational": {"withdrawn": 8}})
-    monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset({8}))
     assert catalog.next_free_slot("operational") == 9
 
 
@@ -329,7 +319,6 @@ def test_exhausted_block_is_an_explicit_error(monkeypatch):
         {"operational": {f"c{n}": n for n in range(catalog.MAX_SLOT + 1)}},
     )
     monkeypatch.setattr(catalog, "RETIRED_SLOTS", {})
-    monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset())
     with pytest.raises(ValueError, match="request its own block"):
         catalog.next_free_slot("operational")
 
@@ -343,7 +332,6 @@ def test_nothing_is_retired_in_a_catalogue_that_has_not_shipped():
     numbers they must avoid.
     """
     assert catalog.RETIRED_SLOTS == {}
-    assert frozenset() == catalog.PERMANENTLY_RESERVED_SLOTS
 
 
 def test_every_slot_in_the_block_is_allocated_contiguously():
@@ -353,73 +341,14 @@ def test_every_slot_in_the_block_is_allocated_contiguously():
     assert catalog.next_free_slot("operational") == 8
 
 
-def test_a_slot_that_ever_emitted_is_never_reallocated(monkeypatch):
-    """The rule that governs slot reuse, exercised rather than assumed.
-
-    Both retired slots are reused -- 6 by `search`, 7 by `config` -- so there
-    is no list of dead numbers to assert against. What must hold is the
-    condition that permits the reuse: a slot may only be reused if no record
-    was ever emitted against it.
-
-    PERMANENTLY_RESERVED_SLOTS is where a slot goes once it *has* emitted, and
-    it is empty today because nothing has shipped. Asserting against it as it
-    stands is vacuously true and would pass even if the rule were deleted, so
-    this test populates it with a slot that is live and checks the violation is
-    actually caught.
-    """
-    live = catalog.CATEGORY_SLOTS["operational"]
-    occupied = live["kv"]
-
-    def reserved_slots_clash(reserved):
-        monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset(reserved))
-        return {
-            package: set(slots.values()) & catalog.PERMANENTLY_RESERVED_SLOTS
-            for package, slots in catalog.CATEGORY_SLOTS.items()
-        }
-
-    # The guard must fire when a slot that emitted is also live.
-    clashes = reserved_slots_clash({occupied})
-    assert clashes["operational"] == {occupied}
-
-    # And must be quiet for a slot nobody has allocated.
-    free = catalog.next_free_slot("operational")
-    assert all(not c for c in reserved_slots_clash({free}).values())
-
-    # The real table, which must be clean.
-    monkeypatch.undo()
-    for package, slots in catalog.CATEGORY_SLOTS.items():
-        assert set(slots.values()) & catalog.PERMANENTLY_RESERVED_SLOTS == set(), (
-            package
-        )
-
-
-def test_every_reused_slot_is_one_that_never_emitted():
-    """Checks the reuses themselves: both must be absent from the emitted set."""
-    for package, retired in catalog.RETIRED_SLOTS.items():
-        live = catalog.CATEGORY_SLOTS.get(package, {})
-        reused = set(retired.values()) & set(live.values())
-        assert reused == {6, 7}, reused
-        assert reused & catalog.PERMANENTLY_RESERVED_SLOTS == set()
-    assert catalog.CATEGORY_SLOTS["operational"]["search"] == 6
-    assert catalog.CATEGORY_SLOTS["operational"]["config"] == 7
-
-
-def test_retirement_did_not_move_the_surviving_ids():
-    """The point of the explicit slot table, asserted on the real retirement."""
+def test_slot_table_ids_are_the_shipped_numbers():
+    """The point of the explicit slot table: every id pinned literally."""
     assert tool_call_event_id("cluster", "read", "operational") == 61488
     assert tool_call_event_id("performance", "read", "operational") == 61493
     assert tool_call_event_id("performance", "write", "operational") == 61525
 
 
-def test_a_new_category_takes_the_next_never_allocated_slot():
-    """Slots 0-7 are allocated, so the next category gets 8."""
-    assert catalog.next_free_slot("operational") == 8
-
-
 def test_search_ids_are_the_shipped_numbers():
-    """Pinned literally, like every other shipped id.
-
-    Search occupies slot 6, one of the two reused from RETIRED_SLOTS.
-    """
+    """Pinned literally, like every other shipped id."""
     assert tool_call_event_id("search", "read", "operational") == 61494
     assert tool_call_event_id("search", "write", "operational") == 61526

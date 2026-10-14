@@ -60,8 +60,8 @@ AI_DATA_PLANE_BLOCK = 0x13000  # 77824
 #: :data:`SERVICE_PACKAGE_BLOCKS`. It remains the default because the
 #: operational server is the one whose tools the shared helpers are usually
 #: asked about; every audited server passes its own package explicitly, from
-#: ``ServerSpec.audit_package``.
-DEFAULT_SERVICE_PACKAGE = "operational"
+#: ``ServerSpec.audit_package``, and every record carries that one.
+SERVICE_PACKAGE = "operational"
 
 #: ``service package -> Tier-2 block base``. Blocks are 0x1000 apart. Adding a
 #: package means an entry here, an entry in :data:`CATEGORY_SLOTS`, a
@@ -169,12 +169,10 @@ for _package, _slots in CATEGORY_SLOTS.items():
 #: A withdrawn slot may be given to a new category **only** when no record was
 #: ever emitted against it. A slot that has emitted must never be reused:
 #: reallocating it would make an existing SIEM rule silently match a new,
-#: unrelated event. Record such a slot in :data:`PERMANENTLY_RESERVED_SLOTS`
-#: as well, which keeps it out of :func:`next_free_slot` for good.
+#: unrelated event. :func:`next_free_slot` never offers a retired slot, so the
+#: reuse has to be written into :data:`CATEGORY_SLOTS` by hand, with that fact
+#: established.
 RETIRED_SLOTS: dict[str, dict[str, int]] = {}
-
-#: Retired slots that must never be reallocated because records exist for them.
-PERMANENTLY_RESERVED_SLOTS: frozenset[int] = frozenset()
 
 
 def categories_for(package: str) -> tuple[str, ...]:
@@ -190,11 +188,7 @@ def categories_for(package: str) -> tuple[str, ...]:
 
 #: Category axis of the default package, kept as a module constant because
 #: it is the axis every descriptor and every test refers to today.
-CATEGORIES: tuple[str, ...] = categories_for(DEFAULT_SERVICE_PACKAGE)
-
-#: Name of the service package this build audits. Recorded once at startup
-#: rather than repeated on every record.
-SERVICE_PACKAGE = DEFAULT_SERVICE_PACKAGE
+CATEGORIES: tuple[str, ...] = categories_for(SERVICE_PACKAGE)
 
 
 def category_index(category: str, package: str) -> int:
@@ -224,10 +218,8 @@ def next_free_slot(package: str) -> int:
             service package should then take a fresh 0x1000 block rather than
             crowding this one.
     """
-    taken = (
-        set(CATEGORY_SLOTS[package].values())
-        | set(RETIRED_SLOTS.get(package, {}).values())
-        | PERMANENTLY_RESERVED_SLOTS
+    taken = set(CATEGORY_SLOTS[package].values()) | set(
+        RETIRED_SLOTS.get(package, {}).values()
     )
     for slot in range(MAX_SLOT + 1):
         if slot not in taken:
@@ -466,30 +458,12 @@ def build_descriptor() -> dict:
         # A single value, for readers that expect one: the package this build
         # audits by default. The authoritative list is `service_packages`, and
         # every tool-call entry names its own.
-        "service_package": DEFAULT_SERVICE_PACKAGE,
+        "service_package": SERVICE_PACKAGE,
         "service_packages": sorted(SERVICE_PACKAGE_BLOCKS),
         "blocks": {"core": CORE_BLOCK, **SERVICE_PACKAGE_BLOCKS},
         "events": entries,
     }
 
-
-#: Every event name that may appear in a record, mapped to its numeric id —
-#: for the core block and the **default** package only.
-#:
-#: Deliberately not spanning every package: a tool-call name such as "query
-#: read" exists in each Tier-2 block with a different id, so a name is only
-#: unique within a package and a flat name map could not represent more than
-#: one. Nothing resolves a name to an id at runtime — the operator-facing
-#: filter takes ids, which are globally unique — so this stays a convenience
-#: for the default package rather than becoming a package-keyed structure with
-#: no caller.
-EVENT_NAMES_TO_IDS: dict[str, int] = {
-    **{event.event_name: event.id for event in AuditEvent},
-    **{
-        event.event_name: event.id
-        for event in all_tool_call_events(DEFAULT_SERVICE_PACKAGE)
-    },
-}
 
 #: Ids of events an operator is permitted to suppress via configuration.
 #:
@@ -522,14 +496,11 @@ __all__ = [
     "ALL_IDS",
     "CATEGORIES",
     "CATEGORY_SLOTS",
-    "DEFAULT_SERVICE_PACKAGE",
     "SERVICE_PACKAGE_BLOCKS",
     "categories_for",
     "MAX_SLOT",
-    "PERMANENTLY_RESERVED_SLOTS",
     "RETIRED_SLOTS",
     "CORE_BLOCK",
-    "EVENT_NAMES_TO_IDS",
     "FILTERABLE_IDS",
     "OPERATIONAL_BLOCK",
     "READ_OFFSET",
