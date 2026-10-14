@@ -19,10 +19,10 @@ from __future__ import annotations
 import pytest
 
 from cb_mcp.audit.catalog import (
-    CATEGORIES,
     CATEGORY_SLOTS,
     FAILSAFE_SLOT_REQUIRED,
     SERVICE_PACKAGE_BLOCKS,
+    categories_for,
 )
 from cb_mcp.audit.classification import (
     FAILSAFE_CATEGORY,
@@ -271,7 +271,7 @@ def test_required_scope_is_derived_from_the_operation_class(operation_class, exp
 
 def test_every_classification_uses_a_known_category_and_class():
     for tool_name, (category, operation_class) in TOOL_CLASSIFICATION[PACKAGE].items():
-        assert category in CATEGORIES, tool_name
+        assert category in categories_for(PACKAGE), tool_name
         assert operation_class in ("read", "write"), tool_name
 
 

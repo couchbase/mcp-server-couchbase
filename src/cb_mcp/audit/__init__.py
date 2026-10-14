@@ -29,7 +29,7 @@ Layout:
 * :mod:`~cb_mcp.audit.state` — per-request refusal channel
 """
 
-from .catalog import SERVICE_PACKAGE, AuditEvent, build_descriptor
+from .catalog import AuditEvent, build_descriptor
 from .classification import (
     TOOL_CLASSIFICATION,
     classify_tool,
@@ -72,7 +72,6 @@ __all__ = [
     "OUTCOME_DENIED",
     "OUTCOME_ERROR",
     "OUTCOME_SUCCESS",
-    "SERVICE_PACKAGE",
     "TOOL_CLASSIFICATION",
     "AuditEvent",
     "AuditLogger",

@@ -22,7 +22,6 @@ import pytest
 
 from cb_mcp.audit import catalog
 from cb_mcp.audit.catalog import (
-    CATEGORIES,
     CORE_BLOCK,
     OPERATIONAL_BLOCK,
     READ_OFFSET,
@@ -30,6 +29,7 @@ from cb_mcp.audit.catalog import (
     AuditEvent,
     all_tool_call_events,
     build_descriptor,
+    categories_for,
     tool_call_event,
     tool_call_event_id,
 )
@@ -47,7 +47,7 @@ def test_block_bases_match_the_prd():
 def test_category_order_is_the_wire_contract():
     # The list index is the ``n`` in base+48+n, so reordering silently
     # renumbers every tool-call event.
-    assert CATEGORIES == (
+    assert categories_for("operational") == (
         "cluster",
         "schema",
         "kv",
@@ -166,7 +166,6 @@ print(json.dumps(build_descriptor(), indent=2))" > src/cb_mcp/audit/descriptor.j
 
 def test_descriptor_entries_are_well_formed():
     shipped = json.loads(DESCRIPTOR_PATH.read_text(encoding="utf-8"))
-    assert shipped["service_package"] == "operational"
     assert shipped["blocks"] == {
         "core": 57344,
         "operational": 61440,
@@ -204,16 +203,13 @@ def test_descriptor_entries_are_well_formed():
 
 
 def test_category_slots_and_categories_cannot_disagree():
-    """``CATEGORIES`` is derived from the slot table, ordered by slot."""
-    assert (
-        tuple(
-            name
-            for name, _ in sorted(
-                catalog.CATEGORY_SLOTS["operational"].items(), key=lambda kv: kv[1]
-            )
+    """``categories_for`` is derived from the slot table, ordered by slot."""
+    assert tuple(
+        name
+        for name, _ in sorted(
+            catalog.CATEGORY_SLOTS["operational"].items(), key=lambda kv: kv[1]
         )
-        == catalog.CATEGORIES
-    )
+    ) == catalog.categories_for("operational")
 
 
 def test_slot_numbers_are_unique_and_within_the_template():

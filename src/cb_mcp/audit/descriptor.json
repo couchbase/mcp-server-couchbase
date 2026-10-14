@@ -1,5 +1,4 @@
 {
-  "service_package": "operational",
   "service_packages": [
     "operational",
     "operational_insights"

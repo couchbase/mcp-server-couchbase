@@ -22,7 +22,7 @@ from dataclasses import replace
 from typing import Any
 
 from ..utils.constants import LOGGER_NAMESPACE
-from .catalog import SERVICE_PACKAGE, AuditEvent, ToolCallEvent
+from .catalog import AuditEvent, ToolCallEvent
 from .config import SINK_FILE, ResolvedAuditConfig
 from .record import OUTCOME_SUCCESS, AuditRecord, ServerContext
 from .sink import (
@@ -261,13 +261,12 @@ def init_audit(config: ResolvedAuditConfig) -> AuditLogger:
     _install_sigterm_handler()
 
     logger.info(
-        "Audit logging enabled. sinks=%s, service_package=%s, file=%s, "
+        "Audit logging enabled. sinks=%s, file=%s, "
         "rotates=%s, max_backups=%d, backups_compressed=yes, tool_args=%s, "
         "disabled_events=%s. Each server process writes its own file; the "
         "configured path has the host and process id inserted so concurrent "
         "stdio servers cannot corrupt one another's records.",
         ",".join(config.sinks),
-        SERVICE_PACKAGE,
         file_sink.path if file_sink is not None else "none",
         _describe_rotation(config),
         config.max_backups,

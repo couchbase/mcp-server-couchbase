@@ -46,23 +46,6 @@ OPERATIONAL_BLOCK = 0xF000  # 61440
 #: Tier-2 block for the Operational Insights (analytics) service package.
 OPERATIONAL_INSIGHTS_BLOCK = 0x10000  # 65536
 
-#: Tier-2 block reserved for the AI Data Plane package.
-#:
-#: Claimed but not populated: no AI Data Plane tools exist in this repository,
-#: so the package has no classification table and emits nothing. The number is
-#: recorded here so the allocation is visible in one place and cannot be handed
-#: to a different package later.
-AI_DATA_PLANE_BLOCK = 0x13000  # 77824
-
-#: Service package used when a caller names none.
-#:
-#: Not "the only audited package" any more — see
-#: :data:`SERVICE_PACKAGE_BLOCKS`. It remains the default because the
-#: operational server is the one whose tools the shared helpers are usually
-#: asked about; every audited server passes its own package explicitly, from
-#: ``ServerSpec.audit_package``, and every record carries that one.
-SERVICE_PACKAGE = "operational"
-
 #: ``service package -> Tier-2 block base``. Blocks are 0x1000 apart. Adding a
 #: package means an entry here, an entry in :data:`CATEGORY_SLOTS`, a
 #: classification table in :mod:`cb_mcp.audit.classification`, and
@@ -186,11 +169,6 @@ def categories_for(package: str) -> tuple[str, ...]:
     )
 
 
-#: Category axis of the default package, kept as a module constant because
-#: it is the axis every descriptor and every test refers to today.
-CATEGORIES: tuple[str, ...] = categories_for(SERVICE_PACKAGE)
-
-
 def category_index(category: str, package: str) -> int:
     """Return the slot ``n`` for ``category`` within ``package``'s block."""
     try:
@@ -236,7 +214,7 @@ def tool_call_event_id(category: str, operation_class: str, package: str) -> int
     """Resolve the Tier-2 event ID for a tool call.
 
     Args:
-        category: One of :data:`CATEGORIES`.
+        category: A category allocated in ``package``'s block.
         operation_class: ``"read"`` or ``"write"``.
     """
     if operation_class not in ("read", "write"):
@@ -378,7 +356,7 @@ class ToolCallEvent:
 
 
 #: Human-readable names for the tool-call categories, used to build the
-#: ``name`` field. Keys must cover :data:`CATEGORIES`.
+#: ``name`` field. Keys must cover every category in :data:`CATEGORY_SLOTS`.
 _CATEGORY_LABELS: dict[str, str] = {
     "cluster": "cluster",
     "schema": "schema",
@@ -455,10 +433,9 @@ def build_descriptor() -> dict:
     ]
     entries.sort(key=lambda entry: entry["id"])
     return {
-        # A single value, for readers that expect one: the package this build
-        # audits by default. The authoritative list is `service_packages`, and
-        # every tool-call entry names its own.
-        "service_package": SERVICE_PACKAGE,
+        # No single `service_package`: the descriptor covers every registered
+        # package, and naming one at the top of the document would be wrong
+        # for every server running another. Each tool-call entry names its own.
         "service_packages": sorted(SERVICE_PACKAGE_BLOCKS),
         "blocks": {"core": CORE_BLOCK, **SERVICE_PACKAGE_BLOCKS},
         "events": entries,
@@ -494,7 +471,6 @@ ALL_IDS: frozenset[int] = frozenset(
 
 __all__ = [
     "ALL_IDS",
-    "CATEGORIES",
     "CATEGORY_SLOTS",
     "SERVICE_PACKAGE_BLOCKS",
     "categories_for",
@@ -504,7 +480,6 @@ __all__ = [
     "FILTERABLE_IDS",
     "OPERATIONAL_BLOCK",
     "READ_OFFSET",
-    "SERVICE_PACKAGE",
     "WRITE_DELTA",
     "AuditEvent",
     "ToolCallEvent",
