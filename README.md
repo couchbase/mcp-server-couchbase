@@ -74,6 +74,7 @@ the `couchbase-operational-insights` SDK.
 | `get_cluster_metrics` | Get one or more cluster statistics over a historic time window via the Management REST API's stats-range endpoint. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
 | `get_cluster_tasks` | Get the cluster tasks running right now — rebalance, compaction, XDCR, index build — via the Management REST API's tasks endpoint. Returns the raw task array; fields vary by task type. Requires the Read-Only Admin (`ro_admin`) role. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
 | `get_cluster_health_snapshot` | Get a per-node health snapshot — service topology, membership, orchestrator and a cluster health rollup — merged from the Management REST API's `/pools/default`, `nodeServices` and `terseClusterInfo` endpoints. Isolates a symptom to a specific node/service and flags which nodes are safe to act on. Requires the Read-Only Admin (`ro_admin`) role. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
+| `get_bucket_config` | Get a bucket's configuration and live state — RAM quota, eviction policy, replica count, durability level, storage backend, conflict-resolution type, auto-compaction settings, and basic stats — via the Management REST API's bucket endpoint. Returns the raw bucket object unchanged; omit `bucket_name` to get every bucket at once. Requires the Read-Only Admin (`ro_admin`) role. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
 | `get_cluster_system_events` | Get the cluster's system event log — configuration changes, failovers, rebalances and service restarts with timestamps — via the Management REST API's `/events` endpoint. Correlates a symptom with what changed and when. Returns events oldest-first with a summary of counts and time range; windowed with `since_time` and bounded (default 50 events) rather than returning the endpoint's 250. Requires the Full Admin or Cluster Admin role. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
 | `discover_tool_input_values` | Look up the exact input values another tool needs, from reference data bundled with the server — currently every Couchbase Server metric name (type, unit, version added, description) for `get_cluster_metrics`. Browse by category or fuzzy-search by keyword. Works offline, without a cluster connection. |
 
@@ -389,12 +390,13 @@ You can disable specific tools to prevent them from being loaded and exposed to 
 
 A few tools reach Couchbase through REST endpoints that Couchbase Capella does not expose. The server works out which kind of cluster `CB_CONNECTION_STRING` points at — Capella when every host ends in `.cloud.couchbase.com`, self-managed otherwise — and does not register the tools that cannot work there. They are reported alongside your own disabled tools by `get_server_configuration_status`, and listed in the startup log.
 
-Today this affects the eight tools that reach Couchbase through an admin REST endpoint rather than the SDK, none of which are registered on a Capella connection:
+Today this affects the nine tools that reach Couchbase through an admin REST endpoint rather than the SDK, none of which are registered on a Capella connection:
 
 | Tool | Endpoint it needs |
 | --- | --- |
 | `get_cluster_metrics` | Management REST (`/pools/default/stats/range`) |
 | `get_cluster_tasks` | Management REST (`/pools/default/tasks`) |
+| `get_bucket_config` | Management REST (`/pools/default/buckets[/<name>]`) |
 | `get_cluster_health_snapshot` | Management REST, plus per-node endpoints |
 | `get_cluster_system_events` | Management REST (`/events`) |
 | `get_index_stats` | Index Service REST (each indexer's `/api/v1/stats`) |

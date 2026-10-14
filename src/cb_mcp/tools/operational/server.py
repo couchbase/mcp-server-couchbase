@@ -14,6 +14,7 @@ import logging
 import re
 from collections import Counter
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from couchbase.diagnostics import ServiceType
@@ -132,6 +133,132 @@ def get_buckets_in_cluster(ctx: Context) -> list[str]:
 
     logger.info(f"Found {len(buckets)} bucket(s) in cluster")
     return buckets
+
+
+def get_bucket_config(
+    ctx: Context, bucket_name: str | None = None, timeout: int = 30
+) -> dict[str, Any] | list[dict[str, Any]]:
+    """Get a bucket's configuration and live state — or every bucket's, if bucket_name is omitted.
+
+    Answers "what is this bucket configured as, and how full is it right now?" — RAM
+    quota, replica count, eviction policy, durability level, storage backend, conflict-
+    resolution type, auto-compaction settings, and basic stats (item count, memory used,
+    ops/sec, disk used). Use this to explain a bucket-level symptom that get_cluster_metrics
+    or get_index_stats pointed at, or as a pre-flight safety check before advising a
+    compaction/quota/durability change — this tool only ever reads; create/edit/flush/delete
+    stay CAO-owned. get_buckets_in_cluster lists bucket names via the SDK but exposes none
+    of this; use this tool once a specific bucket needs explaining.
+
+    Calls GET /pools/default/buckets/<bucket_name> (one bucket) or GET /pools/default/buckets
+    (every bucket, when bucket_name is omitted). Self-managed Couchbase Server 7.6+ only
+    (Capella is rejected without a REST call); needs the Read-Only Admin (ro_admin) role.
+
+    Reading the result — returned exactly as the endpoint sends it, nothing stripped or
+    renamed, so every field keeps its REST API name (camelCase):
+    - "autoCompactionSettings" is the bare value false, not an object, when the bucket has
+      no per-bucket override. Read false as "uses the cluster-wide compaction settings",
+      not "compaction disabled" — they are not the same thing, and this field alone cannot
+      tell you which.
+    - "durabilityMinLevel" and "storageBackend" are absent on server versions that predate
+      those fields; absence means "not reported", not "none"/"couchstore".
+    - "vBucketServerMap" and "nodes" are the bulk of the payload (a full server list and a
+      per-vBucket map that grows with vbucket/replica/node count) and carry no RCA-relevant
+      signal, but are not stripped: this tool never reshapes what the endpoint returns.
+    - A node that was never joined to a cluster (or whose cluster-init failed) answers this
+      endpoint with 200 and [] rather than an error. This is unlikely to matter for a
+      connection_string naming hosts an operator verified are cluster members, but is a real
+      risk when it names a DNS/SRV record backed by a rotating node set (e.g. a Kubernetes
+      headless service), where a connection can land on a freshly provisioned, not-yet-joined
+      node: an empty list there is not proof the cluster itself has no buckets.
+
+    Returns the endpoint's response unchanged — a dict for one bucket, a list for all
+    buckets. Raises on failure, including a 404 for an unknown bucket name.
+    """
+    try:
+        settings = get_settings(ctx)
+        validate_connection_settings(settings)
+        connection_string = settings["connection_string"]
+        if is_capella_connection(connection_string):
+            raise ValueError("get_bucket_config is not supported on Capella clusters")
+
+        is_tls = connection_string.lower().startswith("couchbases://")
+        protocol, port = (
+            ("https", MANAGEMENT_REST_PORT_TLS)
+            if is_tls
+            else ("http", MANAGEMENT_REST_PORT_PLAIN)
+        )
+        verify_ssl = determine_ssl_verification(
+            connection_string, settings.get("ca_cert_path")
+        )
+        hosts = [
+            f"[{host}]" if ":" in host else host
+            for host in extract_hosts_from_connection_string(connection_string)
+        ]
+        if not hosts:
+            raise ValueError(
+                f"No hosts found in connection_string: {connection_string!r}"
+            )
+
+        path = "/pools/default/buckets"
+        if bucket_name:
+            path = f"{path}/{quote(bucket_name, safe='')}"
+
+        # Failover, not fan-out: bucket config is tracked cluster-wide and every node
+        # relays the same answer, so the first host that responds is complete — the
+        # rest are only tried if it is unreachable. Same reasoning as get_cluster_tasks.
+        # Verified against a real 3-node 7.6 cluster (including mid-rebalance): bucket
+        # list/config and the raw vBucketServerMap were identical from every node, down
+        # to the byte, aside from each node's own identity markers. The one caveat found
+        # is noted in the docstring: a node that was never joined to the cluster answers
+        # with 200 and [] rather than an error. hosts here is whatever the operator's own
+        # connection_string names, so this only bites when that names a DNS/SRV record
+        # backed by a rotating node set rather than fixed, verified cluster members.
+        last_error: Exception | None = None
+        with httpx.Client(verify=verify_ssl, timeout=timeout) as client:
+            for host in hosts:
+                try:
+                    response = client.get(
+                        f"{protocol}://{host}:{port}{path}",
+                        auth=(settings["username"], settings["password"]),
+                    )
+                    # A 4xx is this request being refused (unknown bucket, insufficient
+                    # role), not the host being unreachable: every other node would
+                    # refuse it identically, so report the server's reason instead of
+                    # failing over and burying it under "failed to reach any host".
+                    if 400 <= response.status_code < 500:
+                        detail = response.text.strip() or response.reason_phrase
+                        raise ValueError(
+                            f"{path} rejected the request "
+                            f"({response.status_code}): {detail}"
+                        )
+                    response.raise_for_status()
+                    result = response.json()
+                    logger.info(
+                        f"Retrieved bucket config for "
+                        f"{bucket_name or f'{len(result)} bucket(s)'} from {host}"
+                    )
+                    return result
+                except json.JSONDecodeError as e:
+                    # A garbled body is this host misbehaving, not the request being
+                    # wrong — and JSONDecodeError subclasses ValueError, so it must be
+                    # caught ahead of the rejection branch below or a bad response from
+                    # one node would abort the whole call.
+                    logger.warning(f"Failed to decode bucket config from {host}: {e}")
+                    last_error = e
+                except ValueError:
+                    # The request itself was refused — failing over would only
+                    # collect the same refusal from every other node.
+                    raise
+                except Exception as e:
+                    logger.warning(f"Failed to fetch bucket config from {host}: {e}")
+                    last_error = e
+        raise RuntimeError(f"Failed to reach any host in {hosts}: {last_error}")
+    except ValueError as e:
+        logger.warning(f"Rejected get_bucket_config request: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Error getting bucket config: {e}", exc_info=True)
+        raise
 
 
 def get_scopes_in_bucket(ctx: Context, bucket_name: str) -> list[str]:

@@ -85,6 +85,7 @@ from .reference import (
 
 # Server tools
 from .server import (
+    get_bucket_config,
     get_buckets_in_cluster,
     get_client_connectivity_report,
     get_cluster_health_and_services,
@@ -117,6 +118,7 @@ TOOL_SET = ToolSet(
     read_only=(
         # Server/Cluster management tools
         get_buckets_in_cluster,
+        get_bucket_config,
         get_server_configuration_status,
         test_cluster_connection,
         get_scopes_and_collections_in_bucket,
@@ -196,6 +198,7 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
     "get_server_configuration_status": ToolAnnotations(readOnlyHint=True),
     "test_cluster_connection": ToolAnnotations(readOnlyHint=True),
     "get_buckets_in_cluster": ToolAnnotations(readOnlyHint=True),
+    "get_bucket_config": ToolAnnotations(readOnlyHint=True),
     "get_scopes_and_collections_in_bucket": ToolAnnotations(readOnlyHint=True),
     "get_collections_in_scope": ToolAnnotations(readOnlyHint=True),
     "get_scopes_in_bucket": ToolAnnotations(readOnlyHint=True),
@@ -282,6 +285,8 @@ TOOL_DEPLOYMENT_REQUIREMENTS: dict[str, Deployment] = {
     "get_cluster_metrics": Deployment.ON_PREM,
     # GET /pools/default/tasks, same port.
     "get_cluster_tasks": Deployment.ON_PREM,
+    # GET /pools/default/buckets[/<name>], same port.
+    "get_bucket_config": Deployment.ON_PREM,
     # Management REST, plus the per-node endpoints it fans out to.
     "get_cluster_health_snapshot": Deployment.ON_PREM,
     # GET /events on the Management REST port.
@@ -330,6 +335,7 @@ __all__ = [
     "get_collections_in_scope",
     "get_scopes_in_bucket",
     "get_buckets_in_cluster",
+    "get_bucket_config",
     "get_document_by_id",
     "lookup_subdocument",
     "mutate_subdocument",

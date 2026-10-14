@@ -25,12 +25,18 @@ reached against a live cluster:
   version-specific query parameters, surfaces a 4xx using the server's own
   message without failing over, and returns the event array in the server's
   order without re-sorting or slicing.
+- get_bucket_config rejects Capella/malformed connection strings up front,
+  returns the single-bucket and all-buckets responses unchanged (raw
+  passthrough, like get_cluster_tasks), falls over between hosts on a network
+  failure, and surfaces a 4xx (unknown bucket, bad role) using the server's
+  own message without failing over to another host.
 """
 
 from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -38,6 +44,7 @@ import pytest
 from couchbase.diagnostics import ServiceType
 
 from cb_mcp.tools.operational.server import (
+    get_bucket_config,
     get_cluster_health_and_services,
     get_cluster_health_snapshot,
     get_cluster_metrics,
@@ -716,6 +723,215 @@ class TestGetClusterTasks:
 
         url = mock_client.get.call_args[0][0]
         assert url == "https://localhost:18091/pools/default/tasks"
+
+
+class TestGetBucketConfig:
+    """get_bucket_config: Capella rejection, host failover, and raw passthrough.
+
+    Like get_cluster_tasks, this one returns the endpoint's response unchanged
+    and re-raises on failure, so these tests assert on raw equality / the
+    raised exception rather than an error envelope or shaped fields.
+    """
+
+    _RAW_BUCKET: ClassVar[dict[str, Any]] = {
+        "name": "travel-sample",
+        "bucketType": "membase",
+        "storageBackend": "magma",
+        "evictionPolicy": "fullEviction",
+        "replicaNumber": 1,
+        "durabilityMinLevel": "none",
+        "conflictResolutionType": "seqno",
+        "autoCompactionSettings": False,
+        "quota": {"ram": 209715200},
+        "basicStats": {
+            "itemCount": 100,
+            "diskUsed": 1,
+            "memUsed": 1,
+            "opsPerSec": 0,
+            "quotaPercentUsed": 1.0,
+            "vbActiveNumNonResident": 0,
+        },
+        # Present so the tests prove raw passthrough keeps it, unlike cluster
+        # health snapshot's merge, which drops it.
+        "vBucketServerMap": {"serverList": ["10.0.1.11:11210"]},
+    }
+
+    @staticmethod
+    def _ok_response(payload) -> MagicMock:
+        """Like TestGetClusterMetrics._ok_response, but with status_code set:
+        get_bucket_config branches on status_code before raise_for_status."""
+        response = TestGetClusterMetrics._ok_response(payload)
+        response.status_code = 200
+        return response
+
+    def test_raises_on_missing_settings(self) -> None:
+        """Missing connection settings must fail before any REST attempt."""
+        ctx = _make_ctx_with_settings({})
+
+        with (
+            patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
+            pytest.raises(ValueError, match="Missing required connection settings"),
+        ):
+            get_bucket_config(ctx)
+
+        mock_client_cls.assert_not_called()
+
+    def test_rejects_capella_connection_without_rest_call(self) -> None:
+        """A Capella connection must be rejected up front, with no REST attempt."""
+        ctx = _make_ctx_with_settings(_CAPELLA_SETTINGS)
+
+        with (
+            patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
+            pytest.raises(ValueError, match="Capella"),
+        ):
+            get_bucket_config(ctx, bucket_name="travel-sample")
+
+        mock_client_cls.assert_not_called()
+
+    def test_rejects_malformed_connection_string_without_rest_call(self) -> None:
+        """A connection string with no extractable host must fail fast."""
+        ctx = _make_ctx_with_settings(
+            {**_VALID_SETTINGS, "connection_string": "not-a-url"}
+        )
+
+        with (
+            patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
+            pytest.raises(ValueError, match="No hosts found"),
+        ):
+            get_bucket_config(ctx, bucket_name="travel-sample")
+
+        mock_client_cls.assert_not_called()
+
+    def test_single_bucket_happy_path_is_unchanged(self) -> None:
+        """A bucket_name argument hits /pools/default/buckets/<name> and the
+        raw response comes back exactly as received — nothing stripped."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get", [self._ok_response(self._RAW_BUCKET)]
+        )
+
+        with client_patch:
+            result = get_bucket_config(ctx, bucket_name="travel-sample")
+
+        url = mock_client.get.call_args[0][0]
+        assert url == "http://localhost:8091/pools/default/buckets/travel-sample"
+        assert result == self._RAW_BUCKET
+        assert "vBucketServerMap" in result
+
+    def test_all_buckets_happy_path_is_the_raw_array(self) -> None:
+        """Omitting bucket_name hits /pools/default/buckets with no trailing
+        segment and returns the endpoint's array unchanged."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        raw_list = [self._RAW_BUCKET, {**self._RAW_BUCKET, "name": "other-bucket"}]
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get", [self._ok_response(raw_list)]
+        )
+
+        with client_patch:
+            result = get_bucket_config(ctx)
+
+        url = mock_client.get.call_args[0][0]
+        assert url == "http://localhost:8091/pools/default/buckets"
+        assert result == raw_list
+
+    def test_bucket_name_is_url_encoded(self) -> None:
+        """A bucket name is not string-concatenated unescaped into the path."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get", [self._ok_response(self._RAW_BUCKET)]
+        )
+
+        with client_patch:
+            get_bucket_config(ctx, bucket_name="a bucket/weird")
+
+        url = mock_client.get.call_args[0][0]
+        assert url == "http://localhost:8091/pools/default/buckets/a%20bucket%2Fweird"
+
+    def test_falls_over_to_second_host(self) -> None:
+        """A dead first host must not fail the call — the next host is tried."""
+        ctx = _make_ctx_with_settings(
+            {**_VALID_SETTINGS, "connection_string": "couchbase://host1,host2"}
+        )
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get",
+            [
+                httpx.ConnectError("host1 unreachable"),
+                self._ok_response(self._RAW_BUCKET),
+            ],
+        )
+
+        with client_patch:
+            result = get_bucket_config(ctx, bucket_name="travel-sample")
+
+        assert result["name"] == "travel-sample"
+        assert mock_client.get.call_count == 2
+
+    def test_raises_when_every_host_fails(self) -> None:
+        """All hosts down surfaces as a RuntimeError naming the hosts tried."""
+        ctx = _make_ctx_with_settings(
+            {**_VALID_SETTINGS, "connection_string": "couchbase://host1,host2"}
+        )
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get",
+            [httpx.ConnectError("down"), httpx.ConnectError("down")],
+        )
+
+        with (
+            client_patch,
+            pytest.raises(RuntimeError, match="Failed to reach any host"),
+        ):
+            get_bucket_config(ctx, bucket_name="travel-sample")
+
+        assert mock_client.get.call_count == 2
+
+    def test_unknown_bucket_surfaces_server_message_without_failover(self) -> None:
+        """A 404 is the request being refused, not the host being unreachable:
+        every other node would 404 identically, so it must not fail over."""
+        ctx = _make_ctx_with_settings(
+            {**_VALID_SETTINGS, "connection_string": "couchbase://host1,host2"}
+        )
+        not_found = MagicMock()
+        not_found.status_code = 404
+        not_found.text = "Requested resource not found."
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get", [not_found]
+        )
+
+        with (
+            client_patch,
+            pytest.raises(ValueError, match="Requested resource not found"),
+        ):
+            get_bucket_config(ctx, bucket_name="no-such-bucket")
+
+        assert mock_client.get.call_count == 1
+
+    def test_uses_management_port_and_buckets_path(self) -> None:
+        """Plain connections hit the plain management port over http."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get", [self._ok_response([])]
+        )
+
+        with client_patch:
+            get_bucket_config(ctx)
+
+        url = mock_client.get.call_args[0][0]
+        assert url == "http://localhost:8091/pools/default/buckets"
+
+    def test_uses_tls_port_for_couchbases_connection(self) -> None:
+        """A couchbases:// connection must use https and the TLS management port."""
+        ctx = _make_ctx_with_settings(
+            {**_VALID_SETTINGS, "connection_string": "couchbases://localhost"}
+        )
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get", [self._ok_response([])]
+        )
+
+        with client_patch:
+            get_bucket_config(ctx)
+
+        url = mock_client.get.call_args[0][0]
+        assert url == "https://localhost:18091/pools/default/buckets"
 
 
 class TestGetClusterHealthSnapshot:
