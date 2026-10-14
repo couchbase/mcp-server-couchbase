@@ -14,10 +14,44 @@ from typing import cast
 
 from fastmcp import Context
 
+from cb_mcp.audit import emitter
+from cb_mcp.audit.config import resolve_audit_config
+from cb_mcp.audit.emitter import AuditLogger, shutdown_audit
 from cb_mcp.tools.status import get_server_configuration_status
 
 
-def _make_ctx(settings=None, cluster_provider=None, logging_config=None) -> Context:
+class _FakeSink:
+    """A sink that only has to report counters."""
+
+    def __init__(self, *, written: int, dropped: int, write_errors: int) -> None:
+        self._stats = {
+            "written": written,
+            "dropped": dropped,
+            "write_errors": write_errors,
+        }
+
+    def start(self) -> None:
+        pass
+
+    def emit(self, line: str) -> None:
+        pass
+
+    def close(self, timeout: float = 5.0) -> None:
+        pass
+
+    @property
+    def stats(self) -> dict[str, int]:
+        return dict(self._stats)
+
+
+def init_audit_for_test(config, sink) -> None:
+    """Install an active logger without touching the filesystem."""
+    emitter._active = AuditLogger(config, sink=sink)
+
+
+def _make_ctx(
+    settings=None, cluster_provider=None, logging_config=None, audit_config=None
+) -> Context:
     # SimpleNamespace duck-types the bits get_server_configuration_status
     # actually reads (request_context.lifespan_context.{settings,
     # cluster_provider, logging_config}); the cast tells pyright that's
@@ -32,6 +66,7 @@ def _make_ctx(settings=None, cluster_provider=None, logging_config=None) -> Cont
                     cluster_provider=cluster_provider,
                     settings=settings if settings is not None else {},
                     logging_config=logging_config,
+                    audit_config=audit_config,
                 )
             )
         ),
@@ -178,3 +213,75 @@ def test_logging_block_alongside_existing_configuration_keys():
     assert "connections" in payload
     # logging is NOT inside configuration — it's a top-level peer.
     assert "logging" not in payload["configuration"]
+
+
+# ---------------------------------------------------------------------------
+# the audit block
+# ---------------------------------------------------------------------------
+
+
+def test_audit_block_reports_the_configuration_and_the_loss_counters():
+    """The counters here are the only way an operator learns records were lost.
+
+    README and DOCKER.md both document ``written`` / ``dropped`` /
+    ``write_errors`` as that signal, and the whole block was untested:
+    dropping ``audit_config`` from the lifespan context, or making
+    ``get_audit_config`` return ``None``, passed the entire suite while the
+    status tool silently stopped reporting auditing at all.
+    """
+    config = resolve_audit_config(
+        enabled=True,
+        sinks="file",
+        file="/var/log/cb-mcp/audit.log",
+        rotation_max_size_mb=10,
+        rotation_interval="1d",
+        max_backups=7,
+        tool_args=None,
+        disabled_events=None,
+    )
+    ctx = _make_ctx({}, audit_config=config.as_dict())
+
+    sink = _FakeSink(written=10427, dropped=3, write_errors=1)
+    try:
+        init_audit_for_test(config, sink)
+        payload = get_server_configuration_status(ctx)
+    finally:
+        shutdown_audit()
+
+    audit = payload["audit"]
+    assert audit["enabled"] is True
+    assert audit["sinks"] == ["file"]
+    assert audit["rotation_interval"] == "1d"
+    assert audit["max_backups"] == 7
+    assert audit["active"] is True
+    # The number that matters: a non-zero ``dropped`` is a gap in the trail.
+    assert audit["stats"] == {"written": 10427, "dropped": 3, "write_errors": 1}
+
+
+def test_audit_block_says_inactive_when_nothing_is_being_written():
+    config = resolve_audit_config(
+        enabled=True,
+        sinks="file",
+        file="/var/log/cb-mcp/audit.log",
+        rotation_max_size_mb=None,
+        rotation_interval="0",
+        max_backups=1,
+        tool_args=None,
+        disabled_events=None,
+    )
+    ctx = _make_ctx({}, audit_config=config.as_dict())
+
+    payload = get_server_configuration_status(ctx)
+    audit = payload["audit"]
+
+    # No logger installed: enabled by configuration, inactive in fact. An
+    # operator must be able to tell those apart.
+    assert audit["enabled"] is True
+    assert audit["active"] is False
+
+
+def test_a_server_without_auditing_reports_a_null_audit_block():
+    """``None`` is the right answer both for auditing off and for a host that
+    never adopted it: in neither case is anything being recorded."""
+    payload = get_server_configuration_status(_make_ctx({}))
+    assert payload["audit"] is None

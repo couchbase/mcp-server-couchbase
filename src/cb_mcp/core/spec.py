@@ -186,3 +186,20 @@ class ServerSpec:
 
     #: Settings keys whose *presence* may be logged but never their value.
     secret_settings_keys: tuple[str, ...] = ()
+
+    #: Tier-2 audit service package this server's tools are classified under,
+    #: or ``None`` when this server is not audited.
+    #:
+    #: Auditing is opt-in per server rather than automatic, because a Tier-2
+    #: block and its category slots are a wire contract: once records exist
+    #: against an id, that id can never mean anything else. A server with no
+    #: package would otherwise have every tool fall through classification's
+    #: fail-closed path and be recorded against *another* server's block —
+    #: same numbers, different meaning, which is the one failure the two-tier
+    #: catalogue exists to prevent.
+    #:
+    #: ``None`` costs nothing: the audit middleware is simply not registered,
+    #: and the resolved audit configuration is still reported by
+    #: ``get_server_configuration_status`` so an operator can see that the
+    #: flags were honored and nothing is being recorded.
+    audit_package: str | None = None

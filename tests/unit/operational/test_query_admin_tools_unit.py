@@ -377,9 +377,7 @@ class TestDeleteActiveQuery:
         assert result == {
             "success": True,
             "request_id": "abc-123",
-            "nodes": [
-                {"node": "localhost:8093", "http_status": 200, "body": "ok"}
-            ],
+            "nodes": [{"node": "localhost:8093", "http_status": 200, "body": "ok"}],
         }
 
     def test_sends_to_every_node_regardless_of_status_code(self) -> None:
