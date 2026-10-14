@@ -203,3 +203,16 @@ class ServerSpec:
     #: ``get_server_configuration_status`` so an operator can see that the
     #: flags were honored and nothing is being recorded.
     audit_package: str | None = None
+
+    #: Whether this server may run as several worker processes behind one
+    #: socket (``--workers > 1``). ``False`` for a server that keeps state in
+    #: process memory which a follow-up request may need, because the next
+    #: request can land on a different worker. Session state is not the
+    #: question here — multi-worker mode is always stateless HTTP — this is
+    #: about state the server's *own* tools keep between calls.
+    #:
+    #: Appended after ``audit_package`` on purpose: ``ServerSpec`` is a shared
+    #: ``cb_mcp.core`` contract, and a new field inserted mid-class would shift
+    #: the positional index of every field after it for any consumer
+    #: constructing it positionally. Add future fields after this one.
+    supports_multiple_workers: bool = True

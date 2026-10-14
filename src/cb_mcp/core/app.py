@@ -20,6 +20,8 @@ from typing import Any
 from fastmcp import FastMCP
 from fastmcp.server.auth import AuthProvider
 from fastmcp.tools import FunctionTool
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from ..audit import (
     AuditEvent,
@@ -33,14 +35,17 @@ from ..audit import (
 )
 from ..audit.record import OUTCOME_ERROR, OUTCOME_SUCCESS
 from ..utils.constants import (
+    HEALTH_CHECK_PATH,
     LOGGER_NAMESPACE,
     NETWORK_TRANSPORTS,
     NETWORK_TRANSPORTS_SDK_MAPPING,
+    STREAMABLE_HTTP_TRANSPORT,
 )
 from ..utils.context import AppContext
 from ..utils.environment import log_environment_info
 from ..utils.telemetry import send_install_ping
 from .contracts import ProviderLifecycle
+from .serving import apply_thread_pool_limit
 from .spec import ServerSpec
 
 logger = logging.getLogger(f"{LOGGER_NAMESPACE}.core.app")
@@ -120,6 +125,8 @@ def build_app(
     read_only_mode: bool = True,
     logging_config: Mapping[str, Any] | None = None,
     audit_config: ResolvedAuditConfig | None = None,
+    thread_pool_size: int | None = None,
+    send_startup_ping: bool = True,
 ) -> FastMCP:
     """Build the ``FastMCP`` application for ``spec``, ready to ``run()``.
 
@@ -138,6 +145,16 @@ def build_app(
     this package's logging module, so a host with its own logging stack can
     populate it without adopting ours. It surfaces via
     ``get_server_configuration_status``.
+
+    ``thread_pool_size`` caps concurrently executing tool calls in this
+    process (``None`` keeps AnyIO's default); see
+    :func:`cb_mcp.core.serving.apply_thread_pool_limit`. When ``settings``
+    carries a ``thread_pool_size`` key, the lifespan reports the limit that
+    actually took effect under it rather than the configured value.
+
+    ``send_startup_ping`` is ``False`` for the processes of a multi-worker
+    deployment, whose supervisor sends one event for all of them so N
+    workers do not look like N installs.
 
     ``audit_config`` is threaded through from the host for the same reason as
     ``logging_config``: a host that resolves its configuration from somewhere
@@ -169,6 +186,16 @@ def build_app(
     async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
         """Build the lifespan AppContext from host-resolved configuration."""
         transport = settings.get("transport")
+        # Applied here because AnyIO's default limiter is run-scoped: it
+        # exists only inside the event loop, and each worker process has its
+        # own. Reported as the effective value so support sees the real cap.
+        # Done before auditing starts: it writes no record, so the
+        # server-started record below is still the first line in the file,
+        # and that record carries the same effective value as everything else.
+        effective_pool_size = apply_thread_pool_limit(thread_pool_size)
+        run_settings: Mapping[str, Any] = settings
+        if "thread_pool_size" in settings:
+            run_settings = {**settings, "thread_pool_size": effective_pool_size}
         # Audit is initialised first so the server-started record is the first
         # line in the file and every later record shares its static context.
         # What auditing is actually doing, which differs from what was asked
@@ -182,7 +209,7 @@ def build_app(
                 oauth_enabled=bool(settings.get("oauth_enabled", False)),
                 read_only_mode=read_only_mode,
                 registered_tool_names=[tool.__name__ for tool in tools],
-                settings=settings,
+                settings=run_settings,
             )
         # Name the server: both servers log into the same hierarchy, so in an
         # aggregated stream these lines are otherwise indistinguishable. The
@@ -192,10 +219,12 @@ def build_app(
             f"MCP server '{spec.id}' initialized in lazy mode for tool "
             f"discovery. Modes: (read_only_mode={read_only_mode})"
         )
+        logger.info(f"Tool-call concurrency limit: {effective_pool_size} per process")
         # Diagnostic snapshot for customer support. Filtered at INFO; visible
         # whenever the user runs with --log-level DEBUG.
-        log_environment_info(transport, settings, spec)
-        send_install_ping(transport, server_id=spec.id)
+        log_environment_info(transport, run_settings, spec)
+        if send_startup_ping:
+            send_install_ping(transport, server_id=spec.id)
         # Built inside the try, not before it: ``provider_factory`` opens a
         # connection and can fail, and auditing has already started by this
         # point — with a sink open, a writer thread running and the
@@ -208,7 +237,7 @@ def build_app(
         try:
             app_context = AppContext(
                 cluster_provider=provider_factory(),
-                settings=settings,
+                settings=run_settings,
                 read_only_mode=read_only_mode,
                 logging_config=logging_config,
                 audit_config=(
@@ -247,6 +276,7 @@ def build_app(
             logger.info("Closing MCP server")
 
     mcp = FastMCP(spec.fastmcp_name, lifespan=app_lifespan, auth=auth)
+    _add_health_check(mcp, spec)
 
     # Registered before tools so it wraps every one of them. The middleware
     # short-circuits whenever the sink is inactive, so a failed sink degrades to
@@ -280,20 +310,55 @@ def build_app(
     return mcp
 
 
+def _add_health_check(mcp: FastMCP, spec: ServerSpec) -> None:
+    """Serve ``GET /health`` next to the MCP endpoint on network transports.
+
+    A *liveness* check for container orchestrators and load balancers: it
+    answers whenever this process can serve HTTP, and deliberately does not
+    touch the backing cluster. Connections are opened lazily on first tool
+    call, and a cluster outage must not make an orchestrator restart
+    containers that are themselves healthy.
+
+    Unauthenticated by design. FastMCP applies OAuth to the MCP endpoint
+    only, so probes keep working when OAuth is enabled, and the response
+    carries nothing beyond the server id. Present in every ``--workers``
+    process too, since each builds its app through here.
+    """
+
+    @mcp.custom_route(HEALTH_CHECK_PATH, methods=["GET"], include_in_schema=False)
+    async def health(_request: Request) -> JSONResponse:
+        return JSONResponse({"status": "ok", "server": spec.id})
+
+
 def run_app(
     mcp: FastMCP,
     *,
     transport: str,
     host: str | None = None,
     port: int | None = None,
+    stateless_http: bool | None = None,
 ) -> None:
     """Run ``mcp`` on ``transport``, translating our transport names to the SDK's.
 
     ``host``/``port`` are forwarded only for network transports; passing them
     for stdio is an error in the SDK rather than a no-op.
+
+    ``stateless_http``, when given, is forwarded on network transports as
+    the exact mode the host resolved and validated — ``False`` included, so
+    FastMCP cannot fall back to its own ``FASTMCP_STATELESS_HTTP`` setting
+    behind the host's back. The standalone CLI always passes it (it folds
+    that setting in when resolving; see
+    ``cb_mcp.core.serving.resolve_serving``). Omitted (``None``), nothing is
+    forwarded and FastMCP decides as it always has, so an embedding host
+    written before this parameter existed keeps its behaviour. SSE has no
+    stateless mode, so it only ever receives ``False``.
     """
     sdk_transport = NETWORK_TRANSPORTS_SDK_MAPPING.get(transport, transport)
     run_kwargs: dict[str, Any] = {}
     if transport in NETWORK_TRANSPORTS:
         run_kwargs = {"host": host, "port": port}
+        if stateless_http is not None:
+            run_kwargs["stateless_http"] = (
+                stateless_http and transport == STREAMABLE_HTTP_TRANSPORT
+            )
     mcp.run(transport=sdk_transport, show_banner=False, **run_kwargs)  # type: ignore[arg-type]
