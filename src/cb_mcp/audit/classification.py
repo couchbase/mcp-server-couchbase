@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from .catalog import DEFAULT_SERVICE_PACKAGE, ToolCallEvent, tool_call_event
+from .catalog import ToolCallEvent, tool_call_event
 
 #: ``service package -> {tool_name -> (category, operation_class)}``.
 #:
@@ -187,8 +187,13 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "operational_insights_get_collections_in_scope": ("schema", "read"),
         "operational_insights_get_schema_for_collection": ("schema", "read"),
         # -- query (SQL++ over Analytics) -----------------------------------
-        "operational_insights_run_query_sync": ("query", "read"),
-        "operational_insights_run_query_async": ("query", "read"),
+        # Both accept SELECT, DML and DDL, so they are statement-classified
+        # (see STATEMENT_CLASSIFIED_TOOLS). The entry here is the fallback used
+        # when no class was recorded, and it is `write` deliberately: a read id
+        # is filterable, so guessing read would let a mutation be configured
+        # out of the audit log.
+        "operational_insights_run_query_sync": ("query", "write"),
+        "operational_insights_run_query_async": ("query", "write"),
         "operational_insights_explain_query": ("query", "read"),
         # The async request lifecycle. Retrieving, discarding and cancelling
         # all act on a handle for a query this caller submitted, so they stay
@@ -204,8 +209,34 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
     },
 }
 
-#: The one tool whose read/write class depends on the statement it is given.
-STATEMENT_CLASSIFIED_TOOL = "run_sql_plus_plus_query"
+#: Tools whose read/write class depends on the statement they are given, as
+#: ``package -> {tool names}``.
+#:
+#: Each of these accepts SELECT, DML and DDL through one entry point, so a
+#: fixed class would be wrong half the time -- and wrong in the dangerous
+#: direction: read ids are filterable, so a mutation booked as a read could be
+#: suppressed from the audit log by configuration. The tool records its own
+#: class into :mod:`cb_mcp.audit.state` at invocation and the middleware reads
+#: it back.
+#:
+#: A tool listed here that fails to record a class falls back to its table
+#: entry below, which is why those entries are ``write``: the failure mode is
+#: a filterable read, so the static answer has to be the non-filterable one.
+STATEMENT_CLASSIFIED_TOOLS: dict[str, frozenset[str]] = {
+    "operational": frozenset({"run_sql_plus_plus_query"}),
+    "operational_insights": frozenset(
+        {
+            "operational_insights_run_query_sync",
+            "operational_insights_run_query_async",
+        }
+    ),
+}
+
+
+def is_statement_classified(tool_name: str, package: str) -> bool:
+    """True when ``tool_name`` reports its own read/write class per invocation."""
+    return tool_name in STATEMENT_CLASSIFIED_TOOLS.get(package, frozenset())
+
 
 #: Fail-closed operation class for a tool with no entry. Write IDs are never
 #: filterable, so an unknown tool is always recorded.
@@ -218,13 +249,13 @@ FAILSAFE_CATEGORY = "cluster"
 
 
 def classification_for(
-    package: str = DEFAULT_SERVICE_PACKAGE,
+    package: str,
 ) -> dict[str, tuple[str, str]]:
     """Return ``package``'s classification table, or an empty one if unaudited."""
     return TOOL_CLASSIFICATION.get(package, {})
 
 
-def is_classified(tool_name: str, package: str = DEFAULT_SERVICE_PACKAGE) -> bool:
+def is_classified(tool_name: str, package: str) -> bool:
     """True when ``tool_name`` has an explicit entry in ``package``'s table."""
     return tool_name in classification_for(package)
 
@@ -232,7 +263,7 @@ def is_classified(tool_name: str, package: str = DEFAULT_SERVICE_PACKAGE) -> boo
 def classify_tool(
     tool_name: str,
     *,
-    package: str = DEFAULT_SERVICE_PACKAGE,
+    package: str,
     operation_class_override: str | None = None,
 ) -> tuple[str, str]:
     """Return ``(category, operation_class)`` for ``tool_name``.
@@ -256,7 +287,7 @@ def classify_tool(
 def resolve_tool_call_event(
     tool_name: str,
     *,
-    package: str = DEFAULT_SERVICE_PACKAGE,
+    package: str,
     operation_class_override: str | None = None,
 ) -> ToolCallEvent:
     """Resolve the catalogue entry for a tool invocation in ``package``."""
@@ -277,9 +308,7 @@ def required_scope_for(operation_class: str) -> str:
     return "write" if operation_class == "write" else "read"
 
 
-def unclassified_tool_names(
-    tool_names: Iterable[str], package: str = DEFAULT_SERVICE_PACKAGE
-) -> list[str]:
+def unclassified_tool_names(tool_names: Iterable[str], package: str) -> list[str]:
     """Return the subset of ``tool_names`` with no entry in ``package``'s table."""
     table = classification_for(package)
     return sorted(name for name in tool_names if name not in table)
@@ -289,7 +318,8 @@ __all__ = [
     "FAILSAFE_CATEGORY",
     "classification_for",
     "FAILSAFE_OPERATION_CLASS",
-    "STATEMENT_CLASSIFIED_TOOL",
+    "STATEMENT_CLASSIFIED_TOOLS",
+    "is_statement_classified",
     "TOOL_CLASSIFICATION",
     "classify_tool",
     "is_classified",

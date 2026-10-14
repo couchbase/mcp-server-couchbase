@@ -51,11 +51,11 @@ from fastmcp.server.middleware import Middleware
 
 from ..utils.constants import LOGGER_NAMESPACE
 from . import state
-from .catalog import DEFAULT_SERVICE_PACKAGE, AuditEvent
+from .catalog import AuditEvent
 from .classification import (
-    STATEMENT_CLASSIFIED_TOOL,
     classify_tool,
     is_classified,
+    is_statement_classified,
     required_scope_for,
     resolve_tool_call_event,
 )
@@ -137,7 +137,7 @@ class AuditMiddleware(Middleware):
         *,
         transport: str,
         cb_userid: str | None = None,
-        service_package: str = DEFAULT_SERVICE_PACKAGE,
+        service_package: str,
         audit_logger: AuditLogger | None = None,
     ) -> None:
         """
@@ -393,7 +393,7 @@ class AuditMiddleware(Middleware):
         """Emit the Tier-2 record for a call that actually reached the tool."""
         override = (
             state.get_statement_class()
-            if tool_name == STATEMENT_CLASSIFIED_TOOL
+            if is_statement_classified(tool_name, self._service_package)
             else None
         )
         event = resolve_tool_call_event(

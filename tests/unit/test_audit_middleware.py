@@ -95,7 +95,10 @@ def _server(audit: AuditLogger, transport: str = "stdio") -> FastMCP:
     mcp = FastMCP("audit-test")
     mcp.add_middleware(
         AuditMiddleware(
-            transport=transport, cb_userid="mcp_service", audit_logger=audit
+            transport=transport,
+            cb_userid="mcp_service",
+            audit_logger=audit,
+            service_package="operational",
         )
     )
     return mcp
@@ -258,7 +261,12 @@ async def test_a_cancelled_call_is_still_recorded(tmp_path):
     assert writes[0]["outcome"] == OUTCOME_ERROR
     # Write ids are never filterable, so the record cannot be configured away
     # either.
-    assert resolve_tool_call_event("upsert_document_by_id").filterable is False
+    assert (
+        resolve_tool_call_event(
+            "upsert_document_by_id", package="operational"
+        ).filterable
+        is False
+    )
 
 
 @pytest.mark.asyncio
@@ -778,7 +786,10 @@ async def test_correlation_survives_without_on_message(tmp_path):
     """
     audit = _build_logger(tmp_path)
     middleware = AuditMiddleware(
-        transport="stdio", cb_userid="mcp_service", audit_logger=audit
+        transport="stdio",
+        cb_userid="mcp_service",
+        audit_logger=audit,
+        service_package="operational",
     )
 
     @dataclass
@@ -907,7 +918,12 @@ async def test_an_oauth_caller_is_named_on_the_tool_call_record(tmp_path):
     audit = _build_logger(tmp_path)
     mcp = FastMCP("audit-test")
     mcp.add_middleware(
-        AuditMiddleware(transport="http", cb_userid="mcp_service", audit_logger=audit)
+        AuditMiddleware(
+            transport="http",
+            cb_userid="mcp_service",
+            audit_logger=audit,
+            service_package="operational",
+        )
     )
 
     @mcp.tool

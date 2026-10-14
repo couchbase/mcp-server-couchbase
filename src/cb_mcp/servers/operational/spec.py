@@ -85,7 +85,5 @@ SPEC = ServerSpec(
         "embedding_aws_access_key_id",
         "embedding_aws_secret_access_key",
     ),
-    # The only audited server today. Its Tier-2 block (0xF000) and category
-    # slots are shipped and frozen; see cb_mcp.audit.catalog.
     audit_package="operational",
 )

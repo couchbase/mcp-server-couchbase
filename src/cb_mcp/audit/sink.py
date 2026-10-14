@@ -622,13 +622,22 @@ class AuditSink(_QueuedSink):
         """When the interval trigger next falls due, or ``inf`` when it is off.
 
         On open the clock is anchored to the file's **last modification time**
-        rather than to now, so a restart does not hand the live file a fresh
-        interval it has not earned. A file last written longer ago than the
-        interval is therefore already due and rolls over on the first record —
-        which is what an operator asking for daily files expects after the
-        server was down for a week. Once running, each rotation sets the next
+        rather than to now, so a process does not hand the live file a fresh
+        interval it has not earned. Once running, each rotation sets the next
         deadline from the clock, so a busy file cannot push its own deadline
         forward by being written to.
+
+        Reaching that anchoring at all requires a file to be there already, and
+        the live filename carries the process id — ``audit.<host>.<pid>.log``.
+        So the only way a new process finds one is pid reuse: the operating
+        system hands out a pid an earlier server held, and that server's file
+        is still on disk. Uncommon, but not rare over a container's lifetime.
+
+        The anchoring is what makes that case safe. The earlier file is older
+        than the interval in any realistic case, so it is already due and
+        rotates on the first record — the previous process's records go to a
+        timestamped backup and this process starts a clean file, rather than
+        the two interleaving in one file with nothing to tell them apart.
         """
         if self._interval <= 0:
             return float("inf")

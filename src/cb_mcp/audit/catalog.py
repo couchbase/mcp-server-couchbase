@@ -114,9 +114,9 @@ CATEGORY_SLOTS: dict[str, dict[str, int]] = {
         "query": 3,
         "index": 4,
         "performance": 5,
-        # The allocation is therefore contiguous across slots 0-7, with 8-15
-        # free. The block has no retired numbers left in reserve: once a
-        # category has emitted, its number is dead permanently.
+        # Contiguous across 0-7, with 8-15 free for new categories. A number
+        # here is a wire contract: once a category has emitted records, its
+        # slot can never mean anything else.
         "search": 6,
         "config": 7,
     },
@@ -159,35 +159,25 @@ for _package, _slots in CATEGORY_SLOTS.items():
             "error, and the call would go unrecorded entirely."
         )
 
-#: Slots retired from use, kept here so their history is visible — ``category
-#: -> n``, using the number the category held.
+#: Slots withdrawn from a released catalogue — ``package -> {category -> n}``,
+#: under the number the category held.
 #:
-#: A retired slot may be reallocated to a new category **only** when no audit
-#: record was ever emitted against it. That holds for a category retired
-#: because it never had any tools classified to it: with no tools there were no
-#: records, so no SIEM rule for the old meaning can exist and reuse is safe.
+#: Empty, because nothing has been withdrawn from a released catalogue. It
+#: exists so the first withdrawal has somewhere to go, and so
+#: :func:`next_free_slot` has something to consult.
 #:
-#: A slot that has ever emitted a record must never be reused, even after the
-#: category is withdrawn — reallocating it would make an old rule silently
-#: match a new, unrelated event. Record such a slot here and leave it out of
-#: :func:`next_free_slot`'s reusable set.
-RETIRED_SLOTS: dict[str, dict[str, int]] = {
-    "operational": {
-        # Neither ever had a tool classified to it, so neither number has
-        # appeared in a record. Both are reused in CATEGORY_SLOTS above, which
-        # that fact is what permits. The entries stay here because they record
-        # what each number has meant, and the invariant test reads them to
-        # check that a reused slot is one that never emitted.
-        "vector": 6,
-        "analytics": 7,
-    },
-}
+#: A withdrawn slot may be given to a new category **only** when no record was
+#: ever emitted against it. A slot that has emitted must never be reused:
+#: reallocating it would make an existing SIEM rule silently match a new,
+#: unrelated event. Record such a slot in :data:`PERMANENTLY_RESERVED_SLOTS`
+#: as well, which keeps it out of :func:`next_free_slot` for good.
+RETIRED_SLOTS: dict[str, dict[str, int]] = {}
 
 #: Retired slots that must never be reallocated because records exist for them.
 PERMANENTLY_RESERVED_SLOTS: frozenset[int] = frozenset()
 
 
-def categories_for(package: str = DEFAULT_SERVICE_PACKAGE) -> tuple[str, ...]:
+def categories_for(package: str) -> tuple[str, ...]:
     """Category axis for ``package``'s Tier-2 block, ordered by slot.
 
     Derived from :data:`CATEGORY_SLOTS` so the two can never disagree.
@@ -200,14 +190,14 @@ def categories_for(package: str = DEFAULT_SERVICE_PACKAGE) -> tuple[str, ...]:
 
 #: Category axis of the default package, kept as a module constant because
 #: it is the axis every descriptor and every test refers to today.
-CATEGORIES: tuple[str, ...] = categories_for()
+CATEGORIES: tuple[str, ...] = categories_for(DEFAULT_SERVICE_PACKAGE)
 
 #: Name of the service package this build audits. Recorded once at startup
 #: rather than repeated on every record.
 SERVICE_PACKAGE = DEFAULT_SERVICE_PACKAGE
 
 
-def category_index(category: str, package: str = DEFAULT_SERVICE_PACKAGE) -> int:
+def category_index(category: str, package: str) -> int:
     """Return the slot ``n`` for ``category`` within ``package``'s block."""
     try:
         return CATEGORY_SLOTS[package][category]
@@ -218,7 +208,7 @@ def category_index(category: str, package: str = DEFAULT_SERVICE_PACKAGE) -> int
         ) from exc
 
 
-def next_free_slot(package: str = DEFAULT_SERVICE_PACKAGE) -> int:
+def next_free_slot(package: str) -> int:
     """Return the slot a newly added category should take.
 
     Returns the lowest **never-allocated** slot. Retired slots are never
@@ -250,9 +240,7 @@ def next_free_slot(package: str = DEFAULT_SERVICE_PACKAGE) -> int:
     )
 
 
-def tool_call_event_id(
-    category: str, operation_class: str, package: str = DEFAULT_SERVICE_PACKAGE
-) -> int:
+def tool_call_event_id(category: str, operation_class: str, package: str) -> int:
     """Resolve the Tier-2 event ID for a tool call.
 
     Args:
@@ -414,9 +402,7 @@ _CATEGORY_LABELS: dict[str, str] = {
 }
 
 
-def tool_call_event(
-    category: str, operation_class: str, package: str = DEFAULT_SERVICE_PACKAGE
-) -> ToolCallEvent:
+def tool_call_event(category: str, operation_class: str, package: str) -> ToolCallEvent:
     """Build the :class:`ToolCallEvent` for a category and operation class."""
     label = _CATEGORY_LABELS[category]
     verb = "read" if operation_class == "read" else "write"
@@ -431,7 +417,7 @@ def tool_call_event(
 
 
 def all_tool_call_events(
-    package: str = DEFAULT_SERVICE_PACKAGE,
+    package: str,
 ) -> list[ToolCallEvent]:
     """Every Tier-2 tool-call entry for ``package``, for descriptor generation."""
     return [
@@ -499,7 +485,10 @@ def build_descriptor() -> dict:
 #: no caller.
 EVENT_NAMES_TO_IDS: dict[str, int] = {
     **{event.event_name: event.id for event in AuditEvent},
-    **{event.event_name: event.id for event in all_tool_call_events()},
+    **{
+        event.event_name: event.id
+        for event in all_tool_call_events(DEFAULT_SERVICE_PACKAGE)
+    },
 }
 
 #: Ids of events an operator is permitted to suppress via configuration.

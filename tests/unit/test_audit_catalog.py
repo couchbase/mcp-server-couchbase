@@ -95,27 +95,27 @@ def test_core_event_ids_are_the_prd_values(event, expected_id, expected_name):
     ],
 )
 def test_tool_call_ids_are_the_prd_values(category, read_id, write_id):
-    assert tool_call_event_id(category, "read") == read_id
-    assert tool_call_event_id(category, "write") == write_id
+    assert tool_call_event_id(category, "read", "operational") == read_id
+    assert tool_call_event_id(category, "write", "operational") == write_id
     assert write_id - read_id == WRITE_DELTA
 
 
 def test_kv_events_use_the_document_label():
     # The PRD names the KV events "document read"/"document write" even though
     # the category axis calls the category "kv".
-    assert tool_call_event("kv", "read").event_name == "document read"
-    assert tool_call_event("kv", "write").event_name == "document write"
+    assert tool_call_event("kv", "read", "operational").event_name == "document read"
+    assert tool_call_event("kv", "write", "operational").event_name == "document write"
 
 
 def test_unknown_category_and_class_are_rejected():
     with pytest.raises(ValueError, match="Unknown audit category"):
-        tool_call_event_id("nonsense", "read")
+        tool_call_event_id("nonsense", "read", "operational")
     with pytest.raises(ValueError, match="must be 'read' or 'write'"):
-        tool_call_event_id("kv", "sideways")
+        tool_call_event_id("kv", "sideways", "operational")
 
 
 def test_writes_are_never_filterable_and_reads_always_are():
-    for event in all_tool_call_events():
+    for event in all_tool_call_events("operational"):
         assert event.filterable is (event.operation_class == "read")
 
 
@@ -129,7 +129,7 @@ def test_security_and_lifecycle_events_are_not_filterable():
 
 def test_ids_are_unique():
     ids = [event.id for event in AuditEvent] + [
-        event.id for event in all_tool_call_events()
+        event.id for event in all_tool_call_events("operational")
     ]
     assert len(ids) == len(set(ids))
 
@@ -286,15 +286,15 @@ def test_retiring_a_category_does_not_move_its_neighbours(monkeypatch):
         if name != "index"
     }
     monkeypatch.setattr(catalog, "CATEGORY_SLOTS", {"operational": trimmed})
-    assert catalog.tool_call_event_id("performance", "read") == 61493
-    assert catalog.tool_call_event_id("query", "read") == 61491
+    assert catalog.tool_call_event_id("performance", "read", "operational") == 61493
+    assert catalog.tool_call_event_id("query", "read", "operational") == 61491
 
 
 def test_next_free_slot_takes_the_lowest_never_allocated(monkeypatch):
     monkeypatch.setattr(catalog, "RETIRED_SLOTS", {})
     monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset())
     # 0-7 are allocated, so 8 is the lowest never-allocated slot.
-    assert catalog.next_free_slot() == 8
+    assert catalog.next_free_slot("operational") == 8
 
 
 def test_next_free_slot_skips_retired_slots(monkeypatch):
@@ -312,14 +312,14 @@ def test_next_free_slot_skips_retired_slots(monkeypatch):
     # 0-7 are live and 8 is retired, so the helper must skip past it to 9.
     # Retiring a slot *above* the first free one would make this pass
     # whether or not RETIRED_SLOTS were consulted at all.
-    assert catalog.next_free_slot() == 9
+    assert catalog.next_free_slot("operational") == 9
 
 
 def test_permanently_reserved_slots_are_never_reallocated(monkeypatch):
     """A slot that has emitted records must not be handed to a new category."""
     monkeypatch.setattr(catalog, "RETIRED_SLOTS", {"operational": {"withdrawn": 8}})
     monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset({8}))
-    assert catalog.next_free_slot() == 9
+    assert catalog.next_free_slot("operational") == 9
 
 
 def test_exhausted_block_is_an_explicit_error(monkeypatch):
@@ -331,26 +331,26 @@ def test_exhausted_block_is_an_explicit_error(monkeypatch):
     monkeypatch.setattr(catalog, "RETIRED_SLOTS", {})
     monkeypatch.setattr(catalog, "PERMANENTLY_RESERVED_SLOTS", frozenset())
     with pytest.raises(ValueError, match="request its own block"):
-        catalog.next_free_slot()
+        catalog.next_free_slot("operational")
 
 
-def test_retired_categories_are_gone_but_their_slots_are_recorded():
-    """vector and analytics were retired before release.
+def test_nothing_is_retired_in_a_catalogue_that_has_not_shipped():
+    """No category has been withdrawn from a released catalogue.
 
-    Neither ever had a tool classified to it, so neither slot ever emitted a
-    record — which is precisely the condition that makes a slot safe to hand to
-    a future category. The numbers stay recorded so the history is visible and
-    nobody wonders why the live table starts skipping at 6.
+    The table exists for the first withdrawal, not to carry development
+    history: a slot that never reached a release never meant anything to an
+    operator, so recording it as retired would only make a reader wonder which
+    numbers they must avoid.
     """
-    assert "vector" not in catalog.CATEGORY_SLOTS["operational"]
-    assert "analytics" not in catalog.CATEGORY_SLOTS["operational"]
-    assert catalog.RETIRED_SLOTS == {"operational": {"vector": 6, "analytics": 7}}
-    # Never emitted a record, so never permanently reserved.
-    assert not catalog.PERMANENTLY_RESERVED_SLOTS
+    assert catalog.RETIRED_SLOTS == {}
+    assert frozenset() == catalog.PERMANENTLY_RESERVED_SLOTS
 
-    for name in ("vector", "analytics"):
-        with pytest.raises(ValueError, match="Unknown audit category"):
-            catalog.tool_call_event_id(name, "read")
+
+def test_every_slot_in_the_block_is_allocated_contiguously():
+    """0-7 are in use and 8-15 are free, with no gaps to explain."""
+    slots = sorted(catalog.CATEGORY_SLOTS["operational"].values())
+    assert slots == list(range(8))
+    assert catalog.next_free_slot("operational") == 8
 
 
 def test_a_slot_that_ever_emitted_is_never_reallocated(monkeypatch):
@@ -382,7 +382,7 @@ def test_a_slot_that_ever_emitted_is_never_reallocated(monkeypatch):
     assert clashes["operational"] == {occupied}
 
     # And must be quiet for a slot nobody has allocated.
-    free = catalog.next_free_slot()
+    free = catalog.next_free_slot("operational")
     assert all(not c for c in reserved_slots_clash({free}).values())
 
     # The real table, which must be clean.
@@ -406,14 +406,14 @@ def test_every_reused_slot_is_one_that_never_emitted():
 
 def test_retirement_did_not_move_the_surviving_ids():
     """The point of the explicit slot table, asserted on the real retirement."""
-    assert tool_call_event_id("cluster", "read") == 61488
-    assert tool_call_event_id("performance", "read") == 61493
-    assert tool_call_event_id("performance", "write") == 61525
+    assert tool_call_event_id("cluster", "read", "operational") == 61488
+    assert tool_call_event_id("performance", "read", "operational") == 61493
+    assert tool_call_event_id("performance", "write", "operational") == 61525
 
 
 def test_a_new_category_takes_the_next_never_allocated_slot():
     """Slots 0-7 are allocated, so the next category gets 8."""
-    assert catalog.next_free_slot() == 8
+    assert catalog.next_free_slot("operational") == 8
 
 
 def test_search_ids_are_the_shipped_numbers():
@@ -421,5 +421,5 @@ def test_search_ids_are_the_shipped_numbers():
 
     Search occupies slot 6, one of the two reused from RETIRED_SLOTS.
     """
-    assert tool_call_event_id("search", "read") == 61494
-    assert tool_call_event_id("search", "write") == 61526
+    assert tool_call_event_id("search", "read", "operational") == 61494
+    assert tool_call_event_id("search", "write", "operational") == 61526

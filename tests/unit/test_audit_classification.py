@@ -29,6 +29,7 @@ from cb_mcp.audit.classification import (
     TOOL_CLASSIFICATION,
     classify_tool,
     is_classified,
+    is_statement_classified,
     required_scope_for,
     resolve_tool_call_event,
     unclassified_tool_names,
@@ -36,6 +37,7 @@ from cb_mcp.audit.classification import (
 from cb_mcp.tools.operational import ALL_TOOLS, READ_ONLY_TOOLS, WRITE_TOOLS
 from cb_mcp.tools.operational_insights import ALL_TOOLS as OI_ALL_TOOLS
 from cb_mcp.tools.operational_insights import WRITE_TOOLS as OI_WRITE_TOOLS
+from cb_mcp.tools.operational_insights.query import _audit_statement_class
 
 #: The operational package. Operational Insights has its own block and table
 #: its own block and table; constants for it are defined alongside these.
@@ -114,7 +116,9 @@ def test_no_stale_oi_entries():
         ("get_server_configuration_status", 65591),  # config read
         ("operational_insights_get_databases_in_cluster", 65585),  # schema read
         ("operational_insights_get_schema_for_collection", 65585),
-        ("operational_insights_run_query_sync", 65587),  # query read
+        # Statement-classified: 65619 is the non-filterable fallback used
+        # when the statement reported no class.
+        ("operational_insights_run_query_sync", 65619),
         ("operational_insights_cancel_async_query", 65587),
         ("operational_insights_list_indexes", 65588),  # index read
         ("operational_insights_create_index", 65620),  # index write
@@ -136,14 +140,14 @@ def test_oi_write_tools_are_classified_write(tool_name):
 @pytest.mark.parametrize("tool_name", sorted(WRITE_TOOL_NAMES))
 def test_repository_write_tools_are_classified_write(tool_name):
     """The audit class must agree with the server's own categorisation."""
-    _, operation_class = classify_tool(tool_name)
+    _, operation_class = classify_tool(tool_name, package=PACKAGE)
     assert operation_class == "write", tool_name
-    assert resolve_tool_call_event(tool_name).filterable is False
+    assert resolve_tool_call_event(tool_name, package=PACKAGE).filterable is False
 
 
 @pytest.mark.parametrize("tool_name", sorted(READ_ONLY_NAMES))
 def test_read_only_tools_are_classified_read(tool_name):
-    _, operation_class = classify_tool(tool_name)
+    _, operation_class = classify_tool(tool_name, package=PACKAGE)
     assert operation_class == "read", tool_name
 
 
@@ -204,13 +208,13 @@ def test_tool_maps_to_the_expected_event_id(tool_name, expected_id):
     wire contract a SIEM rule is written against; only an explicit expectation
     holds it still.
     """
-    assert resolve_tool_call_event(tool_name).id == expected_id
+    assert resolve_tool_call_event(tool_name, package=PACKAGE).id == expected_id
 
 
 def test_sqlpp_write_statement_moves_to_the_query_write_id():
-    read_event = resolve_tool_call_event("run_sql_plus_plus_query")
+    read_event = resolve_tool_call_event("run_sql_plus_plus_query", package=PACKAGE)
     write_event = resolve_tool_call_event(
-        "run_sql_plus_plus_query", operation_class_override="write"
+        "run_sql_plus_plus_query", package=PACKAGE, operation_class_override="write"
     )
     assert read_event.id == 61491
     assert write_event.id == 61523
@@ -246,15 +250,15 @@ def test_the_failsafe_category_is_allocated_everywhere():
 
 
 def test_unknown_tool_fails_closed_to_a_non_filterable_write():
-    assert is_classified("some_future_tool") is False
-    event = resolve_tool_call_event("some_future_tool")
+    assert is_classified("some_future_tool", PACKAGE) is False
+    event = resolve_tool_call_event("some_future_tool", package=PACKAGE)
     assert event.operation_class == "write"
     assert event.filterable is False
 
 
 def test_unclassified_tool_names_reports_only_the_gaps():
     names = ["get_document_by_id", "brand_new_a", "brand_new_b"]
-    assert unclassified_tool_names(names) == ["brand_new_a", "brand_new_b"]
+    assert unclassified_tool_names(names, PACKAGE) == ["brand_new_a", "brand_new_b"]
 
 
 @pytest.mark.parametrize(
@@ -269,3 +273,68 @@ def test_every_classification_uses_a_known_category_and_class():
     for tool_name, (category, operation_class) in TOOL_CLASSIFICATION[PACKAGE].items():
         assert category in CATEGORIES, tool_name
         assert operation_class in ("read", "write"), tool_name
+
+
+class TestStatementClassifiedTools:
+    """Tools that accept SELECT, DML and DDL through one entry point.
+
+    Their class cannot come from the tool name. Read ids are filterable, so a
+    mutation recorded as a read could be configured out of the audit log --
+    which is why the static fallback for each is write.
+    """
+
+    def test_the_operational_insights_query_tools_are_statement_classified(self):
+        for tool_name in (
+            "operational_insights_run_query_sync",
+            "operational_insights_run_query_async",
+        ):
+            assert is_statement_classified(tool_name, "operational_insights"), tool_name
+
+    def test_sqlpp_is_statement_classified_on_the_operational_server(self):
+        assert is_statement_classified("run_sql_plus_plus_query", PACKAGE)
+
+    def test_a_statement_classified_tool_is_not_shared_across_packages(self):
+        """The name only means something inside its own package."""
+        assert not is_statement_classified(
+            "run_sql_plus_plus_query", "operational_insights"
+        )
+        assert not is_statement_classified(
+            "operational_insights_run_query_sync", PACKAGE
+        )
+
+    @pytest.mark.parametrize(
+        "tool_name",
+        [
+            "operational_insights_run_query_sync",
+            "operational_insights_run_query_async",
+        ],
+    )
+    def test_the_fallback_class_is_the_non_filterable_one(self, tool_name):
+        """If no class was recorded, the record must not be filterable.
+
+        The failure mode of the state channel is silence, so the static answer
+        has to be the one that cannot hide a mutation.
+        """
+        event = resolve_tool_call_event(tool_name, package="operational_insights")
+        assert event.operation_class == "write"
+        assert event.filterable is False
+
+    @pytest.mark.parametrize(
+        ("statement", "expected"),
+        [
+            ("SELECT 1", "read"),
+            ("  -- a comment\nSELECT 1", "read"),
+            ("EXPLAIN SELECT 1", "read"),
+            ("INSERT INTO x VALUES (1)", "write"),
+            ("DELETE FROM x WHERE a = 1", "write"),
+            ("CREATE INDEX i ON d(a)", "write"),
+            ("COPY d TO link AT 'p'", "write"),
+            # Not provably a read, so it is recorded as a write: noise in the
+            # log rather than a mutation that could be filtered out of it.
+            ("WITH a AS (SELECT 1) SELECT * FROM a", "write"),
+        ],
+    )
+    def test_statements_that_are_not_provably_reads_are_writes(
+        self, statement, expected
+    ):
+        assert _audit_statement_class(statement) == expected
