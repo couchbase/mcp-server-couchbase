@@ -24,7 +24,7 @@ from click.testing import CliRunner
 
 import mcp_server
 from cb_mcp.servers.operational.spec import SPEC as OPERATIONAL_SPEC
-from cb_mcp.servers.operational_insights.spec import SPEC as OI_SPEC
+from cb_mcp.servers.operational_insights.spec import SPEC as OPERATIONAL_INSIGHTS_SPEC
 from cb_mcp.utils.environment import (
     _redacted_settings,
     presence_only_keys_for,
@@ -36,7 +36,9 @@ from cb_mcp.utils.environment import (
 # invokes the others explicitly.
 SERVERS = [
     pytest.param([], OPERATIONAL_SPEC, id="operational"),
-    pytest.param(["operational-insights"], OI_SPEC, id="operational-insights"),
+    pytest.param(
+        ["operational-insights"], OPERATIONAL_INSIGHTS_SPEC, id="operational-insights"
+    ),
 ]
 
 # Keys the host puts into settings that are deliberately *not* reported.
@@ -44,14 +46,28 @@ SERVERS = [
 # somebody wrote down, rather than an oversight. Keyed by server id.
 DELIBERATELY_UNREPORTED: dict[str, set[str]] = {
     "operational": set(),
-    "operational-insights": set(),
+    # embedding_options is composed into every server's CLI (server-agnostic,
+    # like oauth_options) even though only the operational server's tools
+    # (run_vector_query / run_vector_search) read the resulting
+    # settings — see core/cli/options.py's embedding_options docstring and
+    # servers/operational/spec.py's safe/secret key comment. Operational Insights's ServerSpec
+    # correctly doesn't classify them, since it never reads them.
+    "operational-insights": {
+        "embedding_provider",
+        "embedding_model",
+        "embedding_api_key",
+        "embedding_endpoint",
+        "embedding_aws_access_key_id",
+        "embedding_aws_secret_access_key",
+        "embedding_aws_region",
+    },
 }
 
 
 @pytest.fixture(autouse=True)
 def mock_sdk_configure_logging():
     # Only the operational server's sdk_log_hook calls a "once per process"
-    # SDK entry point (couchbase.configure_logging). The OI server's hook
+    # SDK entry point (couchbase.configure_logging). The Operational Insights server's hook
     # (bridge_sdk_logging) only rewires stdlib logging objects and is safe to
     # call repeatedly, so it needs no equivalent patch here.
     with patch.object(couchbase, "configure_logging"):

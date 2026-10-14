@@ -8,9 +8,11 @@ Tests for:
 - get_scopes_and_collections_in_bucket
 - get_collections_in_scope
 - get_cluster_health_and_services (including service_types filtering)
-- get_cluster_diagnostics_report
+- get_client_connectivity_report
 - test_cluster_connection
 - get_cluster_metrics
+- get_cluster_health_snapshot
+- get_cluster_system_events (ordering, limit, since_time inclusivity)
 """
 
 from __future__ import annotations
@@ -284,3 +286,284 @@ async def test_get_cluster_metrics_invalid_metric_reports_per_spec_error() -> No
         # The server reports the unrecognized metric via a per-spec error rather
         # than failing the whole request.
         assert data[0].get("errors") or data[0].get("data") == []
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_tasks() -> None:
+    """Verify get_cluster_tasks returns the raw task array from the cluster.
+
+    Self-managed Couchbase Server 7.6+ only; Capella is rejected by the tool.
+    Unlike the enveloped tools, this returns the endpoint's array unchanged, so
+    the assertions are about shape rather than a status envelope.
+
+    An idle cluster still reports a rebalance task with status "notRunning", so
+    this asserts on per-task "status" rather than on the array being empty.
+    """
+    async with create_mcp_session() as session:
+        response = await session.call_tool("get_cluster_tasks")
+        payload = extract_payload(response)
+
+        if is_error_response(response):
+            # Only the documented Capella rejection is an acceptable error here —
+            # anything else (connectivity, RBAC, an unsupported server) is a real
+            # failure this test should catch, not silently pass through.
+            assert "Capella" in str(payload), (
+                f"Expected only a Capella rejection, got: {payload}"
+            )
+            return
+
+        payload = ensure_list(payload)
+        assert isinstance(payload, list), f"Expected a list, got {type(payload)}"
+        for task in payload:
+            assert isinstance(task, dict), f"Expected task objects, got: {task}"
+            # "type" and "status" are the only fields common to every task type;
+            # everything else varies by type and is passed through untouched.
+            assert "type" in task, f"Task missing 'type': {task}"
+            assert "status" in task, f"Task missing 'status': {task}"
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_health_snapshot() -> None:
+    """Verify get_cluster_health_snapshot merges the three topology endpoints.
+
+    Self-managed Couchbase Server 7.6+ only; Capella is rejected by the tool.
+    Like get_cluster_tasks this returns its payload unenveloped, so the
+    assertions are about shape rather than a status envelope.
+
+    A healthy test cluster exercises only the healthy path, so this asserts on
+    the join (every node carries its status, services and ports) and on the
+    orchestrator being identified — the merge's failure mode is a quiet one,
+    where nothing raises but no node is ever flagged.
+    """
+    async with create_mcp_session() as session:
+        response = await session.call_tool("get_cluster_health_snapshot")
+        payload = extract_payload(response)
+
+        if is_error_response(response):
+            # Only the documented Capella rejection is an acceptable error here.
+            assert "Capella" in str(payload), (
+                f"Expected only a Capella rejection, got: {payload}"
+            )
+            return
+
+        assert isinstance(payload, dict), f"Expected a dict, got {type(payload)}"
+        assert set(payload) == {"cluster", "nodes"}, f"Unexpected keys: {list(payload)}"
+
+        cluster = payload["cluster"]
+        nodes = payload["nodes"]
+        assert isinstance(nodes, list) and nodes, "Expected at least one node"
+        assert cluster["nodes_total"] == len(nodes)
+
+        for node in nodes:
+            # status/services come from /pools/default, service_ports from
+            # nodeServices — all three present means the join worked.
+            assert node["hostname"], f"Node missing hostname: {node}"
+            assert node["status"], f"Node missing status: {node}"
+            assert isinstance(node["services"], list), f"Bad services: {node}"
+            assert isinstance(node["service_ports"], dict), f"Bad ports: {node}"
+            assert isinstance(node["is_orchestrator"], bool)
+            assert node["safe_to_act_on"] is not node["is_orchestrator"]
+            # Per-node sample metrics are deliberately not carried through.
+            assert "systemStats" not in node
+            assert "interestingStats" not in node
+
+        # terseClusterInfo names the orchestrator by otpNode; a hostname
+        # comparison would leave every node unflagged without raising.
+        if cluster["orchestrator_known"]:
+            orchestrators = [n for n in nodes if n["is_orchestrator"]]
+            assert len(orchestrators) == 1, (
+                f"Expected exactly one orchestrator, got {len(orchestrators)}; "
+                f"orchestrator={cluster['orchestrator']!r}"
+            )
+
+        # The rollups must agree with the per-node rows they summarise.
+        assert cluster["unhealthy_nodes"] == [
+            n["hostname"] for n in nodes if n["status"] != "healthy"
+        ]
+        assert cluster["inactive_nodes"] == [
+            n["hostname"] for n in nodes if n["clusterMembership"] != "active"
+        ]
+        assert sum(cluster["nodes_by_status"].values()) == len(nodes)
+
+        # Pre-signed failover/eject URLs must never reach the caller.
+        assert "controllers" not in cluster
+        assert "failOver" not in str(payload)
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_health_snapshot_is_internally_consistent() -> None:
+    """Verify the snapshot describes one coherent view of the cluster.
+
+    The tool reads /pools/default, nodeServices and terseClusterInfo from a
+    single node and abandons a host if any one of the three fails, rather than
+    merging payloads fetched from different nodes — two nodes can disagree
+    about membership mid-rebalance. Unit tests cover that with mocks; this
+    checks the guarantee holds end to end, where a regression that spread the
+    reads across hosts would show up as the three payloads disagreeing.
+
+    Called twice because the failure is per-call: a snapshot stitched from two
+    nodes can look self-consistent once and name a different node set or
+    orchestrator on the next call against an unchanged cluster.
+    """
+    async with create_mcp_session() as session:
+        responses = [
+            await session.call_tool("get_cluster_health_snapshot") for _ in range(2)
+        ]
+        if any(is_error_response(r) for r in responses):
+            # Only the documented Capella rejection is acceptable here.
+            assert "Capella" in str(extract_payload(responses[0]))
+            return
+        first, second = (extract_payload(r) for r in responses)
+
+        for payload in (first, second):
+            nodes = payload["nodes"]
+            cluster = payload["cluster"]
+
+            # Every node in /pools/default must have been joined to its
+            # nodeServices entry: an active node always serves management, so
+            # empty ports here mean the two payloads named different nodes.
+            for node in nodes:
+                if node["clusterMembership"] == "active":
+                    assert node["service_ports"], (
+                        f"Active node {node['hostname']} has no service ports — "
+                        f"the nodeServices join missed it"
+                    )
+                    assert node["reachable_address"], (
+                        f"Active node {node['hostname']} has no reachable address"
+                    )
+
+            # terseClusterInfo's orchestrator must name a node that
+            # /pools/default also reported, by otpNode.
+            if cluster["orchestrator_known"]:
+                assert cluster["orchestrator"] in {n["otpNode"] for n in nodes}, (
+                    f"Orchestrator {cluster['orchestrator']!r} is not among the "
+                    f"nodes reported: {[n['otpNode'] for n in nodes]}"
+                )
+
+        # An unchanged cluster must describe the same topology twice.
+        assert [n["otpNode"] for n in first["nodes"]] == [
+            n["otpNode"] for n in second["nodes"]
+        ]
+        assert first["cluster"]["orchestrator"] == second["cluster"]["orchestrator"]
+
+
+def _system_events_or_skip(response, payload):
+    """Return the payload, or skip/fail on the documented error cases.
+
+    /events needs Full Admin or Cluster Admin — a higher bar than the ro_admin
+    the sibling cluster tools need — so narrower test credentials are a reason
+    to skip rather than to fail. A Capella rejection is the other acceptable
+    error; anything else is a real failure.
+    """
+    if not is_error_response(response):
+        return payload
+    text = str(payload)
+    if "Capella" in text:
+        pytest.skip("get_cluster_system_events is not supported on Capella")
+    if "403" in text or "Forbidden" in text or "401" in text:
+        pytest.skip(f"/events needs Full Admin or Cluster Admin: {text}")
+    pytest.fail(f"Unexpected error from get_cluster_system_events: {text}")
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_system_events() -> None:
+    """Verify get_cluster_system_events returns a bounded, ordered event log.
+
+    Self-managed Couchbase Server 7.6+ only; Capella is rejected by the tool.
+    Like get_cluster_tasks it returns its payload unenveloped, so the
+    assertions are about shape rather than a status envelope.
+
+    The ordering assertion is the important one: /events returns events
+    oldest-first and the tool must not re-sort or slice them. A regression
+    there is silent — the call still succeeds, it just returns the wrong end
+    of the window.
+    """
+    async with create_mcp_session() as session:
+        response = await session.call_tool("get_cluster_system_events")
+        payload = _system_events_or_skip(response, extract_payload(response))
+
+        summary = payload["summary"]
+        events = payload["events"]
+        assert summary["ordering"] == "ascending_oldest_first"
+        assert summary["returned"] == len(events) <= 50, (
+            f"Default limit should bound the result at 50, got {summary['returned']}"
+        )
+
+        timestamps = [e["timestamp"] for e in events if isinstance(e, dict)]
+        assert timestamps == sorted(timestamps), (
+            "Events must stay in the server's oldest-first order"
+        )
+        if timestamps:
+            assert summary["time_range"]["earliest"] == timestamps[0]
+            assert summary["time_range"]["latest"] == timestamps[-1]
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_system_events_respects_limit() -> None:
+    """Verify the limit is forwarded to the server and bounds the result."""
+    async with create_mcp_session() as session:
+        response = await session.call_tool("get_cluster_system_events", {"limit": 5})
+        payload = _system_events_or_skip(response, extract_payload(response))
+
+        assert payload["summary"]["limit"] == 5
+        assert len(payload["events"]) <= 5
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_system_events_sends_no_version_specific_params() -> None:
+    """Verify the tool works identically on every supported server version.
+
+    The endpoint's severity/component/event_id filters only exist in Couchbase
+    Server 8.0+; a 7.6 cluster answers them with 400 "Unsupported key". The tool
+    exposes only since_time and limit, so this passes on both — the regression it
+    guards is a filter parameter creeping back into the query string.
+    """
+    async with create_mcp_session() as session:
+        for arguments in ({}, {"limit": 3}, {"since_time": "2020-01-01T00:00:00Z"}):
+            response = await session.call_tool("get_cluster_system_events", arguments)
+            payload = _system_events_or_skip(response, extract_payload(response))
+            assert payload["summary"]["ordering"] == "ascending_oldest_first"
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_system_events_since_time_is_inclusive() -> None:
+    """Verify since_time narrows the window and includes its boundary event.
+
+    The paging advice in the docstring — page on next_since_time, dedupe on
+    uuid — is only correct if sinceTime is inclusive, so that is pinned here.
+    """
+    async with create_mcp_session() as session:
+        response = await session.call_tool("get_cluster_system_events")
+        payload = _system_events_or_skip(response, extract_payload(response))
+        if not payload["events"]:
+            pytest.skip("No system events logged on this cluster")
+
+        boundary = payload["summary"]["time_range"]["latest"]
+        response = await session.call_tool(
+            "get_cluster_system_events", {"since_time": boundary, "limit": 10}
+        )
+        payload = _system_events_or_skip(response, extract_payload(response))
+
+        timestamps = [e["timestamp"] for e in payload["events"]]
+        assert all(ts >= boundary for ts in timestamps), (
+            f"Every event should be at or after {boundary}, got {timestamps}"
+        )
+        assert boundary in timestamps, "sinceTime is inclusive of its boundary event"
+
+
+@pytest.mark.asyncio
+async def test_get_cluster_system_events_rejects_unbounded_limit() -> None:
+    """Verify the REST API's unlimited -1 cannot be reached through the tool.
+
+    The full event log is several megabytes; forwarding -1 would put all of it
+    into a single tool result.
+    """
+    async with create_mcp_session() as session:
+        for limit in (-1, 10000):
+            response = await session.call_tool(
+                "get_cluster_system_events", {"limit": limit}
+            )
+            assert is_error_response(response), (
+                f"limit={limit} should be rejected, got a result"
+            )
+            assert "limit must be between" in str(extract_payload(response))

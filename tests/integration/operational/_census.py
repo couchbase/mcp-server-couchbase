@@ -10,7 +10,7 @@ session plumbing. That mattered once a second server existed: every
 Operational Insights test imports that conftest for the session helpers, and
 inherited ~170 lines describing a tool set its server does not have. The
 Operational Insights server keeps its own, much smaller census in
-``tests/integration/operational_insights/test_oi_mcp_integration.py``.
+``tests/integration/operational_insights/test_operational_insights_mcp_integration.py``.
 """
 
 # Tools we expect to be registered by the server
@@ -40,15 +40,28 @@ EXPECTED_TOOLS = {
     "list_indexes",
     "get_index_stats",
     "create_index",
+    "create_query_index",
     "build_index",
     "drop_index",
     # FTS tools
-    "list_fts_indexes",
-    "get_fts_index_definition",
-    "run_fts_query",
+    "list_search_indexes",
+    "get_search_index_definition",
+    "run_search",
+    "upsert_search_index",
+    "drop_search_index",
+    # Vector search tools
+    "run_vector_query",
+    "run_vector_search",
     "get_cluster_health_and_services",
-    "get_cluster_diagnostics_report",
+    "get_client_connectivity_report",
     "get_cluster_metrics",
+    "get_cluster_tasks",
+    "get_cluster_health_snapshot",
+    "get_cluster_system_events",
+    # Query service admin (N1QL Admin REST API) tools
+    "get_cluster_query_vitals",
+    "get_active_queries",
+    "delete_active_query",
     # Performance analysis tools
     "get_longest_running_queries",
     "get_most_frequent_queries",
@@ -71,8 +84,11 @@ TOOLS_BY_CATEGORY = {
         "get_scopes_and_collections_in_bucket",
         "get_collections_in_scope",
         "get_cluster_health_and_services",
-        "get_cluster_diagnostics_report",
+        "get_client_connectivity_report",
         "get_cluster_metrics",
+        "get_cluster_tasks",
+        "get_cluster_health_snapshot",
+        "get_cluster_system_events",
     },
     "kv": {
         "get_document_by_id",
@@ -93,13 +109,25 @@ TOOLS_BY_CATEGORY = {
         "get_index_stats",
         "get_index_advisor_recommendations",
         "create_index",
+        "create_query_index",
         "build_index",
         "drop_index",
     },
     "fts": {
-        "list_fts_indexes",
-        "get_fts_index_definition",
-        "run_fts_query",
+        "list_search_indexes",
+        "get_search_index_definition",
+        "run_search",
+        "upsert_search_index",
+        "drop_search_index",
+    },
+    "vector_search": {
+        "run_vector_query",
+        "run_vector_search",
+    },
+    "query_admin": {
+        "get_cluster_query_vitals",
+        "get_active_queries",
+        "delete_active_query",
     },
     "management": {
         "create_scope",
@@ -176,8 +204,27 @@ TOOL_REQUIRED_PARAMS = {
         "index_name",
         "keys",
     ],
+    "create_query_index": [
+        "bucket_name",
+        "scope_name",
+        "collection_name",
+        "index_name",
+        "index_type",
+    ],
     "build_index": ["bucket_name", "scope_name", "collection_name"],
     "drop_index": ["bucket_name", "scope_name", "collection_name", "index_name"],
-    "get_fts_index_definition": ["index_name"],
-    "run_fts_query": ["index_name", "query"],
+    "get_search_index_definition": ["index_name"],
+    "run_search": ["index_name", "query"],
+    "upsert_search_index": ["index_name", "source_name"],
+    "drop_search_index": ["index_name"],
+    "run_vector_query": [
+        "bucket_name",
+        "scope_name",
+        "collection_name",
+        "vector_field",
+        "query_text",
+        "distance_metric",
+    ],
+    "run_vector_search": ["index_name", "vector_field", "vector_query_text"],
+    "delete_active_query": ["request_id"],
 }

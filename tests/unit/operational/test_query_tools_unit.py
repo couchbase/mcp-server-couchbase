@@ -123,7 +123,8 @@ class TestRunSqlPlusPlusQueryReadOnly:
             ctx, "b", "s", "EXPLAIN UPDATE users SET x = 1"
         )
 
-        assert result == [{"plan": "..."}]
+        assert result["rows"] == [{"plan": "..."}]
+        assert result["truncated"] is False
         scope.query.assert_called_once()
 
     def test_writes_allowed_when_read_only_mode_false(self) -> None:
@@ -132,7 +133,8 @@ class TestRunSqlPlusPlusQueryReadOnly:
         scope.query.return_value = iter([])
 
         result = run_sql_plus_plus_query(ctx, "b", "s", "UPDATE users SET age = 25")
-        assert result == []
+        assert result["rows"] == []
+        assert result["row_count"] == 0
         scope.query.assert_called_once()
 
     def test_select_returns_rows(self) -> None:
@@ -141,7 +143,12 @@ class TestRunSqlPlusPlusQueryReadOnly:
         scope.query.return_value = iter([{"id": 1}, {"id": 2}])
 
         result = run_sql_plus_plus_query(ctx, "b", "s", "SELECT * FROM users")
-        assert result == [{"id": 1}, {"id": 2}]
+        assert result == {
+            "success": True,
+            "rows": [{"id": 1}, {"id": 2}],
+            "row_count": 2,
+            "truncated": False,
+        }
 
     def test_cluster_query_failure_propagates(self) -> None:
         """If the SDK raises during query execution, the error must propagate."""
@@ -365,7 +372,7 @@ class TestCollectionExpressionReadOnlyGuard:
 
         result = run_sql_plus_plus_query(ctx, "b", "s", query)
 
-        assert result == [{"ok": 1}]
+        assert result["rows"] == [{"ok": 1}]
         scope.query.assert_called_once()
 
 

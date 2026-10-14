@@ -297,10 +297,10 @@ mcp-server-couchbase/
 ├── tests/
 │   ├── unit/                    # Pure Python tests (no cluster)
 │   │   ├── operational/           # Operational-server-only unit tests
-│   │   └── operational_insights/  # OI-only unit tests
+│   │   └── operational_insights/  # Operational Insights-only unit tests
 │   ├── integration/             # Shared session plumbing; tests live per server
 │   │   ├── operational/           # Tests against a live Couchbase cluster
-│   │   └── operational_insights/  # Tests against a live OI cluster, env-gated
+│   │   └── operational_insights/  # Tests against a live Operational Insights cluster, env-gated
 │   ├── perf/                    # In-process performance tests, opt-in via CB_MCP_PERF=1
 │   ├── accuracy/                # AI-in-the-loop accuracy tests (see tests/README.md)
 │   └── _all_specs.py            # Test-only ALL_SPECS registry (see its docstring)
@@ -353,11 +353,10 @@ avoids the problem entirely.
 **2. Declare the tools** in `src/cb_mcp/tools/<id>/`, exporting a `ToolSet` and a
 `TOOL_ANNOTATIONS` mapping from the package `__init__`. Tool *names* should be
 globally unique across all servers — a client connected to two servers sees one
-flat namespace, so a duplicate name is ambiguous to it. Prefer a unique name.
-If a name genuinely must be duplicated — each server having its *own*
-implementation behind it (e.g. porting an existing tool set whose names
-predate this rule, as `operational-insights`'s `get_collections_in_scope`,
-`get_schema_for_collection`, `create_index` and `list_indexes` do) — add it to
+flat namespace, so a duplicate name is ambiguous to it. Prefer a unique name,
+e.g. a server-specific prefix (`operational-insights` prefixes every
+tool name with `operational_insights_` for exactly this reason). If a name genuinely must be
+duplicated — each server having its *own* implementation behind it — add it to
 `KNOWN_DUPLICATE_TOOL_NAMES` in `tests/unit/test_server_specs.py` with a
 one-line reason. The test still fails on any *new*, undocumented collision.
 

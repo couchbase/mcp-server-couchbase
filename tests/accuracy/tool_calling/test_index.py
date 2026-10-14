@@ -4,7 +4,9 @@ Covers:
   - list_indexes (all variants: cluster-wide, per-bucket, per-scope,
     per-collection)
   - get_index_advisor_recommendations
-  - create_index
+  - create_query_index (via the deprecated create_index prompt wording --
+    create_index itself is deprecated in favor of create_query_index, so
+    the model is expected to pick that instead)
   - build_index
   - drop_index
 """
@@ -210,13 +212,17 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
                 f"index '{create_index_name}'."
             ),
             expected_tools=[
+                # create_index is deprecated (see its own docstring: "prefer
+                # create_query_index(index_type='scalar', ...) instead"), so
+                # the model consistently picks create_query_index now.
                 ExpectedToolCall(
-                    tool_name="create_index",
+                    tool_name="create_query_index",
                     parameters={
                         "bucket_name": bucket,
                         "scope_name": scope,
                         "collection_name": collection,
                         "index_name": _contains("email"),
+                        "index_type": "scalar",
                         "keys": Matcher.any_value(),
                     },
                 ),

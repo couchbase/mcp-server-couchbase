@@ -26,6 +26,32 @@ DEFAULT_READ_ONLY_MODE = True
 DEFAULT_TRANSPORT = "stdio"
 DEFAULT_HOST = "127.0.0.1"
 
+# Query result size budget
+#
+# Every query tool streams rows from the cluster and stops once the serialized
+# result reaches this many bytes, rather than buffering an unbounded result set
+# (see cb_mcp.utils.query_limits). The budget is measured in *serialized JSON
+# bytes* because what it protects is the payload sent to the MCP client and the
+# model's context window — neither of which cares about Python's in-memory
+# representation.
+#
+# The default is deliberately small. A query tool's output is consumed by an
+# LLM, and 15 kB is already a sizeable fraction of a context window; operators
+# who need more can raise it, but the safe default must not be "whatever the
+# cluster happened to return".
+DEFAULT_MAX_QUERY_RESULT_SIZE = 15 * 1024  # 15 kB
+
+# Hard ceiling. A value above this is clamped (with a warning) rather than
+# rejected: these servers are usually configured through container environment
+# variables, where a startup failure takes the whole deployment down and a
+# clamp merely caps a result set. 1 MB is well past the point where an LLM can
+# use the rows anyway, so the clamp costs nothing in practice.
+MAX_MAX_QUERY_RESULT_SIZE = 1024 * 1024  # 1 MB
+
+# Floor. Below roughly one row's worth of JSON the budget stops being a
+# truncation limit and becomes "return nothing", which no operator intends.
+MIN_MAX_QUERY_RESULT_SIZE = 1024  # 1 kB
+
 # Allowed Transport Types
 ALLOWED_TRANSPORTS = ["stdio", "http", "sse"]
 NETWORK_TRANSPORTS = ["http", "sse"]
@@ -69,6 +95,46 @@ DEFAULT_LOG_SINKS = "stderr"
 # "DEFAULT_" so it cannot be mistaken for the operational server's default
 # again — it shares that value by history, not by contract.
 FALLBACK_LOG_FILE = "mcp_server.log"
+
+# Audit Logging Configuration
+# Audit is a separate sink from the CB_MCP_LOG_* operational logs: it
+# guarantees a stable schema, completeness for non-filterable events, and is
+# sensitive by default. Opt-in — an operator must enable it, and name a file if
+# the file sink is selected.
+DEFAULT_AUDIT_ENABLED = False
+# Where audit records go. Comma-separated, same shape as CB_MCP_LOG_SINKS.
+# "console" is the default because it needs no configuration and makes an
+# enabled audit visible immediately; "file" is what a real deployment uses.
+#
+# "console" writes to **stderr**, never stdout: under the stdio transport
+# stdout carries the JSON-RPC protocol, and a single audit line written there
+# would corrupt the client's stream. The name follows the PRD; the stream
+# follows the protocol.
+ALLOWED_AUDIT_SINKS = ("console", "file")
+DEFAULT_AUDIT_SINKS = "console"
+# No default path: selecting the file sink without naming a file is a
+# configuration error that is reported at startup, leaving the file sink off
+# rather than aborting.
+DEFAULT_AUDIT_FILE = None
+# Rotation size per audit file, in MB. 0 is valid and turns size-based rotation
+# off entirely.
+DEFAULT_AUDIT_ROTATION_MAX_SIZE_MB = 10.0
+# Age the live audit file may reach before it rotates, as <value><unit> where
+# the unit is "d" (24 hours) or "w" (7 days). 0 is valid and turns
+# interval-based rotation off entirely. Size and interval rotation are
+# independent: either, both, or neither may be active.
+DEFAULT_AUDIT_ROTATION_INTERVAL = "1d"
+# Rotated backups retained per audit file, excluding the live file. 0 is valid
+# and keeps only the live file.
+DEFAULT_AUDIT_MAX_BACKUPS = 10
+# Tool argument values are sensitive: document-write tools carry entire
+# document bodies. There is no redaction capability in this release, so the
+# default is off and enabling it emits a startup warning.
+DEFAULT_AUDIT_TOOL_ARGS = False
+# Seconds per interval unit. "d" is 24 hours and "w" is 7 days, exactly as the
+# PRD defines them; no month or year unit exists, because neither has a fixed
+# length and an audit retention window must be arithmetic, not calendrical.
+AUDIT_INTERVAL_UNIT_SECONDS = {"d": 86_400, "w": 604_800}
 
 # OAuth Scopes
 # Tokens carrying SCOPE_READ may call read-only tools (including SQL++ query,

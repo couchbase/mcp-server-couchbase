@@ -13,7 +13,7 @@ for that stack in one place. The grouping mirrors the option stacks one-to-one
 on purpose: if a flag is added to a stack, the class that has to learn about it
 is the one named after that stack.
 
-This module also owns the two other mechanical jobs: composing the six stacks
+This module also owns the two other mechanical jobs: composing the seven stacks
 into one ``server_options`` decorator, and assembling the ``settings`` mapping.
 ``settings`` is a wire contract — the env-info diagnostic record, the
 ``get_server_configuration_status`` tool and every provider read it by key — so
@@ -37,24 +37,27 @@ the servers are*. That story stays in ``mcp_server.py``.
 """
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, NamedTuple
 
 import click
 from fastmcp.server.auth import AuthProvider
 
+from ..audit.config import ResolvedAuditConfig, resolve_audit_config
 from ..auth import OAuthConfigError, resolve_oauth
 from ..core.cli.options import (
+    audit_options,
     compose,
     credential_options,
+    embedding_options,
     logging_options,
     oauth_options,
     read_only_option,
     tool_gating_options,
     transport_options,
 )
-from ..core.spec import ServerSpec
-from ..servers.operational_insights.cli import oi_credential_options
+from ..core.spec import Deployment, ServerSpec
+from ..servers.operational_insights.cli import operational_insights_credential_options
 from ..tool_registration import prepare_tools_for_registration
 from .logging import (
     ParsedLogLevel,
@@ -68,9 +71,11 @@ __all__ = [
     "INSIGHTS_CREDENTIALS",
     "CliParams",
     "CredentialProfile",
+    "EmbeddingParams",
     "GatedTools",
     "build_settings",
     "gate_tools",
+    "resolve_deployment_for",
     "resolved_logging_snapshot",
     "server_options",
 ]
@@ -116,7 +121,7 @@ CLUSTER_CREDENTIALS = CredentialProfile(
 #: adding a key here without also adding it there would be an unclassified
 #: settings key (test_settings_classification).
 INSIGHTS_CREDENTIALS = CredentialProfile(
-    options=oi_credential_options,
+    options=operational_insights_credential_options,
     settings_keys=(
         "connection_string",
         "username",
@@ -148,16 +153,22 @@ class TransportParams:
 
 @dataclass(frozen=True)
 class GatingParams:
-    """Which tools get registered at all: read-only mode plus the opt-out lists.
+    """What the server will let a tool do: read-only mode, the opt-out lists, and the result budget.
 
     The two lists stay as the operator typed them (comma-separated names or a
     file path); ``prepare_tools_for_registration`` parses and validates them
     against the tools that actually loaded.
+
+    ``max_query_result_size`` rides here rather than in its own params class
+    because it shares the others' role — a limit on what a registered tool may
+    do — and because it is declared in the same Click stack. It arrives already
+    clamped by ``validate_max_query_result_size``.
     """
 
     read_only_mode: bool
     disabled_tools: str | None
     confirmation_required_tools: str | None
+    max_query_result_size: int
 
     @classmethod
     def from_click(cls, params: Mapping[str, Any]) -> "GatingParams":
@@ -165,6 +176,7 @@ class GatingParams:
             read_only_mode=params["read_only_mode"],
             disabled_tools=params["disabled_tools"],
             confirmation_required_tools=params["confirmation_required_tools"],
+            max_query_result_size=params["max_query_result_size"],
         )
 
 
@@ -216,6 +228,47 @@ class OAuthParams:
             "oauth_mcp_base_url": self.mcp_base_url,
             "oauth_scope_read_label": self.scope_read_label,
             "oauth_scope_write_label": self.scope_write_label,
+        }
+
+
+@dataclass(frozen=True)
+class EmbeddingParams:
+    """The seven EMBEDDING_* flags, resolved. All optional — see embedding_options
+    in core/cli/options.py; validated at tool-call time, not CLI-parse time,
+    since embedding config is unused unless run_vector_query /
+    run_vector_search are actually called.
+    """
+
+    provider: str | None
+    model: str | None
+    api_key: str | None
+    endpoint: str | None
+    aws_access_key_id: str | None
+    aws_secret_access_key: str | None
+    aws_region: str | None
+
+    @classmethod
+    def from_click(cls, params: Mapping[str, Any]) -> "EmbeddingParams":
+        return cls(
+            provider=params["embedding_provider"],
+            model=params["embedding_model"],
+            api_key=params["embedding_api_key"],
+            endpoint=params["embedding_endpoint"],
+            aws_access_key_id=params["embedding_aws_access_key_id"],
+            aws_secret_access_key=params["embedding_aws_secret_access_key"],
+            aws_region=params["embedding_aws_region"],
+        )
+
+    def as_settings(self) -> dict[str, Any]:
+        """The embedding slice of ``settings``."""
+        return {
+            "embedding_provider": self.provider,
+            "embedding_model": self.model,
+            "embedding_api_key": self.api_key,
+            "embedding_endpoint": self.endpoint,
+            "embedding_aws_access_key_id": self.aws_access_key_id,
+            "embedding_aws_secret_access_key": self.aws_secret_access_key,
+            "embedding_aws_region": self.aws_region,
         }
 
 
@@ -293,6 +346,21 @@ class LoggingParams:
         )
 
 
+#: The Click destinations :attr:`CliParams.audit` resolves from. Listed
+#: explicitly so the raw params mapping — which also holds the cluster password
+#: — is not retained wholesale.
+_AUDIT_PARAM_KEYS = (
+    "audit_log_enabled",
+    "audit_log_sinks",
+    "audit_log_file_path",
+    "audit_log_rotation_max_size_mb",
+    "audit_log_rotation_interval",
+    "audit_log_retention_max_backups",
+    "audit_log_tool_args",
+    "audit_log_disabled_events",
+)
+
+
 @dataclass(frozen=True)
 class CliParams:
     """Everything one invocation configured, grouped by the flag stack it came from.
@@ -308,6 +376,48 @@ class CliParams:
     transport: TransportParams
     gating: GatingParams
     oauth: OAuthParams
+    embedding: EmbeddingParams
+    #: Raw audit flags, resolved lazily by :attr:`audit`.
+    audit_params: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    #: One-slot cache for :attr:`audit`. A list because this dataclass is
+    #: frozen: the list is mutated, the field is not reassigned.
+    _audit_cache: list[ResolvedAuditConfig] = field(
+        default_factory=list, repr=False, compare=False
+    )
+
+    @property
+    def audit(self) -> ResolvedAuditConfig:
+        """The resolved audit configuration, computed on **first access**.
+
+        Deliberately not resolved in :meth:`from_click`. Resolution is where
+        the "file sink selected without a path" error and the tool-args warning
+        are emitted, and ``from_click`` runs two lines before
+        ``cli.logging.apply()`` in ``_start_server`` — so eager resolution sent
+        every one of those diagnostics to ``logging.lastResort`` instead of the
+        operator's configured sinks, while README and DOCKER.md both promised
+        "an error in the log". Resolving on first access puts them where they
+        were documented to be, because the first access is after logging is up.
+        """
+        if not self._audit_cache:
+            self._audit_cache.append(
+                resolve_audit_config(
+                    enabled=self.audit_params.get("audit_log_enabled"),
+                    sinks=self.audit_params.get("audit_log_sinks"),
+                    file=self.audit_params.get("audit_log_file_path"),
+                    rotation_max_size_mb=self.audit_params.get(
+                        "audit_log_rotation_max_size_mb"
+                    ),
+                    rotation_interval=self.audit_params.get(
+                        "audit_log_rotation_interval"
+                    ),
+                    max_backups=self.audit_params.get(
+                        "audit_log_retention_max_backups"
+                    ),
+                    tool_args=self.audit_params.get("audit_log_tool_args"),
+                    disabled_events=self.audit_params.get("audit_log_disabled_events"),
+                )
+            )
+        return self._audit_cache[0]
 
     @classmethod
     def from_click(
@@ -319,6 +429,14 @@ class CliParams:
             transport=TransportParams.from_click(params),
             gating=GatingParams.from_click(params),
             oauth=OAuthParams.from_click(params),
+            embedding=EmbeddingParams.from_click(params),
+            # Carried raw, not resolved: see :attr:`audit` for why resolution
+            # must happen after logging is configured. Narrowed to the audit
+            # flags rather than the whole mapping, which would keep the cluster
+            # password alive on this object for the life of the process.
+            audit_params={
+                key: params.get(key) for key in _AUDIT_PARAM_KEYS if key in params
+            },
         )
 
     def resolve_auth(self, spec: ServerSpec) -> AuthProvider | None:
@@ -358,10 +476,39 @@ class GatedTools(NamedTuple):
     disabled: set[str]
 
 
+def resolve_deployment_for(
+    spec: ServerSpec, credentials: Mapping[str, Any]
+) -> Deployment | None:
+    """Which deployment this run is pointed at, as far as the spec can tell.
+
+    The host does not know what a deployment looks like for any particular
+    service — it asks the spec, which names a resolver only if its service has
+    tools that care. Servers without one, and connection strings a resolver
+    cannot place, both come back ``None`` and gate nothing.
+
+    What was resolved is logged by ``prepare_tools_for_registration``, which
+    owns every other line about tool gating; this module stays free of a
+    logger of its own, where a stdlib ``logging`` import would sit confusingly
+    beside the relative ``.logging`` import above.
+    """
+    if spec.deployment_resolver is None:
+        return None
+    return spec.deployment_resolver(credentials.get("connection_string"))
+
+
 def gate_tools(
-    spec: ServerSpec, gating: GatingParams, *, enforce_scopes: bool
+    spec: ServerSpec,
+    gating: GatingParams,
+    *,
+    enforce_scopes: bool,
+    deployment: Deployment | None = None,
 ) -> GatedTools:
-    """Apply read-only mode and the operator's opt-out lists to the spec's tools."""
+    """Apply read-only mode, the operator's opt-out lists, and the deployment.
+
+    ``deployment`` defaults to ``None`` — "gate nothing on this axis" — so a
+    caller that has not resolved one, or a server with no deployment-specific
+    tools, behaves exactly as before this gate existed.
+    """
     return GatedTools(
         *prepare_tools_for_registration(
             spec,
@@ -369,6 +516,7 @@ def gate_tools(
             disabled_tools=gating.disabled_tools,
             confirmation_required_tools=gating.confirmation_required_tools,
             enforce_scopes=enforce_scopes,
+            deployment=deployment,
         )
     )
 
@@ -397,8 +545,10 @@ def build_settings(
             "host": cli.transport.host,
             "port": cli.transport.port,
             **cli.oauth.as_settings(enabled=oauth_enabled),
+            **cli.embedding.as_settings(),
             "disabled_tools": gated.disabled,
             "confirmation_required_tools": gated.confirmation_required,
+            "max_query_result_size": cli.gating.max_query_result_size,
         }
     )
     return settings
@@ -431,7 +581,7 @@ def server_options(
     once here means the only per-server inputs are the three that genuinely
     differ: whose credentials, which default port, which default log file.
 
-    Apply this *above* ``@click.version_option``, as the six stacks were:
+    Apply this *above* ``@click.version_option``, as the seven stacks were:
     ``--version`` is an eager option and its position in the list is asserted.
     """
     return compose(
@@ -441,4 +591,6 @@ def server_options(
         tool_gating_options,
         logging_options(default_log_file=default_log_file),
         oauth_options,
+        audit_options,
+        embedding_options,
     )

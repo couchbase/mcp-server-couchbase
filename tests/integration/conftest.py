@@ -106,7 +106,7 @@ async def _stdio_session(
     module's argv when given. ``base_env`` overrides the default
     (operational-credential-requiring) env entirely, rather than layering on
     top of it — a second server's integration tests build their own base env
-    (different credential vars, e.g. ``build_oi_env()``) and must not be
+    (different credential vars, e.g. ``build_operational_insights_env()``) and must not be
     forced through this server's ``REQUIRED_ENV_VARS`` check to get there.
     See ``tests/integration/operational_insights/conftest.py``.
     """

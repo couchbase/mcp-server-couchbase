@@ -30,7 +30,7 @@ from cb_mcp.servers.operational.constants import (
     OPERATIONAL_LOGGER_NAMESPACE,
 )
 from cb_mcp.servers.operational_insights.constants import (
-    FASTMCP_SERVER_NAME as OI_FASTMCP_SERVER_NAME,
+    FASTMCP_SERVER_NAME as OPERATIONAL_INSIGHTS_FASTMCP_SERVER_NAME,
 )
 from cb_mcp.servers.operational_insights.constants import (
     OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE,
@@ -47,6 +47,11 @@ from cb_mcp.utils.logging import configure_logging
 # "couchbase" root, which belongs to the SDK.
 EXPECTED_LOGGER_NAMES = {
     # shared
+    "cb_mcp.audit.config": "couchbase.mcp.audit.config",
+    "cb_mcp.audit.emitter": "couchbase.mcp.audit",
+    "cb_mcp.audit.identity": "couchbase.mcp.audit.identity",
+    "cb_mcp.audit.middleware": "couchbase.mcp.audit.middleware",
+    "cb_mcp.audit.sink": "couchbase.mcp.audit.sink",
     "cb_mcp.auth": "couchbase.mcp.auth",
     "cb_mcp.core.app": "couchbase.mcp.core.app",
     "cb_mcp.tool_registration": "couchbase.mcp.tool_registration",
@@ -55,6 +60,7 @@ EXPECTED_LOGGER_NAMES = {
     "cb_mcp.utils.elicitation": "couchbase.mcp.utils.elicitation",
     "cb_mcp.utils.environment": "couchbase.mcp.utils.environment",
     "cb_mcp.utils.logging": "couchbase.mcp.utils.logging",
+    "cb_mcp.utils.query_limits": "couchbase.mcp.utils.query_limits",
     "cb_mcp.utils.scope_enforcement": "couchbase.mcp.utils.scope_enforcement",
     "cb_mcp.utils.telemetry": "couchbase.mcp.utils.telemetry",
     # operational server
@@ -63,12 +69,20 @@ EXPECTED_LOGGER_NAMES = {
     "cb_mcp.tools.operational.index": "couchbase.mcp.operational.tools.index",
     "cb_mcp.tools.operational.kv": "couchbase.mcp.operational.tools.kv",
     "cb_mcp.tools.operational.query": "couchbase.mcp.operational.tools.query",
+    "cb_mcp.tools.operational.query_admin": "couchbase.mcp.operational.tools.query_admin",
     "cb_mcp.tools.operational.reference": "couchbase.mcp.operational.tools.reference",
     "cb_mcp.tools.operational.server": "couchbase.mcp.operational.tools.server",
+    "cb_mcp.tools.operational.vector_index": "couchbase.mcp.operational.tools.vector_index",
+    "cb_mcp.tools.operational.vector_search": "couchbase.mcp.operational.tools.vector_search",
+    "cb_mcp.utils.operational.cluster_health": "couchbase.mcp.operational.utils.cluster_health",
     "cb_mcp.utils.operational.connection": "couchbase.mcp.operational.utils.connection",
     "cb_mcp.utils.operational.connection_string": "couchbase.mcp.utils.connection_string",
     "cb_mcp.utils.operational.index_utils": "couchbase.mcp.operational.utils.index_utils",
     "cb_mcp.utils.operational.reference_data": "couchbase.mcp.operational.utils.reference_data",
+    "cb_mcp.utils.operational.embeddings.registry": "couchbase.mcp.operational.utils.embeddings",
+    "cb_mcp.utils.operational.embeddings.providers._openai_compatible": "couchbase.mcp.operational.utils.embeddings.providers.openai_compatible",
+    "cb_mcp.utils.operational.embeddings.providers.cohere": "couchbase.mcp.operational.utils.embeddings.providers.cohere",
+    "cb_mcp.utils.operational.embeddings.providers.bedrock": "couchbase.mcp.operational.utils.embeddings.providers.bedrock",
     "providers.operational": "couchbase.mcp.operational.providers.operational",
     # operational-insights server
     "cb_mcp.tools.operational_insights.index": "couchbase.mcp.operational-insights.tools.index",
@@ -158,14 +172,14 @@ def test_fastmcp_name_is_wire_visible():
     assert FASTMCP_SERVER_NAME == "couchbase-operational"
 
 
-def test_oi_fastmcp_name_is_wire_visible():
-    """serverInfo.name for the OI server. Breaking for every connected client.
+def test_operational_insights_fastmcp_name_is_wire_visible():
+    """serverInfo.name for the Operational Insights server. Breaking for every connected client.
 
     Deliberately a separate, literal-asserting test rather than folding into
     the one above via parametrization — reading the value back from the
     constant it's asserting against would test nothing.
     """
-    assert OI_FASTMCP_SERVER_NAME == "couchbase-operational-insights"
+    assert OPERATIONAL_INSIGHTS_FASTMCP_SERVER_NAME == "couchbase-operational-insights"
 
 
 def test_configure_logging_attaches_to_the_root():

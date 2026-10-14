@@ -54,8 +54,8 @@ from cb_mcp.servers.operational.constants import (
     DEFAULT_OPERATIONAL_PORT,
 )
 from cb_mcp.servers.operational_insights.constants import (
-    DEFAULT_OI_LOG_FILE,
-    DEFAULT_OI_PORT,
+    DEFAULT_OPERATIONAL_INSIGHTS_LOG_FILE,
+    DEFAULT_OPERATIONAL_INSIGHTS_PORT,
 )
 from cb_mcp.utils.cli_params import (
     CLUSTER_CREDENTIALS,
@@ -64,6 +64,7 @@ from cb_mcp.utils.cli_params import (
     CredentialProfile,
     build_settings,
     gate_tools,
+    resolve_deployment_for,
     resolved_logging_snapshot,
     server_options,
 )
@@ -89,7 +90,15 @@ def _start_server(
     # First: everything after this is logged.
     cli.logging.apply(sdk_log_hook=spec.sdk_log_hook)
     auth = cli.resolve_auth(spec)
-    gated = gate_tools(spec, cli.gating, enforce_scopes=auth is not None)
+    # Resolved from the credentials this run was given, so a tool that only
+    # works on one kind of cluster is never registered against the other.
+    deployment = resolve_deployment_for(spec, cli.credentials)
+    gated = gate_tools(
+        spec,
+        cli.gating,
+        enforce_scopes=auth is not None,
+        deployment=deployment,
+    )
     settings = build_settings(cli, gated=gated, oauth_enabled=auth is not None)
 
     # CLI-resolved configuration lives on AppContext, not in a module global,
@@ -104,6 +113,7 @@ def _start_server(
         auth=auth,
         read_only_mode=cli.gating.read_only_mode,
         logging_config=resolved_logging_snapshot(),
+        audit_config=cli.audit,
     )
 
     run_app(
@@ -168,8 +178,8 @@ def operational(**params: Any) -> None:
 )
 @server_options(
     credentials=INSIGHTS_CREDENTIALS,
-    default_port=DEFAULT_OI_PORT,
-    default_log_file=DEFAULT_OI_LOG_FILE,
+    default_port=DEFAULT_OPERATIONAL_INSIGHTS_PORT,
+    default_log_file=DEFAULT_OPERATIONAL_INSIGHTS_LOG_FILE,
 )
 # Also on the subcommand so `couchbase-mcp-server operational-insights --version` works.
 @click.version_option(

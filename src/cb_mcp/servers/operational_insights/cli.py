@@ -18,15 +18,15 @@ from ...core.cli.options import compose
 #: operational server's credential_options. connect_to_operational_insights_cluster
 #: validates presence at actual connection time instead.
 #:
-#: Env var names are CB_OI_*, not CB_*: CB_CONNECTION_STRING/CB_USERNAME/
+#: Env var names are CB_OPERATIONAL_INSIGHTS_*, not CB_*: CB_CONNECTION_STRING/CB_USERNAME/
 #: CB_PASSWORD already mean the *operational* cluster and both subcommands
 #: can run from the same shell/.env, so reusing them here would silently
 #: feed a couchbase:// string to this server.
-oi_credential_options = compose(
+operational_insights_credential_options = compose(
     click.option(
         "--connection-string",
         "connection_string",
-        envvar="CB_OI_CONNECTION_STRING",
+        envvar="CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING",
         help=(
             "Operational Insights endpoint URL, e.g. http://localhost:8095 "
             "(local server) or https://<host>:18095 (Capella). "
@@ -36,25 +36,25 @@ oi_credential_options = compose(
     click.option(
         "--username",
         "username",
-        envvar="CB_OI_USERNAME",
+        envvar="CB_OPERATIONAL_INSIGHTS_USERNAME",
         help="Operational Insights username",
     ),
     click.option(
         "--password",
         "password",
-        envvar="CB_OI_PASSWORD",
+        envvar="CB_OPERATIONAL_INSIGHTS_PASSWORD",
         help="Operational Insights password",
     ),
     click.option(
         "--ca-cert-path",
         "ca_cert_path",
-        envvar="CB_OI_CA_CERT_PATH",
+        envvar="CB_OPERATIONAL_INSIGHTS_CA_CERT_PATH",
         help="Path to the server trust store (CA certificate) file. The certificate at this path is used to verify the server certificate during the authentication process.",
     ),
     click.option(
         "--client-cert-path",
         "client_cert_path",
-        envvar="CB_OI_CLIENT_CERT_PATH",
+        envvar="CB_OPERATIONAL_INSIGHTS_CLIENT_CERT_PATH",
         help="Path to the client certificate used for mTLS authentication. "
         "Either a PEM certificate (paired with --client-key-path) or a "
         "PKCS#12 bundle (.p12/.pfx, --client-key-path left unset). Requires "
@@ -64,7 +64,7 @@ oi_credential_options = compose(
     click.option(
         "--client-key-path",
         "client_key_path",
-        envvar="CB_OI_CLIENT_KEY_PATH",
+        envvar="CB_OPERATIONAL_INSIGHTS_CLIENT_KEY_PATH",
         help="Path to the client certificate's private key file (PEM). Leave "
         "unset when --client-cert-path is a PKCS#12 bundle that already "
         "contains the key.",
@@ -72,7 +72,7 @@ oi_credential_options = compose(
     click.option(
         "--client-cert-password",
         "client_cert_password",
-        envvar="CB_OI_CLIENT_CERT_PASSWORD",
+        envvar="CB_OPERATIONAL_INSIGHTS_CLIENT_CERT_PASSWORD",
         help="Decryption password for the client key/PKCS#12 bundle, if it "
         "is encrypted. Omit if the file is unencrypted.",
     ),

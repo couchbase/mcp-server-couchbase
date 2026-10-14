@@ -22,8 +22,27 @@ classify a new one.
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from enum import Enum
 
 from mcp.types import ToolAnnotations
+
+
+class Deployment(Enum):
+    """Where the cluster behind a connection string is running.
+
+    Two values, because only two distinctions matter to a tool: Capella, whose
+    managed control plane does not expose the Management and Index service
+    REST ports, and a self-managed ("on-prem") cluster, which does. A tool
+    that speaks only to the SDK works on both and declares nothing.
+
+    There is deliberately no ``UNKNOWN`` member. "Cannot tell" is spelled
+    ``None`` at the one place that can produce it — see
+    ``ServerSpec.deployment_resolver`` — so it cannot be mistaken for a third
+    kind of cluster and compared against a requirement.
+    """
+
+    CAPELLA = "capella"
+    ON_PREM = "on-prem"
 
 
 @dataclass(frozen=True)
@@ -125,6 +144,33 @@ class ServerSpec:
     #: Per-tool explanations appended to a scope-denial error.
     scope_hints: Mapping[str, str] = field(default_factory=dict)
 
+    #: Tools that only work on one kind of deployment, by name. A tool absent
+    #: from this mapping works on every deployment and needs no entry — the
+    #: mapping lists exceptions, not the inventory.
+    #:
+    #: Declared here rather than folded into ``ToolSet`` because deployment is
+    #: an axis of its own: ``ToolSet``'s read/write split is what the OAuth
+    #: scope layer keys off, and crossing the two would turn two buckets into
+    #: four without either layer gaining anything.
+    #:
+    #: A tool whose requirement does not match the resolved deployment is not
+    #: registered at all, and is reported in the operator's disabled-tools set
+    #: — reusing the one path a withheld tool already travels (status tool,
+    #: audit record, startup log) rather than adding a parallel one.
+    deployment_requirements: Mapping[str, Deployment] = field(default_factory=dict)
+
+    #: How this server decides which deployment its connection string names,
+    #: called as ``resolver(connection_string)``. ``None``, or a ``None``
+    #: return, means "cannot tell" and nothing is withheld.
+    #:
+    #: A callable on the spec rather than a branch in the host, for the same
+    #: reason as ``sdk_log_hook``: recognising a deployment means knowing what
+    #: this service's connection strings look like, which is service-specific
+    #: knowledge the host must not grow. It also keeps the detection helper
+    #: (and its service-specific module) out of every process that does not
+    #: run this server.
+    deployment_resolver: Callable[[str | None], "Deployment | None"] | None = None
+
     #: The backing SDK's log-forwarding entry point, called as
     #: ``hook(logger_root, level)``. ``None`` means the SDK has no such hook,
     #: or must not be initialized in this server's process — several SDKs
@@ -140,3 +186,20 @@ class ServerSpec:
 
     #: Settings keys whose *presence* may be logged but never their value.
     secret_settings_keys: tuple[str, ...] = ()
+
+    #: Tier-2 audit service package this server's tools are classified under,
+    #: or ``None`` when this server is not audited.
+    #:
+    #: Auditing is opt-in per server rather than automatic, because a Tier-2
+    #: block and its category slots are a wire contract: once records exist
+    #: against an id, that id can never mean anything else. A server with no
+    #: package would otherwise have every tool fall through classification's
+    #: fail-closed path and be recorded against *another* server's block —
+    #: same numbers, different meaning, which is the one failure the two-tier
+    #: catalogue exists to prevent.
+    #:
+    #: ``None`` costs nothing: the audit middleware is simply not registered,
+    #: and the resolved audit configuration is still reported by
+    #: ``get_server_configuration_status`` so an operator can see that the
+    #: flags were honored and nothing is being recorded.
+    audit_package: str | None = None

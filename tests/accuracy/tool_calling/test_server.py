@@ -8,8 +8,11 @@ Covers:
   - get_collections_in_scope
   - get_scopes_and_collections_in_bucket
   - get_cluster_health_and_services (including service_types filtering)
-  - get_cluster_diagnostics_report
+  - get_client_connectivity_report
   - get_cluster_metrics
+  - get_cluster_tasks
+  - get_cluster_health_snapshot
+  - get_cluster_system_events
   - discover_tool_input_values
 """
 
@@ -208,6 +211,100 @@ def _build_cases(bucket: str, scope: str) -> list[AccuracyCase]:
             expected_tools=[
                 ExpectedToolCall(
                     tool_name="get_cluster_metrics",
+                    parameters=Matcher.any_value(),
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="get_cluster_tasks_whats_running_now",
+            prompt=(
+                "Is anything actually running on my Couchbase cluster right now — "
+                "a rebalance, a compaction, an index build?"
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_cluster_tasks",
+                    parameters=Matcher.any_value(),
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="get_cluster_tasks_stuck_rebalance",
+            prompt=(
+                "Our rebalance looks like it has been stuck at the same percentage "
+                "for a while. What is the cluster reporting?"
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_cluster_tasks",
+                    parameters=Matcher.any_value(),
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="get_cluster_health_snapshot_node_down_alert",
+            prompt=(
+                "We just got an alert that a node is down in our Couchbase "
+                "cluster. Which node is it and what service does it run?"
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_cluster_health_snapshot",
+                    parameters=Matcher.any_value(),
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="get_cluster_health_snapshot_verify_topology_after_replacement",
+            prompt=(
+                "A failed node was just replaced in our Couchbase cluster. Did "
+                "the topology settle correctly - is every node back and is the "
+                "orchestrator stable?"
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_cluster_health_snapshot",
+                    parameters=Matcher.any_value(),
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="get_cluster_system_events_what_changed",
+            prompt=(
+                "Our Couchbase cluster started having problems about an hour "
+                "ago. What changed on the cluster around then?"
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_cluster_system_events",
+                    parameters=Matcher.any_value(),
+                ),
+            ],
+        )
+    )
+
+    cases.append(
+        AccuracyCase(
+            test_id="get_cluster_system_events_recent_errors",
+            prompt=("Show me any errors in the Couchbase cluster's system event log."),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_cluster_system_events",
                     parameters=Matcher.any_value(),
                 ),
             ],

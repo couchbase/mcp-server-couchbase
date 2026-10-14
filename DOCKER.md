@@ -21,8 +21,11 @@ Documentation: <https://docs.couchbase.com/mcp-server/get-started/overview.html>
 | `get_server_configuration_status` | Get the server status and configuration without connecting to the cluster — reports read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration |
 | `test_cluster_connection` | Check the cluster credentials by connecting to the cluster |
 | `get_cluster_health_and_services` | Get cluster health status and list of all running services, optionally filtered to specific services via `service_types` |
-| `get_cluster_diagnostics_report` | Get the SDK's cached connection diagnostics — whether connections were already broken and for how long, without any active network probing |
+| `get_client_connectivity_report` | Get the SDK's cached connection diagnostics — whether connections were already broken and for how long, without any active network probing |
 | `get_cluster_metrics` | Get one or more cluster statistics over a historic time window via the Management REST API's stats-range endpoint. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
+| `get_cluster_tasks` | Get the cluster tasks running right now — rebalance, compaction, XDCR, index build — via the Management REST API's tasks endpoint. Returns the raw task array; fields vary by task type. Requires the Read-Only Admin (`ro_admin`) role. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
+| `get_cluster_health_snapshot` | Get a per-node health snapshot — service topology, membership, orchestrator and a cluster health rollup — merged from the Management REST API's `/pools/default`, `nodeServices` and `terseClusterInfo` endpoints. Isolates a symptom to a specific node/service and flags which nodes are safe to act on. Requires the Read-Only Admin (`ro_admin`) role. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
+| `get_cluster_system_events` | Get the cluster's system event log — configuration changes, failovers, rebalances and service restarts with timestamps — via the Management REST API's `/events` endpoint. Correlates a symptom with what changed and when. Returns events oldest-first with a summary of counts and time range; windowed with `since_time` and bounded (default 50 events) rather than returning the endpoint's 250. Requires the Full Admin or Cluster Admin role. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
 | `discover_tool_input_values` | Look up the exact input values another tool needs, from reference data bundled with the server — currently every Couchbase Server metric name (type, unit, version added, description) for `get_cluster_metrics`. Browse by category or fuzzy-search by keyword. Works offline, without a cluster connection. |
 
 ### Data model & schema discovery tools
@@ -51,23 +54,36 @@ Documentation: <https://docs.couchbase.com/mcp-server/get-started/overview.html>
 
 | Tool Name | Description |
 | --------- | ----------- |
-| `list_indexes` | List all indexes in the cluster with their definitions, with optional filtering by bucket, scope, collection and index name. Set `return_raw_index_stats=true` to return the unprocessed index information. |
+| `list_indexes` | List all indexes in the cluster with their definitions, with optional filtering by bucket, scope, collection and index name. Each entry includes `is_vector` (and, when true, `vector_type`: `hyperscale` or `composite`). Set `return_raw_index_stats=true` to return the unprocessed index information.  |
+| `get_index_stats` | Get per-index statistics (size, fragmentation, scan traffic, indexing lag) from the Index Service, per node. Names which index is responsible for disk or memory pressure, and identifies unused indexes. **Self-managed Couchbase Server 7.6+ only — not available on Capella.** |
 | `get_index_advisor_recommendations` | Get index recommendations from Couchbase Index Advisor for a given SQL++ query to optimize query performance |
-| `create_index` | Create a scalar (non-vector) GSI secondary index on a collection. Deferred by default — call `build_index` afterward to build it. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `create_index` | **Deprecated** — use `create_query_index` instead. Create a scalar (non-vector) GSI secondary index on a collection. Deferred by default — call `build_index` afterward to build it. Kept for backward compatibility, removed in a future 2.0. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `create_query_index` | Create a GSI index — scalar, Hyperscale vector, or Composite vector — via `index_type`, all through raw SQL++ (neither vector shape has an SDK management API). `similarity` and `dimension` are required for vector types, with no default. Deferred by default — call `build_index` afterward. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `build_index` | Trigger the build of all deferred indexes on a collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
 | `drop_index` | Drop a GSI index (scalar or vector) from a collection. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
-| `run_sql_plus_plus_query` | Run a [SQL++ query](https://www.couchbase.com/sqlplusplus/) on a specified scope.<br><br>Queries are automatically scoped to the specified bucket and scope, so use collection names directly (e.g., `SELECT * FROM users` instead of `SELECT * FROM bucket.scope.users`).<br><br>`CB_MCP_READ_ONLY_MODE` is `true` by default, which means that **all write operations (KV, Query, and index management)** are disabled. When enabled (i.e. `CB_MCP_READ_ONLY_MODE=true`), write tools are not loaded and SQL++ queries that modify data are blocked. |
+| `run_sql_plus_plus_query` | Run a [SQL++ query](https://www.couchbase.com/sqlplusplus/) on a specified scope.<br><br>Queries are automatically scoped to the specified bucket and scope, so use collection names directly (e.g., `SELECT * FROM users` instead of `SELECT * FROM bucket.scope.users`).<br><br>`CB_MCP_READ_ONLY_MODE` is `true` by default, which means that **all write operations (KV, Query, index management, and FTS index management)** are disabled. When enabled (i.e. `CB_MCP_READ_ONLY_MODE=true`), write tools are not loaded and SQL++ queries that modify data are blocked. |
 | `explain_sql_plus_plus_query` | Generate and evaluate an EXPLAIN plan for a SQL++ query. Returns query metadata, extracted plan, and plan evaluation findings. |
 
 ### Full-text search (FTS) tools
 
-Requires Couchbase Server 7.6+ and the Search service. Vector search is not supported by these tools (see the separate vector search tooling).
+Requires Couchbase Server 7.6+ and the Search service. Vector search *querying* is not supported by these tools (see [Vector search tools](#vector-search-tools) below) — a vector field mapping in `upsert_search_index` is unaffected by this and already works.
 
 | Tool Name | Description |
 | --------- | ----------- |
-| `list_fts_indexes` | List Search (FTS) indexes. With no filters, lists cluster-level (legacy) indexes; with `bucket_name`, lists scope-level (scoped) indexes across every scope in that bucket; with `bucket_name` and `scope_name`, lists scope-level indexes in that one scope. |
-| `get_fts_index_definition` | Get the full definition of a single Search index (mappings, analyzers, plan params). Pass `bucket_name` and `scope_name` together for a scope-level index, or omit both for a cluster-level (legacy) index. |
-| `run_fts_query` | Run an FTS query against a Search index, or fetch its execution plan. `query` is the raw FTS query JSON body, supporting any non-vector query type (match, match_phrase, term, conjuncts, disjuncts, geo, date/numeric range, query_string, ...). Pass `explain=true` to fetch the execution plan instead of results — this still executes the query (`limit` defaulting to 1) since the Search service only exposes the plan per matched hit, not as a separate dry-run call. |
+| `list_search_indexes` | List Search (FTS) indexes. With no filters, lists cluster-level (legacy) indexes; with `bucket_name`, lists scope-level (scoped) indexes across every scope in that bucket; with `bucket_name` and `scope_name`, lists scope-level indexes in that one scope. |
+| `get_search_index_definition` | Get the full definition of a single Search index (mappings, analyzers, plan params). Pass `bucket_name` and `scope_name` together for a scope-level index, or omit both for a cluster-level (legacy) index. |
+| `run_search` | Run an FTS query against a Search index, or fetch its execution plan. `query` is the raw FTS query JSON body, supporting any non-vector query type (match, match_phrase, term, conjuncts, disjuncts, geo, date/numeric range, query_string, ...). Pass `explain=true` to fetch the execution plan instead of results — this still executes the query (`limit` defaulting to 1) since the Search service only exposes the plan per matched hit, not as a separate dry-run call. |
+| `upsert_search_index` | Create or update a Search (FTS) index definition (mappings, analyzers, plan params) — including a vector field mapping (`type: "vector"`, with `dims`/`similarity`; note FTS's similarity values differ from GSI's). Works with both scope-level (scoped) and cluster-level (legacy) indexes. Pass `bucket_name` and `scope_name` together to target a scope-level index, or omit both for a cluster-level (legacy) index. Updating an existing index triggers a full rebuild — fetch the current definition with `get_search_index_definition` first and pass its `uuid` back to avoid clobbering concurrent changes. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `drop_search_index` | Drop a Search (FTS) index. Works with both scope-level (scoped) and cluster-level (legacy) indexes. Pass `bucket_name` and `scope_name` together for a scope-level index, or omit both for a cluster-level (legacy) index. This permanently removes the index and cannot be undone — confirm the exact name and location with `list_search_indexes` first. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+
+### Vector search tools
+
+Both tools embed query text using the model configured via `EMBEDDING_*` environment variables (see the table below) — the caller passes plain text, never a raw vector. `run_vector_query` targets Couchbase Server 8.0+'s GSI vector indexes via SQL++; `run_vector_search` targets the Search service's vector search on Couchbase Server 7.6+. Available on both self-managed Couchbase Server and Capella.
+
+| Tool Name | Description |
+| --------- | ----------- |
+| `run_vector_query` | Embed a query and run a vector similarity search against a GSI vector index (Couchbase Server 8.0+), via SQL++'s `APPROX_VECTOR_DISTANCE()`. GSI selects the index automatically from the vector field referenced in the query — there is no `index_name` parameter. |
+| `run_vector_search` | Run the Search service's vector search (Couchbase Server 7.6+) against a *named* Search index. `scalar_query` makes this a hybrid search (full-text and vector similarity both contribute to ranking); `prefilter` narrows the vector search's candidate pool before it runs (the Search-service equivalent of `run_vector_query`'s `where` prefilter). Both take the same raw FTS query JSON body `run_search` accepts, and both are optional and combinable. |
 
 ### Query performance analysis tools
 
@@ -81,6 +97,16 @@ Requires Couchbase Server 7.6+ and the Search service. Vector search is not supp
 | `get_queries_not_using_covering_index` | Get queries that don't use a covering index |
 | `get_queries_not_selective` | Get queries that are not selective (index scans return many more documents than final result) |
 
+### Query service health tools
+
+These reach the Query service's own N1QL Admin REST API, distinct from the SQL++ system-catalog-based tools above — they report the query engine's health directly, per node, and include the only remediation action in this group. **Self-managed Couchbase Server 7.6+ only — not available on Capella.**
+
+| Tool Name | Description |
+| --------- | ----------- |
+| `get_cluster_query_vitals` | Get query-engine health (request rate, active/queued request counts, memory, GC, uptime) from every query-service node, via the Query service's `/admin/vitals` endpoint. Distinguishes "the workload is heavy" from "the query engine itself is stressed." Requires at minimum the Read-Only Admin (`ro_admin`) role. |
+| `get_active_queries` | Get all queries executing right now, merged across every query-service node, via the `/admin/active_requests` endpoint — elapsed time, statement, client, state. Requires at minimum the Read-Only Admin (`ro_admin`) role. |
+| `delete_active_query` | Cancel an in-flight query by its request ID via `DELETE /admin/active_requests/{request_id}`, trying every query node in turn. Requires the Full Admin or Cluster Admin role. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+
 ### Operational Insights tools
 
 This image also runs a second server, for Operational Insights clusters —
@@ -88,34 +114,30 @@ append `operational-insights` to the container's command to select it
 instead of the default `operational` server (see [Configuration](#configuration)
 below).
 
+Every tool name below is prefixed with `operational_insights_` (`get_server_configuration_status`
+excepted) so none can collide with the operational server's tool names, even
+if a single MCP client registers both servers at once.
+
 | Tool Name | Description |
 | --------- | ----------- |
 | `get_server_configuration_status` | Get this server's status and configuration without connecting to a cluster — read-only mode, disabled/confirmation-required tools, OAuth settings, and the resolved logging configuration. Shared with the operational server: the same tool, registered by both. |
-| `get_databases_in_cluster` | List all databases in the Operational Insights cluster. |
-| `get_scopes_in_database` | List all scopes in a database. |
-| `get_collections_in_scope` | List all collections (datasets) in a scope. Shares its name with the operational server's tool of the same name — see the note below. |
-| `get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. Shares its name with the operational server's tool of the same name — see the note below. |
-| `list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog. Shares its name with the operational server's tool of the same name — see the note below. |
-| `run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return all result rows. Enforces read-only mode server-side; there is no client-side SQL++ parser. |
-| `explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
-| `create_index` | Create a secondary index via `CREATE INDEX`. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** Shares its name with the operational server's tool of the same name — see the note below. |
-| `run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Same read-only enforcement as `run_query_sync`. |
-| `get_async_query_results` | Check whether an async query has finished and, if so, return its rows. |
-| `discard_async_query_results` | Free a finished async query's result buffers on the server. |
-| `cancel_async_query` | Stop an async query that is still running. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `operational_insights_get_databases_in_cluster` | List all databases in the Operational Insights cluster. |
+| `operational_insights_get_scopes_in_database` | List all scopes in a database. |
+| `operational_insights_get_collections_in_scope` | List all collections (datasets) in a scope. |
+| `operational_insights_get_schema_for_collection` | Infer the JSON schema of a collection by sampling documents. |
+| `operational_insights_list_indexes` | List secondary indexes via the `System.Metadata.Index` catalog. |
+| `operational_insights_run_query_sync` | Run a SQL++ statement (SELECT, DML, or DDL) and return its result rows, up to `CB_MCP_MAX_QUERY_RESULT_SIZE` (a larger result reports `truncated: true`). Pass `copy_to_link`/`copy_to_bucket`/`copy_to_path` to export the rows to object storage instead. Enforces read-only mode server-side; there is no client-side SQL++ parser. |
+| `operational_insights_explain_query` | Generate the query plan for a SQL++ statement via EXPLAIN, without executing it. |
+| `operational_insights_create_index` | Create a secondary index via `CREATE INDEX`. **Disabled by default when `CB_MCP_READ_ONLY_MODE=true`.** |
+| `operational_insights_run_query_async` | Start a SQL++ statement without waiting for it to finish, returning a `query_handle` token. Accepts the same `copy_to_*` export arguments, and is preferred for a large export. Same read-only enforcement as `operational_insights_run_query_sync`. |
+| `operational_insights_get_async_query_results` | Check whether an async query has finished and, if so, return its rows. |
+| `operational_insights_discard_async_query_results` | Free a finished async query's result buffers on the server. |
+| `operational_insights_cancel_async_query` | Stop an async query that is still running. Available in read-only mode: cancelling releases resources the caller allocated and does not modify stored data. |
 
 The Server Async Request API tools form a start → poll → discard-or-cancel
-flow: `run_query_async` returns a `query_handle`, `get_async_query_results` is
-polled until ready, then `discard_async_query_results` frees the results or
-`cancel_async_query` stops a still-running query.
-
-> **Note:** `get_collections_in_scope`, `get_schema_for_collection`,
-> `create_index` and `list_indexes` exist, with different behavior, on both
-> servers — each runs as a separate container/process, so this only matters
-> if one MCP client registers both simultaneously.
-> (`get_server_configuration_status` also appears on both, but it is
-> deliberately *one* shared tool — same implementation, same result shape —
-> so it needs no disambiguation.)
+flow: `operational_insights_run_query_async` returns a `query_handle`, `operational_insights_get_async_query_results` is
+polled until ready, then `operational_insights_discard_async_query_results` frees the results or
+`operational_insights_cancel_async_query` stops a still-running query.
 
 ## Usage
 
@@ -155,14 +177,14 @@ Add the configuration specified below to the MCP configuration in your MCP clien
 
 To run the [Operational Insights server](#operational-insights-tools)
 instead, append `operational-insights` to `args` and use its own env vars
-(`CB_OI_CONNECTION_STRING`/`CB_OI_USERNAME`/`CB_OI_PASSWORD`, see below) —
+(`CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING`/`CB_OPERATIONAL_INSIGHTS_USERNAME`/`CB_OPERATIONAL_INSIGHTS_PASSWORD`, see below) —
 with no trailing argument the container runs the default operational server:
 
 ```bash
 docker run --rm -i \
-  -e CB_OI_CONNECTION_STRING=http://localhost:8095 \
-  -e CB_OI_USERNAME=Administrator \
-  -e CB_OI_PASSWORD=password \
+  -e CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING=http://localhost:8095 \
+  -e CB_OPERATIONAL_INSIGHTS_USERNAME=Administrator \
+  -e CB_OPERATIONAL_INSIGHTS_PASSWORD=password \
   docker.io/couchbase/mcp-server:latest operational-insights
 ```
 
@@ -178,14 +200,14 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_CLIENT_CERT_PATH`                | Path to the client certificate file for mTLS authentication                                                                                              | **Required if using mTLS (or Username and Password required)** |
 | `CB_CLIENT_KEY_PATH`                 | Path to the client key file for mTLS authentication                                                                                                      | **Required if using mTLS (or Username and Password required)** |
 | `CB_CA_CERT_PATH`                    | Path to server root certificate for TLS if server is configured with a self-signed/untrusted certificate.                                                |                                                                |
-| `CB_OI_CONNECTION_STRING`            | [Operational Insights server](#operational-insights-tools) endpoint URL (HTTP/HTTPS, not `couchbase://`). Ignored by the default `operational` server.  | **Required for `operational-insights`**                       |
-| `CB_OI_USERNAME`                     | Operational Insights username. Ignored by the default `operational` server.                                                                              | **Required for `operational-insights`**                       |
-| `CB_OI_PASSWORD`                     | Operational Insights password. Ignored by the default `operational` server.                                                                              | **Required for `operational-insights`**                       |
-| `CB_OI_CA_CERT_PATH`                 | Path to server root certificate (PEM) for the Operational Insights server, if self-signed/untrusted. Ignored by the default `operational` server.        |                                                                |
-| `CB_OI_CLIENT_CERT_PATH`             | Path to the client certificate for Operational Insights mTLS authentication (PEM, or a PKCS#12 bundle with `CB_OI_CLIENT_KEY_PATH` unset). Requires an `https://` `CB_OI_CONNECTION_STRING`; overrides username/password when set. Ignored by the default `operational` server. | **Required if using mTLS (or Username and Password required)** |
-| `CB_OI_CLIENT_KEY_PATH`              | Path to the client certificate's private key (PEM) for Operational Insights mTLS. Leave unset for a PKCS#12 bundle. Ignored by the default `operational` server. | **Required if using mTLS (or Username and Password required)** |
-| `CB_OI_CLIENT_CERT_PASSWORD`         | Decryption password for an encrypted Operational Insights client key/PKCS#12 bundle. Ignored by the default `operational` server.                        |                                                                |
-| `CB_MCP_READ_ONLY_MODE`              | Prevent all data modifications (KV, Query, and index management). When `true`, write tools are not loaded.                                                               | `true`                                                         |
+| `CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING`            | [Operational Insights server](#operational-insights-tools) endpoint URL (HTTP/HTTPS, not `couchbase://`). Ignored by the default `operational` server.  | **Required for `operational-insights`**                       |
+| `CB_OPERATIONAL_INSIGHTS_USERNAME`                     | Operational Insights username. Ignored by the default `operational` server.                                                                              | **Required for `operational-insights`**                       |
+| `CB_OPERATIONAL_INSIGHTS_PASSWORD`                     | Operational Insights password. Ignored by the default `operational` server.                                                                              | **Required for `operational-insights`**                       |
+| `CB_OPERATIONAL_INSIGHTS_CA_CERT_PATH`                 | Path to server root certificate (PEM) for the Operational Insights server, if self-signed/untrusted. Ignored by the default `operational` server.        |                                                                |
+| `CB_OPERATIONAL_INSIGHTS_CLIENT_CERT_PATH`             | Path to the client certificate for Operational Insights mTLS authentication (PEM, or a PKCS#12 bundle with `CB_OPERATIONAL_INSIGHTS_CLIENT_KEY_PATH` unset). Requires an `https://` `CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING`; overrides username/password when set. Ignored by the default `operational` server. | **Required if using mTLS (or Username and Password required)** |
+| `CB_OPERATIONAL_INSIGHTS_CLIENT_KEY_PATH`              | Path to the client certificate's private key (PEM) for Operational Insights mTLS. Leave unset for a PKCS#12 bundle. Ignored by the default `operational` server. | **Required if using mTLS (or Username and Password required)** |
+| `CB_OPERATIONAL_INSIGHTS_CLIENT_CERT_PASSWORD`         | Decryption password for an encrypted Operational Insights client key/PKCS#12 bundle. Ignored by the default `operational` server.                        |                                                                |
+| `CB_MCP_READ_ONLY_MODE`              | Prevent all data modifications (KV, Query, index management, and FTS index management). When `true`, write tools are not loaded.                                                               | `true`                                                         |
 | `CB_MCP_TRANSPORT`                   | Transport mode (stdio/http/sse)                                                                                                                          | `stdio`                                                        |
 | `CB_MCP_HOST`                        | Server host (HTTP/SSE modes)                                                                                                                             | `127.0.0.1`                                                    |
 | `CB_MCP_PORT`                        | Server port (HTTP/SSE modes). Defaults to each server's own port when unset (`operational`: `8000`, `operational-insights`: `8001`) — set explicitly only to override. | `8000` (`operational`) / `8001` (`operational-insights`) |
@@ -212,6 +234,21 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_MCP_OAUTH_MCP_BASE_URL`          | Public base URL of this server. When set, publishes RFC 9728 Protected Resource Metadata for PRM-aware clients                                            | None                                                           |
 | `CB_MCP_OAUTH_SCOPE_READ_LABEL`      | Override the OAuth scope label treated as 'read' access (advertised in PRM and matched against the token `scope`/`scp` claim). Use when your IdP can't emit the canonical form | `couchbase-mcp:read`                       |
 | `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`     | Override the OAuth scope label treated as 'write' access; same semantics as the read label                                                                | `couchbase-mcp:write`                                          |
+| `CB_MCP_AUDIT_LOG_ENABLED`           | Enable audit logging — a separate sink from the `CB_MCP_LOG_*` operational logs, with a stable schema and its own retention (see [Auditing](#auditing))   | `false`                                                        |
+| `CB_MCP_AUDIT_LOG_SINKS`             | Comma-separated audit destinations: `console`, `file`, or both. `console` writes to **stderr** — never stdout, which carries the JSON-RPC protocol on stdio | `console`                                    |
+| `CB_MCP_AUDIT_LOG_FILE_PATH`         | Path to the audit log file. Required when `file` is in the sinks; the hostname and process id are inserted before the extension (`audit.log` → `audit.<host>.<pid>.log`), so containers sharing a volume never share a file. Mount a volume at this path to keep records after the container stops | None |
+| `CB_MCP_AUDIT_LOG_ROTATION_MAX_SIZE_MB` | Maximum size **in MB** the live audit file may reach before it rotates. `0` turns size-based rotation **off**                                          | `10` (10 MB)                                                   |
+| `CB_MCP_AUDIT_LOG_ROTATION_INTERVAL` | Age the live audit file may reach before it rotates, as `<value><unit>` where the unit is `d` (24 hours) or `w` (7 days) — e.g. `1d`, `30d`, `8w`. `0` turns interval-based rotation **off** | `1d`                         |
+| `CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS` | Rotated backups retained per audit file, excluding the live file; they are gzipped. Bounds one file, not the directory: each container start creates a new file with its own backups | `10`                   |
+| `CB_MCP_AUDIT_LOG_TOOL_ARGS`         | Record tool argument values. **Off by default** — there is no redaction in this release, so enabling it writes arguments verbatim, including full document bodies | `false`                                                |
+| `CB_MCP_AUDIT_LOG_DISABLED_EVENTS`   | Audit events to suppress: comma-separated numeric event ids (e.g. `61490,61491`), or a file with one id per line. Only filterable events can be suppressed | None                                            |
+| `EMBEDDING_PROVIDER`                 | Embedding provider for `run_vector_query` / `run_vector_search`: one of `couchbase`, `openai`, `cohere`, `voyage`, `bedrock`. Unset disables both tools' embedding step until configured. | None                                                           |
+| `EMBEDDING_MODEL`                    | Model name/ID for the configured embedding provider                                                                                                       | None                                                           |
+| `EMBEDDING_API_KEY`                  | API key for the configured provider. Not used by `bedrock` (uses the AWS credential chain / `EMBEDDING_AWS_*` instead)                                    | None                                                           |
+| `EMBEDDING_ENDPOINT`                 | Base URL override (an OpenAI-compatible local server, or a Couchbase Model Service deployment's own URL — **required** when `EMBEDDING_PROVIDER=couchbase`) | None                                                         |
+| `EMBEDDING_AWS_ACCESS_KEY_ID`        | AWS access key ID, `bedrock` provider only. Omit to use the default AWS credential chain                                                                  | None                                                           |
+| `EMBEDDING_AWS_SECRET_ACCESS_KEY`    | AWS secret access key, `bedrock` provider only                                                                                                             | None                                                           |
+| `EMBEDDING_AWS_REGION`               | AWS region, `bedrock` provider only. Falls back to the AWS SDK's own region resolution if unset                                                           | None                                                           |
 
 ### Disabling Tools
 
@@ -314,7 +351,7 @@ Lines starting with `#` are treated as comments and ignored.
 >
 > For example, even if you disable `upsert_document_by_id` and `delete_document_by_id`, data modifications can still occur via the `run_sql_plus_plus_query` tool using SQL++ DML statements (INSERT, UPDATE, DELETE, MERGE) unless:
 >
-> - The `CB_MCP_READ_ONLY_MODE` is set to `true` (default), which disables all write operations (KV, Query, and index management), OR
+> - The `CB_MCP_READ_ONLY_MODE` is set to `true` (default), which disables all write operations (KV, Query, index management, and FTS index management), OR
 > - The database user lacks the necessary RBAC permissions for data modification
 >
 > **Best Practice:** Always configure appropriate RBAC permissions on your Couchbase user credentials as the primary security measure. Use `CB_MCP_READ_ONLY_MODE=true` (the default) for comprehensive write protection, and tool disabling as an additional layer to guide LLM behavior.
@@ -391,6 +428,36 @@ The server logs to `stderr` by default. Logging is configured with the `CB_MCP_L
 
 For more details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/logging.html).
 
+### Auditing
+
+Audit logging records **who did what, and whether it was allowed** — a different question from the operational logs, which record what went wrong. It is off by default and enabled with the `CB_MCP_AUDIT_*` variables in the [Environment Variables](#environment-variables) table.
+
+Records are JSON Lines, one immutable record per line, in the same field vocabulary as Couchbase Server and Sync Gateway.
+
+- **`CB_MCP_AUDIT_LOG_ENABLED` / `CB_MCP_AUDIT_LOG_SINKS` / `CB_MCP_AUDIT_LOG_FILE_PATH`** — enabling auditing alone writes to the console (stderr). A container that keeps records needs `CB_MCP_AUDIT_LOG_SINKS=file` and a path. Selecting the file sink without a path leaves the server running, with the console sink if one was also selected, and an error in the log.
+- **Mount a volume at the audit path.** The audit file is written inside the container like any other file, so without a volume the records are destroyed when the container is removed — which defeats the purpose of keeping them. This matters more than it does for logs: the records are meant to outlive the process.
+- **One file per container.** The container's hostname and process id are inserted before the extension (`audit.log` → `audit.3f2a91c4b7de.1.log`). The hostname is what makes this safe: this image's `ENTRYPOINT` is exec form, so the server is **PID 1 in every container**, and a name built from the pid alone would give every container sharing a volume the same `audit.1.log` — interleaved lines and rotation races that silently destroy records. Docker assigns each container a distinct hostname by default. If you override `--hostname` to the same value on two containers **and** share one volume between them, give each its own subdirectory instead. Consolidating the files is the operator's job.
+- **Retention is per file, not per deployment.** `CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS` bounds the backups of *one* audit file. Each new container is a new hostname and so a new file with its own backups, and nothing prunes the files of containers that have exited. On a long-lived mounted volume, total usage grows with the number of container starts — size it accordingly, or sweep old `audit.*.log*` files yourself.
+- **Rotation and compression.** Size and age are independent triggers and either can be switched off with `0`: `CB_MCP_AUDIT_LOG_ROTATION_MAX_SIZE_MB` caps the live file's size, `CB_MCP_AUDIT_LOG_ROTATION_INTERVAL` caps its age, and whichever falls due first rotates it. Rotated files are named with the UTC rotation time and **gzipped** (`audit.3f2a91c4b7de.1.log.20261006T091422481503Z.gz`), which is what keeps a months-long retention window affordable on a mounted volume; the live file stays plain text so `docker exec ... tail -f` still works.
+- **Filtering** — `CB_MCP_AUDIT_LOG_DISABLED_EVENTS` turns read noise down, taking numeric event ids (e.g. `61490,61491`). Write and security events cannot be disabled; an attempt to do so is refused with a warning.
+- **`CB_MCP_AUDIT_LOG_TOOL_ARGS`** — off by default, and warns at startup when enabled. There is no redaction in this release, so arguments are written verbatim, including full document bodies.
+- **Fail-open** — if the audit file cannot be written, the server keeps serving and records are dropped and counted. `get_server_configuration_status` reports the live `written` / `dropped` / `write_errors` counters.
+
+Auditing applies to **both** servers. Each has its own Tier-2 event block, so an id names the server that emitted it: operational uses `0xF000` (61440), `operational-insights` `0x10000` (65536). The two share the core block `0xE000` (57344) for lifecycle, session, authorization and guardrail events.
+
+```bash
+docker run --rm \
+  -e CB_CONNECTION_STRING=couchbases://your-cluster \
+  -e CB_USERNAME=user -e CB_PASSWORD=password \
+  -e CB_MCP_AUDIT_LOG_ENABLED=true \
+  -e CB_MCP_AUDIT_LOG_SINKS=file \
+  -e CB_MCP_AUDIT_LOG_FILE_PATH=/audit/audit.log \
+  -e CB_MCP_AUDIT_LOG_ROTATION_INTERVAL=1d \
+  -e CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS=90 \
+  -v "$(pwd)/audit:/audit" \
+  couchbase/mcp-server-couchbase:latest
+```
+
 ### OAuth 2.1 Authorization
 
 When running with `CB_MCP_TRANSPORT=http`, the server can act as an **OAuth 2.1 resource server**: it validates incoming bearer JWTs against your identity provider's JWKS. It is provider-agnostic (any OAuth 2.1 / OIDC provider that publishes a JWKS — Auth0, Okta, Keycloak, AWS Cognito, Microsoft Entra, etc.) and does **not** issue tokens or manage users. OAuth settings are ignored on `stdio`.
@@ -399,6 +466,6 @@ OAuth is configured with the `CB_MCP_OAUTH_*` variables in the [Environment Vari
 
 - OAuth activates only when all three of `CB_MCP_OAUTH_JWT_JWKS_URI`, `CB_MCP_OAUTH_JWT_ISSUER`, and `CB_MCP_OAUTH_JWT_AUDIENCE` are set; setting only some of them fails at startup.
 - Setting `CB_MCP_OAUTH_MCP_BASE_URL` additionally publishes RFC 9728 Protected Resource Metadata so PRM-aware clients can discover the authorization server.
-- Access is gated by two scopes read from the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools, including SQL++) and `couchbase-mcp:write` (write tools: KV mutations and index management). Full access requires both. If your IdP can't emit those canonical labels, override them with `CB_MCP_OAUTH_SCOPE_READ_LABEL` / `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`.
+- Access is gated by two scopes read from the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools, including SQL++) and `couchbase-mcp:write` (write tools: KV mutations, index management, and FTS index management). Full access requires both. If your IdP can't emit those canonical labels, override them with `CB_MCP_OAUTH_SCOPE_READ_LABEL` / `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`.
 
 For full details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/oauth-overview.html).

@@ -4,7 +4,7 @@ Everything here works for any server: the provider, the settings snapshot,
 the server identity, the logging snapshot. Anything that resolves a *cluster*
 lives with its own server's helpers instead —
 ``cb_mcp.utils.operational.context.get_cluster_connection`` and
-``cb_mcp.utils.operational_insights.context.get_oi_cluster`` — since each
+``cb_mcp.utils.operational_insights.context.get_operational_insights_cluster`` — since each
 names a different SDK's type.
 
 That split is why this module no longer imports either SDK, even under
@@ -36,7 +36,7 @@ class AppContext:
             reached through it here is service-specific. A tool that needs
             the cluster itself goes through its own server's accessor
             (``get_cluster_connection`` here,
-            ``cb_mcp.utils.operational_insights.context.get_oi_cluster``
+            ``cb_mcp.utils.operational_insights.context.get_operational_insights_cluster``
             there), which narrows to that service's provider protocol.
             The standalone MCP server populates this with ``OperationalClusterProvider``
             during lifespan startup; other implementations supply their own.
@@ -48,6 +48,10 @@ class AppContext:
             management) are disabled and KV and index write tools are not loaded.
         logging_config: Optional snapshot of the active logging configuration,
             populated by the server entrypoint after configuring its loggers.
+        audit_config: Optional snapshot of the active audit configuration,
+            populated by the server entrypoint after initialising the audit
+            sink. Reported by ``get_server_configuration_status`` so the tool
+            output and the audit file always agree on what is running.
         server_id: Which server this process is running (e.g. "operational").
             An identity, not configuration — nobody sets it, so it is kept off
             ``settings``, which holds operator-resolved values only. Populated
@@ -59,6 +63,7 @@ class AppContext:
     settings: Mapping[str, Any] = field(default_factory=dict)
     read_only_mode: bool = True
     logging_config: Mapping[str, Any] | None = None
+    audit_config: Mapping[str, Any] | None = None
     server_id: str | None = None
     server_name: str | None = None
 
@@ -97,3 +102,15 @@ def get_logging_config(ctx: Context) -> Mapping[str, Any] | None:
     context type doesn't carry a ``logging_config`` attribute at all.
     """
     return getattr(ctx.request_context.lifespan_context, "logging_config", None)  # type: ignore
+
+
+def get_audit_config(ctx: Context) -> Mapping[str, Any] | None:
+    """Return the audit-config snapshot attached to the lifespan context.
+
+    Returns ``None`` when the server entrypoint doesn't populate the field —
+    including host servers whose lifespan context type doesn't carry an
+    ``audit_config`` attribute at all — so a host that has not adopted auditing
+    is indistinguishable from one running with it switched off, which is the
+    correct report in both cases.
+    """
+    return getattr(ctx.request_context.lifespan_context, "audit_config", None)  # type: ignore

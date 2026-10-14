@@ -20,15 +20,21 @@ from ...utils.cli import (
     validate_log_level,
     validate_log_path,
     validate_log_sinks,
+    validate_max_query_result_size,
     validate_scope_label,
 )
 from ...utils.constants import (
     ALLOWED_OAUTH_ALGORITHMS,
     ALLOWED_TRANSPORTS,
+    DEFAULT_AUDIT_ENABLED,
+    DEFAULT_AUDIT_FILE,
+    DEFAULT_AUDIT_SINKS,
+    DEFAULT_AUDIT_TOOL_ARGS,
     DEFAULT_HOST,
     DEFAULT_LOG_BACKUP_COUNT,
     DEFAULT_LOG_LEVEL,
     DEFAULT_LOG_SINKS,
+    DEFAULT_MAX_QUERY_RESULT_SIZE,
     DEFAULT_OAUTH_ALGORITHM,
     DEFAULT_READ_ONLY_MODE,
     DEFAULT_TRANSPORT,
@@ -159,8 +165,20 @@ tool_gating_options = compose(
         "Also accepts a file path containing one tool name per line. "
         "Requires the MCP client to support elicitation.",
     ),
+    click.option(
+        "--max-query-result-size",
+        "max_query_result_size",
+        envvar="CB_MCP_MAX_QUERY_RESULT_SIZE",
+        callback=validate_max_query_result_size,
+        type=int,
+        default=DEFAULT_MAX_QUERY_RESULT_SIZE,
+        help="Maximum size, in bytes, of a query tool's result. Rows are "
+        "streamed from the cluster and reading stops once this budget is "
+        "reached; the response then reports truncated: true. Values above "
+        "1048576 (1 MB) or below 1024 (1 kB) are clamped with a warning.",
+    ),
 )
-"""Per-tool opt-outs and confirmation requirements. Shared by every server."""
+"""Per-tool opt-outs, confirmation requirements, and the query result budget. Shared by every server."""
 
 
 def logging_options(*, default_log_file: str) -> Callable:
@@ -391,3 +409,163 @@ oauth_options = compose(
     ),
 )
 """OAuth resource-server configuration. Shared by every server; scope label defaults are per-server."""
+
+
+audit_options = compose(
+    click.option(
+        "--audit-log-enabled",
+        "audit_log_enabled",
+        envvar="CB_MCP_AUDIT_LOG_ENABLED",
+        type=bool,
+        default=DEFAULT_AUDIT_ENABLED,
+        help="Enable audit logging. Applies to both stdio and http transports; the "
+        "set of applicable events differs by transport (authorization events are "
+        "http-only). Audit output is a separate sink from the --log-* operational "
+        "logs, with a stable schema and its own retention. Honored only by servers "
+        "that declare an audit package; on a server that does not, the flag "
+        "resolves and is reported but nothing is recorded.",
+    ),
+    click.option(
+        "--audit-log-sinks",
+        "audit_log_sinks",
+        envvar="CB_MCP_AUDIT_LOG_SINKS",
+        default=DEFAULT_AUDIT_SINKS,
+        help="Comma-separated list of audit sinks. Allowed values: console, file. "
+        "Default is console. 'console' writes to stderr — never stdout, which "
+        "carries the JSON-RPC protocol under the stdio transport. Include 'file' "
+        "with --audit-log-file-path for a deployment that retains records.",
+    ),
+    click.option(
+        "--audit-log-file-path",
+        "audit_log_file_path",
+        envvar="CB_MCP_AUDIT_LOG_FILE_PATH",
+        default=DEFAULT_AUDIT_FILE,
+        help="Path to the audit log file. Required when 'file' is in "
+        "--audit-log-sinks; if it is missing the server still starts, with the "
+        "file sink dropped and an error recorded. Each server process writes its "
+        "own file with the host and process id inserted before the extension "
+        "(audit.log -> audit.myhost.1234.log), because a single stdio deployment "
+        "runs one server process per client and sharing one file between them "
+        "would corrupt records.",
+    ),
+    click.option(
+        "--audit-log-rotation-max-size-mb",
+        "audit_log_rotation_max_size_mb",
+        envvar="CB_MCP_AUDIT_LOG_ROTATION_MAX_SIZE_MB",
+        type=click.FloatRange(min=0),
+        default=None,
+        help="Maximum size in MB the live audit file may reach before it rotates. "
+        "Default is 10 MB. 0 turns size-based rotation off; combined with an "
+        "interval of 0 that gives a single unbounded file.",
+    ),
+    click.option(
+        "--audit-log-rotation-interval",
+        "audit_log_rotation_interval",
+        envvar="CB_MCP_AUDIT_LOG_ROTATION_INTERVAL",
+        default=None,
+        help="Age the live audit file may reach before it rotates, as "
+        "<value><unit> where the unit is 'd' (24 hours) or 'w' (7 days) — e.g. "
+        "1d, 30d, 1w, 8w. Default is 1d. 0 turns interval-based rotation off. "
+        "Size and interval are independent: whichever falls due first rotates "
+        "the file.",
+    ),
+    click.option(
+        "--audit-log-retention-max-backups",
+        "audit_log_retention_max_backups",
+        envvar="CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS",
+        type=click.IntRange(min=0),
+        default=None,
+        help="Number of rotated audit files retained, excluding the live file. "
+        "Default is 10. Rotated files are gzipped and named with the UTC rotation "
+        "time. Set to 0 to keep no backups at all: the live file is truncated at "
+        "each rotation, so it stays bounded and nothing older is kept.",
+    ),
+    click.option(
+        "--audit-log-tool-args",
+        "audit_log_tool_args",
+        envvar="CB_MCP_AUDIT_LOG_TOOL_ARGS",
+        type=bool,
+        default=DEFAULT_AUDIT_TOOL_ARGS,
+        help="Record tool argument values in the audit log. Off by default: there "
+        "is no redaction capability in this release, so enabling this writes "
+        "arguments verbatim, including the full document bodies passed to "
+        "document-write tools. Review the audit file's retention and access "
+        "controls before enabling it.",
+    ),
+    click.option(
+        "--audit-log-disabled-events",
+        "audit_log_disabled_events",
+        envvar="CB_MCP_AUDIT_LOG_DISABLED_EVENTS",
+        default=None,
+        help="Audit events to suppress. Accepts comma-separated numeric event "
+        "ids (e.g. '61490,61491'), or a file path with one id per line. Ids are "
+        "listed in the audit descriptor. Only filterable events can be "
+        "suppressed: write and security events are always recorded, and an "
+        "attempt to disable one is refused with a warning.",
+    ),
+)
+"""Audit sink configuration. Shared by every server; honored where a spec declares an audit package."""
+embedding_options = compose(
+    click.option(
+        "--embedding-provider",
+        "embedding_provider",
+        envvar="EMBEDDING_PROVIDER",
+        type=click.Choice(
+            ["couchbase", "openai", "cohere", "voyage", "bedrock"], case_sensitive=False
+        ),
+        default=None,
+        help="Embedding provider for run_vector_query / run_vector_search. "
+        "Unset disables both tools' embedding step until configured (they stay "
+        "registered and fail with an actionable error at call time, not at startup).",
+    ),
+    click.option(
+        "--embedding-model",
+        "embedding_model",
+        envvar="EMBEDDING_MODEL",
+        default=None,
+        help="Model name/ID for the configured embedding provider.",
+    ),
+    click.option(
+        "--embedding-api-key",
+        "embedding_api_key",
+        envvar="EMBEDDING_API_KEY",
+        default=None,
+        help="API key for the configured embedding provider. Not used by bedrock "
+        "(uses the AWS credential chain / --embedding-aws-* instead).",
+    ),
+    click.option(
+        "--embedding-endpoint",
+        "embedding_endpoint",
+        envvar="EMBEDDING_ENDPOINT",
+        default=None,
+        help="Base URL override for the configured embedding provider (e.g. an "
+        "OpenAI-compatible local server, or a Couchbase Model Service deployment's "
+        "own URL — required when --embedding-provider=couchbase).",
+    ),
+    click.option(
+        "--embedding-aws-access-key-id",
+        "embedding_aws_access_key_id",
+        envvar="EMBEDDING_AWS_ACCESS_KEY_ID",
+        default=None,
+        help="AWS access key ID, bedrock provider only. Omit to use the default "
+        "AWS credential chain.",
+    ),
+    click.option(
+        "--embedding-aws-secret-access-key",
+        "embedding_aws_secret_access_key",
+        envvar="EMBEDDING_AWS_SECRET_ACCESS_KEY",
+        default=None,
+        help="AWS secret access key, bedrock provider only.",
+    ),
+    click.option(
+        "--embedding-aws-region",
+        "embedding_aws_region",
+        envvar="EMBEDDING_AWS_REGION",
+        default=None,
+        help="AWS region, bedrock provider only. Falls back to the AWS SDK's own "
+        "region resolution if unset.",
+    ),
+)
+"""Embedding-provider configuration for the vector search tools. Server-agnostic
+(unlike credential_options), so it is composed the same way for every server even
+though only the operational server currently registers tools that read it."""
