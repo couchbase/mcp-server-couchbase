@@ -324,6 +324,26 @@ async def test_get_cluster_tasks() -> None:
             assert "status" in task, f"Task missing 'status': {task}"
 
 
+async def _call_bucket_config(session, **kwargs):
+    """Call get_bucket_config, accounting for Capella withholding it entirely.
+
+    On Capella this tool is withheld at registration (TOOL_DEPLOYMENT_REQUIREMENTS
+    marks it ON_PREM), so a withheld call fails with MCP's generic "unknown tool"
+    error without ever reaching the tool's own Capella-rejecting ValueError — that
+    error will not mention "Capella". Checking the advertised tool list first means
+    the right failure mode is asserted either way, matching the distinction
+    test_deployment_gating.py's test_withheld_tool_cannot_be_called_by_name already
+    makes. Returns None once the withheld case has been asserted and there is
+    nothing left for the caller to check, otherwise the response to continue with.
+    """
+    names = {tool.name for tool in (await session.list_tools()).tools}
+    response = await session.call_tool("get_bucket_config", arguments=kwargs)
+    if "get_bucket_config" not in names:
+        assert response.isError, "Expected an error calling a withheld tool"
+        return None
+    return response
+
+
 @pytest.mark.asyncio
 async def test_get_bucket_config_for_one_bucket() -> None:
     """Verify get_bucket_config returns the raw bucket object unchanged.
@@ -335,9 +355,10 @@ async def test_get_bucket_config_for_one_bucket() -> None:
     """
     bucket_name = require_test_bucket()
     async with create_mcp_session() as session:
-        response = await session.call_tool(
-            "get_bucket_config", arguments={"bucket_name": bucket_name}
-        )
+        response = await _call_bucket_config(session, bucket_name=bucket_name)
+        if response is None:
+            return
+
         payload = extract_payload(response)
 
         if is_error_response(response):
@@ -366,7 +387,10 @@ async def test_get_bucket_config_for_all_buckets() -> None:
     """Verify omitting bucket_name returns every bucket's raw object unchanged."""
     bucket_name = require_test_bucket()
     async with create_mcp_session() as session:
-        response = await session.call_tool("get_bucket_config", arguments={})
+        response = await _call_bucket_config(session)
+        if response is None:
+            return
+
         payload = extract_payload(response)
 
         if is_error_response(response):
@@ -385,10 +409,12 @@ async def test_get_bucket_config_for_all_buckets() -> None:
 async def test_get_bucket_config_unknown_bucket_is_an_error() -> None:
     """Verify an unknown bucket name surfaces the server's own 404 message."""
     async with create_mcp_session() as session:
-        response = await session.call_tool(
-            "get_bucket_config",
-            arguments={"bucket_name": "this-bucket-does-not-exist"},
+        response = await _call_bucket_config(
+            session, bucket_name="this-bucket-does-not-exist"
         )
+        if response is None:
+            return
+
         payload = extract_payload(response)
 
         assert is_error_response(response), f"Expected an error, got: {payload}"
