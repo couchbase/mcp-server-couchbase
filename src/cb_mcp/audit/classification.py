@@ -80,6 +80,12 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # category covers.
         "get_cluster_query_vitals": ("cluster", "read"),
         "get_index_stats": ("cluster", "read"),
+        # Bucket configuration and live stats via the Management REST API — the
+        # same RCA surface as its neighbours above (quota, durability, eviction,
+        # compaction), not the schema-discovery surface below: it describes how
+        # a bucket is operationally configured, not what scopes/collections it
+        # has.
+        "get_bucket_config": ("cluster", "read"),
         # -- schema / discovery --------------------------------------------
         "get_buckets_in_cluster": ("schema", "read"),
         "get_scopes_in_bucket": ("schema", "read"),
