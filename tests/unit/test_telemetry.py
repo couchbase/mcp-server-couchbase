@@ -1,13 +1,9 @@
-"""Tests for Reo.dev telemetry: startup ping and per-tool-call wrapper.
+"""Tests for Reo.dev telemetry: the startup ping is the only event.
 
 Coverage map:
 - send_install_ping fires one event with the transport mode, never raises.
-- wrap_with_telemetry fires one event per call with tool_name/success/duration,
-  for both sync and async tools, and re-raises exceptions from the wrapped tool
-  after still recording the failed call.
+- tool calls emit nothing: there is no per-call wrapper to install.
 """
-
-import pytest
 
 from cb_mcp.utils import telemetry
 
@@ -49,69 +45,7 @@ class TestSendInstallPing:
         telemetry.send_install_ping("stdio", server_id="operational")
 
 
-class TestWrapWithTelemetry:
-    @pytest.mark.asyncio
-    async def test_sync_tool_fires_success_event(self, monkeypatch):
-        fake_logger = _RecordingLogger()
-        monkeypatch.setattr(telemetry, "telemetry_logger", fake_logger)
-
-        def sample_tool(x: int) -> int:
-            return x * 2
-
-        wrapped = telemetry.wrap_with_telemetry(sample_tool, server_id="operational")
-        result = wrapped(21)
-
-        assert result == 42
-        assert len(fake_logger.events) == 1
-        event = fake_logger.events[0]
-        assert event["activity_type"] == "tool_call"
-        assert event["tool_name"] == "sample_tool"
-        assert event["success"] == "true"
-        assert "duration_ms" in event
-
-    @pytest.mark.asyncio
-    async def test_async_tool_is_awaited_and_fires_success_event(self, monkeypatch):
-        fake_logger = _RecordingLogger()
-        monkeypatch.setattr(telemetry, "telemetry_logger", fake_logger)
-        called = False
-
-        async def async_sample_tool() -> bool:
-            nonlocal called
-            called = True
-            return True
-
-        wrapped = telemetry.wrap_with_telemetry(
-            async_sample_tool, server_id="operational"
-        )
-        result = await wrapped()
-
-        assert called is True
-        assert result is True
-        assert fake_logger.events[0]["tool_name"] == "async_sample_tool"
-        assert fake_logger.events[0]["success"] == "true"
-
-    @pytest.mark.asyncio
-    async def test_exception_is_reraised_and_recorded_as_failure(self, monkeypatch):
-        fake_logger = _RecordingLogger()
-        monkeypatch.setattr(telemetry, "telemetry_logger", fake_logger)
-
-        def failing_tool():
-            raise ValueError("bad input")
-
-        wrapped = telemetry.wrap_with_telemetry(failing_tool, server_id="operational")
-
-        with pytest.raises(ValueError, match="bad input"):
-            wrapped()
-
-        assert len(fake_logger.events) == 1
-        assert fake_logger.events[0]["success"] == "false"
-
-    @pytest.mark.asyncio
-    async def test_noop_logger_does_not_prevent_execution(self, monkeypatch):
-        monkeypatch.setattr(telemetry, "telemetry_logger", None)
-
-        def sample_tool() -> str:
-            return "ok"
-
-        wrapped = telemetry.wrap_with_telemetry(sample_tool, server_id="operational")
-        assert wrapped() == "ok"
+def test_tool_calls_are_not_reported():
+    """Registered tools are the plain functions: no telemetry wrapper, no event."""
+    assert not hasattr(telemetry, "wrap_with_telemetry")
+    assert not hasattr(telemetry, "_send_tool_call_event")

@@ -25,7 +25,13 @@ jobs:
     name: Upload to TestPyPI via Jenkins
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # workflow_run matches by name only, so reject runs from forks or PR events.
+    if: >-
+      github.event_name == 'workflow_dispatch' || (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        contains(fromJSON('["push", "workflow_dispatch"]'), github.event.workflow_run.event)
+      )
     steps:
       - name: Download version artifact
         if: github.event_name == 'workflow_run'
