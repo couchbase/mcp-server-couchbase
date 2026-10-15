@@ -11,6 +11,8 @@ Tests for:
 - get_client_connectivity_report
 - test_cluster_connection
 - get_cluster_metrics
+- get_cluster_tasks
+- get_bucket_config
 - get_cluster_health_snapshot
 - get_cluster_system_events (ordering, limit, since_time inclusivity)
 """
@@ -320,6 +322,105 @@ async def test_get_cluster_tasks() -> None:
             # everything else varies by type and is passed through untouched.
             assert "type" in task, f"Task missing 'type': {task}"
             assert "status" in task, f"Task missing 'status': {task}"
+
+
+async def _call_bucket_config(session, **kwargs):
+    """Call get_bucket_config, accounting for Capella withholding it entirely.
+
+    On Capella this tool is withheld at registration (TOOL_DEPLOYMENT_REQUIREMENTS
+    marks it ON_PREM), so a withheld call fails with MCP's generic "unknown tool"
+    error without ever reaching the tool's own Capella-rejecting ValueError — that
+    error will not mention "Capella". Checking the advertised tool list first means
+    the right failure mode is asserted either way, matching the distinction
+    test_deployment_gating.py's test_withheld_tool_cannot_be_called_by_name already
+    makes. Returns None once the withheld case has been asserted and there is
+    nothing left for the caller to check, otherwise the response to continue with.
+    """
+    names = {tool.name for tool in (await session.list_tools()).tools}
+    response = await session.call_tool("get_bucket_config", arguments=kwargs)
+    if "get_bucket_config" not in names:
+        assert response.isError, "Expected an error calling a withheld tool"
+        return None
+    return response
+
+
+@pytest.mark.asyncio
+async def test_get_bucket_config_for_one_bucket() -> None:
+    """Verify get_bucket_config returns the raw bucket object unchanged.
+
+    Like get_cluster_tasks, this returns the endpoint's response as-is, so the
+    assertions are about shape/presence rather than a status envelope.
+
+    Self-managed Couchbase Server 7.6+ only; Capella is rejected by the tool.
+    """
+    bucket_name = require_test_bucket()
+    async with create_mcp_session() as session:
+        response = await _call_bucket_config(session, bucket_name=bucket_name)
+        if response is None:
+            return
+
+        payload = extract_payload(response)
+
+        if is_error_response(response):
+            assert "Capella" in str(payload), (
+                f"Expected only a Capella rejection, got: {payload}"
+            )
+            return
+
+        assert payload["name"] == bucket_name
+        for field in (
+            "bucketType",
+            "evictionPolicy",
+            "replicaNumber",
+            "autoCompactionSettings",
+            "quota",
+            "basicStats",
+        ):
+            assert field in payload, f"Missing '{field}' in {payload}"
+        assert "itemCount" in payload["basicStats"]
+        # Raw passthrough: nothing stripped, unlike cluster health snapshot's merge.
+        assert "vBucketServerMap" in payload
+
+
+@pytest.mark.asyncio
+async def test_get_bucket_config_for_all_buckets() -> None:
+    """Verify omitting bucket_name returns every bucket's raw object unchanged."""
+    bucket_name = require_test_bucket()
+    async with create_mcp_session() as session:
+        response = await _call_bucket_config(session)
+        if response is None:
+            return
+
+        payload = extract_payload(response)
+
+        if is_error_response(response):
+            assert "Capella" in str(payload), (
+                f"Expected only a Capella rejection, got: {payload}"
+            )
+            return
+
+        payload = ensure_list(payload)
+        assert isinstance(payload, list), f"Expected a list, got {type(payload)}"
+        names = [bucket["name"] for bucket in payload]
+        assert bucket_name in names, f"{bucket_name!r} missing from {names}"
+
+
+@pytest.mark.asyncio
+async def test_get_bucket_config_unknown_bucket_is_an_error() -> None:
+    """Verify an unknown bucket name surfaces the server's own 404 message."""
+    async with create_mcp_session() as session:
+        response = await _call_bucket_config(
+            session, bucket_name="this-bucket-does-not-exist"
+        )
+        if response is None:
+            return
+
+        payload = extract_payload(response)
+
+        assert is_error_response(response), f"Expected an error, got: {payload}"
+        if "Capella" in str(payload):
+            return
+        assert "not found" in str(payload).lower()
 
 
 @pytest.mark.asyncio

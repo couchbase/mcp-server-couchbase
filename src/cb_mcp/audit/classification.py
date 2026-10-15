@@ -80,6 +80,7 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # category covers.
         "get_cluster_query_vitals": ("cluster", "read"),
         "get_index_stats": ("cluster", "read"),
+        "get_bucket_config": ("cluster", "read"),
         # -- schema / discovery --------------------------------------------
         "get_buckets_in_cluster": ("schema", "read"),
         "get_scopes_in_bucket": ("schema", "read"),

@@ -16,6 +16,7 @@ Operational Insights server keeps its own, much smaller census in
 # Tools we expect to be registered by the server
 EXPECTED_TOOLS = {
     "get_buckets_in_cluster",
+    "get_bucket_config",
     "get_server_configuration_status",
     "test_cluster_connection",
     "get_scopes_and_collections_in_bucket",
@@ -80,6 +81,7 @@ TOOLS_BY_CATEGORY = {
         "get_server_configuration_status",
         "test_cluster_connection",
         "get_buckets_in_cluster",
+        "get_bucket_config",
         "get_scopes_in_bucket",
         "get_scopes_and_collections_in_bucket",
         "get_collections_in_scope",

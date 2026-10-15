@@ -41,10 +41,11 @@ WRITE_TOOL_NAMES = {
     "drop_search_index",
 }
 
-# Read-only tool names that should always be available (35 tools)
+# Read-only tool names that should always be available (36 tools)
 READ_ONLY_TOOL_NAMES = {
-    # Server/Cluster management tools (14)
+    # Server/Cluster management tools (15)
     "get_buckets_in_cluster",
+    "get_bucket_config",
     "get_server_configuration_status",
     "test_cluster_connection",
     "get_scopes_and_collections_in_bucket",
@@ -191,14 +192,14 @@ class TestToolCounts:
         """Verify correct number of tools in read-only mode."""
         tools = get_tools(read_only_mode=True)
         assert len(tools) == len(READ_ONLY_TOOLS)
-        assert len(tools) == 35  # Expected count of read-only tools
+        assert len(tools) == 36  # Expected count of read-only tools
 
     def test_all_tools_mode_tool_count(self):
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (35 read-only + 16 write)
-        assert len(tools) == 51
+        # Expected total count (36 read-only + 16 write)
+        assert len(tools) == 52
 
     def test_write_tools_count(self):
         """Verify exactly 16 write tools exist."""
