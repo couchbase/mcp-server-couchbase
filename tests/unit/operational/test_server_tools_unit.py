@@ -15,8 +15,10 @@ reached against a live cluster:
   reject Capella connections up front without attempting the REST call.
 - get_cluster_metrics rejects malformed specs (non-object spec, non-integer
   step/start/end) without attempting the REST call.
-- get_cluster_tasks rejects Capella/malformed connection strings up front, falls
-  over between hosts, and returns the REST array unchanged (no envelope).
+- get_cluster_tasks rejects Capella connections and unresolvable endpoints up
+  front, falls over between hosts, resolves its management endpoint via the SDK
+  (so a port-mapped cluster is reached on its real port, not 8091), and returns
+  the REST array unchanged (no envelope).
 - get_cluster_health_snapshot rejects Capella connections and unresolvable
   endpoints up front, reads its three endpoints from a single host, and falls
   over to the next host when any one of them fails.
@@ -403,6 +405,21 @@ class TestGetClusterMetrics:
     """get_cluster_metrics: Capella rejection, REST call, and error/success envelopes."""
 
     @staticmethod
+    def _patch_endpoints(endpoints: list[str] | None = None):
+        """Patch the SDK-backed management-endpoint resolution.
+
+        The tool asks the SDK where management listens rather than appending
+        the default port to the connection string, so these tests stub that
+        resolution instead of varying the connection string's hosts.
+        """
+        resolved = ["localhost:8091"] if endpoints is None else endpoints
+        return patch.multiple(
+            "cb_mcp.tools.operational.server",
+            resolve_management_endpoints=MagicMock(return_value=resolved),
+            get_cluster_connection=MagicMock(return_value=MagicMock()),
+        )
+
+    @staticmethod
     def _patch_httpx_client(side_effect_method: str, side_effect):
         """Patch httpx.Client so *side_effect_method* ("get"/"post") returns *side_effect*."""
         mock_client_cm = MagicMock()
@@ -447,19 +464,23 @@ class TestGetClusterMetrics:
         assert "Capella" in result["error"]
         assert "Failed to get cluster metrics" in result["message"]
 
-    def test_rejects_malformed_connection_string_without_rest_call(self) -> None:
-        """A connection string with no extractable host must fail fast, not
-        raise RuntimeError with no underlying error."""
+    def test_rejects_unresolvable_endpoints_without_rest_call(self) -> None:
+        """When the SDK resolves no management endpoint and the connection
+        string yields no fallback host, fail fast rather than raise
+        RuntimeError with no underlying error."""
         settings = {**_VALID_SETTINGS, "connection_string": "not-a-url"}
         ctx = _make_ctx_with_settings(settings)
         metrics = [{"metric": [], "nodes": ["host1:11210"]}]
 
-        with patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls:
+        with (
+            self._patch_endpoints([]),
+            patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
+        ):
             result = get_cluster_metrics(ctx, metrics=metrics)
 
         mock_client_cls.assert_not_called()
         assert result["status"] == "error"
-        assert "No hosts found" in result["error"]
+        assert "No management endpoints found" in result["error"]
         assert "Failed to get cluster metrics" in result["message"]
 
     def test_returns_success_envelope_with_rest_response(self) -> None:
@@ -480,7 +501,7 @@ class TestGetClusterMetrics:
             "post", [self._ok_response(rest_response)]
         )
 
-        with client_patch:
+        with client_patch, self._patch_endpoints():
             result = get_cluster_metrics(ctx, metrics=metrics)
 
         called_url = mock_client.post.call_args[0][0]
@@ -498,7 +519,7 @@ class TestGetClusterMetrics:
             [httpx.ConnectError("refused"), self._ok_response([{"data": []}])],
         )
 
-        with client_patch:
+        with client_patch, self._patch_endpoints(["host1:8091", "host2:8091"]):
             result = get_cluster_metrics(ctx, metrics=[])
 
         assert result == {"status": "success", "data": [{"data": []}]}
@@ -511,7 +532,7 @@ class TestGetClusterMetrics:
         error = httpx.ConnectError("refused")
         client_patch, _ = self._patch_httpx_client("post", [error, error])
 
-        with client_patch:
+        with client_patch, self._patch_endpoints(["host1:8091", "host2:8091"]):
             result = get_cluster_metrics(ctx, metrics=[])
 
         assert result["status"] == "error"
@@ -554,7 +575,7 @@ class TestGetClusterMetrics:
             "post", [self._ok_response([{"data": []}])]
         )
 
-        with client_patch:
+        with client_patch, self._patch_endpoints():
             result = get_cluster_metrics(ctx, metrics=metrics)
 
         mock_client.post.assert_called_once()
@@ -593,15 +614,16 @@ class TestGetClusterTasks:
 
         mock_client_cls.assert_not_called()
 
-    def test_rejects_malformed_connection_string_without_rest_call(self) -> None:
-        """A connection string with no extractable host must fail fast."""
+    def test_rejects_unresolvable_endpoints_without_rest_call(self) -> None:
+        """No resolvable management endpoint must fail fast."""
         ctx = _make_ctx_with_settings(
             {**_VALID_SETTINGS, "connection_string": "not-a-url"}
         )
 
         with (
+            TestGetClusterMetrics._patch_endpoints([]),
             patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
-            pytest.raises(ValueError, match="No hosts found"),
+            pytest.raises(ValueError, match="No management endpoints found"),
         ):
             get_cluster_tasks(ctx)
 
@@ -633,7 +655,7 @@ class TestGetClusterTasks:
             "get", [TestGetClusterMetrics._ok_response(rest_response)]
         )
 
-        with client_patch:
+        with client_patch, TestGetClusterMetrics._patch_endpoints():
             result = get_cluster_tasks(ctx)
 
         assert result == rest_response
@@ -648,7 +670,7 @@ class TestGetClusterTasks:
             "get", [TestGetClusterMetrics._ok_response([])]
         )
 
-        with client_patch:
+        with client_patch, TestGetClusterMetrics._patch_endpoints():
             assert get_cluster_tasks(ctx) == []
 
     def test_falls_over_to_second_host(self) -> None:
@@ -665,7 +687,10 @@ class TestGetClusterTasks:
             ],
         )
 
-        with client_patch:
+        with (
+            client_patch,
+            TestGetClusterMetrics._patch_endpoints(["host1:8091", "host2:8091"]),
+        ):
             result = get_cluster_tasks(ctx)
 
         assert result == tasks
@@ -683,27 +708,29 @@ class TestGetClusterTasks:
 
         with (
             client_patch,
+            TestGetClusterMetrics._patch_endpoints(["host1:8091", "host2:8091"]),
             pytest.raises(RuntimeError, match="Failed to reach any host"),
         ):
             get_cluster_tasks(ctx)
 
         assert mock_client.get.call_count == 2
 
-    def test_uses_management_port_and_tasks_path(self) -> None:
-        """Plain connections hit the plain management port over http."""
+    def test_uses_resolved_endpoint_and_tasks_path(self) -> None:
+        """Plain connections hit the SDK-resolved endpoint over http."""
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
             "get", [TestGetClusterMetrics._ok_response([])]
         )
 
-        with client_patch:
+        with client_patch, TestGetClusterMetrics._patch_endpoints():
             get_cluster_tasks(ctx)
 
         url = mock_client.get.call_args[0][0]
         assert url == "http://localhost:8091/pools/default/tasks"
 
-    def test_uses_tls_port_for_couchbases_connection(self) -> None:
-        """A couchbases:// connection must use https and the TLS management port."""
+    def test_uses_https_for_couchbases_connection(self) -> None:
+        """A couchbases:// connection must use https; the port comes from the
+        SDK-resolved endpoint, not from a hardcoded TLS default."""
         ctx = _make_ctx_with_settings(
             {**_VALID_SETTINGS, "connection_string": "couchbases://localhost"}
         )
@@ -711,11 +738,29 @@ class TestGetClusterTasks:
             "get", [TestGetClusterMetrics._ok_response([])]
         )
 
-        with client_patch:
+        with client_patch, TestGetClusterMetrics._patch_endpoints(["localhost:18091"]):
             get_cluster_tasks(ctx)
 
         url = mock_client.get.call_args[0][0]
         assert url == "https://localhost:18091/pools/default/tasks"
+
+    def test_uses_port_mapped_endpoint_not_default_port(self) -> None:
+        """The regression this fix addresses: when management is published on a
+        non-default port (a port-mapped Docker or NAT'd cluster), the call must
+        go to the SDK-resolved port, not to 8091 at the connection string's
+        host — which on a developer box is a different cluster entirely."""
+        ctx = _make_ctx_with_settings(
+            {**_VALID_SETTINGS, "connection_string": "couchbase://127.0.0.1:19210"}
+        )
+        client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
+            "get", [TestGetClusterMetrics._ok_response([])]
+        )
+
+        with client_patch, TestGetClusterMetrics._patch_endpoints(["127.0.0.1:19191"]):
+            get_cluster_tasks(ctx)
+
+        url = mock_client.get.call_args[0][0]
+        assert url == "http://127.0.0.1:19191/pools/default/tasks"
 
 
 class TestGetClusterHealthSnapshot:
