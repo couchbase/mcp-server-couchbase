@@ -203,16 +203,17 @@ tool_gating_options = compose(
         "Requires the MCP client to support elicitation.",
     ),
     click.option(
-        "--max-query-result-size",
-        "max_query_result_size",
-        envvar="CB_MCP_MAX_QUERY_RESULT_SIZE",
+        "--operational-insights-query-result-max-size",
+        "operational_insights_query_result_max_size",
+        envvar="CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE",
         callback=validate_max_query_result_size,
         type=int,
         default=DEFAULT_MAX_QUERY_RESULT_SIZE,
-        help="Maximum size, in bytes, of a query tool's result. Rows are "
-        "streamed from the cluster and reading stops once this budget is "
+        help="Maximum size, in bytes, of an Operational Insights query "
+        "tool's result. Unset means no limit: the full result is returned. "
+        "When set, rows are streamed and reading stops once the budget is "
         "reached; the response then reports truncated: true. Values above "
-        "1048576 (1 MB) or below 1024 (1 kB) are clamped with a warning.",
+        "4194304 (4 MB) are clamped with a warning.",
     ),
 )
 """Per-tool opt-outs, confirmation requirements, and the query result budget. Shared by every server."""

@@ -175,19 +175,13 @@ async def test_run_sql_plus_plus_query_select() -> None:
                 "query": query,
             },
         )
-        envelope = extract_payload(response)
+        payload = ensure_list(extract_payload(response))
 
-        # run_sql_plus_plus_query returns an envelope, not a bare row list.
-        assert envelope["success"] is True, f"Query failed: {envelope}"
-        assert envelope["truncated"] is False, (
-            "A one-row COUNT(*) must never hit the result-size budget"
-        )
-        rows = envelope["rows"]
+        assert isinstance(payload, list), f"Expected list, got {type(payload)}"
         # Query should return at least one row
-        assert len(rows) >= 1
-        assert envelope["row_count"] == len(rows)
+        assert len(payload) >= 1
         # First row should have doc_count field
-        assert "doc_count" in rows[0]
+        assert "doc_count" in payload[0]
 
 
 @pytest.mark.asyncio
@@ -209,18 +203,16 @@ async def test_run_sql_plus_plus_query_with_limit() -> None:
                 "query": query,
             },
         )
-        envelope = extract_payload(response)
+        payload = ensure_list(extract_payload(response))
 
-        assert envelope["success"] is True, f"Query failed: {envelope}"
-        rows = envelope["rows"]
+        assert isinstance(payload, list), f"Expected list, got {type(payload)}"
 
         # Skip if collection is empty
-        if len(rows) == 0:
+        if len(payload) == 0:
             skip_reason = f"Collection '{collection}' has no documents"
         else:
             # Should return at most 5 documents
-            assert len(rows) <= 5
-            assert envelope["row_count"] == len(rows)
+            assert len(payload) <= 5
 
     if skip_reason:
         pytest.skip(skip_reason)
@@ -246,16 +238,15 @@ async def test_run_sql_plus_plus_query_meta() -> None:
                 "query": query,
             },
         )
-        envelope = extract_payload(response)
+        payload = ensure_list(extract_payload(response))
 
-        assert envelope["success"] is True, f"Query failed: {envelope}"
-        rows = envelope["rows"]
+        assert isinstance(payload, list), f"Expected list, got {type(payload)}"
 
         # Skip if collection is empty
-        if len(rows) == 0:
+        if len(payload) == 0:
             skip_reason = f"Collection '{collection}' has no documents"
         else:
-            assert "doc_id" in rows[0]
+            assert "doc_id" in payload[0]
 
     if skip_reason:
         pytest.skip(skip_reason)

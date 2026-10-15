@@ -184,7 +184,7 @@ class GatingParams:
     read_only_mode: bool
     disabled_tools: str | None
     confirmation_required_tools: str | None
-    max_query_result_size: int
+    max_query_result_size: int | None
 
     @classmethod
     def from_click(cls, params: Mapping[str, Any]) -> "GatingParams":
@@ -192,7 +192,7 @@ class GatingParams:
             read_only_mode=params["read_only_mode"],
             disabled_tools=params["disabled_tools"],
             confirmation_required_tools=params["confirmation_required_tools"],
-            max_query_result_size=params["max_query_result_size"],
+            max_query_result_size=params["operational_insights_query_result_max_size"],
         )
 
 
@@ -573,7 +573,7 @@ def build_settings(
             **cli.embedding.as_settings(),
             "disabled_tools": gated.disabled,
             "confirmation_required_tools": gated.confirmation_required,
-            "max_query_result_size": cli.gating.max_query_result_size,
+            "operational_insights_query_result_max_size": cli.gating.max_query_result_size,
         }
     )
     return settings

@@ -16,7 +16,7 @@ from logging import getLogger
 
 import click
 
-from .constants import DEFAULT_MAX_QUERY_RESULT_SIZE, LOGGER_NAMESPACE
+from .constants import LOGGER_NAMESPACE
 from .logging import (
     ParsedLogLevel,
     ParsedLogSinks,
@@ -54,23 +54,25 @@ def validate_log_sinks(
 
 def validate_max_query_result_size(
     ctx: click.Context, param: click.Parameter, value: int | None
-) -> int:
-    """Click callback for ``--max-query-result-size``.
+) -> int | None:
+    """Click callback for ``--operational-insights-query-result-max-size``.
 
-    Delegates to :func:`clamp_max_query_result_size`, which caps the value
-    into the supported range and warns when it moves it. Clamping rather than
-    raising ``UsageError`` is deliberate — see ``MAX_MAX_QUERY_RESULT_SIZE``
-    in ``constants``: these servers are usually configured through container
-    environment variables, where rejecting a bad value takes the deployment
-    down while clamping only caps a result set.
+    ``None`` (the flag and its environment variable left unset) passes through
+    untouched and means *no limit* — an unconfigured server must not silently
+    cap results.
+
+    A configured value is clamped by :func:`clamp_max_query_result_size` rather
+    than rejected: see ``MAX_MAX_QUERY_RESULT_SIZE`` in ``constants``. These
+    servers are usually configured through container environment variables,
+    where rejecting a bad value takes the deployment down while clamping only
+    caps a result set.
 
     A non-numeric value never reaches here (Click's ``type=int`` rejects it
-    first, which is the right behaviour for an explicitly typed flag); the
-    tolerant parsing in ``max_query_result_size_from`` covers the separate
-    case of an embedding host that builds settings without the CLI.
+    first); the tolerant parsing in ``max_query_result_size_from`` covers the
+    separate case of an embedding host that builds settings without the CLI.
     """
     if value is None:
-        return DEFAULT_MAX_QUERY_RESULT_SIZE
+        return None
     return clamp_max_query_result_size(value)
 
 

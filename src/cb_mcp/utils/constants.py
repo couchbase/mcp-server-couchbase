@@ -30,31 +30,32 @@ DEFAULT_HOST = "127.0.0.1"
 # uses more than one core; see cb_mcp.core.serving.
 DEFAULT_WORKERS = 1
 
-# Query result size budget
+# Query result size budget (Operational Insights only)
 #
-# Every query tool streams rows from the cluster and stops once the serialized
-# result reaches this many bytes, rather than buffering an unbounded result set
-# (see cb_mcp.utils.query_limits). The budget is measured in *serialized JSON
-# bytes* because what it protects is the payload sent to the MCP client and the
-# model's context window — neither of which cares about Python's in-memory
-# representation.
+# When set, the Operational Insights query tools stream rows from the cluster
+# and stop once the serialized result reaches this many bytes, rather than
+# buffering an unbounded result set (see cb_mcp.utils.query_limits). The budget
+# is measured in *serialized JSON bytes* because what it protects is the payload
+# sent to the MCP client and, through it, the model's context window — neither
+# of which cares about Python's in-memory representation.
 #
-# The default is deliberately small. A query tool's output is consumed by an
-# LLM, and 15 kB is already a sizeable fraction of a context window; operators
-# who need more can raise it, but the safe default must not be "whatever the
-# cluster happened to return".
-DEFAULT_MAX_QUERY_RESULT_SIZE = 15 * 1024  # 15 kB
+# There is deliberately NO default: unset means no truncation, matching the
+# behaviour before the budget existed. Capping results is a decision an operator
+# makes for their deployment, not something the server imposes — a silent 15 kB
+# ceiling would have surprised anyone whose queries legitimately return more.
+DEFAULT_MAX_QUERY_RESULT_SIZE: int | None = None
 
-# Hard ceiling. A value above this is clamped (with a warning) rather than
-# rejected: these servers are usually configured through container environment
-# variables, where a startup failure takes the whole deployment down and a
-# clamp merely caps a result set. 1 MB is well past the point where an LLM can
-# use the rows anyway, so the clamp costs nothing in practice.
-MAX_MAX_QUERY_RESULT_SIZE = 1024 * 1024  # 1 MB
+# Hard ceiling on a *configured* value. Above this it is clamped (with a
+# warning) rather than rejected: these servers are usually configured through
+# container environment variables, where a startup failure takes the whole
+# deployment down while a clamp merely caps a result set.
+MAX_MAX_QUERY_RESULT_SIZE = 4 * 1024 * 1024  # 4 MB
 
-# Floor. Below roughly one row's worth of JSON the budget stops being a
-# truncation limit and becomes "return nothing", which no operator intends.
-MIN_MAX_QUERY_RESULT_SIZE = 1024  # 1 kB
+# No floor: 0 is a real budget of zero bytes, and any positive value is honoured
+# as given. A budget smaller than a single row yields no rows, which is reported
+# explicitly ("the first row alone exceeds the N-byte limit... matching rows
+# exist but are too wide to return") rather than looking like an empty result.
+MIN_MAX_QUERY_RESULT_SIZE = 0
 
 # Allowed Transport Types
 ALLOWED_TRANSPORTS = ["stdio", "http", "sse"]

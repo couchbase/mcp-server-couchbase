@@ -346,8 +346,7 @@ def test_unparseable_statement_still_runs_when_writes_are_allowed_and_auditing_o
         # is about is that the call ran, not what the query tool's result looks
         # like, and pinning the full shape made it a casualty of an unrelated
         # change to that shape.
-        assert result["success"] is True
-        assert result["rows"] == []
+        assert result == []
         assert audit_state.get_statement_class() == "write"
     finally:
         audit_state.reset(token)
