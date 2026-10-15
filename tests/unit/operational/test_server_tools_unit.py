@@ -833,15 +833,16 @@ class TestGetBucketConfig:
 
         mock_client_cls.assert_not_called()
 
-    def test_rejects_malformed_connection_string_without_rest_call(self) -> None:
-        """A connection string with no extractable host must fail fast."""
+    def test_rejects_unresolvable_endpoints_without_rest_call(self) -> None:
+        """No resolvable management endpoint must fail fast."""
         ctx = _make_ctx_with_settings(
             {**_VALID_SETTINGS, "connection_string": "not-a-url"}
         )
 
         with (
+            TestGetClusterMetrics._patch_endpoints([]),
             patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
-            pytest.raises(ValueError, match="No hosts found"),
+            pytest.raises(ValueError, match="No management endpoints found"),
         ):
             get_bucket_config(ctx, bucket_name="travel-sample")
 
@@ -869,7 +870,7 @@ class TestGetBucketConfig:
             "get", [self._ok_response(self._RAW_BUCKET)]
         )
 
-        with client_patch:
+        with client_patch, TestGetClusterMetrics._patch_endpoints():
             result = get_bucket_config(ctx, bucket_name="travel-sample")
 
         url = mock_client.get.call_args[0][0]
@@ -886,7 +887,7 @@ class TestGetBucketConfig:
             "get", [self._ok_response(raw_list)]
         )
 
-        with client_patch:
+        with client_patch, TestGetClusterMetrics._patch_endpoints():
             result = get_bucket_config(ctx)
 
         url = mock_client.get.call_args[0][0]
@@ -900,7 +901,7 @@ class TestGetBucketConfig:
             "get", [self._ok_response(self._RAW_BUCKET)]
         )
 
-        with client_patch:
+        with client_patch, TestGetClusterMetrics._patch_endpoints():
             get_bucket_config(ctx, bucket_name="a bucket/weird")
 
         url = mock_client.get.call_args[0][0]
@@ -919,7 +920,10 @@ class TestGetBucketConfig:
             ],
         )
 
-        with client_patch:
+        with (
+            client_patch,
+            TestGetClusterMetrics._patch_endpoints(["host1:8091", "host2:8091"]),
+        ):
             result = get_bucket_config(ctx, bucket_name="travel-sample")
 
         assert result["name"] == "travel-sample"
@@ -937,6 +941,7 @@ class TestGetBucketConfig:
 
         with (
             client_patch,
+            TestGetClusterMetrics._patch_endpoints(["host1:8091", "host2:8091"]),
             pytest.raises(RuntimeError, match="Failed to reach any host"),
         ):
             get_bucket_config(ctx, bucket_name="travel-sample")
@@ -958,27 +963,29 @@ class TestGetBucketConfig:
 
         with (
             client_patch,
+            TestGetClusterMetrics._patch_endpoints(["host1:8091", "host2:8091"]),
             pytest.raises(ValueError, match="Requested resource not found"),
         ):
             get_bucket_config(ctx, bucket_name="no-such-bucket")
 
         assert mock_client.get.call_count == 1
 
-    def test_uses_management_port_and_buckets_path(self) -> None:
-        """Plain connections hit the plain management port over http."""
+    def test_uses_resolved_endpoint_and_buckets_path(self) -> None:
+        """Plain connections hit the SDK-resolved endpoint over http."""
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         client_patch, mock_client = TestGetClusterMetrics._patch_httpx_client(
             "get", [self._ok_response([])]
         )
 
-        with client_patch:
+        with client_patch, TestGetClusterMetrics._patch_endpoints():
             get_bucket_config(ctx)
 
         url = mock_client.get.call_args[0][0]
         assert url == "http://localhost:8091/pools/default/buckets"
 
-    def test_uses_tls_port_for_couchbases_connection(self) -> None:
-        """A couchbases:// connection must use https and the TLS management port."""
+    def test_uses_https_for_couchbases_connection(self) -> None:
+        """A couchbases:// connection must use https; the port comes from the
+        SDK-resolved endpoint, not from a hardcoded TLS default."""
         ctx = _make_ctx_with_settings(
             {**_VALID_SETTINGS, "connection_string": "couchbases://localhost"}
         )
@@ -986,7 +993,10 @@ class TestGetBucketConfig:
             "get", [self._ok_response([])]
         )
 
-        with client_patch:
+        with (
+            client_patch,
+            TestGetClusterMetrics._patch_endpoints(["localhost:18091"]),
+        ):
             get_bucket_config(ctx)
 
         url = mock_client.get.call_args[0][0]

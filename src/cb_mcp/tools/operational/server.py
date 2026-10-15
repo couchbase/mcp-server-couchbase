@@ -185,22 +185,23 @@ def get_bucket_config(
         if is_capella_connection(connection_string):
             raise ValueError("get_bucket_config is not supported on Capella clusters")
 
-        is_tls = connection_string.lower().startswith("couchbases://")
-        protocol, port = (
-            ("https", MANAGEMENT_REST_PORT_TLS)
-            if is_tls
-            else ("http", MANAGEMENT_REST_PORT_PLAIN)
+        protocol = (
+            "https" if connection_string.lower().startswith("couchbases://") else "http"
         )
         verify_ssl = determine_ssl_verification(
             connection_string, settings.get("ca_cert_path")
         )
-        hosts = [
-            f"[{host}]" if ":" in host else host
-            for host in extract_hosts_from_connection_string(connection_string)
-        ]
-        if not hosts:
+        # Ask the SDK where management actually listens rather than appending the
+        # default port to the connection string's hosts: the port it carries is a KV
+        # one, and a port-mapped or NAT'd cluster serves management elsewhere. Same
+        # resolution get_cluster_tasks/get_index_stats use.
+        endpoints = resolve_management_endpoints(
+            get_cluster_connection(ctx), connection_string
+        )
+        if not endpoints:
             raise ValueError(
-                f"No hosts found in connection_string: {connection_string!r}"
+                f"No management endpoints found for connection_string: "
+                f"{connection_string!r}"
             )
 
         path = "/pools/default/buckets"
@@ -214,15 +215,16 @@ def get_bucket_config(
         # list/config and the raw vBucketServerMap were identical from every node, down
         # to the byte, aside from each node's own identity markers. The one caveat found
         # is noted in the docstring: a node that was never joined to the cluster answers
-        # with 200 and [] rather than an error. hosts here is whatever the operator's own
-        # connection_string names, so this only bites when that names a DNS/SRV record
-        # backed by a rotating node set rather than fixed, verified cluster members.
+        # with 200 and [] rather than an error. endpoints here come from the SDK's own
+        # resolution of the operator's connection_string, so this only bites when that
+        # resolves to a DNS/SRV record backed by a rotating node set rather than fixed,
+        # verified cluster members.
         last_error: Exception | None = None
         with httpx.Client(verify=verify_ssl, timeout=timeout) as client:
-            for host in hosts:
+            for host in endpoints:
                 try:
                     response = client.get(
-                        f"{protocol}://{host}:{port}{path}",
+                        f"{protocol}://{host}{path}",
                         auth=(settings["username"], settings["password"]),
                     )
                     # A 4xx is this request being refused (unknown bucket, insufficient
@@ -256,7 +258,7 @@ def get_bucket_config(
                 except Exception as e:
                     logger.warning(f"Failed to fetch bucket config from {host}: {e}")
                     last_error = e
-        raise RuntimeError(f"Failed to reach any host in {hosts}: {last_error}")
+        raise RuntimeError(f"Failed to reach any host in {endpoints}: {last_error}")
     except ValueError as e:
         logger.warning(f"Rejected get_bucket_config request: {e}")
         raise
