@@ -168,6 +168,7 @@ def test_read_only_tools_are_classified_read(tool_name):
         # rather than the query workload or the index inventory.
         ("get_cluster_query_vitals", 61488),
         ("get_index_stats", 61488),
+        ("get_bucket_config", 61488),
         # The server's own surface, split out of cluster on the same date.
         ("get_server_configuration_status", 61495),
         ("discover_tool_input_values", 61495),
