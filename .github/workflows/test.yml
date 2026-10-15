@@ -9,8 +9,9 @@ on:
   pull_request:
     branches: [main]
 
-# One in-flight run per branch. Each run provisions eight Couchbase
-# containers (transport x cb-version x server-binary), so a push to a PR that
+# One in-flight run per branch. Each run provisions eleven Couchbase
+# containers (transport x cb-version x server-binary, plus three multi-worker
+# HTTP jobs), so a push to a PR that
 # is already building otherwise doubles that until the first run finishes.
 #
 # Cancelling is scoped to pull requests deliberately: a superseded PR run
@@ -61,7 +62,9 @@ jobs:
   # needs a different product and its own two-container setup, so it has its
   # own workflow (operational-insights-integration-tests.yml).
   integration-tests:
-    name: 'Integration: operational (${{ matrix.transport }} / cb-${{ matrix.cb_version }} / ${{ matrix.server_binary }})'
+    # Single-worker jobs keep their original names (anything referring to a
+    # check by name keeps working); multi-worker jobs get a suffix.
+    name: "Integration: operational (${{ matrix.transport }} / cb-${{ matrix.cb_version }} / ${{ matrix.server_binary }}${{ matrix.workers > 1 && format(' / {0} workers', matrix.workers) || '' }})"
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -69,11 +72,36 @@ jobs:
         transport: ["stdio", "http"]
         cb_version: ["8.0.0", "7.6.11"]
         server_binary: ["source", "docker", "pypi"]
+        # A real dimension, not just an include key: an include entry that
+        # only *adds* a key is merged into the existing matching job, which
+        # would silently turn the single-worker job into a multi-worker one.
+        # Overriding workers=1 forces the include below into new jobs.
+        workers: [1]
         exclude:
           - transport: stdio
             server_binary: docker
           - transport: stdio
             server_binary: pypi
+        # The whole operational suite against a --workers server. Each test
+        # opens a fresh session, so requests spread across worker processes:
+        # a document written through one worker is read back through another,
+        # which is what proves no tool depends on one process's memory. All
+        # three binaries, because each fails differently (source: spawn
+        # imports; docker: supervisor as PID 1; pypi: uvloop/httptools wheels).
+        # One Couchbase version is enough; the topology is version-agnostic.
+        include:
+          - transport: http
+            cb_version: "8.0.0"
+            server_binary: source
+            workers: 4
+          - transport: http
+            cb_version: "8.0.0"
+            server_binary: docker
+            workers: 4
+          - transport: http
+            cb_version: "8.0.0"
+            server_binary: pypi
+            workers: 4
 
     services:
       couchbase:
@@ -240,9 +268,10 @@ jobs:
         env:
           CB_MCP_PORT: 8000
           CB_MCP_READ_ONLY_MODE: "false"
+          CB_MCP_WORKERS: ${{ matrix.workers }}
           PYTHONPATH: src
         run: |
-          echo "Starting MCP server (${{ matrix.server_binary }}) with HTTP transport..."
+          echo "Starting MCP server (${{ matrix.server_binary }}, ${CB_MCP_WORKERS} worker(s)) with HTTP transport..."
 
           if [[ "${{ matrix.server_binary }}" == "source" ]]; then
             CB_CONNECTION_STRING=couchbase://localhost \
@@ -250,6 +279,7 @@ jobs:
             CB_MCP_HOST=127.0.0.1 \
             CB_MCP_PORT=$CB_MCP_PORT \
             CB_MCP_READ_ONLY_MODE=$CB_MCP_READ_ONLY_MODE \
+            CB_MCP_WORKERS=$CB_MCP_WORKERS \
             PYTHONPATH=$PYTHONPATH \
               uv run python -m mcp_server &
             echo "SERVER_PID=$!" >> $GITHUB_ENV
@@ -264,6 +294,7 @@ jobs:
               -e CB_MCP_HOST=0.0.0.0 \
               -e CB_MCP_PORT=$CB_MCP_PORT \
               -e CB_MCP_READ_ONLY_MODE=$CB_MCP_READ_ONLY_MODE \
+              -e CB_MCP_WORKERS=$CB_MCP_WORKERS \
               mcp-server-test:latest
 
           elif [[ "${{ matrix.server_binary }}" == "pypi" ]]; then
@@ -272,20 +303,34 @@ jobs:
             CB_MCP_HOST=127.0.0.1 \
             CB_MCP_PORT=$CB_MCP_PORT \
             CB_MCP_READ_ONLY_MODE=$CB_MCP_READ_ONLY_MODE \
+            CB_MCP_WORKERS=$CB_MCP_WORKERS \
               /tmp/pypi-test-venv/bin/couchbase-mcp-server &
             echo "SERVER_PID=$!" >> $GITHUB_ENV
           fi
 
+          # Polls /health, the liveness endpoint orchestrators probe: it is
+          # served by every worker and answers 200 only once that process is
+          # serving HTTP. Longer budget than one process needs, because N
+          # workers each import the SDK before accepting.
           echo "Waiting for HTTP server to be ready..."
-          for i in {1..30}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/mcp 2>/dev/null || echo "000")
-            if [[ -n "$code" && "$code" != "000" ]]; then
-              echo "HTTP server is ready (HTTP $code after ${i}s)"
+          ready=false
+          for i in {1..60}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/health 2>/dev/null || echo "000")
+            if [[ "$code" == "200" ]]; then
+              echo "HTTP server is ready (/health 200 after ${i}s)"
+              ready=true
               break
             fi
-            echo "Waiting for HTTP server... ($i/30)"
+            echo "Waiting for HTTP server... ($i/60, /health -> $code)"
             sleep 1
           done
+          if [[ "$ready" != "true" ]]; then
+            echo "::error::MCP server did not become healthy within 60s"
+            if [[ "${{ matrix.server_binary }}" == "docker" ]]; then
+              docker logs mcp-server-http || true
+            fi
+            exit 1
+          fi
           # Uvicorn can accept connections before FastMCP's session manager
           # finishes initializing — give it a moment to fully settle.
           sleep 3
@@ -302,6 +347,28 @@ jobs:
         run: |
           echo "Running tests with HTTP transport (${{ matrix.server_binary }})..."
           uv run pytest tests/integration/operational -v --tb=short
+
+      # SIGTERM is what `docker stop` and Kubernetes send. With --workers the
+      # server is a Uvicorn supervisor running as PID 1, and it must stop its
+      # workers and exit on its own. Clean exits are 0 (the --workers
+      # supervisor) or 143 (128+SIGTERM: a single Uvicorn server shuts down
+      # gracefully, then re-raises the signal so the exit status says what
+      # stopped it). 137 means it ignored SIGTERM and was killed after the
+      # grace period, which fails the job. Anything else is a warning: the
+      # tests above already passed.
+      - name: Verify clean shutdown on SIGTERM (Docker)
+        if: matrix.transport == 'http' && matrix.server_binary == 'docker'
+        run: |
+          docker stop --time 20 mcp-server-http
+          code=$(docker inspect --format '{{.State.ExitCode}}' mcp-server-http)
+          docker logs --tail 40 mcp-server-http
+          echo "Container exit code: $code"
+          if [[ "$code" == "137" ]]; then
+            echo "::error::Server did not exit on SIGTERM within 20s and was killed"
+            exit 1
+          elif [[ "$code" != "0" && "$code" != "143" ]]; then
+            echo "::warning::Server exited with code $code after SIGTERM"
+          fi
 
       - name: Stop HTTP server
         if: matrix.transport == 'http' && always()

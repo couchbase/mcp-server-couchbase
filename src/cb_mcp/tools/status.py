@@ -26,8 +26,10 @@ from typing import Any
 
 from fastmcp import Context
 
+from ..audit.emitter import get_audit_logger
 from ..utils.config import get_settings
 from ..utils.context import (
+    get_audit_config,
     get_cluster_provider,
     get_logging_config,
     get_server_id,
@@ -78,11 +80,32 @@ def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
     # implementations that don't populate it.
     logging_status = get_logging_config(ctx)
 
+    # Audit state: the resolved configuration plus the sink counters. The
+    # counters matter as much as the config — ``dropped`` is the only way an
+    # operator discovers that audit records were lost to a full disk or revoked
+    # permissions, since the sink deliberately fails open rather than turning an
+    # audit outage into a server outage.
+    #
+    # Reported from here, beside the logging snapshot, because auditing is a
+    # server-level concern rather than a service one: the configuration comes
+    # from the lifespan context and the counters from the process-wide logger,
+    # and neither names an SDK. A server that has not enabled auditing reports
+    # ``None``, which is the same answer as a host that never adopted it — and
+    # that is the correct report in both cases.
+    audit_status = get_audit_config(ctx)
+    if audit_status is not None:
+        audit_status = dict(audit_status)
+        audit_logger = get_audit_logger()
+        audit_status["active"] = audit_logger.active
+        if audit_logger.active:
+            audit_status["stats"] = audit_logger.stats
+
     return {
         "server_name": get_server_name(ctx),
         "server_id": get_server_id(ctx),
         "status": "running",
         "configuration": configuration,
         "logging": logging_status,
+        "audit": audit_status,
         "connections": connection_status,
     }

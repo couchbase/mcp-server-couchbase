@@ -212,6 +212,8 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_MCP_TRANSPORT`                   | Transport mode (stdio/http/sse)                                                                                                                          | `stdio`                                                        |
 | `CB_MCP_HOST`                        | Server host (HTTP/SSE modes)                                                                                                                             | `127.0.0.1`                                                    |
 | `CB_MCP_PORT`                        | Server port (HTTP/SSE modes). Defaults to each server's own port when unset (`operational`: `8000`, `operational-insights`: `8001`) — set explicitly only to override. | `8000` (`operational`) / `8001` (`operational-insights`) |
+| `CB_MCP_WORKERS`                     | Number of server worker processes for the `http` transport. Values above 1 use more CPU cores, run in stateless HTTP mode, cannot be combined with `CB_MCP_CONFIRMATION_REQUIRED_TOOLS`, and write per-process log files (the supervisor and each worker) named `<base>.<host>.<pid>.<level>.log`. `operational` server only. | `1` |
+| `CB_MCP_STATELESS_HTTP`              | Handle each HTTP request without per-session state (`http` transport only). Cannot be combined with `CB_MCP_CONFIRMATION_REQUIRED_TOOLS`. | `true` when workers > 1, otherwise `false` |
 | `CB_MCP_DISABLED_TOOLS`              | Tools to disable (see [Disabling Tools](#disabling-tools))                                                                                               | None                                                           |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | Tools that require explicit user confirmation before execution (see [Elicitation/Confirmation for Tool Calls](#elicitationconfirmation-for-tool-calls))  | None                                                           |
 | `CB_MCP_LOG_LEVEL`                   | Logging level for the server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging))                                                        | `info`                                                         |
@@ -235,6 +237,14 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_MCP_OAUTH_MCP_BASE_URL`          | Public base URL of this server. When set, publishes RFC 9728 Protected Resource Metadata for PRM-aware clients                                            | None                                                           |
 | `CB_MCP_OAUTH_SCOPE_READ_LABEL`      | Override the OAuth scope label treated as 'read' access (advertised in PRM and matched against the token `scope`/`scp` claim). Use when your IdP can't emit the canonical form | `couchbase-mcp:read`                       |
 | `CB_MCP_OAUTH_SCOPE_WRITE_LABEL`     | Override the OAuth scope label treated as 'write' access; same semantics as the read label                                                                | `couchbase-mcp:write`                                          |
+| `CB_MCP_AUDIT_LOG_ENABLED`           | Enable audit logging — a separate sink from the `CB_MCP_LOG_*` operational logs, with a stable schema and its own retention (see [Auditing](#auditing))   | `false`                                                        |
+| `CB_MCP_AUDIT_LOG_SINKS`             | Comma-separated audit destinations: `console`, `file`, or both. `console` writes to **stderr** — never stdout, which carries the JSON-RPC protocol on stdio | `console`                                    |
+| `CB_MCP_AUDIT_LOG_FILE_PATH`         | Path to the audit log file. Required when `file` is in the sinks; the hostname and process id are inserted before the extension (`audit.log` → `audit.<host>.<pid>.log`), so containers sharing a volume never share a file. Mount a volume at this path to keep records after the container stops | None |
+| `CB_MCP_AUDIT_LOG_ROTATION_MAX_SIZE_MB` | Maximum size **in MB** the live audit file may reach before it rotates. `0` turns size-based rotation **off**                                          | `10` (10 MB)                                                   |
+| `CB_MCP_AUDIT_LOG_ROTATION_INTERVAL` | Age the live audit file may reach before it rotates, as `<value><unit>` where the unit is `d` (24 hours) or `w` (7 days) — e.g. `1d`, `30d`, `8w`. `0` turns interval-based rotation **off** | `1d`                         |
+| `CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS` | Rotated backups retained per audit file, excluding the live file; they are gzipped. Bounds one file, not the directory: each container start creates a new file with its own backups | `10`                   |
+| `CB_MCP_AUDIT_LOG_TOOL_ARGS`         | Record tool argument values. **Off by default** — there is no redaction in this release, so enabling it writes arguments verbatim, including full document bodies | `false`                                                |
+| `CB_MCP_AUDIT_LOG_DISABLED_EVENTS`   | Audit events to suppress: comma-separated numeric event ids (e.g. `61490,61491`), or a file with one id per line. Only filterable events can be suppressed | None                                            |
 | `EMBEDDING_PROVIDER`                 | Embedding provider for `run_vector_query` / `run_vector_search`: one of `couchbase`, `openai`, `cohere`, `voyage`, `bedrock`. Unset disables both tools' embedding step until configured. | None                                                           |
 | `EMBEDDING_MODEL`                    | Model name/ID for the configured embedding provider                                                                                                       | None                                                           |
 | `EMBEDDING_API_KEY`                  | API key for the configured provider. Not used by `bedrock` (uses the AWS credential chain / `EMBEDDING_AWS_*` instead)                                    | None                                                           |
@@ -384,6 +394,8 @@ When a listed tool is invoked:
 - If the client supports elicitation, the user is prompted to confirm before execution.
 - If the client does not support elicitation, the tool executes without confirmation for backward compatibility.
 
+Confirmation needs an MCP session, so it cannot be combined with stateless HTTP (`CB_MCP_STATELESS_HTTP=true`, or `CB_MCP_WORKERS` above 1). The server refuses to start with that combination rather than running the listed tools unconfirmed.
+
 #### MCP Client Configuration Example
 
 ```json
@@ -420,6 +432,63 @@ The server logs to `stderr` by default. Logging is configured with the `CB_MCP_L
 - **Server-config snapshot** — with the `file` sink active, a one-shot record is written as JSON to a dedicated `mcp_server_config.log.json` file (derived from `CB_MCP_LOG_FILE`), overwritten each start, so support always has the current config even after other logs rotate.
 
 For more details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/logging.html).
+
+### Health Check
+
+With `CB_MCP_TRANSPORT=http`, the server answers `GET /health` with `{"status": "ok", "server": "<server>"}` on the same port as the MCP endpoint. It is a liveness check: it confirms the server is up and serving HTTP, does not connect to the cluster, and needs no authentication even when OAuth is enabled. It is not available on `stdio`, which has no HTTP listener.
+
+Kubernetes:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8000
+  initialDelaySeconds: 5
+  periodSeconds: 10
+```
+
+Docker Compose (the image has no `curl`, so the check uses Python):
+
+```yaml
+healthcheck:
+  test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+  interval: 10s
+  timeout: 5s
+  retries: 3
+```
+
+Use port `8001` for the `operational-insights` server, or whatever `CB_MCP_PORT` is set to. If `CB_MCP_HOST` is not `0.0.0.0`, make sure the probe can reach that address.
+
+### Auditing
+
+Audit logging records **who did what, and whether it was allowed** — a different question from the operational logs, which record what went wrong. It is off by default and enabled with the `CB_MCP_AUDIT_*` variables in the [Environment Variables](#environment-variables) table.
+
+Records are JSON Lines, one immutable record per line, in the same field vocabulary as Couchbase Server and Sync Gateway.
+
+- **`CB_MCP_AUDIT_LOG_ENABLED` / `CB_MCP_AUDIT_LOG_SINKS` / `CB_MCP_AUDIT_LOG_FILE_PATH`** — enabling auditing alone writes to the console (stderr). A container that keeps records needs `CB_MCP_AUDIT_LOG_SINKS=file` and a path. Selecting the file sink without a path leaves the server running, with the console sink if one was also selected, and an error in the log.
+- **Mount a volume at the audit path.** The audit file is written inside the container like any other file, so without a volume the records are destroyed when the container is removed — which defeats the purpose of keeping them. This matters more than it does for logs: the records are meant to outlive the process.
+- **One file per container.** The container's hostname and process id are inserted before the extension (`audit.log` → `audit.3f2a91c4b7de.1.log`). The hostname is what makes this safe: this image's `ENTRYPOINT` is exec form, so the server is **PID 1 in every container**, and a name built from the pid alone would give every container sharing a volume the same `audit.1.log` — interleaved lines and rotation races that silently destroy records. Docker assigns each container a distinct hostname by default. If you override `--hostname` to the same value on two containers **and** share one volume between them, give each its own subdirectory instead. Consolidating the files is the operator's job.
+- **Retention is per file, not per deployment.** `CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS` bounds the backups of *one* audit file. Each new container is a new hostname and so a new file with its own backups, and nothing prunes the files of containers that have exited. On a long-lived mounted volume, total usage grows with the number of container starts — size it accordingly, or sweep old `audit.*.log*` files yourself.
+- **Rotation and compression.** Size and age are independent triggers and either can be switched off with `0`: `CB_MCP_AUDIT_LOG_ROTATION_MAX_SIZE_MB` caps the live file's size, `CB_MCP_AUDIT_LOG_ROTATION_INTERVAL` caps its age, and whichever falls due first rotates it. Rotated files are named with the UTC rotation time and **gzipped** (`audit.3f2a91c4b7de.1.log.20261006T091422481503Z.gz`), which is what keeps a months-long retention window affordable on a mounted volume; the live file stays plain text so `docker exec ... tail -f` still works.
+- **Filtering** — `CB_MCP_AUDIT_LOG_DISABLED_EVENTS` turns read noise down, taking numeric event ids (e.g. `61490,61491`). Write and security events cannot be disabled; an attempt to do so is refused with a warning.
+- **`CB_MCP_AUDIT_LOG_TOOL_ARGS`** — off by default, and warns at startup when enabled. There is no redaction in this release, so arguments are written verbatim, including full document bodies.
+- **Fail-open** — if the audit file cannot be written, the server keeps serving and records are dropped and counted. `get_server_configuration_status` reports the live `written` / `dropped` / `write_errors` counters.
+
+Auditing applies to **both** servers. Each has its own Tier-2 event block, so an id names the server that emitted it: operational uses `0xF000` (61440), `operational-insights` `0x10000` (65536). The two share the core block `0xE000` (57344) for lifecycle, session, authorization and guardrail events.
+
+```bash
+docker run --rm \
+  -e CB_CONNECTION_STRING=couchbases://your-cluster \
+  -e CB_USERNAME=user -e CB_PASSWORD=password \
+  -e CB_MCP_AUDIT_LOG_ENABLED=true \
+  -e CB_MCP_AUDIT_LOG_SINKS=file \
+  -e CB_MCP_AUDIT_LOG_FILE_PATH=/audit/audit.log \
+  -e CB_MCP_AUDIT_LOG_ROTATION_INTERVAL=1d \
+  -e CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS=90 \
+  -v "$(pwd)/audit:/audit" \
+  couchbase/mcp-server-couchbase:latest
+```
 
 ### OAuth 2.1 Authorization
 

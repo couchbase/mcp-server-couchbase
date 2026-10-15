@@ -305,6 +305,8 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_TRANSPORT` | `--transport` | Transport mode: `stdio`, `http`, `sse` | `stdio` |
 | `CB_MCP_HOST` | `--host` | Host for HTTP/SSE transport modes | `127.0.0.1` |
 | `CB_MCP_PORT` | `--port` | Port for HTTP/SSE transport modes | `8000` |
+| `CB_MCP_WORKERS` | `--workers` | Number of server worker processes for the `http` transport. Values above 1 run in stateless HTTP mode (see [Multiple Workers](#multiple-workers)) | `1` |
+| `CB_MCP_STATELESS_HTTP` | `--stateless-http` | Handle each HTTP request without per-session state. Only honored with `http`; cannot be combined with confirmation-required tools (see [Multiple Workers](#multiple-workers)) | `true` when workers > 1, otherwise `false` |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Elicitation/Confirmation Required Tools](#elicitationconfirmation-for-tool-calls)) | None |
 | `CB_MCP_MAX_QUERY_RESULT_SIZE` | `--max-query-result-size` | Maximum size **in bytes** of a query tool's result. Rows are streamed from the cluster and reading stops once the budget is reached; the response then reports `truncated: true` along with a `truncation` object explaining what happened. Applies to `run_sql_plus_plus_query` (operational) and `operational_insights_run_query_sync` / `operational_insights_get_async_query_results` (Operational Insights). Values above `1048576` (1 MB) or below `1024` (1 kB) are clamped with a startup warning | `15360` (15 kB) |
@@ -329,6 +331,14 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_OAUTH_MCP_BASE_URL` | `--oauth-mcp-base-url` | Public base URL of this server. When set, publishes RFC 9728 Protected Resource Metadata so PRM-aware clients can discover the IdP | None |
 | `CB_MCP_OAUTH_SCOPE_READ_LABEL` | `--oauth-scope-read-label` | Override the OAuth scope label treated as 'read' access (advertised in PRM and matched against the token's `scope`/`scp` claim). Use when your IdP can't emit the canonical form | `couchbase-mcp:read` |
 | `CB_MCP_OAUTH_SCOPE_WRITE_LABEL` | `--oauth-scope-write-label` | Override the OAuth scope label treated as 'write' access; same semantics as the read label | `couchbase-mcp:write` |
+| `CB_MCP_AUDIT_LOG_ENABLED` | `--audit-log-enabled` | Enable audit logging — a separate sink from the `CB_MCP_LOG_*` operational logs, with a stable schema and its own retention (see [Auditing](#auditing)) | `false` |
+| `CB_MCP_AUDIT_LOG_SINKS` | `--audit-log-sinks` | Comma-separated audit destinations: `console`, `file`, or both. `console` writes to **stderr** — never stdout, which carries the JSON-RPC protocol on stdio | `console` |
+| `CB_MCP_AUDIT_LOG_FILE_PATH` | `--audit-log-file-path` | Path to the audit log file. Required when `file` is in the sinks; the hostname and process id are inserted before the extension (`audit.log` → `audit.<host>.<pid>.log`) | None |
+| `CB_MCP_AUDIT_LOG_ROTATION_MAX_SIZE_MB` | `--audit-log-rotation-max-size-mb` | Maximum size **in MB** the live audit file may reach before it rotates. `0` turns size-based rotation **off** | `10` (10 MB) |
+| `CB_MCP_AUDIT_LOG_ROTATION_INTERVAL` | `--audit-log-rotation-interval` | Age the live audit file may reach before it rotates, as `<value><unit>` where the unit is `d` (24 hours) or `w` (7 days) — e.g. `1d`, `30d`, `8w`. `0` turns interval-based rotation **off** | `1d` |
+| `CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS` | `--audit-log-retention-max-backups` | Rotated backups retained **per audit file**, excluding the live file. Backups are gzipped. `0` keeps none. This bounds one file, not the directory — see [Auditing](#auditing) | `10` |
+| `CB_MCP_AUDIT_LOG_TOOL_ARGS` | `--audit-log-tool-args` | Record tool argument values in the audit log. **Off by default** — there is no redaction in this release, so enabling it writes arguments verbatim, including full document bodies | `false` |
+| `CB_MCP_AUDIT_LOG_DISABLED_EVENTS` | `--audit-log-disabled-events` | Audit events to suppress: comma-separated numeric event ids (e.g. `61490,61491`), or a file with one id per line. Only filterable events can be suppressed | None |
 | `EMBEDDING_PROVIDER` | `--embedding-provider` | Embedding provider for `run_vector_query` / `run_vector_search`: one of `couchbase`, `openai`, `cohere`, `voyage`, `bedrock`. Unset disables both tools' embedding step until configured — see [Embedding Provider Configuration](#embedding-provider-configuration) | None |
 | `EMBEDDING_MODEL` | `--embedding-model` | Model name/ID for the configured embedding provider | None |
 | `EMBEDDING_API_KEY` | `--embedding-api-key` | API key for the configured provider. Not used by `bedrock` (uses the AWS credential chain / `EMBEDDING_AWS_*` instead) | None |
@@ -517,6 +527,8 @@ When a listed tool is invoked:
 - If the client supports elicitation, the user is prompted to confirm.
 - If the client does not support elicitation, the tool executes without confirmation for backward compatibility.
 
+Confirmation needs an MCP session, so it cannot be used with stateless HTTP (`--stateless-http`, or `--workers` above 1). The server refuses to start with that combination rather than running the listed tools unconfirmed.
+
 You can also check the version of the server using:
 
 ```bash
@@ -528,7 +540,7 @@ uvx couchbase-mcp-server --version
 The MCP server logs to `stderr` by default. Logging is configured with the `CB_MCP_LOG_*` variables listed in [Additional Configuration](#additional-configuration-for-mcp-server):
 
 - **`CB_MCP_LOG_LEVEL`** — how much is logged: `info` (the default) logs lifecycle events and tool invocations, `debug` adds verbose internal detail, and `off` disables all logging.
-- **`CB_MCP_LOG_SINKS`** — where logs go: `stderr` (the default), per-level rotating files (`file`), or both. With `file`, one file is written per level (for example `mcp_server.info.log` and `mcp_server.error.log`) at the path set by `CB_MCP_LOG_FILE`.
+- **`CB_MCP_LOG_SINKS`** — where logs go: `stderr` (the default), per-level rotating files (`file`), or both. With `file`, one file is written per level (for example `mcp_server.info.log` and `mcp_server.error.log`) at the path set by `CB_MCP_LOG_FILE`. With [multiple workers](#multiple-workers), each process's files also carry the host and process id (`mcp_server.<host>.<pid>.info.log`).
 - **Rotation size** — `CB_MCP_LOG_ROTATION_MAX_SIZE_MB` is the global size (**in MB**) at which each per-level file rotates. Override individual levels with `CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE_MB` (`ERROR`/`WARNING`/`INFO`/`DEBUG`), also **in MB**, which inherit the global when unset. A size of `0` (global or per-level) is invalid and falls back to the default (1 MB) with a startup warning. `CB_MCP_LOG_MAX_BYTES` (bytes) is **deprecated** but still honored for backward compatibility; it is ignored when `CB_MCP_LOG_ROTATION_MAX_SIZE_MB` is also set, and prints a deprecation warning at startup.
 - **Retention** — `CB_MCP_LOG_RETENTION_BACKUP_COUNT` sets how many rotated backups are kept per level (excluding the live file); the default of `1` preserves the previous behaviour. Override individual levels with `CB_MCP_LOG_<LEVEL>_RETENTION_BACKUP_COUNT` (`ERROR`/`WARNING`/`INFO`/`DEBUG`), which inherit the global value when unset. Set a count to `0` to keep only the live file for that level — it is still capped by the rotation size (reset on rollover rather than backed up).
 - **Server-config snapshot** — when the `file` sink is active, a one-shot record (OS, Python, dependency versions, transport, resolved logging config, and redacted server config) is written as JSON to a dedicated `mcp_server_config.log.json` file (derived from the `CB_MCP_LOG_FILE` base). It is overwritten on each start, so support always has the current config and it never scrolls out of a rotating log.
@@ -543,6 +555,65 @@ uvx couchbase-mcp-server --log-level=debug --log-sinks=file \
 ```
 
 For more details, see the [documentation](https://docs.couchbase.com/mcp-server/configuration/logging.html).
+
+### Auditing
+
+Audit logging answers a different question from the operational logs. Logs tell you **what went wrong**; the audit log tells you **who did what, and whether it was allowed**. It exists because the MCP server is the only layer that can answer either question about an agent: every request reaches the cluster as the single `CB_USERNAME` the server connects with, so Couchbase Server's own audit log cannot tell two callers apart — and decisions such as a scope denial, a read-only block or a declined confirmation never reach the cluster at all.
+
+Auditing is **off by default**. `CB_MCP_AUDIT_LOG_ENABLED=true` turns it on, writing to the console (stderr) unless `CB_MCP_AUDIT_LOG_SINKS` says otherwise. A deployment that keeps records sets `CB_MCP_AUDIT_LOG_SINKS=file` and a path in `CB_MCP_AUDIT_LOG_FILE_PATH`; selecting the file sink without a path leaves the server running — with the console sink if one was also selected, otherwise with auditing off — and an error in the log.
+
+Records are **JSON Lines** — one immutable record per line — using the same field vocabulary as Couchbase Server and Sync Gateway (`id`, `name`, `description`, `timestamp`, `real_userid`, `server`, `cid`, `outcome`, `reason`), so an existing audit pipeline gets one format across the estate.
+
+```json
+{"id":61522,"name":"document write","description":"A document write operation was requested through a tool","timestamp":"2026-09-29T09:14:22.418Z","real_userid":{"domain":"oauth","user":"agent-svc-7"},"server":{"version":"1.0.2","host":"mcp-01"},"cid":"9f2c...","outcome":"success","tool_name":"upsert_document_by_id","required_scope":"write","ks":"travel-sample.inventory.airline","cb_userid":"mcp_service"}
+```
+
+- **Identity** — `real_userid` records the *caller*, in one of three domains: `oauth` (the bearer token's subject), `local` (the OS process owner, on stdio), or `anonymous` (HTTP with OAuth disabled). Enabling auditing on HTTP without OAuth warns at startup, because every record then resolves to `anonymous`.
+- **Correlation** — `cid` groups every record produced by one request, so an authorization denial, a guardrail refusal and the eventual tool result join without matching on timestamps. There is deliberately **no session identifier**: MCP is moving to a stateless model in which connection identity must not be read as session continuity. For SQL++, the same `cid` is sent as the query's `client_context_id`, which Couchbase Server records as `clientContextId` — an exact join between the two logs.
+- **Events** — a fixed catalogue on numbered ID blocks: server lifecycle and configuration, session initialize, token rejected, scope check denied, read-only write blocked, confirmation declined or skipped, and one read/write pair per tool category (cluster, schema, document, query, index, performance, search, config). Adding a tool needs no new ID and no change to a SIEM rule. The full catalogue ships as `descriptor.json` inside the package.
+- **Filtering** — `CB_MCP_AUDIT_LOG_DISABLED_EVENTS` turns *read* noise down, taking numeric event ids (the id is the wire contract; event names are prose and may be reworded, so they are not accepted). Write and security events are **not filterable**: an attempt to disable one is refused with a warning, so the record of who changed what cannot be switched off by configuration.
+- **Rotation** — two independent triggers, and either may be switched off with `0`. `CB_MCP_AUDIT_LOG_ROTATION_MAX_SIZE_MB` rotates the live file when it grows past a size; `CB_MCP_AUDIT_LOG_ROTATION_INTERVAL` rotates it when it grows older than an age (`1d`, `30d`, `1w`, `8w`). Whichever falls due first rotates the file, and with both off the file simply keeps growing. The interval clock is anchored to the live file, not to startup, so a server that was down over the weekend rolls the stale file away rather than appending to it.
+- **Retention and compression** — `CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS` keeps that many rotated files beside the live one; `0` keeps none, truncating the live file at each rotation. Backups are named with the UTC rotation time (`audit.<host>.<pid>.log.20261006T091422481503Z.gz`) and **gzipped**, which matters because audit retention is measured in months — JSON Lines compresses roughly ten to one. The live file is deliberately left uncompressed so `tail -f` and `grep` still work during an incident.
+- **Per-writer files** — the hostname and process id are inserted before the extension (`audit.log` → `audit.<host>.<pid>.log`), because a stdio deployment runs one server process per client and a shared rotating file would interleave and corrupt records. The hostname matters in containers: the published image's `ENTRYPOINT` is exec form, so the server is PID 1 in every container and a pid-only name would collide across containers sharing a volume.
+- **Retention is per file** — the backup count bounds the rotated copies of *one* audit file. Every process, and so every stdio session and every restart, writes a new file with its own backups, and nothing prunes the files of processes that have exited. Total disk use therefore grows with the number of server starts; size the volume accordingly or sweep old `audit.*.log*` files.
+- **Fail-open** — if the audit file cannot be written, the server keeps serving and the records are dropped and counted rather than turning an audit outage into a server outage. `get_server_configuration_status` reports the live `written` / `dropped` / `write_errors` counters, and `dropped` is the only way to discover that records were lost.
+- **Tool arguments** — recorded only when `CB_MCP_AUDIT_LOG_TOOL_ARGS` is enabled, which warns at startup. There is no redaction in this release, so arguments are written verbatim, including the full document bodies passed to document-write tools.
+
+Auditing applies to **both** servers. Each has its own Tier-2 event block, so an id names the server that emitted it: operational uses `0xF000` (61440), Operational Insights `0x10000` (65536). The two share the core block `0xE000` (57344) for lifecycle, session, authorization and guardrail events.
+
+```bash
+# Audit to the console (stderr) — no path needed
+uvx couchbase-mcp-server --audit-log-enabled=true
+
+# Audit to a file: daily rotation, 10 gzipped backups, both by default
+uvx couchbase-mcp-server --audit-log-enabled=true \
+  --audit-log-sinks=file --audit-log-file-path=/var/log/cb-mcp/audit.log
+
+# 90 days of daily files, with no size limit on any of them
+uvx couchbase-mcp-server --audit-log-enabled=true \
+  --audit-log-sinks=file --audit-log-file-path=/var/log/cb-mcp/audit.log \
+  --audit-log-rotation-max-size-mb=0 \
+  --audit-log-rotation-interval=1d \
+  --audit-log-retention-max-backups=90
+
+# ~100 MB of records, ~20 MB on disk once gzipped
+uvx couchbase-mcp-server --audit-log-enabled=true \
+  --audit-log-sinks=file --audit-log-file-path=/var/log/cb-mcp/audit.log \
+  --audit-log-rotation-max-size-mb=10 \
+  --audit-log-rotation-interval=0 \
+  --audit-log-retention-max-backups=9
+
+# One file, never rotated — keep everything
+uvx couchbase-mcp-server --audit-log-enabled=true \
+  --audit-log-sinks=file --audit-log-file-path=/var/log/cb-mcp/audit.log \
+  --audit-log-rotation-max-size-mb=0 --audit-log-rotation-interval=0 \
+  --audit-log-retention-max-backups=0
+
+# Turn down read noise, keeping every write and security event
+uvx couchbase-mcp-server --audit-log-enabled=true \
+  --audit-log-sinks=file --audit-log-file-path=/var/log/cb-mcp/audit.log \
+  --audit-log-disabled-events="61490,61491"   # document read, query read
+```
 
 ### Client Specific Configuration
 
@@ -834,6 +905,35 @@ uvx couchbase-mcp-server \
 ```
 
 The server will be available on <http://localhost:8000/mcp>. This can be used in MCP clients supporting streamable http transport mode such as Cursor.
+
+### Multiple Workers
+
+One server process uses at most about one CPU core. To use more cores, run several worker processes behind the same host and port:
+
+```bash
+uvx couchbase-mcp-server \
+  --connection-string='<couchbase_connection_string>' \
+  --username='<database_username>' \
+  --password='<database_password>' \
+  --transport=http \
+  --workers=4
+```
+
+A good starting point is the number of CPU cores available to the server. With more than one worker:
+
+- The `http` transport is required.
+- The server runs in stateless HTTP mode, because a client's requests can reach different workers. You can also set `--stateless-http=true` on a single worker, for example when several replicas sit behind a load balancer without sticky sessions.
+- `--confirmation-required-tools` cannot be used, since confirmation needs a session (see [Elicitation/Confirmation for Tool Calls](#elicitationconfirmation-for-tool-calls)).
+- Every process writes its own log files, named with the host and process id, for example `mcp_server.<host>.<pid>.info.log`: one set for the supervisor that starts the workers, and one per worker. A restarted worker starts a new set of files.
+- The [Operational Insights server](#operational-insights-server) supports only one worker, because its async query handles are held in process memory.
+
+### Health Check
+
+In HTTP mode the server also answers `GET /health` (for example <http://localhost:8000/health>) with `{"status": "ok", "server": "operational"}`. Use it for container liveness probes and load-balancer health checks:
+
+- It reports that the server process is up and serving HTTP. It does not connect to the cluster, so a cluster outage does not make healthy containers restart.
+- It needs no authentication, even when OAuth is enabled; it returns nothing beyond the server name.
+- It is served by every worker when running with `--workers`.
 
 ### MCP Client Configuration
 

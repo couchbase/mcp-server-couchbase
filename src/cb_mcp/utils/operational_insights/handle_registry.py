@@ -32,6 +32,9 @@ server's own request-id/handle strings and rebuilds the REST calls each time
 (no live object retained). This class is deliberately small and
 self-contained so such a backend can replace it behind the same method
 surface.
+
+Until then, the OI server's spec sets ``supports_multiple_workers=False``, so
+``--workers > 1`` is refused at startup instead of failing per call.
 """
 
 from __future__ import annotations

@@ -19,8 +19,7 @@ import pytest
 
 PERF_ENABLED = os.getenv("CB_MCP_PERF") == "1"
 
-# Keep the telemetry wrapper installed (realistic overhead) but stop the
-# reo-census SDK from sending a network event per tool call. Gated so a
+# Stop the reo-census SDK from sending anything during perf runs. Gated so a
 # root `pytest tests/` run doesn't leak these into unrelated tests.
 if PERF_ENABLED:
     os.environ.setdefault("DO_NOT_TRACK", "1")

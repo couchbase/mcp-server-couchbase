@@ -47,8 +47,14 @@ from cb_mcp.utils.logging import configure_logging
 # "couchbase" root, which belongs to the SDK.
 EXPECTED_LOGGER_NAMES = {
     # shared
+    "cb_mcp.audit.config": "couchbase.mcp.audit.config",
+    "cb_mcp.audit.emitter": "couchbase.mcp.audit",
+    "cb_mcp.audit.identity": "couchbase.mcp.audit.identity",
+    "cb_mcp.audit.middleware": "couchbase.mcp.audit.middleware",
+    "cb_mcp.audit.sink": "couchbase.mcp.audit.sink",
     "cb_mcp.auth": "couchbase.mcp.auth",
     "cb_mcp.core.app": "couchbase.mcp.core.app",
+    "cb_mcp.core.serving": "couchbase.mcp.core.serving",
     "cb_mcp.tool_registration": "couchbase.mcp.tool_registration",
     "cb_mcp.utils.cli": "couchbase.mcp.utils.cli",
     "cb_mcp.utils.config": "couchbase.mcp.utils.config",

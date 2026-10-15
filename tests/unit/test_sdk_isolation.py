@@ -75,6 +75,7 @@ def _sdks_loaded_by(source: str) -> set[str]:
         "cb_mcp.core.contracts",
         "cb_mcp.core.spec",
         "cb_mcp.core.app",
+        "cb_mcp.core.serving",
         "cb_mcp.utils.context",
         # The package __init__ re-exports from .context, so importing
         # *anything* from cb_mcp.utils used to drag the Couchbase SDK in.
