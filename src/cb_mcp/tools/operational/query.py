@@ -23,11 +23,6 @@ from ...utils.operational.query_utils import (
     evaluate_query_plan,
     extract_plan_from_explain_results,
 )
-from ...utils.query_limits import (
-    collect_rows_within_budget,
-    max_query_result_size_for,
-)
-from ...utils.responses import tool_success
 from ...utils.sqlpp import safe_ident
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.query")
@@ -89,15 +84,9 @@ def get_schema_for_collection(
         if num_sample_values is not None:
             query += f' WITH {{"num_sample_values": {num_sample_values}}}'
         result = run_sql_plus_plus_query(ctx, bucket_name, scope_name, query)
-        rows = result["rows"]
         # Result is a list of list of schemas. We convert it to a list of schemas.
-        if rows:
-            schema["schema"] = rows[0]
-        # INFER returns one row, so the budget should never bite here; say so
-        # if it somehow does rather than presenting a partial schema as whole.
-        if result.get("truncated"):
-            schema["truncated"] = True
-            schema["truncation"] = result["truncation"]
+        if result:
+            schema["schema"] = result[0]
         logger.info(
             f"Retrieved schema for {format_keyspace(bucket_name, scope_name, collection_name)}"
         )
@@ -167,14 +156,8 @@ def run_sql_plus_plus_query(
     scope_name: str,
     query: str,
     named_parameters: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Run a SQL++ query on a scope and return the result rows.
-
-    Returns {"success": True, "rows": [...], "row_count": N, "truncated": bool}.
-    When "truncated" is true the result is incomplete: reading stopped at the
-    configured byte budget and the remaining rows were never fetched. They
-    cannot be retrieved by calling again — narrow the query instead. A
-    "truncation" object then carries the byte counts and an explanation.
+) -> list[dict[str, Any]]:
+    """Run a SQL++ query on a scope and return the results as a list of JSON objects.
 
     The query will be run on the specified scope in the specified bucket.
     The query should use collection names directly without bucket/scope prefixes, as the scope context is automatically set.
@@ -298,6 +281,7 @@ def run_sql_plus_plus_query(
             f"(write_blocked={block_query_writes})"
         )
 
+        results = []
         # Reached only for read-only queries (or when writes are allowed).
         # Forward named parameters only when provided so existing callers that
         # pass none keep the exact previous behaviour.
@@ -307,23 +291,12 @@ def run_sql_plus_plus_query(
             if named_parameters is not None
             else scope.query(query, **options)
         )
-        # The SDK's QueryResult streams rows, so this stops reading — and stops
-        # the cluster sending — once the budget is spent, rather than buffering
-        # a result set of unknown size.
-        bounded = collect_rows_within_budget(
-            result,
-            limit_bytes=max_query_result_size_for(ctx),
-            service="operational",
-        )
+        for row in result:
+            results.append(row)
         logger.info(
-            f"SQL++ query in {bucket_name}.{scope_name} returned "
-            f"{bounded.row_count} row(s) (truncated={bounded.truncated})"
+            f"SQL++ query in {bucket_name}.{scope_name} returned {len(results)} row(s)"
         )
-        return tool_success(
-            rows=bounded.rows,
-            row_count=bounded.row_count,
-            **bounded.as_envelope_fields(),
-        )
+        return results
     except Exception as e:
         logger.error(f"Error running query: {e!s}", exc_info=True)
         raise
@@ -357,7 +330,7 @@ def explain_sql_plus_plus_query(
         explain_statement,
     )
 
-    plan = extract_plan_from_explain_results(explain_results["rows"])
+    plan = extract_plan_from_explain_results(explain_results)
     plan_evaluation = evaluate_query_plan(plan)
 
     return {

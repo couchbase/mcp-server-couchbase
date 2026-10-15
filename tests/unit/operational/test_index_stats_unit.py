@@ -7,6 +7,12 @@ Covers:
 - get_index_stats filter-hierarchy validation and error propagation.
 - get_index_stats rejects Capella connections up front, before any cluster
   connection or REST call.
+- resolve_management_endpoints / resolve_query_endpoints: the SDK-reported
+  path (dedup, unusable entries) and the connection-string fallback (scheme
+  to port, IPv6 bracketing, host-less strings).
+- fetch_index_stats_from_rest_api's fan-out across several index nodes: one
+  node per request, results kept apart, and a slow or absent node reported
+  without discarding the rest.
 """
 
 from __future__ import annotations
@@ -14,7 +20,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 from typing import ClassVar
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -22,9 +28,11 @@ from cb_mcp.tools.operational.index import get_index_stats
 from cb_mcp.utils.operational.index_utils import (
     _parse_index_nodes,
     build_stats_path,
+    fetch_index_stats_from_rest_api,
     format_stats_keyspace_part,
     parse_index_stats_key,
     resolve_management_endpoints,
+    resolve_query_endpoints,
 )
 
 SETTINGS = {
@@ -417,6 +425,444 @@ class TestResolveManagementEndpoints:
         assert resolve_management_endpoints(cluster, "couchbases://host1") == [
             "host1:18091"
         ]
+
+
+class TestFanOutAcrossIndexNodes:
+    """fetch_index_stats_from_rest_api queries every index node, not one.
+
+    ``/api/v1/stats`` is served by an individual indexer and reports only the
+    indexes that node holds, so a single call never describes the cluster --
+    an index on another node is simply absent, with no error to notice. The
+    fan-out is what makes the answer cluster-wide, and it is the part a
+    single-node setup cannot exercise.
+
+    ``TestGetIndexStats`` above covers the reshaping that happens *after*
+    this, with the whole fetch stubbed out; these tests drive the fetch
+    itself, stubbing only node discovery and the HTTP client, so no cluster
+    is needed.
+    """
+
+    @staticmethod
+    def _node(name: str, *urls: str) -> dict:
+        """One discovered index node: its key, and the addresses to try in order."""
+        return {"node": name, "stats_urls": list(urls)}
+
+    @staticmethod
+    def _response(status: int = 200, payload: dict | None = None) -> MagicMock:
+        """A mock httpx.Response that mimics .status_code/.raise_for_status/.json."""
+        response = MagicMock()
+        response.status_code = status
+        response.json.return_value = {} if payload is None else payload
+        if status >= 400:
+            response.raise_for_status.side_effect = RuntimeError(f"HTTP {status}")
+        else:
+            response.raise_for_status.return_value = None
+        return response
+
+    def _fetch(self, nodes, get_side_effect, **kwargs):
+        """Run the fan-out over *nodes* with httpx.Client.get stubbed.
+
+        Returns ``(result, urls_requested)`` so a test can assert on what came
+        back *and* on which addresses were actually called -- the ordering of
+        a node's candidate addresses is only observable through the latter.
+        """
+        requested: list[str] = []
+
+        def get(url, **_kwargs):
+            requested.append(url)
+            outcome = get_side_effect(url)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        client = MagicMock()
+        client.get = MagicMock(side_effect=get)
+        client_cm = MagicMock()
+        client_cm.__enter__.return_value = client
+        client_cm.__exit__.return_value = False
+
+        with (
+            patch(
+                "cb_mcp.utils.operational.index_utils.discover_index_nodes",
+                return_value=nodes,
+            ),
+            patch(
+                "cb_mcp.utils.operational.index_utils.httpx.Client",
+                return_value=client_cm,
+            ),
+        ):
+            result = fetch_index_stats_from_rest_api(
+                SimpleNamespace(),
+                "couchbase://a",
+                "Administrator",
+                "password",
+                **kwargs,
+            )
+        return result, requested
+
+    def test_every_node_is_queried_and_kept_apart(self):
+        """Three nodes, three requests, three separate entries.
+
+        A partitioned index reports only the partitions stored locally, so
+        merging the bodies would double-count; each node's raw body is kept
+        under its own key.
+        """
+        nodes = [
+            self._node("a:8091", "http://a:9102/api/v1/stats"),
+            self._node("b:8091", "http://b:9102/api/v1/stats"),
+            self._node("c:8091", "http://c:9102/api/v1/stats"),
+        ]
+        bodies = {
+            "http://a:9102/api/v1/stats": {"test:idx": {"items_count": 1}},
+            "http://b:9102/api/v1/stats": {"test:idx": {"items_count": 2}},
+            "http://c:9102/api/v1/stats": {"test:idx": {"items_count": 3}},
+        }
+        (per_node, not_hosted, failures), requested = self._fetch(
+            nodes, lambda url: self._response(payload=bodies[url])
+        )
+
+        assert len(requested) == 3
+        assert sorted(per_node) == ["a:8091", "b:8091", "c:8091"]
+        assert [per_node[n]["test:idx"]["items_count"] for n in sorted(per_node)] == [
+            1,
+            2,
+            3,
+        ]
+        assert not_hosted == []
+        assert failures == []
+
+    def test_one_unreachable_node_does_not_discard_the_others(self):
+        """A partial answer is still an answer, and it names what was missed.
+
+        Raising here would turn one flaky indexer into no stats at all, which
+        is the opposite of what querying every node is for.
+        """
+        nodes = [
+            self._node("a:8091", "http://a:9102/api/v1/stats"),
+            self._node("b:8091", "http://b:9102/api/v1/stats"),
+            self._node("c:8091", "http://c:9102/api/v1/stats"),
+        ]
+
+        def get(url):
+            if "b:" in url:
+                return RuntimeError("connection refused")
+            return self._response(payload={"test:idx": {"items_count": 7}})
+
+        (per_node, not_hosted, failures), _ = self._fetch(nodes, get)
+
+        assert sorted(per_node) == ["a:8091", "c:8091"]
+        assert not_hosted == []
+        assert [f["node"] for f in failures] == ["b:8091"]
+        assert "connection refused" in failures[0]["error"]
+
+    def test_a_404_marks_the_node_not_hosted_rather_than_failed(self):
+        """The two partial-answer categories are not the same thing.
+
+        A 404 is the indexer answering that it does not hold this keyspace --
+        a definitive reply. Folding it in with transport failures would report
+        a healthy node as unreachable.
+        """
+        nodes = [
+            self._node("a:8091", "http://a:9102/api/v1/stats"),
+            self._node("b:8091", "http://b:9102/api/v1/stats"),
+        ]
+
+        def get(url):
+            if "b:" in url:
+                return self._response(status=404)
+            return self._response(payload={"test:idx": {"items_count": 7}})
+
+        (per_node, not_hosted, failures), _ = self._fetch(nodes, get)
+
+        assert sorted(per_node) == ["a:8091"]
+        assert not_hosted == ["b:8091"]
+        assert failures == []
+
+    def test_a_404_stops_that_node_without_trying_its_other_address(self):
+        """A definitive "not here" ends the node; the alternate address cannot help.
+
+        Both addresses reach the same indexer, so retrying could only replace
+        a clear 404 with a connection error against a second address.
+        """
+        nodes = [
+            self._node(
+                "a:8091",
+                "http://external:9102/api/v1/stats",
+                "http://internal:9102/api/v1/stats",
+            ),
+            self._node("b:8091", "http://b:9102/api/v1/stats"),
+        ]
+
+        def get(url):
+            if "external" in url:
+                return self._response(status=404)
+            return self._response(payload={"test:idx": {"items_count": 7}})
+
+        (_per_node, not_hosted, failures), requested = self._fetch(nodes, get)
+
+        assert "http://internal:9102/api/v1/stats" not in requested
+        assert not_hosted == ["a:8091"]
+        assert failures == []
+
+    def test_a_node_falls_back_to_its_second_address(self):
+        """A transport failure, unlike a 404, is worth retrying elsewhere.
+
+        A node can advertise an external and an internal address; only one may
+        be routable from here, so the first failing must not condemn the node.
+        """
+        nodes = [
+            self._node(
+                "a:8091",
+                "http://external:9102/api/v1/stats",
+                "http://internal:9102/api/v1/stats",
+            )
+        ]
+
+        def get(url):
+            if "external" in url:
+                return RuntimeError("no route to host")
+            return self._response(payload={"test:idx": {"items_count": 7}})
+
+        (per_node, _not_hosted, failures), requested = self._fetch(nodes, get)
+
+        assert requested == [
+            "http://external:9102/api/v1/stats",
+            "http://internal:9102/api/v1/stats",
+        ]
+        assert per_node["a:8091"]["test:idx"]["items_count"] == 7
+        assert failures == []
+
+    def test_every_node_failing_raises_rather_than_returning_empty(self):
+        """No stats at all is an error, not an empty success.
+
+        An empty mapping would reshape into a successful-looking response
+        describing no indexes, which reads as "this cluster has none".
+        """
+        nodes = [
+            self._node("a:8091", "http://a:9102/api/v1/stats"),
+            self._node("b:8091", "http://b:9102/api/v1/stats"),
+        ]
+        with pytest.raises(RuntimeError, match="every index node"):
+            self._fetch(nodes, lambda _url: RuntimeError("connection refused"))
+
+    def test_every_node_denying_the_name_raises_its_own_error(self):
+        """All-404 means the name is wrong, which is not "the cluster is down".
+
+        Distinguished so the message can point at the bucket/scope/collection
+        or index name instead of sending the caller to check connectivity.
+        """
+        nodes = [
+            self._node("a:8091", "http://a:9102/api/v1/stats"),
+            self._node("b:8091", "http://b:9102/api/v1/stats"),
+        ]
+        with pytest.raises(RuntimeError, match="does not exist"):
+            self._fetch(
+                nodes,
+                lambda _url: self._response(status=404),
+                bucket_name="nosuch",
+            )
+
+    def test_no_index_nodes_raises_before_any_request(self):
+        """Discovery finding nothing is its own error, reported up front."""
+        with pytest.raises(RuntimeError, match="No index-service nodes"):
+            self._fetch([], lambda _url: self._response())
+
+
+class TestEndpointResolversShareOneShape:
+    """The management and query resolvers are the same function twice over.
+
+    Both ping one service, dedup the remotes it reports, and otherwise fall
+    back to the connection string's hosts on a scheme-chosen default port.
+    They are parametrized together so a fix applied to one and forgotten in
+    the other fails here -- the duplication is in the source, so it has to be
+    in the test or only one copy stays honest.
+
+    ``TestResolveManagementEndpoints`` above already covers the happy path and
+    the TLS fallback for management; this class covers what neither resolver
+    had: the fallback's own edges, and every query-resolver case.
+    """
+
+    #: (resolver, service key in the ping report, plain port, TLS port)
+    RESOLVERS: ClassVar = [
+        pytest.param(
+            resolve_management_endpoints, "management", 8091, 18091, id="mgmt"
+        ),
+        pytest.param(resolve_query_endpoints, "query", 8093, 18093, id="query"),
+    ]
+
+    @staticmethod
+    def _cluster(report):
+        """A stand-in cluster whose ping returns *report* as JSON.
+
+        Pass ``None`` to make ping raise instead, which is the other way the
+        SDK can leave the resolver with nothing to go on.
+        """
+        if report is None:
+
+            def ping(*_args, **_kwargs):
+                raise RuntimeError("management service unreachable")
+        else:
+
+            def ping(*_args, **_kwargs):
+                return SimpleNamespace(as_json=lambda: json.dumps(report))
+
+        return SimpleNamespace(ping=ping)
+
+    @pytest.mark.parametrize(("resolver", "service", "plain", "tls"), RESOLVERS)
+    def test_plain_scheme_falls_back_to_the_plain_port(
+        self, resolver, service, plain, tls
+    ):
+        """The counterpart to the TLS fallback, pinned as its own subject.
+
+        The existing plain-port assertion rides along on the ping-raises test,
+        so a change to the scheme check would be reported as an exception-path
+        failure rather than as the port regression it is.
+        """
+        cluster = self._cluster({})
+        assert resolver(cluster, "couchbase://host1") == [f"host1:{plain}"]
+
+    @pytest.mark.parametrize(("resolver", "service", "plain", "tls"), RESOLVERS)
+    def test_scheme_match_is_case_insensitive(self, resolver, service, plain, tls):
+        """The resolver lowercases before testing the scheme, so uppercase is TLS.
+
+        A connection string is not normalised before it reaches here, and URL
+        schemes are case-insensitive, so ``COUCHBASES://`` has to select the
+        TLS port like its lowercase spelling does.
+        """
+        cluster = self._cluster({})
+        assert resolver(cluster, "COUCHBASES://host1") == [f"host1:{tls}"]
+
+    @pytest.mark.parametrize(("resolver", "service", "plain", "tls"), RESOLVERS)
+    def test_ipv6_host_is_rebracketed_in_the_fallback(
+        self, resolver, service, plain, tls
+    ):
+        """An IPv6 literal survives the strip-then-restore round trip.
+
+        ``extract_hosts_from_connection_string`` returns a hostname bare, so
+        ``[::1]`` arrives here as ``::1``; the result is going into a URL, so
+        ``_bracket_ipv6`` has to put the brackets back or the port reads as
+        another address group. Both halves are tested elsewhere -- this pins
+        their composition, which is where an unbracketed host would appear.
+        """
+        cluster = self._cluster({})
+        assert resolver(cluster, "couchbase://[::1]:11210") == [f"[::1]:{plain}"]
+
+    @pytest.mark.parametrize(("resolver", "service", "plain", "tls"), RESOLVERS)
+    def test_ipv6_fallback_handles_several_hosts(self, resolver, service, plain, tls):
+        """Each host is bracketed on its own, including alongside a named one."""
+        cluster = self._cluster({})
+        assert resolver(
+            cluster, "couchbases://[2001:db8::1]:11207,node2.example.test:11207"
+        ) == [f"[2001:db8::1]:{tls}", f"node2.example.test:{tls}"]
+
+    @pytest.mark.parametrize(("resolver", "service", "plain", "tls"), RESOLVERS)
+    def test_hostless_connection_string_yields_no_endpoints(
+        self, resolver, service, plain, tls
+    ):
+        """No hosts to fall back to means no endpoints -- not a bare port.
+
+        Formatting the default port with an empty host would produce
+        ``":8091"``, which reads as a usable endpoint and fails later as a
+        connection error pointing at the cluster rather than at the empty
+        connection string. Callers iterate the result, so [] surfaces as
+        "nothing to query" instead.
+        """
+        cluster = self._cluster({})
+        assert resolver(cluster, "couchbase://") == []
+
+    @pytest.mark.parametrize(("resolver", "service", "plain", "tls"), RESOLVERS)
+    def test_ping_failure_falls_back_rather_than_raising(
+        self, resolver, service, plain, tls
+    ):
+        """A ping that raises is caught and logged, not propagated.
+
+        The fallback exists precisely for the case where the SDK cannot say
+        where the service listens, so an unreachable service must degrade to
+        the default port rather than fail the caller's tool call.
+        """
+        cluster = self._cluster(None)
+        assert resolver(cluster, "couchbase://host1") == [f"host1:{plain}"]
+
+    @pytest.mark.parametrize(("resolver", "service", "plain", "tls"), RESOLVERS)
+    def test_duplicate_remotes_are_reported_once(self, resolver, service, plain, tls):
+        """Ping can name the same remote twice; the caller fans out per node.
+
+        A duplicate would mean querying one node twice and reporting it as
+        two, which matters most for the query resolver -- /admin/vitals and
+        /admin/active_requests answer per node, so every entry returned here
+        becomes a separate request and a separate row.
+        """
+        cluster = self._cluster(
+            {
+                "services": {
+                    service: [
+                        {"remote": "10.0.1.11:9102"},
+                        {"remote": "10.0.1.11:9102"},
+                        {"remote": "10.0.1.12:9102"},
+                    ]
+                }
+            }
+        )
+        assert resolver(cluster, "couchbase://10.0.1.11") == [
+            "10.0.1.11:9102",
+            "10.0.1.12:9102",
+        ]
+
+    @pytest.mark.parametrize(("resolver", "service", "plain", "tls"), RESOLVERS)
+    def test_entries_without_a_remote_are_skipped(self, resolver, service, plain, tls):
+        """An endpoint the SDK reports with no (or an empty) remote is unusable.
+
+        Keeping it would put None or "" into a URL; skipping it leaves the
+        endpoints the SDK could actually name, which is still better than
+        discarding the whole report and falling back.
+        """
+        cluster = self._cluster(
+            {
+                "services": {
+                    service: [
+                        {"remote": None},
+                        {"remote": ""},
+                        {"state": "ok"},
+                        {"remote": "10.0.1.12:9102"},
+                    ]
+                }
+            }
+        )
+        assert resolver(cluster, "couchbase://10.0.1.11") == ["10.0.1.12:9102"]
+
+    @pytest.mark.parametrize(("resolver", "service", "plain", "tls"), RESOLVERS)
+    def test_report_without_usable_entries_falls_back(
+        self, resolver, service, plain, tls
+    ):
+        """A report whose every entry is unusable is as good as no report.
+
+        The fallback is guarded on the collected endpoints rather than on
+        whether the ping succeeded, so a service block that yields nothing
+        still reaches the connection string.
+        """
+        cluster = self._cluster({"services": {service: [{"remote": None}]}})
+        assert resolver(cluster, "couchbase://host1") == [f"host1:{plain}"]
+
+    @pytest.mark.parametrize(("resolver", "service", "plain", "tls"), RESOLVERS)
+    def test_other_services_in_the_report_are_ignored(
+        self, resolver, service, plain, tls
+    ):
+        """Only this resolver's own service block is read.
+
+        The ping is already limited to one service type, so a report carrying
+        another is not expected -- but reading the wrong block would silently
+        return the wrong ports, so the key lookup is pinned here.
+        """
+        other = "query" if service == "management" else "management"
+        cluster = self._cluster(
+            {
+                "services": {
+                    service: [{"remote": "10.0.1.11:9999"}],
+                    other: [{"remote": "10.0.1.11:1111"}],
+                }
+            }
+        )
+        assert resolver(cluster, "couchbase://10.0.1.11") == ["10.0.1.11:9999"]
 
 
 class TestNotHostedReporting:

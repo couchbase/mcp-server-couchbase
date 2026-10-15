@@ -120,22 +120,50 @@ class TestTruncation:
 
 
 class TestOversizedSingleRow:
-    """One row larger than the whole budget is kept, and flagged."""
+    """The budget is a hard ceiling: a row that would overrun it is dropped."""
 
-    def test_first_row_is_kept_even_when_it_overruns(self) -> None:
-        """Returning [] here would read as "no matches" rather than "too big"."""
-        big = {"blob": "x" * 50_000}
-        bounded = _collect([big], 1024)
-        assert bounded.rows == [big]
+    def test_oversized_first_row_is_not_returned(self) -> None:
+        """An operator capping the payload at N bytes must get at most N bytes.
+
+        Returning the row anyway was the earlier behaviour, on the grounds
+        that an empty list reads like "no matches". The flag carries that
+        distinction instead — see ``truncation_message`` — so the limit can
+        stay absolute.
+        """
+        bounded = _collect([{"blob": "x" * 50_000}], 1024)
+        assert bounded.rows == []
         assert bounded.truncated is True
-        # The documented exception: this is the one case where the returned
-        # payload exceeds the budget.
-        assert bounded.bytes_returned > 1024
+        assert bounded.bytes_returned <= 1024
 
     def test_oversized_row_followed_by_more(self) -> None:
         bounded = _collect([{"blob": "x" * 50_000}, ROW], 1024)
-        assert bounded.row_count == 1
+        assert bounded.row_count == 0
         assert bounded.truncated is True
+
+    def test_rows_before_an_oversized_one_are_kept(self) -> None:
+        """Only the overrunning row is dropped, not what preceded it."""
+        bounded = _collect([ROW, {"blob": "x" * 50_000}], ROW_BYTES + 1024)
+        assert bounded.rows == [ROW]
+        assert bounded.truncated is True
+
+    def test_empty_truncated_is_distinguishable_from_empty_complete(self) -> None:
+        """Zero rows means two opposite things; only ``truncated`` separates them.
+
+        A caller that reads emptiness as "no matches" would report the wrong
+        answer for a collection whose rows are merely too wide.
+        """
+        too_wide = _collect([{"blob": "x" * 50_000}], 1024)
+        no_matches = _collect([], 1024)
+
+        assert too_wide.row_count == no_matches.row_count == 0
+        assert too_wide.truncated is True
+        assert no_matches.truncated is False
+
+    def test_zero_row_message_does_not_read_as_an_empty_result(self) -> None:
+        """ "Returned the first 0 row(s)" would describe the wrong failure."""
+        message = _collect([{"blob": "x" * 50_000}], 1024).truncation_message()
+        assert "not an empty result" in message
+        assert "too wide" in message
 
 
 class TestLaziness:
@@ -192,31 +220,53 @@ class TestRowMeasurement:
 
 
 class TestClamping:
+    """Only an upper bound applies; small values are honoured as given."""
+
     def test_above_maximum_is_clamped(self, caplog) -> None:
         with caplog.at_level(logging.WARNING):
             assert (
-                clamp_max_query_result_size(5 * 1024 * 1024)
+                clamp_max_query_result_size(8 * 1024 * 1024)
                 == MAX_MAX_QUERY_RESULT_SIZE
             )
-        assert "exceeds the maximum" in caplog.text
+        assert "exceeds" in caplog.text
 
-    def test_below_minimum_is_clamped(self, caplog) -> None:
-        with caplog.at_level(logging.WARNING):
-            assert clamp_max_query_result_size(10) == MIN_MAX_QUERY_RESULT_SIZE
-        assert "below the minimum" in caplog.text
+    def test_maximum_is_four_megabytes(self) -> None:
+        assert MAX_MAX_QUERY_RESULT_SIZE == 4 * 1024 * 1024
+
+    def test_there_is_no_floor(self) -> None:
+        assert MIN_MAX_QUERY_RESULT_SIZE == 0
 
     @pytest.mark.parametrize(
-        "value",
-        [
-            MIN_MAX_QUERY_RESULT_SIZE,
-            DEFAULT_MAX_QUERY_RESULT_SIZE,
-            MAX_MAX_QUERY_RESULT_SIZE,
-        ],
+        "value", [0, 1, 512, 1024, 15360, MAX_MAX_QUERY_RESULT_SIZE]
     )
-    def test_in_range_values_pass_through(self, value: int, caplog) -> None:
+    def test_values_up_to_the_maximum_pass_through(self, value: int, caplog) -> None:
+        """A tiny budget is a valid choice, not a misconfiguration to correct."""
         with caplog.at_level(logging.WARNING):
             assert clamp_max_query_result_size(value) == value
         assert caplog.text == ""
+
+
+class TestNoLimitConfigured:
+    """Unset means no truncation — the behaviour before the budget existed."""
+
+    def test_there_is_no_default_budget(self) -> None:
+        assert DEFAULT_MAX_QUERY_RESULT_SIZE is None
+
+    def test_none_returns_every_row(self) -> None:
+        bounded = _collect([ROW] * 1000, None)
+        assert bounded.row_count == 1000
+        assert bounded.truncated is False
+
+    def test_none_never_truncates_however_wide_the_rows(self) -> None:
+        bounded = _collect([{"blob": "x" * 500_000}], None)
+        assert bounded.row_count == 1
+        assert bounded.truncated is False
+
+    def test_zero_is_a_real_budget_not_an_absent_one(self) -> None:
+        """0 means zero bytes, which is distinct from 'no limit'."""
+        bounded = _collect([ROW] * 5, 0)
+        assert bounded.row_count == 0
+        assert bounded.truncated is True
 
 
 class TestSettingsLookup:
@@ -225,23 +275,34 @@ class TestSettingsLookup:
 
     def test_none_uses_the_default(self) -> None:
         assert (
-            max_query_result_size_from({"max_query_result_size": None})
+            max_query_result_size_from(
+                {"operational_insights_query_result_max_size": None}
+            )
             == DEFAULT_MAX_QUERY_RESULT_SIZE
         )
 
     def test_configured_value_is_honoured(self) -> None:
-        assert max_query_result_size_from({"max_query_result_size": 20_480}) == 20_480
+        assert (
+            max_query_result_size_from(
+                {"operational_insights_query_result_max_size": 20_480}
+            )
+            == 20_480
+        )
 
     def test_out_of_range_value_is_clamped_on_read(self) -> None:
         """An embedding host never passes through the CLI validator."""
         assert (
-            max_query_result_size_from({"max_query_result_size": 99_999_999})
+            max_query_result_size_from(
+                {"operational_insights_query_result_max_size": 99_999_999}
+            )
             == MAX_MAX_QUERY_RESULT_SIZE
         )
 
     def test_non_numeric_value_falls_back(self) -> None:
         assert (
-            max_query_result_size_from({"max_query_result_size": "abc"})
+            max_query_result_size_from(
+                {"operational_insights_query_result_max_size": "abc"}
+            )
             == DEFAULT_MAX_QUERY_RESULT_SIZE
         )
 
@@ -256,7 +317,7 @@ class TestContextLookup:
         ctx = SimpleNamespace(
             request_context=SimpleNamespace(
                 lifespan_context=SimpleNamespace(
-                    settings={"max_query_result_size": 20_480}
+                    settings={"operational_insights_query_result_max_size": 20_480}
                 )
             )
         )
