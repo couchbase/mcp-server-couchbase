@@ -292,25 +292,15 @@ def parse_disabled_events(raw: str | None) -> set[int]:
 def _resolve_size_mb(raw: float | None) -> float:
     """Rotation size in MB. ``0`` is off; an unusable value falls back loudly.
 
-    Unusable means negative, not finite, or too large to convert to bytes.
-    The last two matter because ``click.FloatRange(min=0)`` does not reject
-    them: ``float()`` accepts every spelling of the IEEE-754 specials (``nan``,
-    ``inf``, ``Infinity``) and overflows large literals such as ``1e400`` to
-    infinity, and a range check stops neither — every comparison against NaN is
-    false, and infinity satisfies ``>= 0``. Such a value reached the conversion
-    to bytes in :func:`resolve_audit_config` and killed the server on startup
-    with ``ValueError`` or ``OverflowError`` (DA-2230), when the documented
-    behaviour for a bad audit setting is to warn and carry on.
+    ``click.FloatRange(min=0)`` passes ``nan`` and ``inf`` through — NaN fails
+    every comparison and infinity satisfies ``>= 0`` — so they reached the
+    conversion to bytes and killed startup.
 
-    ``math.isfinite`` is tested on ``size_mb`` first for that reason: NaN would
-    pass both comparisons after it. It is then tested a second time on the
-    *product*, which is the only place an overflow can be created: ``1e308`` is
-    a perfectly good float, but ``1e308 * BYTES_PER_MB`` saturates to infinity,
-    so checking the input alone would not catch it. Checking the product rather
-    than comparing against a precomputed ceiling keeps the bound exact and
-    self-maintaining — it is by definition the largest input that converts —
-    and leaves no machine limit written down as if it were a chosen size. With
-    it in force, the conversion in :func:`resolve_audit_config` cannot raise.
+    Hence the order: ``isfinite`` first, because NaN would pass the two checks
+    after it. The product is tested because that is where an overflow is
+    created — ``1e308`` is a fine float, but ``1e308 * BYTES_PER_MB`` is not —
+    and testing it beats a precomputed ceiling, which would hard-code a machine
+    limit as if it were a chosen size.
     """
     if raw is None:
         return DEFAULT_AUDIT_ROTATION_MAX_SIZE_MB
