@@ -6,7 +6,7 @@ Thank you for your interest in contributing to the Couchbase MCP Server! This gu
 
 These are the ground rules we review every contribution against. Reading this section first will save you review round-trips.
 
-1. **Discuss before you build.** Open an issue before writing code for any new tool or significant change — a GitHub issue for external contributors, or a JIRA ticket for Couchbase internal contributors (see the [issue template](.github/JIRA_ISSUE_TEMPLATE.md)). For new tools, we want to design the tool interface (name, parameters, return shape, annotations) together *before* implementation — a tool's interface is a public API for MCP clients and is hard to change later.
+1. **Discuss before you build.** Open an issue before writing code for any new tool or significant change — a GitHub issue for external contributors, or a CBSE for Couchbase internal contributors (see the [issue template](.github/JIRA_ISSUE_TEMPLATE.md)). Internal contributions follow a further process before any code is written: see [For Couchbase internal contributors](#for-couchbase-internal-contributors). For new tools, we want to design the tool interface (name, parameters, return shape, annotations) together *before* implementation — a tool's interface is a public API for MCP clients and is hard to change later.
    - Use a **single issue per class of related tools** (e.g., one issue proposing a set of Search tools) rather than one issue per tool.
    - Explain **why the tools are needed** with as detailed a use case as possible — what an AI agent cannot accomplish today, and how it would use the proposed tools.
 2. **Keep pull requests small and focused.** One tool, one bug fix, or one refactor per PR. Small PRs get reviewed and merged much faster. If your change is large, split it into a series of smaller PRs and mention the plan in the issue.
@@ -15,6 +15,26 @@ These are the ground rules we review every contribution against. Reading this se
 5. **Don't break the managed MCP interfaces.** The `cb_mcp` package is shared with managed (hosted) MCP server implementations via the host-agnostic contracts in `src/cb_mcp/core/contracts.py` (notably `ClusterProvider`). See [Host-agnostic design](#host-agnostic-design) below.
 6. **Test your changes — and show it.** New code needs unit tests and, where it touches a live cluster, integration tests. PRs must include evidence of testing (see [Evidence of testing](#evidence-of-testing)).
 7. **Preserve backwards compatibility.** Tool names, parameters, return shapes, CLI flags, and environment variables are all public interfaces. Breaking changes need prior discussion in an issue.
+
+### For Couchbase internal contributors
+
+Internal contributions go through the CBSE process **before any code is written**. This exists so that a request is prioritised against the rest of the roadmap, and so that the solution is agreed before anyone spends time implementing it.
+
+1. **File a CBSE** capturing:
+   - the customer, and the environment it applies to;
+   - the use case **in the context of an agentic application**: what the agent is trying to do, and what it cannot do today;
+   - any existing workaround, and why it is not viable in the long term;
+   - the impact of not having the capability.
+
+   This is what lets the team judge how many customers are affected and how the request ranks against work already in the pipeline. A CBSE that describes an SDK capability without a customer use case cannot be prioritised.
+
+2. **Wait for priority and scope to be set.** A CBSE is picked up for a specific release. Priorities for a release are generally fixed once it is under way, so expect a request to land in a later release unless it is a P0 that a customer needs immediately.
+
+3. **Agree the solution in the linked IDEA ticket.** Every solution carries trade-offs and consequences for existing customers and for the product. That discussion happens before implementation rather than in review, so that effort is not spent twice.
+
+4. **Then implement**, and open the pull request linked to the CBSE. Engineering reviews the PR in the context of what the CBSE asked for.
+
+**Do not open a pull request before the CBSE has been approved.**
 
 ## 🚀 Development Setup
 
@@ -110,6 +130,8 @@ The `cb_mcp` package is reused by managed MCP server implementations, not just t
 - Provider configuration returned for status reporting must never include secrets (return `_configured` booleans instead).
 
 ### Tool design
+
+**Keep the tool set as small as the use case allows.** A large tool set is one of the primary challenges for an agent. Every tool consumes tokens in the context window, dilutes the agent's attention across more descriptions, and adds another opportunity for the agent to choose the wrong one. Before proposing a new tool, weigh those costs, and ask whether an existing tool could carry the capability as an optional parameter instead. Prefer the fewest tools that cover the use case without compromising it.
 
 New tools are the most common contribution. Before implementing any, open a single issue covering the class of related tools you're proposing, following the [issue template](.github/JIRA_ISSUE_TEMPLATE.md). The issue should include:
 
@@ -242,7 +264,7 @@ PRs without testing evidence will be sent back for it before review.
 
 ## 🤝 Submitting Changes
 
-1. **Push your branch** and create a pull request. If you are working from a fork, follow [these instructions](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork).
+1. **Push your branch** and create a pull request. If you are working from a fork, follow [these instructions](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork). Internal contributors: the CBSE must be approved and its solution agreed before the pull request is opened (see [For Couchbase internal contributors](#for-couchbase-internal-contributors)).
 2. **Keep it small**: if the diff is doing more than one thing, split it.
 3. **Fill in the PR description** — the [PR template](.github/PULL_REQUEST_TEMPLATE.md) is pre-populated when you open a PR:
    - What does this change do, and which issue does it resolve?
@@ -253,7 +275,9 @@ PRs without testing evidence will be sent back for it before review.
 
 ### PR Checklist
 
-- [ ] Linked to an issue (required for new tools). The issue can be on JIRA (preferred for internal contributors) or GitHub.
+- [ ] Linked to an issue (required for new tools). External contributors: a GitHub issue. Internal contributors: an approved CBSE, with the solution agreed in its linked IDEA ticket.
+- [ ] The issue states the customer use case in the context of an agentic application, not only the capability
+- [ ] The tool set grows by as little as the use case allows (could an existing tool take a parameter instead?)
 - [ ] Uses the Couchbase SDK (REST fallback justified in the description, if any)
 - [ ] Works on both Capella and self-managed Couchbase Server
 - [ ] No changes to `cb_mcp.core` contracts / managed MCP interfaces (or discussed first)
