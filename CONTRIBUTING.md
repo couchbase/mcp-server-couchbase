@@ -169,8 +169,43 @@ Keep the dependency footprint small — all servers ship in one distribution via
 - Import a server's SDK only from that server's own modules, never from shared code.
 - Give every runtime dependency an upper bound, and comment any bound that is tighter than the next major (see `rapidfuzz` in `pyproject.toml`, pinned below the release that dropped Python 3.10).
 - Dependencies needed by only one opt-in feature belong in an optional extra (like `bedrock-embeddings`), not the core list.
-- New dependencies must be permissively licensed and actively maintained.
+- New dependencies must be actively maintained and use a permitted license (see [Dependency licenses](#dependency-licenses) below).
 - Dependency bumps arrive via Dependabot; don't mix unrelated version bumps into a feature PR.
+
+##### Dependency licenses
+
+The rules below apply to every new dependency, including any new transitive dependencies it brings in, and to existing dependencies whose license changes on upgrade. State each new package's license in your PR. A package offered under more than one license must say whether *all* of them apply (X **and** Y) or you can choose one (X **or** Y).
+
+**✅ Permitted.** Use freely; most only require keeping the copyright notice and license text.
+
+- *Permissive / public domain*: CC0 1.0, Unlicense, WTFPL, Beerware
+- *Notice*:
+  - Apache-2.0, Apache Software License 1.1
+  - MIT / X11, ISC
+  - BSD-2-Clause, BSD-3-Clause, Eclipse Distribution License
+  - Python Software Foundation License
+  - zlib/libpng, bzip2, Boost Software License
+  - AFL 2.1 / 3.0, Artistic License 1.0 / 2.0
+  - CC BY (Attribution), Community Data License Agreement – Permissive 2.0
+  - Microsoft Public License (MS-PL), NCSA, OpenSSL, PHP License 2.02 / 3.0
+  - Unicode License, W3C Software License, ZPL
+  - Lucent Public License 1.02, FreeType, libjpeg-turbo, LibTIFF, TCP Wrappers, X.Net, Zend Engine License 2.00, Autodesk DWF Toolkit
+
+**⚠️ Needs approval before use.** These are reciprocal licenses: you can use the code freely, but you must publish any changes you make to it. Raise the dependency in your issue first. Couchbase product management and legal must approve it before the PR can merge, so expect a delay.
+
+- MPL 1.0 / 1.1 / 2.0
+- EPL 1.0 / 2.0, CPL 1.0, IPL 1.0
+- CDDL 1.0 / 1.1, Apple Public Source License 2.0, Ruby License
+- GNU LGPL (any version) and GNU GPL 2.0 with Classpath Exception, only where the linking requirements can be met
+
+**⛔ Not accepted.** Choose an alternative. These are restrictive (copyleft) or source-available licenses:
+
+- GNU GPL (any version), AGPL, GNU LGPL where the linking requirements can't be met
+- CC BY-SA, CC BY-ND
+- Netscape Public License 1.0 / 1.1, OSL, QPL, Sleepycat, Sybase Open Watcom, Common Public Attribution License, BCL, qmail terms
+- Source-available licenses: Business Source License (BSL), Server Side Public License (SSPL), Elastic License, Commons Clause, Redis Source Available License, and Microsoft Ms-LPL / Ms-LRL / Ms-RSL
+
+If a license isn't listed here, treat it as needing approval and ask in the issue.
 
 #### Backwards compatibility
 
