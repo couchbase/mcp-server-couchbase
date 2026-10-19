@@ -5,7 +5,8 @@ Coverage map:
 - sink parsing: console, file, both, invalid, empty
 - selecting the file sink without a path is reported and degrades, not fatal
 - a path with no file sink is warned about
-- rotation size: 0 is off, negative falls back
+- rotation size: 0 is off, negative falls back, and a value that cannot be
+  converted to bytes (nan, inf, or large enough to overflow) falls back too
 - rotation interval parsing: units, 0, invalid
 - retention: 0 honoured, negative falls back
 - MB to bytes conversion
@@ -20,6 +21,8 @@ Coverage map:
 from __future__ import annotations
 
 import logging
+import math
+import sys
 
 import pytest
 
@@ -192,6 +195,59 @@ def test_zero_rotation_size_turns_size_rotation_off(tmp_path, caplog):
 def test_negative_rotation_size_falls_back_with_a_warning(tmp_path, caplog):
     with caplog.at_level(logging.WARNING):
         config = _file_audit(tmp_path, rotation_max_size_mb=-5)
+    assert config.rotation_max_size_mb == 10.0
+    assert "falling back to the default" in caplog.text
+
+
+# DA-2230: click.FloatRange(min=0) accepts these — float() parses every spelling
+# of the IEEE-754 specials, and a range check cannot reject them because every
+# comparison against NaN is false and infinity satisfies >= 0. They reached the
+# int() conversion in resolve_audit_config and took the server down on startup.
+@pytest.mark.parametrize(
+    ("value", "label"),
+    [
+        (float("nan"), "nan"),
+        (float("inf"), "inf"),
+        (float("-inf"), "-inf"),
+        (float("1e400"), "1e400 overflows to inf when parsed"),
+        (1e308, "finite, but overflows once multiplied by BYTES_PER_MB"),
+        (1e307, "likewise finite"),
+        (1.8e302, "just above the conversion ceiling"),
+    ],
+)
+def test_unusable_rotation_size_falls_back_with_a_warning(
+    tmp_path, caplog, value, label
+):
+    """An unusable size is reported and replaced, never fatal (DA-2230).
+
+    The regression was a crash, so the assertion that matters most is that
+    resolve_audit_config returns at all.
+    """
+    with caplog.at_level(logging.WARNING):
+        config = _file_audit(tmp_path, rotation_max_size_mb=value)
+    assert config.rotation_max_size_mb == 10.0, label
+    assert config.max_bytes == int(10.0 * BYTES_PER_MB)
+    assert "falling back to the default" in caplog.text
+
+
+def test_largest_convertible_rotation_size_is_accepted(tmp_path, caplog):
+    """The bound is the overflow point itself, and it is inclusive.
+
+    Pinned so the guard cannot drift into rejecting sizes that convert
+    perfectly well — it exists to stop a crash, not to cap how large an audit
+    file may grow.
+    """
+    largest = sys.float_info.max / BYTES_PER_MB
+    with caplog.at_level(logging.WARNING):
+        config = _file_audit(tmp_path, rotation_max_size_mb=largest)
+    assert config.rotation_max_size_mb == largest
+    assert "falling back" not in caplog.text
+
+    # The next representable float above it does not convert, and falls back.
+    with caplog.at_level(logging.WARNING):
+        config = _file_audit(
+            tmp_path, rotation_max_size_mb=math.nextafter(largest, math.inf)
+        )
     assert config.rotation_max_size_mb == 10.0
     assert "falling back to the default" in caplog.text
 

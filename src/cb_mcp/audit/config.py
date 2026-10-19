@@ -23,6 +23,7 @@ is off. The server starts either way.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -289,11 +290,26 @@ def parse_disabled_events(raw: str | None) -> set[int]:
 
 
 def _resolve_size_mb(raw: float | None) -> float:
-    """Rotation size in MB. ``0`` is off; negative falls back with a warning."""
+    """Rotation size in MB. ``0`` is off; an unusable value falls back loudly.
+
+    ``click.FloatRange(min=0)`` passes ``nan`` and ``inf`` through — NaN fails
+    every comparison and infinity satisfies ``>= 0`` — so they reached the
+    conversion to bytes and killed startup.
+
+    Hence the order: ``isfinite`` first, because NaN would pass the two checks
+    after it. The product is tested because that is where an overflow is
+    created — ``1e308`` is a fine float, but ``1e308 * BYTES_PER_MB`` is not —
+    and testing it beats a precomputed ceiling, which would hard-code a machine
+    limit as if it were a chosen size.
+    """
     if raw is None:
         return DEFAULT_AUDIT_ROTATION_MAX_SIZE_MB
     size_mb = float(raw)
-    if size_mb < 0:
+    if (
+        not math.isfinite(size_mb)
+        or size_mb < 0
+        or not math.isfinite(size_mb * BYTES_PER_MB)
+    ):
         logger.warning(
             "Invalid audit rotation size %s MB; falling back to the default of "
             "%s MB. Use 0 to turn size-based rotation off.",
