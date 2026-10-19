@@ -267,7 +267,14 @@ def logging_options(*, default_log_file: str) -> Callable:
             envvar="CB_MCP_LOG_ROTATION_MAX_SIZE_MB",
             # Default None so the 1 MB default is applied only when neither this nor the
             # deprecated --log-max-bytes is set.
-            type=click.FloatRange(min=0),
+            #
+            # click.FLOAT, not FloatRange(min=0), here and on the four per-level
+            # overrides below: an unusable size is warned about and replaced in
+            # cb_mcp.utils.logging rather than aborting startup, which is what 0
+            # already does. The range check never caught nan or inf anyway --
+            # NaN fails every comparison and infinity satisfies >= 0 -- so both
+            # reached round() and killed the server (DA-2230).
+            type=click.FLOAT,
             default=None,
             help="Global maximum size in MB per-level log file before it rotates, "
             "inherited by every level unless overridden. Default is 1 MB. 0 is invalid "
@@ -291,7 +298,7 @@ def logging_options(*, default_log_file: str) -> Callable:
             "--log-error-rotation-max-size-mb",
             "log_error_rotation_max_size_mb",
             envvar="CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE_MB",
-            type=click.FloatRange(min=0),
+            type=click.FLOAT,
             default=None,
             help="Rotation size in MB for the ERROR log file. Overrides "
             "--log-rotation-max-size-mb for ERROR; inherits it when unset. 0 is invalid and "
@@ -301,7 +308,7 @@ def logging_options(*, default_log_file: str) -> Callable:
             "--log-warning-rotation-max-size-mb",
             "log_warning_rotation_max_size_mb",
             envvar="CB_MCP_LOG_WARNING_ROTATION_MAX_SIZE_MB",
-            type=click.FloatRange(min=0),
+            type=click.FLOAT,
             default=None,
             help="Rotation size in MB for the WARNING log file. Overrides "
             "--log-rotation-max-size-mb for WARNING; inherits it when unset. 0 is invalid "
@@ -311,7 +318,7 @@ def logging_options(*, default_log_file: str) -> Callable:
             "--log-info-rotation-max-size-mb",
             "log_info_rotation_max_size_mb",
             envvar="CB_MCP_LOG_INFO_ROTATION_MAX_SIZE_MB",
-            type=click.FloatRange(min=0),
+            type=click.FLOAT,
             default=None,
             help="Rotation size in MB for the INFO log file. Overrides "
             "--log-rotation-max-size-mb for INFO; inherits it when unset. 0 is invalid and "
@@ -321,7 +328,7 @@ def logging_options(*, default_log_file: str) -> Callable:
             "--log-debug-rotation-max-size-mb",
             "log_debug_rotation_max_size_mb",
             envvar="CB_MCP_LOG_DEBUG_ROTATION_MAX_SIZE_MB",
-            type=click.FloatRange(min=0),
+            type=click.FLOAT,
             default=None,
             help="Rotation size in MB for the DEBUG log file. Overrides "
             "--log-rotation-max-size-mb for DEBUG; inherits it when unset. 0 is invalid and "

@@ -11,7 +11,9 @@ afterwards via an autouse fixture, so tests don't bleed state into one another.
 from __future__ import annotations
 
 import logging
+import math
 import re
+import sys
 from logging.handlers import RotatingFileHandler
 from unittest.mock import patch
 
@@ -533,6 +535,49 @@ class TestPerLevelMaxBytes:
         per_level, warnings = logmod._resolve_per_level_max_bytes(2, None, {"ERROR": 0})
         assert per_level["ERROR"] == 2 * BYTES_PER_MB
         assert any("CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE_MB=0" in w for w in warnings)
+
+    # DA-2230: click.FLOAT lets these through to the resolver -- float() parses
+    # every spelling of the IEEE-754 specials, and 1e308 is finite but overflows
+    # once multiplied. All of them reached round() and crashed startup.
+    @pytest.mark.parametrize(
+        "value",
+        [float("nan"), float("inf"), float("1e400"), 1e308, 1e307, -5, -0.5],
+    )
+    def test_unusable_global_falls_back_to_default_with_warning(self, value):
+        per_level, warnings = logmod._resolve_per_level_max_bytes(value, None, {})
+        assert all(v == DEFAULT_LOG_MAX_BYTES for v in per_level.values())
+        assert any("CB_MCP_LOG_ROTATION_MAX_SIZE_MB" in w for w in warnings)
+
+    @pytest.mark.parametrize(
+        "value",
+        [float("nan"), float("inf"), float("1e400"), 1e308, 1e307, -5, -0.5],
+    )
+    def test_unusable_per_level_inherits_global_with_warning(self, value):
+        # Global 2 MB; an unusable ERROR override inherits it, like an invalid 0.
+        per_level, warnings = logmod._resolve_per_level_max_bytes(
+            2, None, {"ERROR": value}
+        )
+        assert per_level["ERROR"] == 2 * BYTES_PER_MB
+        assert all(v == 2 * BYTES_PER_MB for v in per_level.values())
+        assert any("CB_MCP_LOG_ERROR_ROTATION_MAX_SIZE_MB" in w for w in warnings)
+
+    def test_largest_convertible_size_is_still_accepted(self):
+        """The bound is the overflow point, not a cap on how large a log may be.
+
+        Pinned so the guard cannot drift into rejecting sizes that convert.
+        """
+        largest = sys.float_info.max / BYTES_PER_MB
+        per_level, warnings = logmod._resolve_per_level_max_bytes(largest, None, {})
+        assert all(
+            v == max(1, round(largest * BYTES_PER_MB)) for v in per_level.values()
+        )
+        assert warnings == []
+
+        per_level, warnings = logmod._resolve_per_level_max_bytes(
+            math.nextafter(largest, math.inf), None, {}
+        )
+        assert all(v == DEFAULT_LOG_MAX_BYTES for v in per_level.values())
+        assert any("CB_MCP_LOG_ROTATION_MAX_SIZE_MB" in w for w in warnings)
 
     def test_resolve_fractional_mb_rounds_to_bytes(self):
         # Fractional MB is allowed and rounded to the nearest whole byte.
