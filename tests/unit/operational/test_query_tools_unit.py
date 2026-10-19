@@ -13,10 +13,13 @@ statement to trigger a read-only block:
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from fastmcp import FastMCP
+from jsonschema import validate
 from lark_sqlpp import modifies_data, modifies_structure, parse_sqlpp
 
 from cb_mcp.tools.operational.query import (
@@ -150,6 +153,28 @@ class TestRunSqlPlusPlusQueryReadOnly:
 
         with pytest.raises(Exception, match="query timeout"):
             run_sql_plus_plus_query(ctx, "b", "s", "SELECT 1")
+
+
+class TestRunSqlPlusPlusQueryRawResults:
+    """SELECT RAW / VALUE returns bare JSON values, not objects (DA-2240)."""
+
+    def test_scalar_rows_pass_through(self) -> None:
+        ctx, _, scope = _make_ctx(read_only_mode=False)
+        scope.query.return_value = iter(["40-Mile Air", "Texas Wings", 7])
+
+        result = run_sql_plus_plus_query(
+            ctx, "b", "s", "SELECT RAW name FROM airline LIMIT 3"
+        )
+
+        assert result == ["40-Mile Air", "Texas Wings", 7]
+
+    def test_output_schema_accepts_non_object_items(self) -> None:
+        mcp = FastMCP("test")
+        mcp.tool(run_sql_plus_plus_query)
+        tool = asyncio.run(mcp.get_tool("run_sql_plus_plus_query"))
+
+        # Must not raise: strings/numbers/arrays are valid result items.
+        validate({"result": ["40-Mile Air", 3, [1, 2], {"a": 1}]}, tool.output_schema)
 
 
 class TestExplainSqlPlusPlusQuery:

@@ -185,6 +185,32 @@ async def test_run_sql_plus_plus_query_select() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_sql_plus_plus_query_select_raw() -> None:
+    """SELECT RAW returns bare values, which the output schema must accept (DA-2240)."""
+    bucket = require_test_bucket()
+    scope = get_test_scope()
+    collection = get_test_collection()
+
+    # COUNT(*) always yields exactly one row, even on an empty collection.
+    query = f"SELECT RAW COUNT(*) FROM `{collection}`"
+
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "run_sql_plus_plus_query",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "query": query,
+            },
+        )
+        assert not is_error_response(response), extract_payload(response)
+        payload = ensure_list(extract_payload(response))
+
+        assert len(payload) == 1
+        assert isinstance(payload[0], int)
+
+
+@pytest.mark.asyncio
 async def test_run_sql_plus_plus_query_with_limit() -> None:
     """Verify run_sql_plus_plus_query respects LIMIT clause."""
     bucket = require_test_bucket()
