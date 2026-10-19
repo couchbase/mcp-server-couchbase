@@ -141,6 +141,29 @@ def test_host_wires_the_couchbase_sdk_log_hook() -> None:
     assert level == logging.DEBUG
 
 
+@pytest.mark.parametrize("value", ["-5", "-0.5", "nan", "inf", "1e400"])
+def test_unusable_audit_rotation_size_does_not_abort_the_cli(value):
+    """An unusable audit rotation size reaches the resolver, not Click.
+
+    The option is ``click.FLOAT`` rather than ``FloatRange(min=0)`` so that a
+    bad value is warned about and replaced by ``_resolve_size_mb`` instead of
+    exiting 2 during argument parsing — a bad audit setting is reported without
+    preventing startup. Pinned here because the guarantee lives in the option's
+    *type*: restoring the range check would move the rejection back to Click
+    and make the server refuse to start, which the unit tests for
+    ``resolve_audit_config`` cannot see.
+    """
+    with patch("cb_mcp.core.app.FastMCP", return_value=MagicMock()):
+        result = CliRunner().invoke(
+            mcp_server.main,
+            ["--audit-log-rotation-max-size-mb", value],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Invalid value" not in result.output
+
+
 def _resolve_oauth_kwargs(**overrides):
     """Minimal OAuth-enabled kwargs for ``resolve_oauth`` (http + all JWT
     fields present), so only the scope-label behavior under test varies."""

@@ -490,11 +490,18 @@ audit_options = compose(
         "--audit-log-rotation-max-size-mb",
         "audit_log_rotation_max_size_mb",
         envvar="CB_MCP_AUDIT_LOG_ROTATION_MAX_SIZE_MB",
-        type=click.FloatRange(min=0),
+        # Deliberately click.FLOAT rather than FloatRange(min=0): a bad audit
+        # setting is reported and replaced, never fatal, so the range check is
+        # left to _resolve_size_mb, which warns and falls back to the default.
+        # FloatRange would reject a negative here with exit 2, before any audit
+        # code runs -- and it never caught nan or inf anyway, since NaN fails
+        # every comparison and infinity satisfies >= 0 (DA-2230).
+        type=click.FLOAT,
         default=None,
         help="Maximum size in MB the live audit file may reach before it rotates. "
         "Default is 10 MB. 0 turns size-based rotation off; combined with an "
-        "interval of 0 that gives a single unbounded file.",
+        "interval of 0 that gives a single unbounded file. An unusable value "
+        "falls back to the default with a startup warning.",
     ),
     click.option(
         "--audit-log-rotation-interval",
