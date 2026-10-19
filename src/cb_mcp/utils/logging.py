@@ -11,6 +11,7 @@ which is why nothing here imports an SDK.
 """
 
 import logging
+import math
 import os
 import sys
 from collections.abc import Callable, Mapping
@@ -153,6 +154,33 @@ def _per_level_path(base_path: str, level_name: str) -> str:
     return f"{root}.{level_name.lower()}{ext}"
 
 
+def _is_convertible_size_mb(size_mb: float) -> bool:
+    """True when a rotation size in MB converts to a usable byte count.
+
+    False for NaN, infinity, negatives, and finite values large enough that the
+    conversion to bytes overflows. Shared by the global and per-level resolvers
+    below so every ``CB_MCP_LOG_*_ROTATION_MAX_SIZE_MB`` applies one rule.
+
+    These reach the resolvers at all because the options are declared
+    ``click.FLOAT``: a bad logging setting is warned about and replaced rather
+    than aborting startup. ``FloatRange(min=0)`` would reject a negative with
+    exit 2 before any of this runs, and it never caught ``nan`` or ``inf``
+    anyway -- every comparison against NaN is false, and infinity satisfies
+    ``>= 0``, so both reached ``round()`` and killed the server.
+
+    ``math.isfinite`` is tested first for that reason: NaN passes every
+    comparison after it. The product is tested because that is where an
+    overflow is created -- ``1e308`` is a fine float, but
+    ``1e308 * BYTES_PER_MB`` is not -- and testing it beats a precomputed
+    ceiling, which would hard-code a machine limit as if it were a chosen size.
+    """
+    return (
+        math.isfinite(size_mb)
+        and size_mb >= 0
+        and math.isfinite(size_mb * BYTES_PER_MB)
+    )
+
+
 def _resolve_global_max_bytes(
     rotation_max_size_mb: float | None,
     max_bytes: int | None,
@@ -163,7 +191,8 @@ def _resolve_global_max_bytes(
     (MB) and takes precedence; ``max_bytes`` is the deprecated
     ``CB_MCP_LOG_MAX_BYTES`` (bytes), still honored for backward compatibility.
     A value of 0 (either variable) is invalid and falls back to
-    :data:`DEFAULT_LOG_MAX_BYTES`. Returns ``(bytes, warnings)``.
+    :data:`DEFAULT_LOG_MAX_BYTES`, as does any size
+    :func:`_is_convertible_size_mb` rejects. Returns ``(bytes, warnings)``.
     """
     warnings: list[str] = []
     if max_bytes is not None:
@@ -183,6 +212,13 @@ def _resolve_global_max_bytes(
             warnings.append(
                 "CB_MCP_LOG_ROTATION_MAX_SIZE_MB=0 is not a valid rotation size; "
                 f"falling back to the default of {DEFAULT_LOG_MAX_BYTES} bytes."
+            )
+            return DEFAULT_LOG_MAX_BYTES, warnings
+        if not _is_convertible_size_mb(rotation_max_size_mb):
+            warnings.append(
+                f"CB_MCP_LOG_ROTATION_MAX_SIZE_MB={rotation_max_size_mb} is not a "
+                "valid rotation size; falling back to the default of "
+                f"{DEFAULT_LOG_MAX_BYTES} bytes."
             )
             return DEFAULT_LOG_MAX_BYTES, warnings
         return max(1, round(rotation_max_size_mb * BYTES_PER_MB)), warnings
@@ -210,7 +246,8 @@ def _resolve_per_level_max_bytes(
     Resolves the effective global via :func:`_resolve_global_max_bytes`, then
     applies per-level ``CB_MCP_LOG_<LEVEL>_ROTATION_MAX_SIZE_MB`` overrides (in
     **MB**): a level absent from ``overrides_mb`` inherits the global, and a
-    level's 0 is invalid and falls back to inheriting the global. Returns the
+    level's 0 -- or any value :func:`_is_convertible_size_mb` rejects -- is
+    invalid and falls back to inheriting the global. Returns the
     ``{level: bytes}`` map for all levels plus human-readable warnings the caller
     should surface once the logger is wired.
     """
@@ -221,10 +258,20 @@ def _resolve_per_level_max_bytes(
     per_level: dict[str, int] = {}
     for lvl in _PER_LEVEL_FILE_LEVELS:
         size_mb = overrides_mb.get(lvl)
-        if size_mb:  # explicit, non-zero override (MB) -> convert to bytes
+        if size_mb and _is_convertible_size_mb(size_mb):
+            # explicit, non-zero, convertible override (MB) -> bytes
             per_level[lvl] = max(1, round(size_mb * BYTES_PER_MB))
             continue
-        if size_mb == 0:  # explicit 0 is invalid (None is silent)
+        if size_mb is not None and not _is_convertible_size_mb(size_mb):
+            # NaN, infinity, negative, or large enough to overflow the
+            # conversion. Truthy, so it would otherwise have been converted
+            # above and raised. Inherits the global, like an invalid 0.
+            warnings.append(
+                f"CB_MCP_LOG_{lvl}_ROTATION_MAX_SIZE_MB={size_mb} is not a valid "
+                "rotation size; falling back to the global rotation size "
+                f"({resolved_global_bytes} bytes)."
+            )
+        elif size_mb == 0:  # explicit 0 is invalid (None is silent)
             warnings.append(
                 f"CB_MCP_LOG_{lvl}_ROTATION_MAX_SIZE_MB=0 is not a valid rotation "
                 f"size; falling back to the global rotation size "
