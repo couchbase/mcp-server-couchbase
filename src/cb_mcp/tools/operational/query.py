@@ -156,8 +156,8 @@ def run_sql_plus_plus_query(
     scope_name: str,
     query: str,
     named_parameters: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
-    """Run a SQL++ query on a scope and return the results as a list of JSON objects.
+) -> list[Any]:
+    """Run a SQL++ query on a scope and return the results as a list of JSON values.
 
     The query will be run on the specified scope in the specified bucket.
     The query should use collection names directly without bucket/scope prefixes, as the scope context is automatically set.
