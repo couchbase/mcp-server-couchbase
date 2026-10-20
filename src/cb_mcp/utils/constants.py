@@ -145,6 +145,17 @@ DEFAULT_AUDIT_TOOL_ARGS = False
 # length and an audit retention window must be arithmetic, not calendrical.
 AUDIT_INTERVAL_UNIT_SECONDS = {"d": 86_400, "w": 604_800}
 
+# QE / development escape hatch. Setting this environment variable to a
+# positive number of seconds replaces the resolved rotation interval, so a
+# rotation that is documented in days can be observed in a test run that lasts
+# a minute. Deliberately environment-only and deliberately not a CLI flag: it
+# is not a supported operator setting, it does not appear in --help, and
+# enabling it emits a WARNING on every startup that names it. "0" and anything
+# unparseable leave the configured interval untouched.
+DEBUG_AUDIT_ROTATION_INTERVAL_SECONDS_ENV = (
+    "_CB_MCP_AUDIT_LOG_ROTATION_INTERVAL_SECONDS"
+)
+
 # OAuth Scopes
 # Tokens carrying SCOPE_READ may call read-only tools (including SQL++ query,
 # which is classified read-only at startup and runtime-gated by
