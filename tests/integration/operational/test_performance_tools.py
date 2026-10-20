@@ -264,7 +264,7 @@ async def test_get_queries_not_selective() -> None:
                 assert "statement" in first_item
                 assert (
                     "diff" in first_item
-                )  # difference between indexScan and resultCount
+                )  # difference between scanned rows and resultCount
 
     if skip_reason:
         pytest.skip(skip_reason)
