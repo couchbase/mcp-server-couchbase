@@ -609,13 +609,18 @@ def get_queries_not_selective(ctx: Context, limit: int = 10) -> list[dict[str, A
         limit: Number of queries to return (default: 10)
 
     Returns:
-        List of queries where index scans return significantly more documents than the final result
+        List of queries where scans (secondary index, primary index, or sequential)
+        return significantly more documents than the final result
     """
+    # Scans are logged under `indexScan` (secondary index) or `primaryScan`
+    # (primary index or sequential scan); a query only has the one its plan used.
     query = """
     SELECT statement,
-       AVG(phaseCounts.`indexScan` - resultCount) AS diff
+       AVG(IFMISSINGORNULL(phaseCounts.`indexScan`, 0)
+         + IFMISSINGORNULL(phaseCounts.`primaryScan`, 0) - resultCount) AS diff
     FROM system:completed_requests
-    WHERE phaseCounts.`indexScan` > resultCount
+    WHERE IFMISSINGORNULL(phaseCounts.`indexScan`, 0)
+        + IFMISSINGORNULL(phaseCounts.`primaryScan`, 0) > resultCount
     GROUP BY statement
     ORDER BY diff DESC
     LIMIT $limit

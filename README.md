@@ -149,7 +149,7 @@ Both tools embed query text using the model configured via [Embedding Provider C
 | `get_queries_with_large_result_count` | Get queries with the largest result counts |
 | `get_queries_using_primary_index` | Get queries that use a primary index (potential performance concern) |
 | `get_queries_not_using_covering_index` | Get queries that don't use a covering index |
-| `get_queries_not_selective` | Get queries that are not selective (index scans return many more documents than final result) |
+| `get_queries_not_selective` | Get queries that are not selective (scans — secondary index, primary index, or sequential — return many more documents than final result) |
 
 ### Query service health tools
 

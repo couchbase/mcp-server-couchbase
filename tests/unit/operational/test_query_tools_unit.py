@@ -26,6 +26,7 @@ from cb_mcp.tools.operational.query import (
     _blocked_write_kind,
     _run_query_tool_with_empty_message,
     explain_sql_plus_plus_query,
+    get_queries_not_selective,
     get_schema_for_collection,
     run_cluster_query,
     run_sql_plus_plus_query,
@@ -320,6 +321,37 @@ class TestRunQueryToolWithEmptyMessage:
             ctx, "SELECT * FROM x", limit=10, empty_message="No data"
         )
         assert result == [{"message": "No data", "results": []}]
+
+
+class TestGetQueriesNotSelective:
+    """DA-2239: scans logged under primaryScan (primary/sequential) must count."""
+
+    def test_query_counts_index_and_primary_scans(self, monkeypatch) -> None:
+        """The SQL++ sums indexScan and primaryScan so WHERE-clause queries are not dropped."""
+        captured: dict = {}
+
+        def fake_run(ctx, query, **kwargs):
+            captured["query"] = query
+            return []
+
+        monkeypatch.setattr(
+            "cb_mcp.tools.operational.query._run_query_tool_with_empty_message",
+            fake_run,
+        )
+        get_queries_not_selective(MagicMock(), limit=5)
+
+        # Only the WHERE clause decides which queries are listed, so assert on it
+        # alone: primaryScan also appears in the SELECT, which would mask a
+        # WHERE that still filters on indexScan only.
+        where = " ".join(
+            captured["query"].split("WHERE")[1].split("GROUP BY")[0].split()
+        )
+        assert "phaseCounts.`indexScan`" in where
+        assert "phaseCounts.`primaryScan`" in where
+        assert "> resultCount" in where
+        # Sub-keys (.GSI/.Seq) repeat the top-level count and must not be added.
+        assert ".GSI" not in captured["query"]
+        assert ".Seq" not in captured["query"]
 
 
 # Collection-expression query forms — ANY / SOME / EVERY / WITHIN / EXISTS used
