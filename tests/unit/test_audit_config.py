@@ -8,6 +8,8 @@ Coverage map:
 - rotation size: 0 is off, negative falls back, and a value that cannot be
   converted to bytes (nan, inf, or large enough to overflow) falls back too
 - rotation interval parsing: units, 0, invalid
+- the `_CB_MCP_...` seconds override: applied, announced, and ignored when
+  unset, zero, negative or unparseable
 - retention: 0 honoured, negative falls back
 - MB to bytes conversion
 - disabled-events parsing: ids only, files, comments, whitespace
@@ -28,12 +30,20 @@ import pytest
 
 from cb_mcp.audit.config import (
     ResolvedAuditConfig,
+    debug_interval_override,
     parse_audit_sinks,
     parse_disabled_events,
     parse_rotation_interval,
     resolve_audit_config,
 )
-from cb_mcp.utils.constants import BYTES_PER_MB
+from cb_mcp.utils.constants import (
+    BYTES_PER_MB,
+    DEBUG_AUDIT_ROTATION_INTERVAL_SECONDS_ENV,
+)
+
+#: Shorthand for the testing-only override; the real name is long enough to
+#: wrap every assertion that mentions it.
+DEBUG_INTERVAL_ENV = DEBUG_AUDIT_ROTATION_INTERVAL_SECONDS_ENV
 
 DAY = 86_400
 WEEK = 604_800
@@ -490,3 +500,75 @@ def test_as_dict_is_json_friendly_and_complete(tmp_path):
         "tool_args": True,
         "disabled_events": [61490],
     }
+
+
+# ---------------------------------------------------------------------------
+# the `_CB_MCP_...` seconds override (QE testing aid)
+# ---------------------------------------------------------------------------
+
+
+def test_debug_override_replaces_the_interval_with_seconds(
+    tmp_path, monkeypatch, caplog
+):
+    """The whole point: a 1d rotation becomes observable inside a test run."""
+    monkeypatch.setenv(DEBUG_INTERVAL_ENV, "5")
+    with caplog.at_level(logging.WARNING):
+        config = _file_audit(tmp_path, rotation_interval="1d")
+    assert config.rotation_interval_seconds == 5
+    assert config.rotation_interval == "5s"
+    assert config.rotation_interval_debug is True
+    # The operator is told, every startup, in terms that name the variable.
+    assert DEBUG_INTERVAL_ENV in caplog.text
+    assert "not a supported deployment setting" in caplog.text
+
+
+def test_debug_override_also_overrides_an_interval_that_was_turned_off(
+    tmp_path, monkeypatch
+):
+    """QE must be able to switch rotation on without editing the deployment."""
+    monkeypatch.setenv(DEBUG_INTERVAL_ENV, "2")
+    config = _file_audit(tmp_path, rotation_interval="0")
+    assert config.rotation_interval_seconds == 2
+    assert config.rotation_interval_debug is True
+
+
+def test_without_the_debug_variable_nothing_changes(tmp_path, monkeypatch):
+    monkeypatch.delenv(DEBUG_INTERVAL_ENV, raising=False)
+    config = _file_audit(tmp_path, rotation_interval="1d")
+    assert config.rotation_interval_seconds == DAY
+    assert config.rotation_interval == "1d"
+    assert config.rotation_interval_debug is False
+    assert "rotation_interval_debug_seconds" not in config.as_dict()
+
+
+@pytest.mark.parametrize("raw", ["0", "-1", "", "   ", "5s", "abc", "1.5"])
+def test_unusable_debug_values_leave_the_configured_interval_alone(
+    tmp_path, monkeypatch, caplog, raw
+):
+    """A typo in a testing knob must not change what the server does.
+
+    Turning rotation off already has a supported setting, so ``0`` and negatives
+    are refused here rather than given a second spelling.
+    """
+    monkeypatch.setenv(DEBUG_INTERVAL_ENV, raw)
+    with caplog.at_level(logging.WARNING):
+        config = _file_audit(tmp_path, rotation_interval="1d")
+    assert config.rotation_interval_seconds == DAY
+    assert config.rotation_interval_debug is False
+    if raw.strip():
+        assert DEBUG_INTERVAL_ENV in caplog.text
+
+
+def test_debug_override_reads_an_injected_environment():
+    assert debug_interval_override({DEBUG_INTERVAL_ENV: "7"}) == 7
+    assert debug_interval_override({}) is None
+
+
+def test_the_status_snapshot_shows_the_override_only_when_it_is_on(
+    tmp_path, monkeypatch
+):
+    """``get_server_configuration_status`` must not hide a five-second rotation."""
+    monkeypatch.setenv(DEBUG_INTERVAL_ENV, "3")
+    snapshot = _file_audit(tmp_path, rotation_interval="1d").as_dict()
+    assert snapshot["rotation_interval"] == "3s"
+    assert snapshot["rotation_interval_debug_seconds"] == 3

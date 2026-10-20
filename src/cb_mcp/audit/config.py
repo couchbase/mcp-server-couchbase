@@ -14,6 +14,15 @@ rotation off. Setting both gives one unbounded file, which is the PRD's Case 2
 *negative* or unparseable value is a configuration error, and that falls back to
 the default with a warning rather than aborting.
 
+**A seconds-resolution interval exists for testing only.** The supported
+vocabulary is days and weeks, which makes interval rotation awkward to verify:
+a QE run cannot wait a day. ``_CB_MCP_AUDIT_LOG_ROTATION_INTERVAL_SECONDS``
+replaces the resolved interval with a raw number of seconds. It is read from
+the environment rather than exposed as a CLI flag, so it cannot be mistaken for
+a supported operator setting, and it announces itself with a WARNING at startup
+and in ``get_server_configuration_status`` so no one is left wondering why a
+daily rotation is firing every five seconds.
+
 **A broken file sink degrades, it does not abort.** Selecting the file sink
 without naming a path is reported and the file sink is dropped; if console was
 also selected the server keeps auditing to console, and if it was not, auditing
@@ -24,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +43,7 @@ from ..utils.constants import (
     ALLOWED_AUDIT_SINKS,
     AUDIT_INTERVAL_UNIT_SECONDS,
     BYTES_PER_MB,
+    DEBUG_AUDIT_ROTATION_INTERVAL_SECONDS_ENV,
     DEFAULT_AUDIT_ENABLED,
     DEFAULT_AUDIT_MAX_BACKUPS,
     DEFAULT_AUDIT_ROTATION_INTERVAL,
@@ -69,6 +80,10 @@ class ResolvedAuditConfig:
     max_backups: int
     tool_args: bool
     disabled_events: tuple[int, ...]
+    #: True when the seconds-resolution debug override is in force. Defaulted
+    #: so the field can sit last and every existing construction site -- the
+    #: disabled logger in ``emitter``, and the tests -- keeps working unchanged.
+    rotation_interval_debug: bool = False
 
     @property
     def writes_file(self) -> bool:
@@ -89,6 +104,14 @@ class ResolvedAuditConfig:
             "process_file": self.process_file,
             "rotation_max_size_mb": self.rotation_max_size_mb,
             "rotation_interval": self.rotation_interval,
+            # Reported only when it is on. A key that is absent in every real
+            # deployment cannot be misread as a supported setting, and when it
+            # is present it is the first thing an operator should question.
+            **(
+                {"rotation_interval_debug_seconds": self.rotation_interval_seconds}
+                if self.rotation_interval_debug
+                else {}
+            ),
             "max_backups": self.max_backups,
             "tool_args": self.tool_args,
             "disabled_events": list(self.disabled_events),
@@ -186,6 +209,55 @@ def _normalise_interval(raw: str | None) -> tuple[str, int]:
     if seconds == 0:
         return "0", 0
     return raw.strip().lower(), seconds
+
+
+def debug_interval_override(
+    environ: dict[str, str] | None = None,
+) -> int | None:
+    """Seconds from the debug environment variable, or ``None`` when unset.
+
+    The supported interval vocabulary is days and weeks (see
+    :func:`parse_rotation_interval`), which cannot be exercised in a test run.
+    This reads ``_CB_MCP_AUDIT_LOG_ROTATION_INTERVAL_SECONDS`` and returns
+    a **positive** number of seconds to use in place of the resolved interval.
+
+    Everything else returns ``None``, meaning "leave the configured interval
+    alone":
+
+    * unset, or set to an empty string — nobody asked for it;
+    * ``0`` or a negative number — turning rotation *off* is already expressible
+      with the supported setting (``CB_MCP_AUDIT_LOG_ROTATION_INTERVAL=0``), so
+      a debug variable is not given a second way to do it;
+    * anything unparseable — a typo in a testing knob must not change what the
+      server does, so it is reported and ignored rather than guessed at.
+
+    ``environ`` is injectable so tests do not have to mutate the process
+    environment.
+    """
+    source = os.environ if environ is None else environ
+    raw = source.get(DEBUG_AUDIT_ROTATION_INTERVAL_SECONDS_ENV)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        seconds = int(raw.strip())
+    except ValueError:
+        logger.warning(
+            "Ignored %s=%r: expected a positive whole number of seconds. "
+            "The configured rotation interval is unchanged.",
+            DEBUG_AUDIT_ROTATION_INTERVAL_SECONDS_ENV,
+            raw,
+        )
+        return None
+    if seconds <= 0:
+        logger.warning(
+            "Ignored %s=%r: only a positive number of seconds overrides the "
+            "interval. Use CB_MCP_AUDIT_LOG_ROTATION_INTERVAL=0 to turn "
+            "interval-based rotation off.",
+            DEBUG_AUDIT_ROTATION_INTERVAL_SECONDS_ENV,
+            raw,
+        )
+        return None
+    return seconds
 
 
 def _read_event_tokens(value: str) -> list[str] | None:
@@ -384,6 +456,23 @@ def resolve_audit_config(
 
     size_mb = _resolve_size_mb(rotation_max_size_mb)
     interval_text, interval_seconds = _normalise_interval(rotation_interval)
+
+    # Testing-only override, applied after normal resolution so an invalid or
+    # absent value leaves the operator's own setting exactly as it resolved.
+    debug_seconds = debug_interval_override()
+    interval_is_debug = debug_seconds is not None
+    if interval_is_debug:
+        logger.warning(
+            "%s=%s is set: the audit rotation interval is %s second(s) instead "
+            "of the configured %r. This is a testing aid, not a supported "
+            "deployment setting -- a production server must not run with it.",
+            DEBUG_AUDIT_ROTATION_INTERVAL_SECONDS_ENV,
+            debug_seconds,
+            debug_seconds,
+            interval_text,
+        )
+        interval_seconds = int(debug_seconds)
+        interval_text = f"{interval_seconds}s"
     backups = _resolve_max_backups(max_backups)
     include_args = DEFAULT_AUDIT_TOOL_ARGS if tool_args is None else bool(tool_args)
 
@@ -413,6 +502,7 @@ def resolve_audit_config(
         max_bytes=0 if size_mb == 0 else max(1, int(size_mb * BYTES_PER_MB)),
         rotation_interval=interval_text,
         rotation_interval_seconds=interval_seconds,
+        rotation_interval_debug=interval_is_debug,
         max_backups=backups,
         tool_args=include_args,
         disabled_events=tuple(sorted(filtered)),
@@ -423,6 +513,7 @@ __all__ = [
     "SINK_CONSOLE",
     "SINK_FILE",
     "ResolvedAuditConfig",
+    "debug_interval_override",
     "parse_audit_sinks",
     "parse_disabled_events",
     "parse_rotation_interval",
