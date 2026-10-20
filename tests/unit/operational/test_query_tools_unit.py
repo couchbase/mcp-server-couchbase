@@ -340,8 +340,15 @@ class TestGetQueriesNotSelective:
         )
         get_queries_not_selective(MagicMock(), limit=5)
 
-        assert "phaseCounts.`indexScan`" in captured["query"]
-        assert "phaseCounts.`primaryScan`" in captured["query"]
+        # Only the WHERE clause decides which queries are listed, so assert on it
+        # alone: primaryScan also appears in the SELECT, which would mask a
+        # WHERE that still filters on indexScan only.
+        where = " ".join(
+            captured["query"].split("WHERE")[1].split("GROUP BY")[0].split()
+        )
+        assert "phaseCounts.`indexScan`" in where
+        assert "phaseCounts.`primaryScan`" in where
+        assert "> resultCount" in where
         # Sub-keys (.GSI/.Seq) repeat the top-level count and must not be added.
         assert ".GSI" not in captured["query"]
         assert ".Seq" not in captured["query"]
