@@ -271,7 +271,7 @@ Both tools embed plain query text with the model configured under [Embedding Pro
 | `get_queries_with_large_result_count` | Queries with the largest result counts |
 | `get_queries_using_primary_index` | Queries using a primary index |
 | `get_queries_not_using_covering_index` | Queries not using a covering index |
-| `get_queries_not_selective` | Queries whose index scans return far more documents than the final result |
+| `get_queries_not_selective` | Queries whose scans — secondary index, primary index or sequential — return far more documents than the final result |
 
 #### Query service health 🖥️
 

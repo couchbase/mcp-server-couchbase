@@ -14,6 +14,7 @@ Coverage map:
 - rotation on size, on interval, on both, and on neither
 - the interval clock is anchored to the live file, not to startup
 - an idle server still rotates on the interval
+- a seconds-resolution interval (the `_CB_MCP_...` override) really rotates
 - backups are timestamped, gzipped and pruned to max_backups
 - a compression failure keeps the uncompressed backup
 - max_backups=0 truncates rather than growing without limit
@@ -329,6 +330,53 @@ def test_an_idle_server_still_rotates_on_the_interval(tmp_path):
 
     assert len(_backups(sink)) == 1, "an idle sink never rotated"
     assert sink.path.stat().st_size == 0
+
+
+def test_a_seconds_resolution_interval_rotates_in_real_time(tmp_path):
+    """What the seconds override buys QE: rotation observable without waiting a day.
+
+    ``_CB_MCP_AUDIT_LOG_ROTATION_INTERVAL_SECONDS`` only resolves to this
+    constructor argument, so this is the behaviour a tester is actually going
+    to watch: no clock is nudged, no deadline is reached into. The sink is
+    given a one-second interval, written to, and left alone.
+    """
+    sink = AuditSink(
+        tmp_path / "audit.log", max_bytes=0, max_backups=3, interval_seconds=1
+    )
+    sink.start()
+    sink.emit('{"first":true}\n')
+    _settle(sink)
+    assert _backups(sink) == [], "rotated before its one second was up"
+
+    # The idle poll is 0.2s, so a one-second interval is comfortably resolvable;
+    # the generous deadline is for a loaded CI box, not for the interval itself.
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and not _backups(sink):
+        time.sleep(0.05)
+    _drain(sink)
+
+    backups = _backups(sink)
+    assert len(backups) == 1, "a one-second interval never rotated"
+    with gzip.open(backups[0], "rt", encoding="utf-8") as handle:
+        assert "first" in handle.read()
+
+
+def test_a_fast_interval_still_skips_periods_with_nothing_written(tmp_path):
+    """A five-second rotation on an idle server must not produce empty backups.
+
+    Worth pinning for the debug path specifically: at one day the empty-period
+    skip is nearly unobservable, at five seconds a tester watching a quiet
+    server would otherwise see a backup appear every five seconds for ever and
+    reasonably report it as a bug.
+    """
+    sink = AuditSink(
+        tmp_path / "audit.log", max_bytes=0, max_backups=3, interval_seconds=1
+    )
+    sink.start()
+    time.sleep(2.5)
+    _drain(sink)
+
+    assert _backups(sink) == [], "an empty file was rotated into a backup"
 
 
 def test_both_triggers_are_live_at_once(tmp_path):

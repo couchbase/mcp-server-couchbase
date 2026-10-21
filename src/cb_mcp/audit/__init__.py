@@ -38,6 +38,7 @@ from .classification import (
 )
 from .config import (
     ResolvedAuditConfig,
+    debug_interval_override,
     parse_audit_sinks,
     parse_rotation_interval,
     resolve_audit_config,
@@ -92,6 +93,7 @@ __all__ = [
     "get_audit_logger",
     "init_audit",
     "parse_audit_sinks",
+    "debug_interval_override",
     "parse_rotation_interval",
     "process_scoped_path",
     "resolve_audit_config",
