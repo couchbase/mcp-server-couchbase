@@ -633,7 +633,8 @@ Auditing is **off by default**. Turn it on with `CB_MCP_AUDIT_LOG_ENABLED=true`;
 # 90 days of daily, gzipped audit files
 uvx couchbase-mcp-server operational --audit-log-enabled=true \
   --audit-log-sinks=file --audit-log-file-path=/var/log/cb-mcp/audit.log \
-  --audit-log-rotation-interval=1d --audit-log-retention-max-backups=90
+  --audit-log-rotation-interval=1d --audit-log-rotation-max-size-mb=0 \
+  --audit-log-retention-max-backups=90
 ```
 
 Records are JSON Lines using the same field vocabulary as Couchbase Server and Sync Gateway:
