@@ -79,7 +79,7 @@ Requires Couchbase Server 7.6+ and the Search service. Vector search *querying* 
 
 ### Vector search tools
 
-Both tools embed query text using the model configured via `EMBEDDING_*` environment variables (see the table below) — the caller passes plain text, never a raw vector. `run_vector_query` targets Couchbase Server 8.0+'s GSI vector indexes via SQL++; `run_vector_search` targets the Search service's vector search on Couchbase Server 7.6+. Available on both self-managed Couchbase Server and Capella.
+Both tools embed query text using the model configured via `CB_MCP_EMBEDDING_MODEL_*` environment variables (see the table below) — the caller passes plain text, never a raw vector. `run_vector_query` targets Couchbase Server 8.0+'s GSI vector indexes via SQL++; `run_vector_search` targets the Search service's vector search on Couchbase Server 7.6+. Available on both self-managed Couchbase Server and Capella.
 
 | Tool Name | Description |
 | --------- | ----------- |
@@ -246,13 +246,13 @@ The detailed explanation for the environment variables can be found on the [GitH
 | `CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS` | Rotated backups retained per audit file, excluding the live file; they are gzipped. Bounds one file, not the directory: each container start creates a new file with its own backups | `10`                   |
 | `CB_MCP_AUDIT_LOG_TOOL_ARGS`         | Record tool argument values. **Off by default** — there is no redaction in this release, so enabling it writes arguments verbatim, including full document bodies | `false`                                                |
 | `CB_MCP_AUDIT_LOG_DISABLED_EVENTS`   | Audit events to suppress: comma-separated numeric event ids (e.g. `61490,61491`), or a file with one id per line. Only filterable events can be suppressed | None                                            |
-| `EMBEDDING_PROVIDER`                 | Embedding provider for `run_vector_query` / `run_vector_search`: one of `couchbase`, `openai`, `cohere`, `voyage`, `bedrock`. Unset disables both tools' embedding step until configured. | None                                                           |
-| `EMBEDDING_MODEL`                    | Model name/ID for the configured embedding provider                                                                                                       | None                                                           |
-| `EMBEDDING_API_KEY`                  | API key for the configured provider. Not used by `bedrock` (uses the AWS credential chain / `EMBEDDING_AWS_*` instead)                                    | None                                                           |
-| `EMBEDDING_ENDPOINT`                 | Base URL override (an OpenAI-compatible local server, or a Couchbase Model Service deployment's own URL — **required** when `EMBEDDING_PROVIDER=couchbase`) | None                                                         |
-| `EMBEDDING_AWS_ACCESS_KEY_ID`        | AWS access key ID, `bedrock` provider only. Omit to use the default AWS credential chain                                                                  | None                                                           |
-| `EMBEDDING_AWS_SECRET_ACCESS_KEY`    | AWS secret access key, `bedrock` provider only                                                                                                             | None                                                           |
-| `EMBEDDING_AWS_REGION`               | AWS region, `bedrock` provider only. Falls back to the AWS SDK's own region resolution if unset                                                           | None                                                           |
+| `CB_MCP_EMBEDDING_MODEL_PROVIDER`                 | Embedding provider for `run_vector_query` / `run_vector_search`: one of `capella`, `openai`, `cohere`, `voyage`, `bedrock`. Unset disables both tools' embedding step until configured. | None                                                           |
+| `CB_MCP_EMBEDDING_MODEL`                    | Model name/ID for the configured embedding provider                                                                                                       | None                                                           |
+| `CB_MCP_EMBEDDING_MODEL_API_KEY`                  | API key for the configured provider. Not used by `bedrock` (uses the AWS credential chain / `CB_MCP_EMBEDDING_MODEL_AWS_*` instead)                                    | None                                                           |
+| `CB_MCP_EMBEDDING_MODEL_ENDPOINT`                 | Base URL override (an OpenAI-compatible local server, or a Capella Model Service deployment's own URL — **required** when `CB_MCP_EMBEDDING_MODEL_PROVIDER=capella`) | None                                                         |
+| `CB_MCP_EMBEDDING_MODEL_AWS_ACCESS_KEY_ID`        | AWS access key ID, `bedrock` provider only. Omit to use the default AWS credential chain                                                                  | None                                                           |
+| `CB_MCP_EMBEDDING_MODEL_AWS_SECRET_ACCESS_KEY`    | AWS secret access key, `bedrock` provider only                                                                                                             | None                                                           |
+| `CB_MCP_EMBEDDING_MODEL_AWS_REGION`               | AWS region, `bedrock` provider only. Falls back to the AWS SDK's own region resolution if unset                                                           | None                                                           |
 
 ### Disabling Tools
 

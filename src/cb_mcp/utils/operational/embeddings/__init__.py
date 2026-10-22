@@ -2,7 +2,7 @@
 
 Turns query text into a vector via a configured provider — Couchbase's own
 Model Service, or a bring-your-own-model backend (OpenAI, Cohere, Voyage,
-Bedrock) — selected by the ``EMBEDDING_PROVIDER`` setting. See
+Bedrock) — selected by the ``CB_MCP_EMBEDDING_MODEL_PROVIDER`` setting. See
 :mod:`cb_mcp.tools.operational.vector_search` for the tools that use this, and
 ``registry.PROVIDER_CONFIG_DOCS`` for the exact config each provider needs.
 """

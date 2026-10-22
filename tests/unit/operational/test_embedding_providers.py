@@ -2,7 +2,7 @@
 (cb_mcp.utils.operational.embeddings).
 
 Covers:
-- registry.resolve_embedding_provider: unset/unknown EMBEDDING_PROVIDER,
+- registry.resolve_embedding_provider: unset/unknown CB_MCP_EMBEDDING_MODEL_PROVIDER,
   case-insensitive matching, dispatch to the right provider class.
 - base.require_fields: missing-required-field error naming every field at
   once, optional fields passing through as None when absent.
@@ -30,10 +30,10 @@ from cb_mcp.utils.operational.embeddings.base import EmbeddingRequest, require_f
 from cb_mcp.utils.operational.embeddings.providers.bedrock import (
     BedrockEmbeddingProvider,
 )
-from cb_mcp.utils.operational.embeddings.providers.cohere import CohereEmbeddingProvider
-from cb_mcp.utils.operational.embeddings.providers.couchbase_provisioned import (
-    CouchbaseProvisionedEmbeddingProvider,
+from cb_mcp.utils.operational.embeddings.providers.capella_provisioned import (
+    CapellaProvisionedEmbeddingProvider,
 )
+from cb_mcp.utils.operational.embeddings.providers.cohere import CohereEmbeddingProvider
 from cb_mcp.utils.operational.embeddings.providers.openai import OpenAIEmbeddingProvider
 from cb_mcp.utils.operational.embeddings.providers.voyage import VoyageEmbeddingProvider
 from cb_mcp.utils.operational.embeddings.registry import resolve_embedding_provider
@@ -86,8 +86,8 @@ class TestRequireFields:
         doc = OpenAIEmbeddingProvider.describe_config()
         with pytest.raises(EmbeddingConfigError) as exc_info:
             require_fields({}, doc)
-        assert "EMBEDDING_API_KEY" in str(exc_info.value)
-        assert "EMBEDDING_MODEL" in str(exc_info.value)
+        assert "CB_MCP_EMBEDDING_MODEL_API_KEY" in str(exc_info.value)
+        assert "CB_MCP_EMBEDDING_MODEL" in str(exc_info.value)
 
     def test_optional_field_absent_is_none_not_an_error(self) -> None:
         doc = OpenAIEmbeddingProvider.describe_config()
@@ -103,7 +103,9 @@ class TestResolveEmbeddingProvider:
             resolve_embedding_provider({})
 
     def test_unknown_provider_is_config_error(self) -> None:
-        with pytest.raises(EmbeddingConfigError, match="Unknown EMBEDDING_PROVIDER"):
+        with pytest.raises(
+            EmbeddingConfigError, match="Unknown CB_MCP_EMBEDDING_MODEL_PROVIDER"
+        ):
             resolve_embedding_provider({"embedding_provider": "not-a-provider"})
 
     def test_dispatches_case_insensitively(self) -> None:
@@ -170,8 +172,10 @@ class TestOpenAIProvider:
 
 class TestCouchbaseProvisionedProvider:
     def test_endpoint_is_required(self) -> None:
-        with pytest.raises(EmbeddingConfigError, match="EMBEDDING_ENDPOINT"):
-            CouchbaseProvisionedEmbeddingProvider.from_settings(
+        with pytest.raises(
+            EmbeddingConfigError, match="CB_MCP_EMBEDDING_MODEL_ENDPOINT"
+        ):
+            CapellaProvisionedEmbeddingProvider.from_settings(
                 {"embedding_api_key": "k", "embedding_model": "m"}
             )
 
@@ -179,7 +183,7 @@ class TestCouchbaseProvisionedProvider:
         """The host Capella's UI shows has no /v1 -- the actual API lives
         under /v1/embeddings, so it must be appended, or every real call
         hits the wrong route."""
-        provider = CouchbaseProvisionedEmbeddingProvider.from_settings(
+        provider = CapellaProvisionedEmbeddingProvider.from_settings(
             {
                 "embedding_api_key": "k",
                 "embedding_model": "m",
@@ -189,7 +193,7 @@ class TestCouchbaseProvisionedProvider:
         assert provider._base_url == "https://abc123.ai.couchbase.com/v1"
 
     def test_endpoint_already_ending_in_v1_is_not_duplicated(self) -> None:
-        provider = CouchbaseProvisionedEmbeddingProvider.from_settings(
+        provider = CapellaProvisionedEmbeddingProvider.from_settings(
             {
                 "embedding_api_key": "k",
                 "embedding_model": "m",
@@ -211,7 +215,7 @@ class TestCouchbaseProvisionedProvider:
             vector=[0.1, 0.2], model="m"
         )
         with patcher:
-            provider = CouchbaseProvisionedEmbeddingProvider.from_settings(
+            provider = CapellaProvisionedEmbeddingProvider.from_settings(
                 {
                     "embedding_api_key": "k",
                     "embedding_model": "m",

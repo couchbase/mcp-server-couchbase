@@ -277,8 +277,8 @@
           "isSecret": false
         },
         {
-          "name": "EMBEDDING_PROVIDER",
-          "description": "Embedding provider for run_vector_query / run_vector_search: one of couchbase, openai, cohere, voyage, bedrock. Unset disables both tools' embedding step until configured.",
+          "name": "CB_MCP_EMBEDDING_MODEL_PROVIDER",
+          "description": "Embedding provider for run_vector_query / run_vector_search: one of capella, openai, cohere, voyage, bedrock. Unset disables both tools' embedding step until configured.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -305,7 +305,7 @@
           "isSecret": false
         },
         {
-          "name": "EMBEDDING_MODEL",
+          "name": "CB_MCP_EMBEDDING_MODEL",
           "description": "Model name/ID for the configured embedding provider.",
           "isRequired": false,
           "format": "string",
@@ -333,35 +333,35 @@
           "isSecret": false
         },
         {
-          "name": "EMBEDDING_API_KEY",
-          "description": "API key for the configured embedding provider. Not used by bedrock (uses the AWS credential chain / EMBEDDING_AWS_* instead).",
+          "name": "CB_MCP_EMBEDDING_MODEL_API_KEY",
+          "description": "API key for the configured embedding provider. Not used by bedrock (uses the AWS credential chain / CB_MCP_EMBEDDING_MODEL_AWS_* instead).",
           "isRequired": false,
           "format": "string",
           "isSecret": true
         },
         {
-          "name": "EMBEDDING_ENDPOINT",
-          "description": "Base URL override for the configured embedding provider (e.g. an OpenAI-compatible local server, or a Couchbase Model Service deployment's own URL). Required when EMBEDDING_PROVIDER=couchbase.",
+          "name": "CB_MCP_EMBEDDING_MODEL_ENDPOINT",
+          "description": "Base URL override for the configured embedding provider (e.g. an OpenAI-compatible local server, or a Capella Model Service deployment's own URL). Required when CB_MCP_EMBEDDING_MODEL_PROVIDER=capella.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
         },
         {
-          "name": "EMBEDDING_AWS_ACCESS_KEY_ID",
+          "name": "CB_MCP_EMBEDDING_MODEL_AWS_ACCESS_KEY_ID",
           "description": "AWS access key ID, bedrock provider only. Omit to use the default AWS credential chain.",
           "isRequired": false,
           "format": "string",
           "isSecret": true
         },
         {
-          "name": "EMBEDDING_AWS_SECRET_ACCESS_KEY",
+          "name": "CB_MCP_EMBEDDING_MODEL_AWS_SECRET_ACCESS_KEY",
           "description": "AWS secret access key, bedrock provider only.",
           "isRequired": false,
           "format": "string",
           "isSecret": true
         },
         {
-          "name": "EMBEDDING_AWS_REGION",
+          "name": "CB_MCP_EMBEDDING_MODEL_AWS_REGION",
           "description": "AWS region, bedrock provider only. Falls back to the AWS SDK's own region resolution if unset.",
           "isRequired": false,
           "format": "string",
@@ -659,7 +659,7 @@
         {
           "type": "named",
           "name": "--embedding-provider",
-          "description": "Embedding provider for run_vector_query / run_vector_search: one of couchbase, openai, cohere, voyage, bedrock. Unset disables both tools' embedding step until configured.",
+          "description": "Embedding provider for run_vector_query / run_vector_search: one of capella, openai, cohere, voyage, bedrock. Unset disables both tools' embedding step until configured.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -683,7 +683,7 @@
         {
           "type": "named",
           "name": "--embedding-endpoint",
-          "description": "Base URL override for the configured embedding provider (e.g. an OpenAI-compatible local server, or a Couchbase Model Service deployment's own URL). Required when --embedding-provider=couchbase.",
+          "description": "Base URL override for the configured embedding provider (e.g. an OpenAI-compatible local server, or a Capella Model Service deployment's own URL). Required when --embedding-provider=capella.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -1718,8 +1718,8 @@
           "isSecret": false
         },
         {
-          "name": "EMBEDDING_PROVIDER",
-          "description": "Embedding provider for run_vector_query / run_vector_search: one of couchbase, openai, cohere, voyage, bedrock. Unset disables both tools' embedding step until configured.",
+          "name": "CB_MCP_EMBEDDING_MODEL_PROVIDER",
+          "description": "Embedding provider for run_vector_query / run_vector_search: one of capella, openai, cohere, voyage, bedrock. Unset disables both tools' embedding step until configured.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -1746,7 +1746,7 @@
           "isSecret": false
         },
         {
-          "name": "EMBEDDING_MODEL",
+          "name": "CB_MCP_EMBEDDING_MODEL",
           "description": "Model name/ID for the configured embedding provider.",
           "isRequired": false,
           "format": "string",
@@ -1774,35 +1774,35 @@
           "isSecret": false
         },
         {
-          "name": "EMBEDDING_API_KEY",
-          "description": "API key for the configured embedding provider. Not used by bedrock (uses the AWS credential chain / EMBEDDING_AWS_* instead).",
+          "name": "CB_MCP_EMBEDDING_MODEL_API_KEY",
+          "description": "API key for the configured embedding provider. Not used by bedrock (uses the AWS credential chain / CB_MCP_EMBEDDING_MODEL_AWS_* instead).",
           "isRequired": false,
           "format": "string",
           "isSecret": true
         },
         {
-          "name": "EMBEDDING_ENDPOINT",
-          "description": "Base URL override for the configured embedding provider (e.g. an OpenAI-compatible local server, or a Couchbase Model Service deployment's own URL). Required when EMBEDDING_PROVIDER=couchbase.",
+          "name": "CB_MCP_EMBEDDING_MODEL_ENDPOINT",
+          "description": "Base URL override for the configured embedding provider (e.g. an OpenAI-compatible local server, or a Capella Model Service deployment's own URL). Required when CB_MCP_EMBEDDING_MODEL_PROVIDER=capella.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
         },
         {
-          "name": "EMBEDDING_AWS_ACCESS_KEY_ID",
+          "name": "CB_MCP_EMBEDDING_MODEL_AWS_ACCESS_KEY_ID",
           "description": "AWS access key ID, bedrock provider only. Omit to use the default AWS credential chain.",
           "isRequired": false,
           "format": "string",
           "isSecret": true
         },
         {
-          "name": "EMBEDDING_AWS_SECRET_ACCESS_KEY",
+          "name": "CB_MCP_EMBEDDING_MODEL_AWS_SECRET_ACCESS_KEY",
           "description": "AWS secret access key, bedrock provider only.",
           "isRequired": false,
           "format": "string",
           "isSecret": true
         },
         {
-          "name": "EMBEDDING_AWS_REGION",
+          "name": "CB_MCP_EMBEDDING_MODEL_AWS_REGION",
           "description": "AWS region, bedrock provider only. Falls back to the AWS SDK's own region resolution if unset.",
           "isRequired": false,
           "format": "string",

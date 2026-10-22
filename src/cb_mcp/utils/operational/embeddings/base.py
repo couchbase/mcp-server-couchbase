@@ -56,7 +56,7 @@ class EmbeddingProvider(ABC):
     mapping is threaded through after construction.
     """
 
-    #: The EMBEDDING_PROVIDER value that selects this class. Matched
+    #: The CB_MCP_EMBEDDING_MODEL_PROVIDER value that selects this class. Matched
     #: case-insensitively by the registry.
     provider_id: ClassVar[str]
 

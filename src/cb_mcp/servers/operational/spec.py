@@ -69,7 +69,7 @@ SPEC = ServerSpec(
     # Only what is genuinely operational-specific: the shared env-info lists
     # already cover connection_string, password and ca_cert_path, which every
     # server has. mTLS client credentials have no analytics equivalent, and
-    # EMBEDDING_* (for run_vector_query / run_vector_search) is read
+    # CB_MCP_EMBEDDING_MODEL_* (for run_vector_query / run_vector_search) is read
     # only by this server's tools even though every server's CLI parses the
     # flags (see core/cli/options.py's embedding_options docstring).
     safe_settings_keys=(

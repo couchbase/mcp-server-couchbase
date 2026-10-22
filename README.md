@@ -339,13 +339,13 @@ The server can be configured using environment variables or command line argumen
 | `CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS` | `--audit-log-retention-max-backups` | Rotated backups retained **per audit file**, excluding the live file. Backups are gzipped. `0` keeps none. This bounds one file, not the directory — see [Auditing](#auditing) | `10` |
 | `CB_MCP_AUDIT_LOG_TOOL_ARGS` | `--audit-log-tool-args` | Record tool argument values in the audit log. **Off by default** — there is no redaction in this release, so enabling it writes arguments verbatim, including full document bodies | `false` |
 | `CB_MCP_AUDIT_LOG_DISABLED_EVENTS` | `--audit-log-disabled-events` | Audit events to suppress: comma-separated numeric event ids (e.g. `61490,61491`), or a file with one id per line. Only filterable events can be suppressed | None |
-| `EMBEDDING_PROVIDER` | `--embedding-provider` | Embedding provider for `run_vector_query` / `run_vector_search`: one of `couchbase`, `openai`, `cohere`, `voyage`, `bedrock`. Unset disables both tools' embedding step until configured — see [Embedding Provider Configuration](#embedding-provider-configuration) | None |
-| `EMBEDDING_MODEL` | `--embedding-model` | Model name/ID for the configured embedding provider | None |
-| `EMBEDDING_API_KEY` | `--embedding-api-key` | API key for the configured provider. Not used by `bedrock` (uses the AWS credential chain / `EMBEDDING_AWS_*` instead) | None |
-| `EMBEDDING_ENDPOINT` | `--embedding-endpoint` | Base URL override (an OpenAI-compatible local server, or a Couchbase Model Service deployment's own URL — **required** when `EMBEDDING_PROVIDER=couchbase`) | None |
-| `EMBEDDING_AWS_ACCESS_KEY_ID` | `--embedding-aws-access-key-id` | AWS access key ID, `bedrock` provider only. Omit to use the default AWS credential chain | None |
-| `EMBEDDING_AWS_SECRET_ACCESS_KEY` | `--embedding-aws-secret-access-key` | AWS secret access key, `bedrock` provider only | None |
-| `EMBEDDING_AWS_REGION` | `--embedding-aws-region` | AWS region, `bedrock` provider only. Falls back to the AWS SDK's own region resolution if unset | None |
+| `CB_MCP_EMBEDDING_MODEL_PROVIDER` | `--embedding-provider` | Embedding provider for `run_vector_query` / `run_vector_search`: one of `capella`, `openai`, `cohere`, `voyage`, `bedrock`. Unset disables both tools' embedding step until configured — see [Embedding Provider Configuration](#embedding-provider-configuration) | None |
+| `CB_MCP_EMBEDDING_MODEL` | `--embedding-model` | Model name/ID for the configured embedding provider | None |
+| `CB_MCP_EMBEDDING_MODEL_API_KEY` | `--embedding-api-key` | API key for the configured provider. Not used by `bedrock` (uses the AWS credential chain / `CB_MCP_EMBEDDING_MODEL_AWS_*` instead) | None |
+| `CB_MCP_EMBEDDING_MODEL_ENDPOINT` | `--embedding-endpoint` | Base URL override (an OpenAI-compatible local server, or a Capella Model Service deployment's own URL — **required** when `CB_MCP_EMBEDDING_MODEL_PROVIDER=capella`) | None |
+| `CB_MCP_EMBEDDING_MODEL_AWS_ACCESS_KEY_ID` | `--embedding-aws-access-key-id` | AWS access key ID, `bedrock` provider only. Omit to use the default AWS credential chain | None |
+| `CB_MCP_EMBEDDING_MODEL_AWS_SECRET_ACCESS_KEY` | `--embedding-aws-secret-access-key` | AWS secret access key, `bedrock` provider only | None |
+| `CB_MCP_EMBEDDING_MODEL_AWS_REGION` | `--embedding-aws-region` | AWS region, `bedrock` provider only. Falls back to the AWS SDK's own region resolution if unset | None |
 
 #### Read-Only Mode Configuration
 
@@ -361,15 +361,15 @@ This is the recommended safe default to prevent inadvertent data modifications b
 
 #### Embedding Provider Configuration
 
-`EMBEDDING_PROVIDER` selects which model backend `run_vector_query` and `run_vector_search` embed query text with. It's entirely optional — the server starts fine with none of the `EMBEDDING_*` variables set, and both tools stay registered; calling either without a provider configured returns an error explaining what to set, rather than failing at startup or disappearing from tool discovery. Each provider needs a different subset of the `EMBEDDING_*` variables:
+`CB_MCP_EMBEDDING_MODEL_PROVIDER` selects which model backend `run_vector_query` and `run_vector_search` embed query text with. It's entirely optional — the server starts fine with none of the `CB_MCP_EMBEDDING_MODEL_*` variables set, and both tools stay registered; calling either without a provider configured returns an error explaining what to set, rather than failing at startup or disappearing from tool discovery. Each provider needs a different subset of the `CB_MCP_EMBEDDING_MODEL_*` variables:
 
-| `EMBEDDING_PROVIDER` | Required | Optional | Notes |
+| `CB_MCP_EMBEDDING_MODEL_PROVIDER` | Required | Optional | Notes |
 | --------------------- | -------- | -------- | ----- |
-| `couchbase` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL`, `EMBEDDING_ENDPOINT` | — | Couchbase's own Model Service (Provisioned/Serverless). `EMBEDDING_ENDPOINT` is this deployment's own base URL (e.g. `https://<id>.ai.couchbase.com`) — get it from Capella's AI Data Plane > Models UI. There is no shared default domain. |
-| `openai` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL` | `EMBEDDING_ENDPOINT` | Defaults to `api.openai.com`. Set `EMBEDDING_ENDPOINT` to point at an OpenAI-compatible local server (Ollama, vLLM, LM Studio) instead. |
-| `cohere` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL` | `EMBEDDING_ENDPOINT` | Defaults to `api.cohere.com`. |
-| `voyage` | `EMBEDDING_API_KEY`, `EMBEDDING_MODEL` | `EMBEDDING_ENDPOINT` | Defaults to `api.voyageai.com`. |
-| `bedrock` | `EMBEDDING_MODEL` | `EMBEDDING_AWS_ACCESS_KEY_ID`, `EMBEDDING_AWS_SECRET_ACCESS_KEY`, `EMBEDDING_AWS_REGION` | Titan embedding models only (e.g. `amazon.titan-embed-text-v2:0`). Omit the AWS credential fields to use the default AWS credential chain (env vars, `~/.aws/credentials`, instance role). Requires the `bedrock-embeddings` extra: `pip install couchbase-mcp-server[bedrock-embeddings]` (or `uv sync --extra bedrock-embeddings` from source). |
+| `capella` | `CB_MCP_EMBEDDING_MODEL_API_KEY`, `CB_MCP_EMBEDDING_MODEL`, `CB_MCP_EMBEDDING_MODEL_ENDPOINT` | — | Capella's own Model Service (Provisioned/Serverless). `CB_MCP_EMBEDDING_MODEL_ENDPOINT` is this deployment's own base URL (e.g. `https://<id>.ai.couchbase.com`) — get it from Capella's AI Data Plane > Models UI. There is no shared default domain. |
+| `openai` | `CB_MCP_EMBEDDING_MODEL_API_KEY`, `CB_MCP_EMBEDDING_MODEL` | `CB_MCP_EMBEDDING_MODEL_ENDPOINT` | Defaults to `api.openai.com`. Set `CB_MCP_EMBEDDING_MODEL_ENDPOINT` to point at an OpenAI-compatible local server (Ollama, vLLM, LM Studio) instead. |
+| `cohere` | `CB_MCP_EMBEDDING_MODEL_API_KEY`, `CB_MCP_EMBEDDING_MODEL` | `CB_MCP_EMBEDDING_MODEL_ENDPOINT` | Defaults to `api.cohere.com`. |
+| `voyage` | `CB_MCP_EMBEDDING_MODEL_API_KEY`, `CB_MCP_EMBEDDING_MODEL` | `CB_MCP_EMBEDDING_MODEL_ENDPOINT` | Defaults to `api.voyageai.com`. |
+| `bedrock` | `CB_MCP_EMBEDDING_MODEL` | `CB_MCP_EMBEDDING_MODEL_AWS_ACCESS_KEY_ID`, `CB_MCP_EMBEDDING_MODEL_AWS_SECRET_ACCESS_KEY`, `CB_MCP_EMBEDDING_MODEL_AWS_REGION` | Titan embedding models only (e.g. `amazon.titan-embed-text-v2:0`). Omit the AWS credential fields to use the default AWS credential chain (env vars, `~/.aws/credentials`, instance role). Requires the `bedrock-embeddings` extra: `pip install couchbase-mcp-server[bedrock-embeddings]` (or `uv sync --extra bedrock-embeddings` from source). |
 
 Example (OpenAI):
 
@@ -383,9 +383,9 @@ Example (OpenAI):
         "CB_CONNECTION_STRING": "couchbases://connection-string",
         "CB_USERNAME": "username",
         "CB_PASSWORD": "password",
-        "EMBEDDING_PROVIDER": "openai",
-        "EMBEDDING_MODEL": "text-embedding-3-small",
-        "EMBEDDING_API_KEY": "sk-..."
+        "CB_MCP_EMBEDDING_MODEL_PROVIDER": "openai",
+        "CB_MCP_EMBEDDING_MODEL": "text-embedding-3-small",
+        "CB_MCP_EMBEDDING_MODEL_API_KEY": "sk-..."
       }
     }
   }

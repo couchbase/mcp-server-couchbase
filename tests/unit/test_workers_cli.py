@@ -278,7 +278,10 @@ class TestWorkerConfigCodec:
             result = CliRunner().invoke(
                 mcp_server.main,
                 argv,
-                env={"EMBEDDING_API_KEY": "k", "EMBEDDING_PROVIDER": "openai"},
+                env={
+                    "CB_MCP_EMBEDDING_MODEL_API_KEY": "k",
+                    "CB_MCP_EMBEDDING_MODEL_PROVIDER": "openai",
+                },
             )
         assert result.exit_code == 0, result.output
 
