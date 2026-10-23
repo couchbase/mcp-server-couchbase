@@ -374,13 +374,13 @@ The [Operational Insights server](#operational-insights-server) accepts the same
 | `CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS` | `--audit-log-retention-max-backups` | Rotated backups retained **per audit file**, excluding the live file. Backups are gzipped. `0` keeps none. This bounds one file, not the directory — see [Auditing](#auditing) | `10` |
 | `CB_MCP_AUDIT_LOG_TOOL_ARGS` | `--audit-log-tool-args` | Record tool argument values in the audit log. **Off by default** — there is no redaction in this release, so enabling it writes arguments verbatim, including full document bodies | `false` |
 | `CB_MCP_AUDIT_LOG_DISABLED_EVENTS` | `--audit-log-disabled-events` | Audit events to suppress: comma-separated numeric event ids (e.g. `61490,61491`), or a file with one id per line. Only filterable events can be suppressed | None |
-| `CB_MCP_EMBEDDING_MODEL_PROVIDER` | `--embedding-provider` | Embedding provider for `run_vector_query` / `run_vector_search`: one of `capella`, `openai`, `cohere`, `voyage`, `bedrock`. Unset disables both tools' embedding step until configured — see [Embedding Provider Configuration](#embedding-providers) | None |
+| `CB_MCP_EMBEDDING_MODEL_PROVIDER` | `--embedding-model-provider` | Embedding provider for `run_vector_query` / `run_vector_search`: one of `capella`, `openai`, `cohere`, `voyage`, `bedrock`. Unset disables both tools' embedding step until configured — see [Embedding Provider Configuration](#embedding-providers) | None |
 | `CB_MCP_EMBEDDING_MODEL` | `--embedding-model` | Model name/ID for the configured embedding provider | None |
-| `CB_MCP_EMBEDDING_MODEL_API_KEY` | `--embedding-api-key` | API key for the configured provider. Not used by `bedrock` (uses the AWS credential chain / `CB_MCP_EMBEDDING_MODEL_AWS_*` instead) | None |
-| `CB_MCP_EMBEDDING_MODEL_ENDPOINT` | `--embedding-endpoint` | Base URL override (an OpenAI-compatible local server, or a Capella Model Service deployment's own URL — **required** when `CB_MCP_EMBEDDING_MODEL_PROVIDER=capella`) | None |
-| `CB_MCP_EMBEDDING_MODEL_AWS_ACCESS_KEY_ID` | `--embedding-aws-access-key-id` | AWS access key ID, `bedrock` provider only. Omit to use the default AWS credential chain | None |
-| `CB_MCP_EMBEDDING_MODEL_AWS_SECRET_ACCESS_KEY` | `--embedding-aws-secret-access-key` | AWS secret access key, `bedrock` provider only | None |
-| `CB_MCP_EMBEDDING_MODEL_AWS_REGION` | `--embedding-aws-region` | AWS region, `bedrock` provider only. Falls back to the AWS SDK's own region resolution if unset | None |
+| `CB_MCP_EMBEDDING_MODEL_API_KEY` | `--embedding-model-api-key` | API key for the configured provider. Not used by `bedrock` (uses the AWS credential chain / `CB_MCP_EMBEDDING_MODEL_AWS_*` instead) | None |
+| `CB_MCP_EMBEDDING_MODEL_ENDPOINT` | `--embedding-model-endpoint` | Base URL override (an OpenAI-compatible local server, or a Capella Model Service deployment's own URL — **required** when `CB_MCP_EMBEDDING_MODEL_PROVIDER=capella`) | None |
+| `CB_MCP_EMBEDDING_MODEL_AWS_ACCESS_KEY_ID` | `--embedding-model-aws-access-key-id` | AWS access key ID, `bedrock` provider only. Omit to use the default AWS credential chain | None |
+| `CB_MCP_EMBEDDING_MODEL_AWS_SECRET_ACCESS_KEY` | `--embedding-model-aws-secret-access-key` | AWS secret access key, `bedrock` provider only | None |
+| `CB_MCP_EMBEDDING_MODEL_AWS_REGION` | `--embedding-model-aws-region` | AWS region, `bedrock` provider only. Falls back to the AWS SDK's own region resolution if unset | None |
 
 </details>
 

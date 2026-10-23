@@ -559,7 +559,7 @@ audit_options = compose(
 """Audit sink configuration. Shared by every server; honored where a spec declares an audit package."""
 embedding_options = compose(
     click.option(
-        "--embedding-provider",
+        "--embedding-model-provider",
         "embedding_provider",
         envvar="CB_MCP_EMBEDDING_MODEL_PROVIDER",
         type=click.Choice(
@@ -578,24 +578,24 @@ embedding_options = compose(
         help="Model name/ID for the configured embedding provider.",
     ),
     click.option(
-        "--embedding-api-key",
+        "--embedding-model-api-key",
         "embedding_api_key",
         envvar="CB_MCP_EMBEDDING_MODEL_API_KEY",
         default=None,
         help="API key for the configured embedding provider. Not used by bedrock "
-        "(uses the AWS credential chain / --embedding-aws-* instead).",
+        "(uses the AWS credential chain / --embedding-model-aws-* instead).",
     ),
     click.option(
-        "--embedding-endpoint",
+        "--embedding-model-endpoint",
         "embedding_endpoint",
         envvar="CB_MCP_EMBEDDING_MODEL_ENDPOINT",
         default=None,
         help="Base URL override for the configured embedding provider (e.g. an "
         "OpenAI-compatible local server, or a Capella Model Service deployment's "
-        "own URL — required when --embedding-provider=capella).",
+        "own URL — required when --embedding-model-provider=capella).",
     ),
     click.option(
-        "--embedding-aws-access-key-id",
+        "--embedding-model-aws-access-key-id",
         "embedding_aws_access_key_id",
         envvar="CB_MCP_EMBEDDING_MODEL_AWS_ACCESS_KEY_ID",
         default=None,
@@ -603,14 +603,14 @@ embedding_options = compose(
         "AWS credential chain.",
     ),
     click.option(
-        "--embedding-aws-secret-access-key",
+        "--embedding-model-aws-secret-access-key",
         "embedding_aws_secret_access_key",
         envvar="CB_MCP_EMBEDDING_MODEL_AWS_SECRET_ACCESS_KEY",
         default=None,
         help="AWS secret access key, bedrock provider only.",
     ),
     click.option(
-        "--embedding-aws-region",
+        "--embedding-model-aws-region",
         "embedding_aws_region",
         envvar="CB_MCP_EMBEDDING_MODEL_AWS_REGION",
         default=None,
