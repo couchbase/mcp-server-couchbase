@@ -82,7 +82,7 @@ def run_vector_query(
     where: str | None = None,
     select_fields: list[str] | None = None,
     num_probes: int | None = None,
-    rerank: int | None = None,
+    rerank: bool | None = None,
     top_n_scan: int | None = None,
 ) -> dict[str, Any]:
     """Embed a query and run a vector similarity search against a GSI vector index.
@@ -111,8 +111,12 @@ def run_vector_query(
     dot, l2/euclidean, l2_squared/euclidean_squared).
 
     num_probes/rerank/top_n_scan are Hyperscale Vector Index tuning
-    parameters (centroids to probe, rerank count, top-N scan). Pass all three
-    together or none -- a Composite Vector Index doesn't use them. This tool
+    parameters. num_probes (integer) is the number of centroids to probe --
+    raise it to improve poor recall. rerank (true/false) re-checks the top
+    candidates against the full vectors; it needs num_probes. top_n_scan
+    (integer) is how many candidates to rerank; it needs num_probes and
+    rerank. num_probes alone, or num_probes + rerank, are both valid. A
+    Composite Vector Index doesn't use any of them. This tool
     itself has no index_name to check, but list_indexes now reports each
     index's `vector_type` ("hyperscale" or "composite") -- check that first
     if you need to know which shape will actually serve the query.
@@ -142,12 +146,12 @@ def run_vector_query(
     id/distance metadata.
     """
 
-    if (num_probes is None) != (rerank is None) or (num_probes is None) != (
-        top_n_scan is None
-    ):
-        return tool_error(
-            "num_probes, rerank, and top_n_scan must be provided together, or all omitted"
-        )
+    # Each tuning option requires the ones before it: nprobes, then rerank,
+    # then topNScan (APPROX_VECTOR_DISTANCE's positional signature).
+    if rerank is not None and num_probes is None:
+        return tool_error("rerank requires num_probes")
+    if top_n_scan is not None and (num_probes is None or rerank is None):
+        return tool_error("top_n_scan requires num_probes and rerank")
 
     # Connection problems -- can't reach the cluster, or this bucket doesn't
     # exist / isn't reachable -- propagate uncaught rather than becoming a
@@ -165,7 +169,11 @@ def run_vector_query(
 
         distance_args = f"doc.{safe_ident(vector_field)}, $query_vector, {quote_literal(distance_metric)}"
         if num_probes is not None:
-            distance_args += f", {int(num_probes)}, {int(rerank)}, {int(top_n_scan)}"
+            distance_args += f", {int(num_probes)}"
+            if rerank is not None:
+                distance_args += f", {'TRUE' if rerank else 'FALSE'}"
+            if top_n_scan is not None:
+                distance_args += f", {int(top_n_scan)}"
         distance_expr = f"APPROX_VECTOR_DISTANCE({distance_args})"
 
         # Nested under "document" rather than flattened with `doc.*`/select_fields

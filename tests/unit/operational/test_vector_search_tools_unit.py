@@ -4,7 +4,7 @@ Covers:
 - run_vector_query: SQL++ query construction (named-parameter vector,
   distance_metric/select_fields/where interpolation, Composite vs Hyperscale
   arity), embedding-provider resolution and failure handling, the
-  num_probes/rerank/top_n_scan all-or-nothing guard, cluster-connection-
+  num_probes/rerank/top_n_scan dependency guard, cluster-connection-
   failure propagation vs. everything-else returning tool_error.
 - run_vector_search: VectorQuery/VectorSearch/SearchRequest
   construction, hybrid (scalar_query present) vs. vector-only branching,
@@ -65,7 +65,21 @@ def _patch_embedding(
 class TestRunVectorQueryValidation:
     """Guards that fire before any cluster/embedding call."""
 
-    def test_partial_hyperscale_params_is_error(self) -> None:
+    @pytest.mark.parametrize(
+        ("kwargs", "expected"),
+        [
+            ({"rerank": True}, "rerank requires num_probes"),
+            ({"top_n_scan": 10}, "top_n_scan requires num_probes and rerank"),
+            (
+                {"num_probes": 4, "top_n_scan": 10},
+                "top_n_scan requires num_probes and rerank",
+            ),
+            ({"rerank": False, "top_n_scan": 10}, "rerank requires num_probes"),
+        ],
+    )
+    def test_tuning_param_without_prerequisite_is_error(
+        self, kwargs: dict, expected: str
+    ) -> None:
         ctx = _make_ctx()
         result = run_vector_query(
             ctx,
@@ -75,11 +89,10 @@ class TestRunVectorQueryValidation:
             "embedding",
             "query text",
             distance_metric="l2_squared",
-            num_probes=10,
-            # rerank/top_n_scan omitted -> invalid
+            **kwargs,
         )
         assert result["success"] is False
-        assert "num_probes" in result["error"]
+        assert result["error"] == expected
 
     def test_connection_failure_propagates(self) -> None:
         """A cluster that can't be reached at all must still raise."""
@@ -181,7 +194,21 @@ class TestRunVectorQueryConstruction:
         assert "WHERE" not in query_text
         assert kwargs["named_parameters"] == {"query_vector": [0.1, 0.2, 0.3]}
 
-    def test_hyperscale_tuning_params_extend_function_arity(self) -> None:
+    @pytest.mark.parametrize(
+        ("kwargs", "tail"),
+        [
+            ({"num_probes": 10}, ", 10)"),
+            ({"num_probes": 10, "rerank": True}, ", 10, TRUE)"),
+            ({"num_probes": 10, "rerank": False}, ", 10, FALSE)"),
+            (
+                {"num_probes": 10, "rerank": True, "top_n_scan": 1000},
+                ", 10, TRUE, 1000)",
+            ),
+        ],
+    )
+    def test_hyperscale_tuning_params_extend_function_arity(
+        self, kwargs: dict, tail: str
+    ) -> None:
         ctx = _make_ctx()
         cluster, bucket, scope = self._cluster_with_scope_query([])
 
@@ -190,7 +217,7 @@ class TestRunVectorQueryConstruction:
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
             _patch_embedding(),
         ):
-            run_vector_query(
+            result = run_vector_query(
                 ctx,
                 "b",
                 "s",
@@ -198,16 +225,16 @@ class TestRunVectorQueryConstruction:
                 "embedding",
                 "query",
                 distance_metric="l2_squared",
-                num_probes=10,
-                rerank=1,
-                top_n_scan=1000,
+                **kwargs,
             )
 
+        assert result["success"] is True
         query_text = scope.query.call_args[0][0]
-        assert (
-            'APPROX_VECTOR_DISTANCE(doc.`embedding`, $query_vector, "l2_squared", 10, 1, 1000)'
-            in query_text
+        expected = (
+            'APPROX_VECTOR_DISTANCE(doc.`embedding`, $query_vector, "l2_squared"' + tail
         )
+        # Same expression in the projection and in ORDER BY.
+        assert query_text.count(expected) == 2
 
     def test_where_and_select_fields_applied(self) -> None:
         ctx = _make_ctx()
