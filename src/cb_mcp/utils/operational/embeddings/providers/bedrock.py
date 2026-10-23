@@ -3,7 +3,7 @@
 Requires the optional ``bedrock-embeddings`` extra
 (``pip install couchbase-mcp-server[bedrock-embeddings]``) for ``boto3`` --
 imported lazily here, never at module scope, so a process that
-never selects ``EMBEDDING_PROVIDER=bedrock`` (and in particular, one that
+never selects ``CB_MCP_EMBEDDING_MODEL_PROVIDER=bedrock`` (and in particular, one that
 doesn't have the extra installed) never pays for or needs the import.
 
 Scoped to the Titan embedding family's request/response shape (``inputText``
@@ -58,7 +58,7 @@ class BedrockEmbeddingProvider(EmbeddingProvider):
             ) from e
         # Falsy/None credential kwargs fall through to boto3's own default
         # credential chain (env vars, ~/.aws/credentials, instance role) —
-        # EMBEDDING_AWS_* are overrides, not requirements.
+        # CB_MCP_EMBEDDING_MODEL_AWS_* are overrides, not requirements.
         region = settings.get("embedding_aws_region") or None
         logger.debug(
             f"Configuring Bedrock client (region={region!r}, "

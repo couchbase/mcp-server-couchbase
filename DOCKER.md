@@ -125,7 +125,7 @@ The most common variables are below. Every option — including logging rotation
 | `CB_MCP_AUDIT_LOG_ENABLED` | Turn on audit logging | `false` |
 | `CB_MCP_AUDIT_LOG_SINKS` / `CB_MCP_AUDIT_LOG_FILE_PATH` | `console` and/or `file`, and the audit file path | `console` |
 | `CB_MCP_OAUTH_JWT_JWKS_URI` / `_ISSUER` / `_AUDIENCE` | Turn on OAuth 2.1 (all three required) | |
-| `EMBEDDING_PROVIDER` | Embedding provider for the vector search tools: `couchbase`, `openai`, `cohere`, `voyage`, `bedrock` | |
+| `CB_MCP_EMBEDDING_MODEL_PROVIDER` | Embedding provider for the vector search tools: `capella`, `openai`, `cohere`, `voyage`, `bedrock` | |
 
 > [!IMPORTANT]
 > Disabling tools does not prevent writes on its own — `run_sql_plus_plus_query` can still run DML unless read-only mode is on. The database user's RBAC permissions are the authoritative security control.

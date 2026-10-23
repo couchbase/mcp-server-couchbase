@@ -56,7 +56,7 @@ dev = [
     "pytest-cov>=7.0.0",
 ]
 # Only needed for run_vector_query / run_vector_search with
-# EMBEDDING_PROVIDER=bedrock — openai/couchbase/voyage use the openai SDK (a
+# CB_MCP_EMBEDDING_MODEL_PROVIDER=bedrock — openai/capella/voyage use the openai SDK (a
 # core dependency, see above); cohere still hand-rolls its request via httpx
 # (already a transitive dependency via fastmcp) since its wire format isn't
 # actually OpenAI-compatible.

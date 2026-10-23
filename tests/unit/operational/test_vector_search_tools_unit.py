@@ -313,7 +313,7 @@ class TestRunVectorQueryConstruction:
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             _patch_embedding(
                 side_effect=EmbeddingConfigError(
-                    "EMBEDDING_PROVIDER is not configured."
+                    "CB_MCP_EMBEDDING_MODEL_PROVIDER is not configured."
                 )
             ),
         ):
@@ -322,7 +322,7 @@ class TestRunVectorQueryConstruction:
             )
 
         assert result["success"] is False
-        assert "EMBEDDING_PROVIDER" in result["error"]
+        assert "CB_MCP_EMBEDDING_MODEL_PROVIDER" in result["error"]
 
 
 class TestRunVectorSearchValidation:

@@ -2,13 +2,13 @@
 Integration tests for vector_search.py (run_vector_query, run_vector_search).
 
 Requires, in addition to the usual CB_CONNECTION_STRING/CB_USERNAME/CB_PASSWORD/
-CB_MCP_TEST_BUCKET: a configured embedding provider (EMBEDDING_PROVIDER plus
-whatever that provider needs — EMBEDDING_MODEL/EMBEDDING_API_KEY/EMBEDDING_ENDPOINT/
-EMBEDDING_AWS_*, see registry.PROVIDER_CONFIG_DOCS). Skips cleanly (not a
-failure) when EMBEDDING_PROVIDER is unset, same convention as
+CB_MCP_TEST_BUCKET: a configured embedding provider (CB_MCP_EMBEDDING_MODEL_PROVIDER plus
+whatever that provider needs — CB_MCP_EMBEDDING_MODEL/CB_MCP_EMBEDDING_MODEL_API_KEY/CB_MCP_EMBEDDING_MODEL_ENDPOINT/
+CB_MCP_EMBEDDING_MODEL_AWS_*, see registry.PROVIDER_CONFIG_DOCS). Skips cleanly (not a
+failure) when CB_MCP_EMBEDDING_MODEL_PROVIDER is unset, same convention as
 CB_MCP_TEST_BUCKET. Because _build_env() (tests/_test_env.py) forwards the
 whole current process environment to the spawned MCP server subprocess,
-setting EMBEDDING_* before running pytest is sufficient -- no extra wiring.
+setting CB_MCP_EMBEDDING_MODEL_* before running pytest is sufficient -- no extra wiring.
 
 There is no MCP write tool for either index kind here (out of scope for this
 tool family, same as FTS indexes), so the fixtures below seed/drop indexes
@@ -87,20 +87,24 @@ def _direct_cluster():
 
 def _embedding_settings_from_env() -> dict[str, Any]:
     return {
-        "embedding_provider": os.getenv("EMBEDDING_PROVIDER"),
-        "embedding_model": os.getenv("EMBEDDING_MODEL"),
-        "embedding_api_key": os.getenv("EMBEDDING_API_KEY"),
-        "embedding_endpoint": os.getenv("EMBEDDING_ENDPOINT"),
-        "embedding_aws_access_key_id": os.getenv("EMBEDDING_AWS_ACCESS_KEY_ID"),
-        "embedding_aws_secret_access_key": os.getenv("EMBEDDING_AWS_SECRET_ACCESS_KEY"),
-        "embedding_aws_region": os.getenv("EMBEDDING_AWS_REGION"),
+        "embedding_provider": os.getenv("CB_MCP_EMBEDDING_MODEL_PROVIDER"),
+        "embedding_model": os.getenv("CB_MCP_EMBEDDING_MODEL"),
+        "embedding_api_key": os.getenv("CB_MCP_EMBEDDING_MODEL_API_KEY"),
+        "embedding_endpoint": os.getenv("CB_MCP_EMBEDDING_MODEL_ENDPOINT"),
+        "embedding_aws_access_key_id": os.getenv(
+            "CB_MCP_EMBEDDING_MODEL_AWS_ACCESS_KEY_ID"
+        ),
+        "embedding_aws_secret_access_key": os.getenv(
+            "CB_MCP_EMBEDDING_MODEL_AWS_SECRET_ACCESS_KEY"
+        ),
+        "embedding_aws_region": os.getenv("CB_MCP_EMBEDDING_MODEL_AWS_REGION"),
     }
 
 
 def _require_embedding_provider() -> dict[str, Any]:
     settings = _embedding_settings_from_env()
     if not settings.get("embedding_provider"):
-        pytest.skip("EMBEDDING_PROVIDER not set")
+        pytest.skip("CB_MCP_EMBEDDING_MODEL_PROVIDER not set")
     return settings
 
 
@@ -402,10 +406,12 @@ async def test_run_vector_query_finds_seeded_document(
 async def test_run_vector_query_missing_provider_returns_error(
     seeded_gsi_vector_index: dict[str, Any],
 ) -> None:
-    """A cluster reachable but a subprocess started with no EMBEDDING_PROVIDER
+    """A cluster reachable but a subprocess started with no CB_MCP_EMBEDDING_MODEL_PROVIDER
     must return a tool_error, not raise or hang."""
     fixture = seeded_gsi_vector_index
-    async with create_mcp_session(extra_env={"EMBEDDING_PROVIDER": ""}) as session:
+    async with create_mcp_session(
+        extra_env={"CB_MCP_EMBEDDING_MODEL_PROVIDER": ""}
+    ) as session:
         response = await session.call_tool(
             "run_vector_query",
             arguments={
@@ -421,7 +427,7 @@ async def test_run_vector_query_missing_provider_returns_error(
 
     assert isinstance(payload, dict)
     assert payload["success"] is False
-    assert "EMBEDDING_PROVIDER" in payload["error"]
+    assert "CB_MCP_EMBEDDING_MODEL_PROVIDER" in payload["error"]
 
 
 @pytest.mark.asyncio

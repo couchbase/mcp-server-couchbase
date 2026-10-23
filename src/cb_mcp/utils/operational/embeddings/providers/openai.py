@@ -1,8 +1,8 @@
 """OpenAI embedding provider (BYOM).
 
-``EMBEDDING_ENDPOINT`` also covers "OpenAI-compatible local server" (Ollama,
+``CB_MCP_EMBEDDING_MODEL_ENDPOINT`` also covers "OpenAI-compatible local server" (Ollama,
 vLLM, LM Studio) — point it at the local server's base URL with
-``EMBEDDING_PROVIDER=openai``; no separate provider is needed for that case.
+``CB_MCP_EMBEDDING_MODEL_PROVIDER=openai``; no separate provider is needed for that case.
 """
 
 from __future__ import annotations
