@@ -249,7 +249,7 @@ class OAuthParams:
 
 @dataclass(frozen=True)
 class EmbeddingParams:
-    """The seven EMBEDDING_* flags, resolved. All optional — see embedding_options
+    """The seven CB_MCP_EMBEDDING_MODEL_* flags, resolved. All optional — see embedding_options
     in core/cli/options.py; validated at tool-call time, not CLI-parse time,
     since embedding config is unused unless run_vector_query /
     run_vector_search are actually called.

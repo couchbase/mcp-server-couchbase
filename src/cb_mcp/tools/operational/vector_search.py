@@ -17,7 +17,7 @@ genuinely different Couchbase mechanisms:
   vector query combined into one ranked result set).
 
 Both tools turn query text into a vector via the pluggable embedding-provider
-abstraction in utils.operational.embeddings, selected by the EMBEDDING_*
+abstraction in utils.operational.embeddings, selected by the CB_MCP_EMBEDDING_MODEL_*
 settings (see registry.PROVIDER_CONFIG_DOCS for exactly what each provider
 needs). Embedding config is entirely optional at server startup -- these
 tools fail with an actionable tool_error at call time if it's missing, they
@@ -88,8 +88,8 @@ def run_vector_query(
     """Embed a query and run a vector similarity search against a GSI vector index.
 
     Embedding: query_text is embedded using the model configured via
-    EMBEDDING_PROVIDER/EMBEDDING_MODEL/EMBEDDING_API_KEY/EMBEDDING_ENDPOINT
-    (plus EMBEDDING_AWS_* for provider=bedrock). If no provider is configured,
+    CB_MCP_EMBEDDING_MODEL_PROVIDER/CB_MCP_EMBEDDING_MODEL/CB_MCP_EMBEDDING_MODEL_API_KEY/CB_MCP_EMBEDDING_MODEL_ENDPOINT
+    (plus CB_MCP_EMBEDDING_MODEL_AWS_* for provider=bedrock). If no provider is configured,
     this tool returns {"success": False, "error": ...} explaining what to set
     -- it is not hidden from tool discovery when unconfigured.
 
@@ -248,8 +248,8 @@ def run_vector_search(
     """Run the Search service's vector search, including hybrid and prefiltered search.
 
     Embedding: vector_query_text is embedded using the model configured via
-    EMBEDDING_PROVIDER/EMBEDDING_MODEL/EMBEDDING_API_KEY/EMBEDDING_ENDPOINT
-    (plus EMBEDDING_AWS_* for provider=bedrock). If no provider is configured,
+    CB_MCP_EMBEDDING_MODEL_PROVIDER/CB_MCP_EMBEDDING_MODEL/CB_MCP_EMBEDDING_MODEL_API_KEY/CB_MCP_EMBEDDING_MODEL_ENDPOINT
+    (plus CB_MCP_EMBEDDING_MODEL_AWS_* for provider=bedrock). If no provider is configured,
     this tool returns {"success": False, "error": ...} explaining what to set
 
     Unlike run_vector_query's GSI-backed search, this tool always targets a

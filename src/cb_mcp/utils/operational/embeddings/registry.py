@@ -13,7 +13,7 @@ and README.md/DOCKER.md (hand-mirrored, same as every other doc table in this
 repo).
 
 Deliberately NOT rendered into the vector search tools' own docstrings
-(``tools/operational/vector_search.py``): which EMBEDDING_* variables a
+(``tools/operational/vector_search.py``): which CB_MCP_EMBEDDING_MODEL_* variables a
 provider needs is a deployment-time decision an operator makes once via env
 vars/CLI flags, not something the calling LLM can act on or change per tool
 call -- an operator checking what's actually configured already has
@@ -57,21 +57,21 @@ PROVIDER_CONFIG_DOCS: dict[str, ProviderConfigDoc] = {
         display_name="OpenAI (BYOM)",
         fields=(
             ConfigField(
-                "EMBEDDING_API_KEY",
+                "CB_MCP_EMBEDDING_MODEL_API_KEY",
                 "embedding_api_key",
                 required=True,
                 secret=True,
                 description="OpenAI API key.",
             ),
             ConfigField(
-                "EMBEDDING_MODEL",
+                "CB_MCP_EMBEDDING_MODEL",
                 "embedding_model",
                 required=True,
                 secret=False,
                 description="Embedding model name, e.g. text-embedding-3-small.",
             ),
             ConfigField(
-                "EMBEDDING_ENDPOINT",
+                "CB_MCP_EMBEDDING_MODEL_ENDPOINT",
                 "embedding_endpoint",
                 required=False,
                 secret=False,
@@ -81,26 +81,26 @@ PROVIDER_CONFIG_DOCS: dict[str, ProviderConfigDoc] = {
         ),
         example_model="text-embedding-3-small",
     ),
-    "couchbase": ProviderConfigDoc(
-        provider_id="couchbase",
-        display_name="Couchbase Model Service (Provisioned/Serverless)",
+    "capella": ProviderConfigDoc(
+        provider_id="capella",
+        display_name="Capella Model Service (Provisioned/Serverless)",
         fields=(
             ConfigField(
-                "EMBEDDING_API_KEY",
+                "CB_MCP_EMBEDDING_MODEL_API_KEY",
                 "embedding_api_key",
                 required=True,
                 secret=True,
                 description="Model Service API key for this deployment.",
             ),
             ConfigField(
-                "EMBEDDING_MODEL",
+                "CB_MCP_EMBEDDING_MODEL",
                 "embedding_model",
                 required=True,
                 secret=False,
                 description="Deployed model name/reference.",
             ),
             ConfigField(
-                "EMBEDDING_ENDPOINT",
+                "CB_MCP_EMBEDDING_MODEL_ENDPOINT",
                 "embedding_endpoint",
                 required=True,
                 secret=False,
@@ -116,21 +116,21 @@ PROVIDER_CONFIG_DOCS: dict[str, ProviderConfigDoc] = {
         display_name="Cohere (BYOM)",
         fields=(
             ConfigField(
-                "EMBEDDING_API_KEY",
+                "CB_MCP_EMBEDDING_MODEL_API_KEY",
                 "embedding_api_key",
                 required=True,
                 secret=True,
                 description="Cohere API key.",
             ),
             ConfigField(
-                "EMBEDDING_MODEL",
+                "CB_MCP_EMBEDDING_MODEL",
                 "embedding_model",
                 required=True,
                 secret=False,
                 description="Embedding model name, e.g. embed-english-v3.0.",
             ),
             ConfigField(
-                "EMBEDDING_ENDPOINT",
+                "CB_MCP_EMBEDDING_MODEL_ENDPOINT",
                 "embedding_endpoint",
                 required=False,
                 secret=False,
@@ -144,21 +144,21 @@ PROVIDER_CONFIG_DOCS: dict[str, ProviderConfigDoc] = {
         display_name="Voyage AI (BYOM)",
         fields=(
             ConfigField(
-                "EMBEDDING_API_KEY",
+                "CB_MCP_EMBEDDING_MODEL_API_KEY",
                 "embedding_api_key",
                 required=True,
                 secret=True,
                 description="Voyage API key.",
             ),
             ConfigField(
-                "EMBEDDING_MODEL",
+                "CB_MCP_EMBEDDING_MODEL",
                 "embedding_model",
                 required=True,
                 secret=False,
                 description="Embedding model name, e.g. voyage-3.",
             ),
             ConfigField(
-                "EMBEDDING_ENDPOINT",
+                "CB_MCP_EMBEDDING_MODEL_ENDPOINT",
                 "embedding_endpoint",
                 required=False,
                 secret=False,
@@ -172,7 +172,7 @@ PROVIDER_CONFIG_DOCS: dict[str, ProviderConfigDoc] = {
         display_name="Amazon Bedrock (BYOM)",
         fields=(
             ConfigField(
-                "EMBEDDING_MODEL",
+                "CB_MCP_EMBEDDING_MODEL",
                 "embedding_model",
                 required=True,
                 secret=False,
@@ -180,7 +180,7 @@ PROVIDER_CONFIG_DOCS: dict[str, ProviderConfigDoc] = {
                 "(Titan embedding family only).",
             ),
             ConfigField(
-                "EMBEDDING_AWS_ACCESS_KEY_ID",
+                "CB_MCP_EMBEDDING_MODEL_AWS_ACCESS_KEY_ID",
                 "embedding_aws_access_key_id",
                 required=False,
                 secret=True,
@@ -188,14 +188,14 @@ PROVIDER_CONFIG_DOCS: dict[str, ProviderConfigDoc] = {
                 "(env vars, ~/.aws/credentials, instance role).",
             ),
             ConfigField(
-                "EMBEDDING_AWS_SECRET_ACCESS_KEY",
+                "CB_MCP_EMBEDDING_MODEL_AWS_SECRET_ACCESS_KEY",
                 "embedding_aws_secret_access_key",
                 required=False,
                 secret=True,
                 description="Paired with the access key ID.",
             ),
             ConfigField(
-                "EMBEDDING_AWS_REGION",
+                "CB_MCP_EMBEDDING_MODEL_AWS_REGION",
                 "embedding_aws_region",
                 required=False,
                 secret=False,
@@ -213,16 +213,16 @@ def _load_provider_classes() -> dict[str, type[EmbeddingProvider]]:
     in a process that never calls these tools.
     """
     from .providers.bedrock import BedrockEmbeddingProvider  # noqa: PLC0415
-    from .providers.cohere import CohereEmbeddingProvider  # noqa: PLC0415
-    from .providers.couchbase_provisioned import (  # noqa: PLC0415
-        CouchbaseProvisionedEmbeddingProvider,
+    from .providers.capella_provisioned import (  # noqa: PLC0415
+        CapellaProvisionedEmbeddingProvider,
     )
+    from .providers.cohere import CohereEmbeddingProvider  # noqa: PLC0415
     from .providers.openai import OpenAIEmbeddingProvider  # noqa: PLC0415
     from .providers.voyage import VoyageEmbeddingProvider  # noqa: PLC0415
 
     return {
         "openai": OpenAIEmbeddingProvider,
-        "couchbase": CouchbaseProvisionedEmbeddingProvider,
+        "capella": CapellaProvisionedEmbeddingProvider,
         "cohere": CohereEmbeddingProvider,
         "voyage": VoyageEmbeddingProvider,
         "bedrock": BedrockEmbeddingProvider,
@@ -235,13 +235,13 @@ def resolve_embedding_provider(settings: Mapping[str, Any]) -> EmbeddingProvider
     providers = _load_provider_classes()
     if not provider_id:
         raise EmbeddingConfigError(
-            "EMBEDDING_PROVIDER is not configured. Set it to one of: "
+            "CB_MCP_EMBEDDING_MODEL_PROVIDER is not configured. Set it to one of: "
             f"{', '.join(sorted(providers))}."
         )
     provider_cls = providers.get(provider_id)
     if provider_cls is None:
         raise EmbeddingConfigError(
-            f"Unknown EMBEDDING_PROVIDER {provider_id!r}. Must be one of: "
+            f"Unknown CB_MCP_EMBEDDING_MODEL_PROVIDER {provider_id!r}. Must be one of: "
             f"{', '.join(sorted(providers))}."
         )
     logger.debug(

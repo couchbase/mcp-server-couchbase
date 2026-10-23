@@ -40,7 +40,7 @@ logger = logging.getLogger(
 
 
 class _OpenAICompatibleProvider(EmbeddingProvider):
-    #: None means EMBEDDING_ENDPOINT is required (no public shared domain).
+    #: None means CB_MCP_EMBEDDING_MODEL_ENDPOINT is required (no public shared domain).
     _default_base_url: str | None = None
     #: OpenAI's documented /v1/embeddings schema (model, input,
     #: encoding_format, dimensions, user) has no input_type field -- False by
@@ -57,7 +57,7 @@ class _OpenAICompatibleProvider(EmbeddingProvider):
     def _normalize_base_url(cls, base_url: str) -> str:
         """Hook for a subclass whose operator-supplied endpoint needs a fixed
         suffix appended -- e.g. Couchbase's bare deployment host needs /v1,
-        see couchbase_provisioned.py. No-op by default: OpenAI and
+        see capella_provisioned.py. No-op by default: OpenAI and
         OpenAI-compatible local servers already expect the operator to supply
         the full path, /v1 included, matching the documented examples.
         """
@@ -69,7 +69,7 @@ class _OpenAICompatibleProvider(EmbeddingProvider):
         base_url = fields.get("embedding_endpoint") or cls._default_base_url
         if not base_url:
             raise EmbeddingConfigError(
-                f"EMBEDDING_ENDPOINT is required for provider {cls.provider_id!r}."
+                f"CB_MCP_EMBEDDING_MODEL_ENDPOINT is required for provider {cls.provider_id!r}."
             )
         base_url = cls._normalize_base_url(base_url.rstrip("/"))
         return cls(
