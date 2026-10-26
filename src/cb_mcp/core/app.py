@@ -44,6 +44,7 @@ from ..utils.constants import (
 from ..utils.context import AppContext
 from ..utils.environment import log_environment_info
 from ..utils.telemetry import send_install_ping
+from ..version import server_version
 from .contracts import ProviderLifecycle
 from .serving import apply_thread_pool_limit
 from .spec import ServerSpec
@@ -275,7 +276,16 @@ def build_app(
                 shutdown_audit()
             logger.info("Closing MCP server")
 
-    mcp = FastMCP(spec.fastmcp_name, lifespan=app_lifespan, auth=auth)
+    # ``version`` is what a client reads back as ``serverInfo.version`` from
+    # the initialize handshake. Left unset, FastMCP reports its own version,
+    # so the protocol identified the framework a build pinned rather than the
+    # build itself and callers had to source it from the install side instead.
+    mcp = FastMCP(
+        spec.fastmcp_name,
+        version=server_version(),
+        lifespan=app_lifespan,
+        auth=auth,
+    )
     _add_health_check(mcp, spec)
 
     # Registered before tools so it wraps every one of them. The middleware
