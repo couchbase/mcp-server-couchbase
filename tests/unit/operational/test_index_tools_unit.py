@@ -131,6 +131,49 @@ class TestGetIndexAdvisorRecommendations:
         ):
             get_index_advisor_recommendations(mock_ctx, "b", "s", "SELECT * FROM x")
 
+    def test_advisor_errors_raise(self) -> None:
+        """Advisor errors arrive inside a successful result; they must be raised
+        rather than reported as an empty "no recommendations" response."""
+        mock_ctx = MagicMock()
+        advisor_payload = [
+            {
+                "advisor_result": {
+                    "errors": [
+                        {
+                            "error": "syntax error - line 1, column 8, near 'advise ', at: SELEC",
+                            "run_count": 1,
+                            "statement": "SELEC broken",
+                        }
+                    ]
+                }
+            }
+        ]
+
+        with (
+            patch(
+                "cb_mcp.tools.operational.index.run_sql_plus_plus_query",
+                return_value=advisor_payload,
+            ),
+            pytest.raises(ValueError, match="syntax error - line 1, column 8"),
+        ):
+            get_index_advisor_recommendations(mock_ctx, "b", "s", "SELEC broken")
+
+    def test_multiple_advisor_errors_are_all_reported(self) -> None:
+        """Every advisor error message must appear in the raised error."""
+        mock_ctx = MagicMock()
+        advisor_payload = [
+            {"advisor_result": {"errors": [{"error": "first"}, {"error": "second"}]}}
+        ]
+
+        with (
+            patch(
+                "cb_mcp.tools.operational.index.run_sql_plus_plus_query",
+                return_value=advisor_payload,
+            ),
+            pytest.raises(ValueError, match="first; second"),
+        ):
+            get_index_advisor_recommendations(mock_ctx, "b", "s", "SELECT * FROM x")
+
     def test_advised_query_bound_as_named_parameter_not_reserved_name(self) -> None:
         """Regression: the advisor must bind the advised query via a named
         parameter whose name is NOT ``query``.
