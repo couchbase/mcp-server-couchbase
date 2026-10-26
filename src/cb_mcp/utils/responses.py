@@ -13,12 +13,50 @@ only failure mode is an unreachable cluster still return bare data and raise.
 
 from typing import Any
 
+from .constants import MAX_ERROR_MESSAGE_LENGTH
+
 
 def tool_success(**fields: Any) -> dict[str, Any]:
     """Build a success envelope: ``{"success": True, **fields}``."""
     return {"success": True, **fields}
 
 
+def _truncate(text: str) -> str:
+    if len(text) <= MAX_ERROR_MESSAGE_LENGTH:
+        return text
+    return text[:MAX_ERROR_MESSAGE_LENGTH] + "... [truncated]"
+
+
+def error_message(error: Exception | str) -> str:
+    """Condense an exception into a short, client-safe message.
+
+    ``str()`` of a Couchbase SDK exception is a full dump: the SQL++ statement,
+    every bound parameter (for vector tools that is the whole embedding, 30 KB+),
+    node addresses and a C++ source path. None of that helps the caller and it
+    floods the LLM's context, so SDK errors are reduced to the server's own
+    error code and message. Everything else is returned as ``str(error)``.
+    Whatever the source, the result is capped at ``MAX_ERROR_MESSAGE_LENGTH`` characters.
+
+    SDK exceptions are recognised by duck typing (``error_context``) because this
+    module is shared with the Operational Insights server, whose process must
+    not import the ``couchbase`` SDK.
+    """
+    context = getattr(error, "error_context", None)
+    if context is None:
+        return _truncate(str(error))
+    code = getattr(context, "first_error_code", None)
+    message = getattr(context, "first_error_message", None)
+    if code is not None or message:
+        return _truncate(f"{code}: {message}" if code is not None else str(message))
+    # No server-side error detail (timeouts, connection failures, ...): keep the
+    # exception type and SDK message, drop the context.
+    detail = getattr(error, "message", None) or "no details"
+    return _truncate(f"{type(error).__name__}: {detail}")
+
+
 def tool_error(error: Exception | str, **fields: Any) -> dict[str, Any]:
-    """Build a failure envelope: ``{"success": False, "error": str(error), **fields}``."""
-    return {"success": False, "error": str(error), **fields}
+    """Build a failure envelope: ``{"success": False, "error": <short message>, **fields}``.
+
+    SDK exceptions are condensed by :func:`error_message`.
+    """
+    return {"success": False, "error": error_message(error), **fields}
