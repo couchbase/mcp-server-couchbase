@@ -40,7 +40,7 @@ def _protocol_members(protocol: type) -> set[str]:
     """Public members a protocol declares, including inherited ones.
 
     Walks the MRO rather than using ``__protocol_attrs__``, which only
-    exists on Python 3.12+; this project supports 3.10. Annotations are
+    exists on Python 3.12+; this project supports 3.11. Annotations are
     collected alongside ``vars`` so attribute members (``handle_registry``)
     count, not just methods.
     """
