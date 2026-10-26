@@ -56,7 +56,7 @@ class TestErrorMessage:
     def test_sdk_error_without_server_detail_drops_context(self) -> None:
         err = UnAmbiguousTimeoutException(message="timed out")
         result = error_message(err)
-        assert result == "UnAmbiguousTimeoutException: timed out"
+        assert result == "UnAmbiguousTimeoutException (see server log for details)"
 
     def test_plain_exceptions_and_strings_unchanged(self) -> None:
         assert error_message(ValueError("bad input")) == "bad input"

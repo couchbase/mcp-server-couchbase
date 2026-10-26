@@ -48,10 +48,10 @@ def error_message(error: Exception | str) -> str:
     message = getattr(context, "first_error_message", None)
     if code is not None or message:
         return _truncate(f"{code}: {message}" if code is not None else str(message))
-    # No server-side error detail (timeouts, connection failures, ...): keep the
-    # exception type and SDK message, drop the context.
-    detail = getattr(error, "message", None) or "no details"
-    return _truncate(f"{type(error).__name__}: {detail}")
+    # No server-side error detail (timeouts, connection failures, ...). The SDK's
+    # ``message`` is marked VOLATILE and ``str(error)`` is the full dump, so give
+    # only the exception type; the full error is in the server log.
+    return f"{type(error).__name__} (see server log for details)"
 
 
 def tool_error(error: Exception | str, **fields: Any) -> dict[str, Any]:
