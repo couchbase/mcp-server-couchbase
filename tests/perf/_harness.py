@@ -27,6 +27,7 @@ from cb_mcp.servers.operational.spec import SPEC as OPERATIONAL_SPEC
 from cb_mcp.tool_registration import prepare_tools_for_registration
 from cb_mcp.tools.operational import TOOL_ANNOTATIONS
 from cb_mcp.utils import AppContext
+from cb_mcp.version import server_version
 
 ITERATIONS = int(os.getenv("CB_MCP_PERF_ITERATIONS", "100"))
 ASSERT_ENABLED = os.getenv("CB_MCP_PERF_ASSERT") == "1"
@@ -135,7 +136,7 @@ def build_perf_server(provider: Any, *, read_only_mode: bool = False) -> FastMCP
             # session; a live provider reconnects lazily on the next call.
             provider.close()
 
-    mcp = FastMCP(FASTMCP_SERVER_NAME, lifespan=lifespan)
+    mcp = FastMCP(FASTMCP_SERVER_NAME, version=server_version(), lifespan=lifespan)
     for tool in final_tools:
         mcp.add_tool(
             FunctionTool.from_function(
