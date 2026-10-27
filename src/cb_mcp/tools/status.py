@@ -35,6 +35,7 @@ from ..utils.context import (
     get_server_id,
     get_server_name,
 )
+from ..version import server_version
 
 
 def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
@@ -103,6 +104,7 @@ def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
     return {
         "server_name": get_server_name(ctx),
         "server_id": get_server_id(ctx),
+        "version": server_version(),
         "status": "running",
         "configuration": configuration,
         "logging": logging_status,
