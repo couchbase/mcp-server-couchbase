@@ -53,10 +53,9 @@ class TestErrorMessage:
             assert leaked not in result
         assert len(result) < 300
 
-    def test_sdk_error_without_server_detail_drops_context(self) -> None:
+    def test_sdk_error_without_server_detail_is_str_capped(self) -> None:
         err = UnAmbiguousTimeoutException(message="timed out")
-        result = error_message(err)
-        assert result == "UnAmbiguousTimeoutException (see server log for details)"
+        assert error_message(err) == str(err)[:MAX_ERROR_MESSAGE_LENGTH]
 
     def test_plain_exceptions_and_strings_unchanged(self) -> None:
         assert error_message(ValueError("bad input")) == "bad input"

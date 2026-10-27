@@ -34,30 +34,25 @@ def _truncate(text: str) -> str:
 
 
 def error_message(error: Exception | str) -> str:
-    """Condense an exception into a short, client-safe message.
+    """Condense an exception into a short message for the MCP client.
 
-    ``str()`` of a Couchbase SDK exception is a full dump: the SQL++ statement,
-    every bound parameter (for vector tools that is the whole embedding, 30 KB+),
-    node addresses and a C++ source path. None of that helps the caller and it
-    floods the LLM's context, so SDK errors are reduced to the server's own
-    error code and message. Everything else is returned as ``str(error)``.
-    Whatever the source, the result is capped at ``MAX_ERROR_MESSAGE_LENGTH`` characters.
+    ``str()`` of a Couchbase SDK query exception is a full dump: the SQL++
+    statement, every bound parameter (for vector tools the whole embedding), node
+    addresses and a C++ source path. When the exception carries a query/analytics
+    error context, the server's own ``code: message`` is returned instead.
+    Anything else is ``str(error)``. The result is capped at
+    ``MAX_ERROR_MESSAGE_LENGTH`` characters.
 
-    SDK exceptions are recognised by duck typing (``error_context``) because this
-    module is shared with the Operational Insights server, whose process must
-    not import the ``couchbase`` SDK.
+    The context is read by duck typing (``error_context``) because this module is
+    shared with the Operational Insights server, whose process must not import the
+    ``couchbase`` SDK.
     """
     context = getattr(error, "error_context", None)
-    if context is None:
-        return _truncate(str(error))
     code = getattr(context, "first_error_code", None)
     message = getattr(context, "first_error_message", None)
     if code is not None or message:
         return _truncate(f"{code}: {message}" if code is not None else str(message))
-    # No server-side error detail (timeouts, connection failures, ...). The SDK's
-    # ``message`` is marked VOLATILE and ``str(error)`` is the full dump, so give
-    # only the exception type; the full error is in the server log.
-    return f"{type(error).__name__} (see server log for details)"
+    return _truncate(str(error))
 
 
 def tool_error(error: Exception | str, **fields: Any) -> dict[str, Any]:
