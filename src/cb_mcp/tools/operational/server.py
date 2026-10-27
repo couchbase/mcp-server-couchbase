@@ -13,6 +13,7 @@ import json
 import logging
 import re
 from collections import Counter
+from datetime import timedelta
 from typing import Any
 from urllib.parse import quote
 
@@ -33,6 +34,7 @@ from ...utils.operational.connection_string import (
     is_capella_connection,
     validate_connection_settings,
 )
+from ...utils.operational.constants import ENDPOINT_PING_TIMEOUT_SECONDS
 from ...utils.operational.context import get_cluster_connection
 from ...utils.operational.index_utils import resolve_management_endpoints
 from .query import run_cluster_query
@@ -335,23 +337,26 @@ def get_cluster_health_and_services(
     try:
         cluster = get_cluster_connection(ctx)
 
-        ping_opts = (
-            PingOptions(service_types=[ServiceType(s) for s in service_types])
-            if service_types
-            else None
-        )
-        ping_args = (ping_opts,) if ping_opts is not None else ()
+        # Bounded so a node that is down but still in the cluster map shows up as a
+        # "timeout" endpoint in the report instead of holding the call for the SDK's
+        # full per-service timeout.
+        ping_kwargs: dict[str, Any] = {
+            "timeout": timedelta(seconds=ENDPOINT_PING_TIMEOUT_SECONDS)
+        }
+        if service_types:
+            ping_kwargs["service_types"] = [ServiceType(s) for s in service_types]
+        ping_opts = PingOptions(**ping_kwargs)
 
         if bucket_name:
             # Ping services from the perspective of the bucket
             logger.debug(f"Pinging cluster services via bucket '{bucket_name}'")
             bucket = connect_to_bucket(cluster, bucket_name)
-            ping_result = bucket.ping(*ping_args)
+            ping_result = bucket.ping(ping_opts)
             result = ping_result.as_json()
         else:
             # Ping services from the perspective of the cluster
             logger.debug("Pinging cluster services")
-            ping_result = cluster.ping(*ping_args)
+            ping_result = cluster.ping(ping_opts)
             result = ping_result.as_json()
 
         logger.info("Retrieved cluster health and services information")

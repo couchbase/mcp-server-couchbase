@@ -6,6 +6,7 @@ This module contains helper functions for working with Couchbase indexes.
 
 import json
 import logging
+from datetime import timedelta
 from typing import Any
 from urllib.parse import quote
 
@@ -19,6 +20,7 @@ from .connection_string import (
     extract_hosts_from_connection_string,
 )
 from .constants import (
+    ENDPOINT_PING_TIMEOUT_SECONDS,
     INDEX_REST_PORT_PLAIN,
     INDEX_REST_PORT_TLS,
     MANAGEMENT_REST_PORT_PLAIN,
@@ -464,12 +466,19 @@ def resolve_management_endpoints(cluster: Any, connection_string: str) -> list[s
     Uses ``ping`` rather than ``diagnostics``: diagnostics only reports sockets
     the SDK happens to have open, and a freshly opened cluster has connected to
     nothing but key-value, so it would report no management endpoint at all.
-    The ping is limited to the management service to keep it cheap.
+    The ping is limited to the management service to keep it cheap, and bounded
+    by ``ENDPOINT_PING_TIMEOUT_SECONDS`` so a node that is down but still in the
+    cluster map cannot hold the call for the SDK's full management timeout.
     """
     endpoints: list[str] = []
     try:
         report = json.loads(
-            cluster.ping(PingOptions(service_types=[ServiceType.Management])).as_json()
+            cluster.ping(
+                PingOptions(
+                    service_types=[ServiceType.Management],
+                    timeout=timedelta(seconds=ENDPOINT_PING_TIMEOUT_SECONDS),
+                )
+            ).as_json()
         )
         for endpoint in report.get("services", {}).get("management", []):
             remote = endpoint.get("remote")
@@ -511,7 +520,12 @@ def resolve_query_endpoints(cluster: Any, connection_string: str) -> list[str]:
     endpoints: list[str] = []
     try:
         report = json.loads(
-            cluster.ping(PingOptions(service_types=[ServiceType.Query])).as_json()
+            cluster.ping(
+                PingOptions(
+                    service_types=[ServiceType.Query],
+                    timeout=timedelta(seconds=ENDPOINT_PING_TIMEOUT_SECONDS),
+                )
+            ).as_json()
         )
         for endpoint in report.get("services", {}).get("query", []):
             remote = endpoint.get("remote")
