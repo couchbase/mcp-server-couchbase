@@ -44,7 +44,7 @@ These are the ground rules we review every contribution against. Reading this se
 
 ### Prerequisites
 
-- **Python 3.10–3.14**: Code must stay 3.10-compatible
+- **Python 3.11–3.14**: Code must stay 3.11-compatible
 - **[uv](https://docs.astral.sh/uv/)**: Fast Python package installer and dependency manager
 - **Git**: For version control
 - **A cluster for the server you're changing**:
@@ -167,7 +167,7 @@ Keep the dependency footprint small — all servers ship in one distribution via
 - Discuss any new runtime dependency in an issue before adding it.
 - Prefer the standard library or existing dependencies (`couchbase`, `couchbase-operational-insights`, `fastmcp`, `click`, `lark-sqlpp`, ...).
 - Import a server's SDK only from that server's own modules, never from shared code.
-- Give every runtime dependency an upper bound, and comment any bound that is tighter than the next major (see `rapidfuzz` in `pyproject.toml`, pinned below the release that dropped Python 3.10).
+- Give every runtime dependency an upper bound, and comment any bound that is tighter than the next major, saying why it is needed.
 - Dependencies needed by only one opt-in feature belong in an optional extra (like `bedrock-embeddings`), not the core list.
 - New dependencies must be actively maintained and use a permitted license (see [Dependency licenses](#dependency-licenses) below).
 - Dependency bumps arrive via Dependabot; don't mix unrelated version bumps into a feature PR.
