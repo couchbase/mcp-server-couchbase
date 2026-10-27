@@ -64,13 +64,13 @@ class TestErrorMessage:
 
     def test_oversized_non_sdk_error_is_truncated(self) -> None:
         result = error_message(RuntimeError("x" * 50_000))
-        assert result.startswith("x" * MAX_ERROR_MESSAGE_LENGTH)
+        assert result.startswith("x" * 100)
         assert result.endswith("... [truncated]")
-        assert len(result) < 600
+        assert len(result) == MAX_ERROR_MESSAGE_LENGTH
 
     def test_oversized_server_message_is_truncated(self) -> None:
         result = error_message(_query_error(msg="y" * 5_000))
-        assert len(result) < 600
+        assert len(result) == MAX_ERROR_MESSAGE_LENGTH
 
     def test_tool_error_envelope_is_condensed(self) -> None:
         envelope = tool_error(_query_error(), index_name="idx")

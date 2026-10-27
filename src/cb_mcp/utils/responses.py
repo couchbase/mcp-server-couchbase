@@ -21,10 +21,16 @@ def tool_success(**fields: Any) -> dict[str, Any]:
     return {"success": True, **fields}
 
 
+_TRUNCATION_SUFFIX = "... [truncated]"
+
+
 def _truncate(text: str) -> str:
+    """Cap ``text`` at ``MAX_ERROR_MESSAGE_LENGTH`` characters, suffix included."""
     if len(text) <= MAX_ERROR_MESSAGE_LENGTH:
         return text
-    return text[:MAX_ERROR_MESSAGE_LENGTH] + "... [truncated]"
+    return (
+        text[: MAX_ERROR_MESSAGE_LENGTH - len(_TRUNCATION_SUFFIX)] + _TRUNCATION_SUFFIX
+    )
 
 
 def error_message(error: Exception | str) -> str:
