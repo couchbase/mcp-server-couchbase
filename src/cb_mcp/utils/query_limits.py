@@ -90,22 +90,37 @@ class BoundedRows:
         """
         if not self.truncated:
             return None
+        # At the hard maximum, raising the variable cannot help (values above it
+        # are clamped), so don't send the reader to a setting that is a no-op.
+        at_maximum = self.limit_bytes >= MAX_MAX_QUERY_RESULT_SIZE
         if self.row_count == 0:
+            hint = (
+                f"The limit is at its maximum of {MAX_MAX_QUERY_RESULT_SIZE} "
+                f"bytes and cannot be raised; project fewer or smaller fields."
+                if at_maximum
+                else "Project fewer or smaller fields, or ask an operator to "
+                "raise CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE."
+            )
             return (
                 f"Result truncated before any row could be returned: the first "
                 f"row alone exceeds the {self.limit_bytes}-byte limit. This is "
                 f"not an empty result — matching rows exist but are too wide to "
-                f"return. Project fewer or smaller fields, or ask an operator to "
-                f"raise CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE."
+                f"return. {hint}"
             )
+        operator_hint = (
+            f"The limit is at its maximum of {MAX_MAX_QUERY_RESULT_SIZE} bytes "
+            f"and cannot be raised."
+            if at_maximum
+            else "An operator can raise the limit with "
+            "CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE."
+        )
         return (
             f"Result truncated: returned the first {self.row_count} row(s) "
             f"({self.bytes_returned} bytes), reaching the "
             f"{self.limit_bytes}-byte limit. The remaining rows were not read "
             f"and cannot be retrieved by calling again — narrow the query with "
             f"a LIMIT, fewer projected fields, or a more selective WHERE "
-            f"clause. An operator can raise the limit with "
-            f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE."
+            f"clause. {operator_hint}"
         )
 
     def as_envelope_fields(self) -> dict[str, Any]:
@@ -127,7 +142,7 @@ class BoundedRows:
         }
 
 
-def clamp_max_query_result_size(value: int) -> int:
+def clamp_max_query_result_size(value: int, *, warn: bool = True) -> int:
     """Clamp a configured budget into the supported range, warning if it moved.
 
     Only an upper bound applies. ``0`` is a real budget of zero bytes and any
@@ -139,20 +154,27 @@ def clamp_max_query_result_size(value: int) -> int:
     ``MAX_MAX_QUERY_RESULT_SIZE`` in ``constants``. The warning names both the
     requested and effective values so an operator reading the log is never
     misled about which one is in force.
+
+    ``warn=False`` clamps silently, for callers that run before logging is
+    configured (the Click callback path): a warning emitted then bypasses the
+    configured sinks. Such callers re-run this with ``warn=True`` once the
+    handlers exist.
     """
     if value > MAX_MAX_QUERY_RESULT_SIZE:
-        logger.warning(
-            f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE {value} exceeds "
-            f"the maximum {MAX_MAX_QUERY_RESULT_SIZE}; clamping to "
-            f"{MAX_MAX_QUERY_RESULT_SIZE}."
-        )
+        if warn:
+            logger.warning(
+                f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE {value} exceeds "
+                f"the maximum {MAX_MAX_QUERY_RESULT_SIZE}; clamping to "
+                f"{MAX_MAX_QUERY_RESULT_SIZE}."
+            )
         return MAX_MAX_QUERY_RESULT_SIZE
     if value < MIN_MAX_QUERY_RESULT_SIZE:
-        logger.warning(
-            f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE {value} is below "
-            f"the minimum {MIN_MAX_QUERY_RESULT_SIZE}; clamping to "
-            f"{MIN_MAX_QUERY_RESULT_SIZE}."
-        )
+        if warn:
+            logger.warning(
+                f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE {value} is below "
+                f"the minimum {MIN_MAX_QUERY_RESULT_SIZE}; clamping to "
+                f"{MIN_MAX_QUERY_RESULT_SIZE}."
+            )
         return MIN_MAX_QUERY_RESULT_SIZE
     return value
 
