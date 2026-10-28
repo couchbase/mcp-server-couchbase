@@ -10,11 +10,13 @@ missing scope → raise).
 from __future__ import annotations
 
 import asyncio
+import threading
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fastmcp import Client, FastMCP
 from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
@@ -323,6 +325,34 @@ class TestWrapWithScopeCheck:
 
         with _mock_token([SCOPE_READ]):
             assert _run(wrapped(42)) == 42
+
+    def test_sync_function_runs_off_the_event_loop(self):
+        """Wrapped sync tools still run in FastMCP's thread pool and overlap.
+
+        The wrapper is async, so FastMCP awaits it on the event loop instead of
+        threading the tool itself. Two calls meet at a barrier only if they run
+        concurrently; calling the tool on the loop serialises them and the
+        barrier times out.
+        """
+        barrier = threading.Barrier(2, timeout=5)
+
+        def blocking_tool() -> str:
+            barrier.wait()
+            return "ok"
+
+        mcp = FastMCP("scope-threadpool")
+        mcp.tool(wrap_with_scope_check(blocking_tool, {SCOPE_READ}))
+
+        async def call_twice():
+            async with Client(mcp) as client:
+                return await asyncio.gather(
+                    client.call_tool("blocking_tool", {}),
+                    client.call_tool("blocking_tool", {}),
+                )
+
+        with _mock_token([SCOPE_READ]):
+            results = _run(call_twice())
+        assert [r.data for r in results] == ["ok", "ok"]
 
     def test_hint_is_appended_to_rejection_message(self):
         """A per-tool hint should appear in the PermissionError message.

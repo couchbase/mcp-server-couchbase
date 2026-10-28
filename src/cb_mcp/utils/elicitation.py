@@ -10,6 +10,7 @@ import inspect
 import logging
 from collections.abc import Callable
 
+from fastmcp.utilities.async_utils import call_sync_fn_in_threadpool
 from mcp import types
 from pydantic import BaseModel, Field
 
@@ -125,9 +126,12 @@ def wrap_with_confirmation(fn: Callable) -> Callable:
                 audit_state.record_confirmation(audit_state.CONFIRMATION_ACCEPTED)
                 logger.info(f"User confirmed execution of '{tool_name}'")
 
-        # Keep wrapper behavior transparent: await async tools, call sync tools directly.
+        # Keep wrapper behavior transparent: await async tools, and run sync
+        # tools in the thread pool as FastMCP would have. This wrapper is async,
+        # so FastMCP no longer does that itself, and calling the tool directly
+        # would block the event loop for the whole SDK call.
         if inspect.iscoroutinefunction(fn):
             return await fn(*args, **kwargs)
-        return fn(*args, **kwargs)
+        return await call_sync_fn_in_threadpool(fn, *args, **kwargs)
 
     return wrapper
