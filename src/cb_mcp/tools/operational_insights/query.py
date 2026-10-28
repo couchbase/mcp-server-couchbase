@@ -267,8 +267,11 @@ def operational_insights_run_query_sync(
     """Run a SQL++ statement and return its result rows, or export them to object storage.
 
     Can carry SELECT, DML, or DDL statements. Rows are streamed from the
-    server and collected up to a configured byte budget; a result that would
-    exceed it is cut short and reported with truncated: true.
+    server. If the operator has set a result-size limit
+    (CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE), a result that would
+    exceed it is cut short and reported with truncated: true. With no limit
+    set, the full result is returned in one response, however large, so add
+    a LIMIT clause or export with copy_to_* when a query may return many rows.
 
     To send a large result straight to object storage instead of returning it,
     pass copy_to_link, copy_to_bucket and copy_to_path. The statement is then
@@ -628,7 +631,12 @@ def operational_insights_get_async_query_results(
     This both reports progress and returns results. If the query is still
     running it returns ready: false and no rows, rather than waiting; call it
     again later to check. If it has finished it returns ready: true with the
-    rows.
+    rows. If the operator has set a result-size limit
+    (CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE), a result that would
+    exceed it is cut short and reported with truncated: true. With no limit
+    set, the full result is returned in one response, however large, so add
+    a LIMIT clause, or pass copy_to_* to operational_insights_run_query_async
+    to export, when a query may return many rows.
 
     Each call is a request to the server, so space out repeat calls instead of
     looping tightly — and prefer telling the user the query is still running
