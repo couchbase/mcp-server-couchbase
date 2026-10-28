@@ -95,7 +95,8 @@ class BoundedRows:
         at_maximum = self.limit_bytes >= MAX_MAX_QUERY_RESULT_SIZE
         if self.row_count == 0:
             hint = (
-                "Project fewer or smaller fields."
+                f"The limit is at its maximum of {MAX_MAX_QUERY_RESULT_SIZE} "
+                f"bytes and cannot be raised; project fewer or smaller fields."
                 if at_maximum
                 else "Project fewer or smaller fields, or ask an operator to "
                 "raise CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE."

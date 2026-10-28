@@ -357,3 +357,14 @@ class TestTruncationMessageAtMaximum:
             rows=[ROW], truncated=True, bytes_returned=10, limit_bytes=1024
         )
         assert "An operator can raise the limit" in below.truncation_message()
+
+    def test_zero_rows_at_maximum_says_it_cannot_be_raised(self) -> None:
+        empty = BoundedRows(
+            rows=[],
+            truncated=True,
+            bytes_returned=0,
+            limit_bytes=MAX_MAX_QUERY_RESULT_SIZE,
+        )
+        message = empty.truncation_message()
+        assert "cannot be raised" in message
+        assert "ask an operator" not in message
