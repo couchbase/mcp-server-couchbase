@@ -52,6 +52,15 @@ class UnknownHandleError(KeyError):
     by a different server process (e.g. another replica, or before a restart).
     """
 
+    def __str__(self) -> str:
+        """Return the bare message.
+
+        ``KeyError.__str__`` is ``repr(args[0])``, so the default would wrap
+        the message in a stray pair of quotes once the tools pass it through
+        ``tool_error`` to the client.
+        """
+        return str(self.args[0]) if self.args else ""
+
 
 @dataclass
 class HandleEntry:
