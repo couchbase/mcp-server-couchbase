@@ -497,6 +497,16 @@ class TestQueryResultsRegistry:
         with pytest.raises(UnknownHandleError):
             registry.get("missing")
 
+    def test_unknown_handle_error_stringifies_without_quotes(self) -> None:
+        """DA-2354: the message must not inherit ``KeyError``'s repr quoting."""
+        registry = QueryResultsRegistry()
+
+        with pytest.raises(UnknownHandleError) as excinfo:
+            registry.get("missing")
+
+        assert str(excinfo.value) == excinfo.value.args[0]
+        assert not str(excinfo.value).startswith(("'", '"'))
+
     def test_remove_is_idempotent(self) -> None:
         registry = QueryResultsRegistry()
         token = registry.register(MagicMock(), "SELECT 1")
@@ -521,3 +531,23 @@ class TestQueryResultsRegistry:
         registry.clear()  # must not raise
 
         assert registry.count() == 0
+
+
+@pytest.mark.parametrize(
+    "tool",
+    [
+        operational_insights_get_async_query_results,
+        operational_insights_discard_async_query_results,
+        operational_insights_cancel_async_query,
+    ],
+)
+def test_unknown_token_error_is_not_quoted(tool) -> None:
+    """DA-2354: every handle-taking tool reports the message unquoted."""
+    ctx, _, _ = _make_ctx()
+
+    error = tool(ctx, "bogus")["error"]
+
+    assert error == (
+        "Unknown query_handle 'bogus'. It may be invalid, already "
+        "discarded/cancelled, or created by a different server process."
+    )
