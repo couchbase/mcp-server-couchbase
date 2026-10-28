@@ -10,6 +10,8 @@ reached against a live cluster:
 - get_cluster_health_and_services returns an error envelope on ping failure.
 - get_cluster_health_and_services translates service_types into PingOptions and
   rejects unrecognized service type strings via the same error envelope.
+- get_cluster_health_and_services bounds every ping — cluster or bucket, with or
+  without service_types — by ENDPOINT_PING_TIMEOUT_SECONDS.
 - get_cluster_metrics returns error envelopes on REST
   failures and success envelopes wrapping the raw REST response otherwise, and
   reject Capella connections up front without attempting the REST call.
@@ -37,6 +39,7 @@ reached against a live cluster:
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
@@ -59,6 +62,7 @@ from cb_mcp.tools.operational.server import (
     # Aliased so pytest doesn't collect the tool function itself as a test.
     test_cluster_connection as cluster_connection_tool,
 )
+from cb_mcp.utils.operational.constants import ENDPOINT_PING_TIMEOUT_SECONDS
 
 
 def _make_ctx(cluster: MagicMock | None = None) -> SimpleNamespace:
@@ -459,6 +463,55 @@ class TestGetClusterHealthAndServices:
         bucket.ping.assert_called_once()
         (ping_opts,) = bucket.ping.call_args.args
         assert list(ping_opts["service_types"]) == [ServiceType.KeyValue]
+        assert result["status"] == "success"
+
+    @pytest.mark.parametrize("bucket_name", [None, "b"], ids=["cluster", "bucket"])
+    @pytest.mark.parametrize(
+        ("service_types", "expected_services"),
+        [(None, None), (["query"], [ServiceType.Query])],
+        ids=["all-services", "filtered"],
+    )
+    def test_every_ping_is_bounded_by_the_endpoint_timeout(
+        self, bucket_name, service_types, expected_services
+    ) -> None:
+        """Every ping carries the timeout, including the unfiltered one.
+
+        Without it the SDK waits out its own per-service timeout (120s under
+        wan_development) on a node that is down but still in the cluster map.
+        The unfiltered path used to pass no PingOptions at all, so it is the
+        one most likely to lose the timeout again; the filter must still be
+        omitted there, since an empty service_types would ping nothing.
+        """
+        cluster = MagicMock()
+        bucket = MagicMock()
+        ping_result = MagicMock()
+        ping_result.as_json.return_value = '{"services": {}}'
+        cluster.ping.return_value = ping_result
+        bucket.ping.return_value = ping_result
+        ctx = _make_ctx(cluster=cluster)
+
+        with (
+            patch(
+                "cb_mcp.tools.operational.server.get_cluster_connection",
+                return_value=cluster,
+            ),
+            patch(
+                "cb_mcp.tools.operational.server.connect_to_bucket",
+                return_value=bucket,
+            ),
+        ):
+            result = get_cluster_health_and_services(
+                ctx, bucket_name=bucket_name, service_types=service_types
+            )
+
+        pinged = bucket.ping if bucket_name else cluster.ping
+        pinged.assert_called_once()
+        (ping_opts,) = pinged.call_args.args
+        assert ping_opts["timeout"] == timedelta(seconds=ENDPOINT_PING_TIMEOUT_SECONDS)
+        if expected_services is None:
+            assert "service_types" not in ping_opts
+        else:
+            assert list(ping_opts["service_types"]) == expected_services
         assert result["status"] == "success"
 
     def test_invalid_service_type_returns_error_envelope(self) -> None:

@@ -5,6 +5,7 @@ from datetime import timedelta
 from couchbase.auth import CertificateAuthenticator, PasswordAuthenticator
 from couchbase.bucket import Bucket
 from couchbase.cluster import Cluster
+from couchbase.diagnostics import ServiceType
 from couchbase.options import ClusterOptions
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
@@ -56,7 +57,13 @@ def connect_to_couchbase_cluster(
         options.apply_profile("wan_development")
 
         cluster = Cluster(connection_string, options)  # type: ignore
-        cluster.wait_until_ready(timedelta(seconds=5))
+        # Wait on key-value only: it is what bootstrap needs. Left to its default,
+        # wait_until_ready checks every service on every node, and a node that is
+        # down but still in the cluster map holds it for the full per-service
+        # timeout (120s under wan_development), not the 5s given here.
+        cluster.wait_until_ready(
+            timedelta(seconds=5), service_types=[ServiceType.KeyValue]
+        )
 
         logger.info("Successfully connected to Couchbase cluster")
         return cluster
