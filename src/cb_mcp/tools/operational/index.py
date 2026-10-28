@@ -60,6 +60,9 @@ def get_index_advisor_recommendations(
     Each index object contains:
     - index: The CREATE INDEX SQL++ command
     - statements: Array of statement objects with the query and run count
+
+    Raises an error carrying the advisor's message if the advisor cannot analyse
+    the statement (for example, a SQL++ syntax error).
     """
     try:
         # Build the ADVISOR query using a named parameter.
@@ -88,6 +91,19 @@ def get_index_advisor_recommendations(
 
         # The result is wrapped in advisor_result key
         advisor_data = advisor_results[0].get("advisor_result", {})
+
+        # The query service reports advisor failures (e.g. a syntax error in the
+        # advised statement) inside the result with status success, not as a
+        # query error, so surface them as a tool error here.
+        advisor_errors = advisor_data.get("errors")
+        if advisor_errors:
+            messages = "; ".join(
+                str(err.get("error", err)) if isinstance(err, dict) else str(err)
+                for err in advisor_errors
+            )
+            raise ValueError(
+                f"Index Advisor could not analyse the statement: {messages}"
+            )
 
         # Extract the relevant fields with defaults
         response = {
