@@ -21,3 +21,12 @@ INDEX_REST_PORT_TLS = 19102
 INDEX_REST_PORT_PLAIN = 9102
 QUERY_REST_PORT_TLS = 18093
 QUERY_REST_PORT_PLAIN = 8093
+
+#: Upper bound, in seconds, on the pings that discover service endpoints and
+#: that get_cluster_health_and_services reports. A
+#: node that is down but still in the cluster map refuses connections, and the
+#: SDK retries those until the operation times out — without this bound that
+#: is the cluster's management/query timeout (120s under the wan_development
+#: profile). Healthy nodes answer well within it; a node that does not is
+#: reported with a "timeout" state rather than holding up the whole call.
+ENDPOINT_PING_TIMEOUT_SECONDS = 8

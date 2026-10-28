@@ -9,10 +9,12 @@ The server-agnostic half of what used to be one 1473-line
 from __future__ import annotations
 
 import threading
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+from couchbase.diagnostics import ServiceType
 
 from cb_mcp.tools.operational.index import (
     fetch_indexes_via_query_service,
@@ -881,6 +883,18 @@ class TestIndexUtilsFunctions:
 class TestConnectionModule:
     """Unit tests for connection.py module."""
 
+    @staticmethod
+    def _assert_waits_on_key_value_only(cluster: MagicMock) -> None:
+        """Readiness must be checked on key-value alone, within five seconds.
+
+        Left to its default, wait_until_ready checks every service on every
+        node, and a node that is down but still in the cluster map holds it for
+        the full per-service timeout rather than the five seconds given.
+        """
+        cluster.wait_until_ready.assert_called_once_with(
+            timedelta(seconds=5), service_types=[ServiceType.KeyValue]
+        )
+
     def test_connect_to_couchbase_cluster_with_password(self) -> None:
         """Verify password authentication path is used correctly."""
         mock_cluster = MagicMock()
@@ -905,7 +919,7 @@ class TestConnectionModule:
 
             mock_auth.assert_called_once_with("admin", "password", cert_path=None)
             mock_cluster_class.assert_called_once()
-            mock_cluster.wait_until_ready.assert_called_once()
+            self._assert_waits_on_key_value_only(mock_cluster)
             assert result == mock_cluster
 
     def test_connect_to_couchbase_cluster_with_certificate(self) -> None:
@@ -941,6 +955,7 @@ class TestConnectionModule:
                 key_path="/path/to/client.key",
                 trust_store_path="/path/to/ca.pem",
             )
+            self._assert_waits_on_key_value_only(mock_cluster)
             assert result == mock_cluster
 
     def test_connect_to_couchbase_cluster_missing_cert_file(self) -> None:
