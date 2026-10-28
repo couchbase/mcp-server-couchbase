@@ -344,6 +344,75 @@ class TestGetClusterHealthAndServices:
         assert result["status"] == "success"
         assert result["data"] == {"services": {"kv": []}}
 
+    @staticmethod
+    def _ping_json(state: str, error: str | None = None) -> MagicMock:
+        entry = {"type": "key_value", "state": state, "bucket": "b"}
+        if error:
+            entry["error"] = error
+        ping_result = MagicMock()
+        ping_result.as_json.return_value = json.dumps(
+            {"services": {"key_value": [entry]}}
+        )
+        return ping_result
+
+    def _run_bucket_ping(self, bucket: MagicMock) -> dict:
+        cluster = MagicMock()
+        with (
+            patch(
+                "cb_mcp.tools.operational.server.get_cluster_connection",
+                return_value=cluster,
+            ),
+            patch(
+                "cb_mcp.tools.operational.server.connect_to_bucket",
+                return_value=bucket,
+            ),
+            patch("cb_mcp.tools.operational.server.time.sleep"),
+        ):
+            return get_cluster_health_and_services(
+                _make_ctx(cluster=cluster), bucket_name="b"
+            )
+
+    def test_bucket_ping_retries_while_bootstrap_incomplete(self) -> None:
+        """DA-2336: a ping before KV sessions finish bootstrapping is retried."""
+        bucket = MagicMock()
+        bucket.ping.side_effect = [
+            self._ping_json("error", "Bootstrap incomplete, cannot perform ping."),
+            self._ping_json("ok"),
+        ]
+
+        result = self._run_bucket_ping(bucket)
+
+        assert bucket.ping.call_count == 2
+        assert result["status"] == "success"
+        assert result["data"]["services"]["key_value"][0]["state"] == "ok"
+
+    def test_bucket_ping_reports_error_once_wait_budget_spent(self) -> None:
+        """A session that never bootstraps is still reported, not hidden."""
+        bucket = MagicMock()
+        bucket.ping.return_value = self._ping_json(
+            "error", "Bootstrap incomplete, cannot perform ping."
+        )
+
+        with patch(
+            "cb_mcp.tools.operational.server.time.monotonic",
+            side_effect=[0.0, 1.0, 99.0],
+        ):
+            result = self._run_bucket_ping(bucket)
+
+        assert bucket.ping.call_count == 2
+        assert result["status"] == "success"
+        assert result["data"]["services"]["key_value"][0]["state"] == "error"
+
+    def test_bucket_ping_does_not_retry_other_errors(self) -> None:
+        """Only the bootstrap race is retried; a real timeout returns at once."""
+        bucket = MagicMock()
+        bucket.ping.return_value = self._ping_json("timeout", "unambiguous_timeout")
+
+        result = self._run_bucket_ping(bucket)
+
+        bucket.ping.assert_called_once()
+        assert result["data"]["services"]["key_value"][0]["state"] == "timeout"
+
     def test_service_types_filter_passed_to_cluster_ping(self) -> None:
         """service_types must be translated into a PingOptions and passed through."""
         cluster = MagicMock()
