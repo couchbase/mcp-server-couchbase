@@ -12,7 +12,9 @@ Coverage map:
   - positional argument forwarding compatibility
 """
 
+import asyncio
 import inspect
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -547,3 +549,32 @@ class TestConfirmationEndToEnd:
                 await client.call_tool("delete_thing", {"document_id": "doc-1"})
 
         assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_confirmed_sync_tools_run_off_the_event_loop(self):
+        """Confirmed sync tools still run in the thread pool and overlap.
+
+        The wrapper is async, so FastMCP awaits it on the event loop instead of
+        threading the tool itself. Two calls meet at a barrier only if they run
+        concurrently; calling the tool on the loop serialises them and the
+        barrier times out.
+        """
+        barrier = threading.Barrier(2, timeout=5)
+
+        def delete_thing(ctx: Context, document_id: str) -> str:
+            barrier.wait()
+            return f"deleted {document_id}"
+
+        mcp = FastMCP("confirmation-threadpool")
+        mcp.add_tool(FunctionTool.from_function(wrap_with_confirmation(delete_thing)))
+
+        async def confirm(message, response_type, params, context):
+            return response_type(confirm=True)
+
+        async with Client(mcp, elicitation_handler=confirm) as client:
+            results = await asyncio.gather(
+                client.call_tool("delete_thing", {"document_id": "doc-1"}),
+                client.call_tool("delete_thing", {"document_id": "doc-2"}),
+            )
+
+        assert [r.data for r in results] == ["deleted doc-1", "deleted doc-2"]

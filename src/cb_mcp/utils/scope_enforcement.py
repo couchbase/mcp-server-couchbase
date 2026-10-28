@@ -21,6 +21,7 @@ import logging
 from collections.abc import Callable
 
 from fastmcp.server.dependencies import get_access_token
+from fastmcp.utilities.async_utils import call_sync_fn_in_threadpool
 
 from ..audit import state as audit_state
 from ..audit.exceptions import ScopeDeniedError
@@ -129,6 +130,9 @@ def wrap_with_scope_check(
 
         if inspect.iscoroutinefunction(fn):
             return await fn(*args, **kwargs)
-        return fn(*args, **kwargs)
+        # This wrapper is async, so FastMCP awaits it on the event loop rather
+        # than sending the tool to its thread pool. Do that here instead, or
+        # every blocking SDK call stalls the loop and calls run one at a time.
+        return await call_sync_fn_in_threadpool(fn, *args, **kwargs)
 
     return wrapper

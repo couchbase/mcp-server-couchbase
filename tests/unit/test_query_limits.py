@@ -20,12 +20,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from cb_mcp.utils.cli import validate_max_query_result_size
+from cb_mcp.utils.cli_params import GatingParams
 from cb_mcp.utils.constants import (
     DEFAULT_MAX_QUERY_RESULT_SIZE,
     MAX_MAX_QUERY_RESULT_SIZE,
     MIN_MAX_QUERY_RESULT_SIZE,
 )
 from cb_mcp.utils.query_limits import (
+    BoundedRows,
     clamp_max_query_result_size,
     collect_rows_within_budget,
     max_query_result_size_for,
@@ -335,3 +338,79 @@ class TestContextLookup:
             max_query_result_size_for(SimpleNamespace())
             == DEFAULT_MAX_QUERY_RESULT_SIZE
         )
+
+
+class TestTruncationMessageAtMaximum:
+    """The message must not point at a setting that cannot go higher."""
+
+    def test_at_maximum_does_not_suggest_raising(self) -> None:
+        too_wide = BoundedRows(
+            rows=[ROW],
+            truncated=True,
+            bytes_returned=10,
+            limit_bytes=MAX_MAX_QUERY_RESULT_SIZE,
+        )
+        message = too_wide.truncation_message()
+        assert "cannot be raised" in message
+        assert "An operator can raise" not in message
+
+    def test_below_maximum_still_suggests_raising(self) -> None:
+        below = BoundedRows(
+            rows=[ROW], truncated=True, bytes_returned=10, limit_bytes=1024
+        )
+        assert "An operator can raise the limit" in below.truncation_message()
+
+    def test_zero_rows_at_maximum_says_it_cannot_be_raised(self) -> None:
+        empty = BoundedRows(
+            rows=[],
+            truncated=True,
+            bytes_returned=0,
+            limit_bytes=MAX_MAX_QUERY_RESULT_SIZE,
+        )
+        message = empty.truncation_message()
+        assert "cannot be raised" in message
+        assert "ask an operator" not in message
+
+
+class TestClampWarningDeferral:
+    """The clamp warning must wait for logging, not fire in the Click callback."""
+
+    def test_silent_clamp_does_not_log(self, caplog) -> None:
+        with caplog.at_level(logging.WARNING):
+            assert (
+                clamp_max_query_result_size(10 * 1024 * 1024, warn=False)
+                == MAX_MAX_QUERY_RESULT_SIZE
+            )
+        assert caplog.text == ""
+
+    def test_click_callback_is_silent_and_passes_value_through(self, caplog) -> None:
+        with caplog.at_level(logging.WARNING):
+            assert validate_max_query_result_size(None, None, 10_000_000) == 10_000_000
+        assert caplog.text == ""
+
+    def test_gating_params_clamps_silently_then_warns_on_request(self, caplog) -> None:
+        params = {
+            "read_only_mode": True,
+            "disabled_tools": None,
+            "confirmation_required_tools": None,
+            "operational_insights_query_result_max_size": 10_000_000,
+        }
+        with caplog.at_level(logging.WARNING):
+            gating = GatingParams.from_click(params)
+            assert caplog.text == ""
+            assert gating.max_query_result_size == MAX_MAX_QUERY_RESULT_SIZE
+            gating.warn_if_clamped()
+        assert "exceeds" in caplog.text
+
+    def test_unset_never_warns(self, caplog) -> None:
+        params = {
+            "read_only_mode": True,
+            "disabled_tools": None,
+            "confirmation_required_tools": None,
+            "operational_insights_query_result_max_size": None,
+        }
+        with caplog.at_level(logging.WARNING):
+            gating = GatingParams.from_click(params)
+            gating.warn_if_clamped()
+        assert gating.max_query_result_size is None
+        assert caplog.text == ""

@@ -23,7 +23,6 @@ from .logging import (
     parse_log_level,
     parse_log_sinks,
 )
-from .query_limits import clamp_max_query_result_size
 
 logger = getLogger(f"{LOGGER_NAMESPACE}.utils.cli")
 
@@ -57,23 +56,23 @@ def validate_max_query_result_size(
 ) -> int | None:
     """Click callback for ``--operational-insights-query-result-max-size``.
 
-    ``None`` (the flag and its environment variable left unset) passes through
-    untouched and means *no limit* — an unconfigured server must not silently
+    Passes the value through untouched; ``None`` (flag and environment
+    variable unset) means *no limit* — an unconfigured server must not silently
     cap results.
 
-    A configured value is clamped by :func:`clamp_max_query_result_size` rather
-    than rejected: see ``MAX_MAX_QUERY_RESULT_SIZE`` in ``constants``. These
-    servers are usually configured through container environment variables,
-    where rejecting a bad value takes the deployment down while clamping only
-    caps a result set.
+    Clamping happens later, in ``GatingParams.from_click``, not here: callbacks
+    run before ``configure_logging``, so a clamp warning emitted here would
+    bypass the configured sinks and never reach a log file. Clamping rather
+    than rejecting is still the deliberate choice — see
+    ``MAX_MAX_QUERY_RESULT_SIZE`` in ``constants``: these servers are usually
+    configured through container environment variables, where rejecting a bad
+    value takes the deployment down while clamping only caps a result set.
 
     A non-numeric value never reaches here (Click's ``type=int`` rejects it
     first); the tolerant parsing in ``max_query_result_size_from`` covers the
     separate case of an embedding host that builds settings without the CLI.
     """
-    if value is None:
-        return None
-    return clamp_max_query_result_size(value)
+    return value
 
 
 def validate_log_path(ctx: click.Context, param: click.Parameter, value: str) -> str:
