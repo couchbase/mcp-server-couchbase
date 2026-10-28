@@ -8,8 +8,10 @@ Covers:
 - get_index_stats rejects Capella connections up front, before any cluster
   connection or REST call.
 - resolve_management_endpoints / resolve_query_endpoints: the SDK-reported
-  path (dedup, unusable entries) and the connection-string fallback (scheme
-  to port, IPv6 bracketing, host-less strings).
+  path (dedup, unusable entries, a ping limited to the resolver's own service
+  and bounded by ENDPOINT_PING_TIMEOUT_SECONDS, timed-out endpoints kept) and
+  the connection-string fallback (scheme to port, IPv6 bracketing, host-less
+  strings).
 - fetch_index_stats_from_rest_api's fan-out across several index nodes: one
   node per request, results kept apart, and a slow or absent node reported
   without discarding the rest.
@@ -18,13 +20,16 @@ Covers:
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
+from couchbase.diagnostics import ServiceType
 
 from cb_mcp.tools.operational.index import get_index_stats
+from cb_mcp.utils.operational.constants import ENDPOINT_PING_TIMEOUT_SECONDS
 from cb_mcp.utils.operational.index_utils import (
     _parse_index_nodes,
     build_stats_path,
@@ -842,6 +847,54 @@ class TestEndpointResolversShareOneShape:
         """
         cluster = self._cluster({"services": {service: [{"remote": None}]}})
         assert resolver(cluster, "couchbase://host1") == [f"host1:{plain}"]
+
+    @pytest.mark.parametrize(("resolver", "service", "plain", "tls"), RESOLVERS)
+    def test_ping_is_limited_to_its_service_and_bounded(
+        self, resolver, service, plain, tls
+    ):
+        """The ping names only this resolver's service and carries the timeout.
+
+        Without the timeout, a node that is down but still in the cluster map
+        holds the ping for the SDK's full per-service timeout (120s under
+        wan_development) — the wait every REST-backed tool sat behind. The
+        shared stand-in discards its arguments, so this captures them.
+        """
+        calls = []
+
+        def ping(*args, **kwargs):
+            calls.append((args, kwargs))
+            return SimpleNamespace(as_json=lambda: json.dumps({}))
+
+        resolver(SimpleNamespace(ping=ping), "couchbase://host1")
+
+        assert len(calls) == 1
+        (ping_opts,), _ = calls[0]
+        assert list(ping_opts["service_types"]) == [ServiceType(service)]
+        assert ping_opts["timeout"] == timedelta(seconds=ENDPOINT_PING_TIMEOUT_SECONDS)
+
+    @pytest.mark.parametrize(("resolver", "service", "plain", "tls"), RESOLVERS)
+    def test_timed_out_endpoint_is_kept(self, resolver, service, plain, tls):
+        """An endpoint the bounded ping gave up on is still returned.
+
+        The ping only discovers addresses; whether a node answers is for the
+        caller's own request to find out and report. Dropping a "timeout"
+        entry would hide a slow-but-alive node and turn a partial answer into a
+        silently incomplete one.
+        """
+        cluster = self._cluster(
+            {
+                "services": {
+                    service: [
+                        {"remote": "10.0.1.11:9102", "state": "ok"},
+                        {"remote": "10.0.1.12:9102", "state": "timeout"},
+                    ]
+                }
+            }
+        )
+        assert resolver(cluster, "couchbase://10.0.1.11") == [
+            "10.0.1.11:9102",
+            "10.0.1.12:9102",
+        ]
 
     @pytest.mark.parametrize(("resolver", "service", "plain", "tls"), RESOLVERS)
     def test_other_services_in_the_report_are_ignored(
