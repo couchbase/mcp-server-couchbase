@@ -743,11 +743,9 @@ def _validate_since_time(since_time: str) -> None:
     """Require the one timestamp shape /events accepts.
 
     Matched against a pattern rather than parsed with
-    ``datetime.fromisoformat``, whose accepted grammar widened in Python 3.11:
-    on 3.11+ it takes ``20261005T091204Z`` and ``+0000``, which the endpoint
-    answers with a 400, while 3.10 rejects them here. That made validation
-    depend on the interpreter. The pattern behaves the same on every supported
-    version and admits only what the endpoint documents: an ISO-8601 UTC
+    ``datetime.fromisoformat``, which accepts ``20261005T091204Z`` and
+    ``+0000`` — both answered by the endpoint with a 400. The pattern admits
+    only what the endpoint documents: an ISO-8601 UTC
     timestamp with dashes and colons, optional fractional seconds, and a
     literal ``Z``. ``+00:00`` is the same instant but the endpoint rejects it,
     so it is not accepted here either.

@@ -322,8 +322,9 @@ def mutate_subdocument(
       the field doesn't exist yet, it is created (and its parents, if create_parents=True).
 
     create_parents: if True, missing intermediate path segments are created automatically
-    for every category except replace_specs and remove_paths, which always require the full
-    path to already exist.
+    for every category except replace_specs, remove_paths and array_insert_specs, which
+    always require the full path (for array_insert, the array itself) to already exist.
+    The server doesn't support create_parents on array inserts, so it is ignored for them.
 
     At least one spec must be provided. As a rule of thumb, keep the combined number of
     specs across all categories to 16 or fewer — Couchbase limits subdocument operations
@@ -383,9 +384,7 @@ def mutate_subdocument(
         (
             "array_insert",
             array_insert_specs or [],
-            lambda s: subdoc.array_insert(
-                s["path"], *s["values"], create_parents=create_parents
-            ),
+            lambda s: subdoc.array_insert(s["path"], *s["values"]),
         ),
         (
             "array_add_unique",

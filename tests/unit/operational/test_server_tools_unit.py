@@ -1649,8 +1649,8 @@ class TestGetClusterSystemEvents:
             # The endpoint rejects "+00:00" as well, even though it is the same
             # instant as "Z".
             "2026-10-05T09:12:04+00:00",
-            # Basic format and "+0000" parse on Python 3.11+ but not 3.10;
-            # validation must not depend on the interpreter.
+            # Basic format and "+0000" parse with datetime.fromisoformat but
+            # the endpoint rejects them.
             "20261005T091204Z",
             "2026-10-05T09:12:04+0000",
             "yesterday",
@@ -1659,9 +1659,8 @@ class TestGetClusterSystemEvents:
     def test_rejects_since_time_the_endpoint_would_reject(self, since_time):
         """Every one of these is a 400 from /events, so reject it locally.
 
-        Checked against a pattern rather than datetime.fromisoformat, whose
-        grammar widened in 3.11 — otherwise the basic-format and "+0000" cases
-        would pass on 3.11+ and fail on 3.10.
+        Checked against a pattern rather than datetime.fromisoformat, which
+        would let the basic-format and "+0000" cases through.
         """
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         with (
