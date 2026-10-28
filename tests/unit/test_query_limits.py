@@ -26,6 +26,7 @@ from cb_mcp.utils.constants import (
     MIN_MAX_QUERY_RESULT_SIZE,
 )
 from cb_mcp.utils.query_limits import (
+    BoundedRows,
     clamp_max_query_result_size,
     collect_rows_within_budget,
     max_query_result_size_for,
@@ -335,3 +336,24 @@ class TestContextLookup:
             max_query_result_size_for(SimpleNamespace())
             == DEFAULT_MAX_QUERY_RESULT_SIZE
         )
+
+
+class TestTruncationMessageAtMaximum:
+    """The message must not point at a setting that cannot go higher."""
+
+    def test_at_maximum_does_not_suggest_raising(self) -> None:
+        too_wide = BoundedRows(
+            rows=[ROW],
+            truncated=True,
+            bytes_returned=10,
+            limit_bytes=MAX_MAX_QUERY_RESULT_SIZE,
+        )
+        message = too_wide.truncation_message()
+        assert "cannot be raised" in message
+        assert "An operator can raise" not in message
+
+    def test_below_maximum_still_suggests_raising(self) -> None:
+        below = BoundedRows(
+            rows=[ROW], truncated=True, bytes_returned=10, limit_bytes=1024
+        )
+        assert "An operator can raise the limit" in below.truncation_message()

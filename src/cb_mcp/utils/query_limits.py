@@ -90,22 +90,36 @@ class BoundedRows:
         """
         if not self.truncated:
             return None
+        # At the hard maximum, raising the variable cannot help (values above it
+        # are clamped), so don't send the reader to a setting that is a no-op.
+        at_maximum = self.limit_bytes >= MAX_MAX_QUERY_RESULT_SIZE
         if self.row_count == 0:
+            hint = (
+                "Project fewer or smaller fields."
+                if at_maximum
+                else "Project fewer or smaller fields, or ask an operator to "
+                "raise CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE."
+            )
             return (
                 f"Result truncated before any row could be returned: the first "
                 f"row alone exceeds the {self.limit_bytes}-byte limit. This is "
                 f"not an empty result — matching rows exist but are too wide to "
-                f"return. Project fewer or smaller fields, or ask an operator to "
-                f"raise CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE."
+                f"return. {hint}"
             )
+        operator_hint = (
+            f"The limit is at its maximum of {MAX_MAX_QUERY_RESULT_SIZE} bytes "
+            f"and cannot be raised."
+            if at_maximum
+            else "An operator can raise the limit with "
+            "CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE."
+        )
         return (
             f"Result truncated: returned the first {self.row_count} row(s) "
             f"({self.bytes_returned} bytes), reaching the "
             f"{self.limit_bytes}-byte limit. The remaining rows were not read "
             f"and cannot be retrieved by calling again — narrow the query with "
             f"a LIMIT, fewer projected fields, or a more selective WHERE "
-            f"clause. An operator can raise the limit with "
-            f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE."
+            f"clause. {operator_hint}"
         )
 
     def as_envelope_fields(self) -> dict[str, Any]:
