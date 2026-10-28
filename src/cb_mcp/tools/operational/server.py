@@ -12,6 +12,7 @@ in this module needs a Couchbase ``Cluster``.
 import json
 import logging
 import re
+import time
 from collections import Counter
 from typing import Any
 from urllib.parse import quote
@@ -52,6 +53,44 @@ EVENTS_ORDERING = "ascending_oldest_first"
 # {"errors": {"sinceTime": "The value must be a valid ISO 8601 UTC"}}, so the
 # literal Z is required here too.
 _ISO_UTC_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
+
+# cluster.bucket() returns once the bucket config is fetched, but the per-node KV
+# sessions keep bootstrapping in the background. A bucket.ping() in that window
+# reports each unfinished session as an error with this text (DA-2336).
+#
+# Why a targeted retry and not Cluster.wait_until_ready: that call does see the
+# bucket's KV sessions (core diagnostics() walks every open bucket), but it waits
+# for DiagnosticsResult.state == Online, which needs every endpoint Connected
+# across all open buckets and all services and ignores service_types. One
+# unrelated bucket or service can stall it, and on timeout it raises
+# UnAmbiguousTimeoutException instead of returning a partial report. The Python
+# SDK has no Bucket.wait_until_ready.
+#
+# Why matching on the text is safe: the core only uses this message when the
+# session is not bootstrapped yet and has no last_bootstrap_error_. A real
+# bootstrap failure (auth, TLS, ...) reports its own message, so it is not
+# retried and comes back at once. A node that never finishes bootstrapping is
+# still reported once the budget is spent.
+_BOOTSTRAP_INCOMPLETE = "Bootstrap incomplete"
+BUCKET_PING_BOOTSTRAP_WAIT_SECONDS = 2.5
+BUCKET_PING_RETRY_DELAY_SECONDS = 0.1
+
+
+def _has_bootstrap_incomplete(ping_data: dict[str, Any]) -> bool:
+    for entries in (ping_data.get("services") or {}).values():
+        for entry in entries or []:
+            if _BOOTSTRAP_INCOMPLETE in (entry.get("error") or ""):
+                return True
+    return False
+
+
+def _ping_bucket_after_bootstrap(bucket: Any, ping_args: tuple) -> dict[str, Any]:
+    deadline = time.monotonic() + BUCKET_PING_BOOTSTRAP_WAIT_SECONDS
+    ping_data = json.loads(bucket.ping(*ping_args).as_json())
+    while _has_bootstrap_incomplete(ping_data) and time.monotonic() < deadline:
+        time.sleep(BUCKET_PING_RETRY_DELAY_SECONDS)
+        ping_data = json.loads(bucket.ping(*ping_args).as_json())
+    return ping_data
 
 
 def test_cluster_connection(
@@ -346,18 +385,17 @@ def get_cluster_health_and_services(
             # Ping services from the perspective of the bucket
             logger.debug(f"Pinging cluster services via bucket '{bucket_name}'")
             bucket = connect_to_bucket(cluster, bucket_name)
-            ping_result = bucket.ping(*ping_args)
-            result = ping_result.as_json()
+            data = _ping_bucket_after_bootstrap(bucket, ping_args)
         else:
             # Ping services from the perspective of the cluster
             logger.debug("Pinging cluster services")
             ping_result = cluster.ping(*ping_args)
-            result = ping_result.as_json()
+            data = json.loads(ping_result.as_json())
 
         logger.info("Retrieved cluster health and services information")
         return {
             "status": "success",
-            "data": json.loads(result),
+            "data": data,
         }
     except Exception as e:
         logger.error(f"Error getting cluster health: {e}", exc_info=True)
