@@ -20,6 +20,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from cb_mcp.utils.cli import validate_max_query_result_size
+from cb_mcp.utils.cli_params import GatingParams
 from cb_mcp.utils.constants import (
     DEFAULT_MAX_QUERY_RESULT_SIZE,
     MAX_MAX_QUERY_RESULT_SIZE,
@@ -368,3 +370,47 @@ class TestTruncationMessageAtMaximum:
         message = empty.truncation_message()
         assert "cannot be raised" in message
         assert "ask an operator" not in message
+
+
+class TestClampWarningDeferral:
+    """The clamp warning must wait for logging, not fire in the Click callback."""
+
+    def test_silent_clamp_does_not_log(self, caplog) -> None:
+        with caplog.at_level(logging.WARNING):
+            assert (
+                clamp_max_query_result_size(10 * 1024 * 1024, warn=False)
+                == MAX_MAX_QUERY_RESULT_SIZE
+            )
+        assert caplog.text == ""
+
+    def test_click_callback_is_silent_and_passes_value_through(self, caplog) -> None:
+        with caplog.at_level(logging.WARNING):
+            assert validate_max_query_result_size(None, None, 10_000_000) == 10_000_000
+        assert caplog.text == ""
+
+    def test_gating_params_clamps_silently_then_warns_on_request(self, caplog) -> None:
+        params = {
+            "read_only_mode": True,
+            "disabled_tools": None,
+            "confirmation_required_tools": None,
+            "operational_insights_query_result_max_size": 10_000_000,
+        }
+        with caplog.at_level(logging.WARNING):
+            gating = GatingParams.from_click(params)
+            assert caplog.text == ""
+            assert gating.max_query_result_size == MAX_MAX_QUERY_RESULT_SIZE
+            gating.warn_if_clamped()
+        assert "exceeds" in caplog.text
+
+    def test_unset_never_warns(self, caplog) -> None:
+        params = {
+            "read_only_mode": True,
+            "disabled_tools": None,
+            "confirmation_required_tools": None,
+            "operational_insights_query_result_max_size": None,
+        }
+        with caplog.at_level(logging.WARNING):
+            gating = GatingParams.from_click(params)
+            gating.warn_if_clamped()
+        assert gating.max_query_result_size is None
+        assert caplog.text == ""

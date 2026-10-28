@@ -142,7 +142,7 @@ class BoundedRows:
         }
 
 
-def clamp_max_query_result_size(value: int) -> int:
+def clamp_max_query_result_size(value: int, *, warn: bool = True) -> int:
     """Clamp a configured budget into the supported range, warning if it moved.
 
     Only an upper bound applies. ``0`` is a real budget of zero bytes and any
@@ -154,20 +154,27 @@ def clamp_max_query_result_size(value: int) -> int:
     ``MAX_MAX_QUERY_RESULT_SIZE`` in ``constants``. The warning names both the
     requested and effective values so an operator reading the log is never
     misled about which one is in force.
+
+    ``warn=False`` clamps silently, for callers that run before logging is
+    configured (the Click callback path): a warning emitted then bypasses the
+    configured sinks. Such callers re-run this with ``warn=True`` once the
+    handlers exist.
     """
     if value > MAX_MAX_QUERY_RESULT_SIZE:
-        logger.warning(
-            f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE {value} exceeds "
-            f"the maximum {MAX_MAX_QUERY_RESULT_SIZE}; clamping to "
-            f"{MAX_MAX_QUERY_RESULT_SIZE}."
-        )
+        if warn:
+            logger.warning(
+                f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE {value} exceeds "
+                f"the maximum {MAX_MAX_QUERY_RESULT_SIZE}; clamping to "
+                f"{MAX_MAX_QUERY_RESULT_SIZE}."
+            )
         return MAX_MAX_QUERY_RESULT_SIZE
     if value < MIN_MAX_QUERY_RESULT_SIZE:
-        logger.warning(
-            f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE {value} is below "
-            f"the minimum {MIN_MAX_QUERY_RESULT_SIZE}; clamping to "
-            f"{MIN_MAX_QUERY_RESULT_SIZE}."
-        )
+        if warn:
+            logger.warning(
+                f"CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE {value} is below "
+                f"the minimum {MIN_MAX_QUERY_RESULT_SIZE}; clamping to "
+                f"{MIN_MAX_QUERY_RESULT_SIZE}."
+            )
         return MIN_MAX_QUERY_RESULT_SIZE
     return value
 
