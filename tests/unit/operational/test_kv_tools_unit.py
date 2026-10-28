@@ -472,6 +472,27 @@ class TestSubDocumentMutateIn:
         expected_specs = [subdoc.upsert("a.b.c", 1, create_parents=True)]
         collection.mutate_in.assert_called_once_with("doc1", expected_specs)
 
+    def test_create_parents_not_applied_to_array_insert(self) -> None:
+        """The server rejects create_parents on array_insert (EINVAL), so it must be omitted."""
+        ctx, cluster, collection = _make_ctx_with_collection()
+
+        with patch(
+            "cb_mcp.tools.operational.kv.get_cluster_connection",
+            return_value=cluster,
+        ):
+            mutate_subdocument(
+                ctx,
+                "b",
+                "s",
+                "c",
+                "doc1",
+                array_insert_specs=[{"path": "tags[0]", "values": ["first"]}],
+                create_parents=True,
+            )
+
+        expected_specs = [subdoc.array_insert("tags[0]", "first")]
+        collection.mutate_in.assert_called_once_with("doc1", expected_specs)
+
     def test_atomic_sdk_error_returns_error_not_raised(self) -> None:
         """mutate_in is atomic: any failing spec fails the whole call. The error
         must be logged and returned, not raised, and mutate_in called exactly once
