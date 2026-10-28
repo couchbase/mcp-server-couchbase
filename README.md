@@ -443,7 +443,7 @@ From source, use the [operational source configuration](#operational-quick-start
 | `CB_OPERATIONAL_INSIGHTS_CLIENT_CERT_PATH` | `--client-cert-path` | Client certificate for mTLS — PEM (with a key) or a PKCS#12 bundle (`.p12`/`.pfx`, no key). Requires an `https://` URL; overrides username/password |
 | `CB_OPERATIONAL_INSIGHTS_CLIENT_KEY_PATH` | `--client-key-path` | Private key (PEM) for the client certificate. Leave unset for PKCS#12 |
 | `CB_OPERATIONAL_INSIGHTS_CLIENT_CERT_PASSWORD` | `--client-cert-password` | Password for an encrypted key or PKCS#12 bundle |
-| `CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE` | `--operational-insights-query-result-max-size` | Maximum query result size **in bytes**. Unset means no limit. When set, reading stops at the budget and the response reports `truncated: true`; a row that would overrun it is not returned. Values above 4 MB are clamped |
+| `CB_MCP_OPERATIONAL_INSIGHTS_QUERY_RESULT_MAX_SIZE` | `--operational-insights-query-result-max-size` | Maximum query result size **in bytes**. Unset means no limit. When set, reading stops at the budget and the response reports `truncated: true`; a row that would overrun it is not returned. Values above 4 MiB (4194304) are clamped to 4 MiB, with a warning on stderr at startup |
 
 All [common configuration](#common-configuration) applies, with these differences from the operational server:
 

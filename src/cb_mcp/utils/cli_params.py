@@ -67,6 +67,7 @@ from .logging import (
     configure_logging,
     get_resolved_logging_config,
 )
+from .query_limits import clamp_max_query_result_size
 
 __all__ = [
     "CLUSTER_CREDENTIALS",
@@ -178,21 +179,38 @@ class GatingParams:
     ``max_query_result_size`` rides here rather than in its own params class
     because it shares the others' role — a limit on what a registered tool may
     do — and because it is declared in the same Click stack. It arrives already
-    clamped by ``validate_max_query_result_size``.
+    clamped here, silently: ``from_click`` runs before logging is configured,
+    so the clamp warning is emitted by :meth:`warn_if_clamped` once it is.
     """
 
     read_only_mode: bool
     disabled_tools: str | None
     confirmation_required_tools: str | None
     max_query_result_size: int | None
+    #: The value as the operator gave it, before clamping; only used to warn.
+    max_query_result_size_requested: int | None = None
+
+    def warn_if_clamped(self) -> None:
+        """Log the clamp warning through the configured sinks.
+
+        Call after ``LoggingParams.apply``. A no-op when nothing was clamped.
+        """
+        if self.max_query_result_size_requested is not None:
+            clamp_max_query_result_size(self.max_query_result_size_requested)
 
     @classmethod
     def from_click(cls, params: Mapping[str, Any]) -> "GatingParams":
+        requested = params["operational_insights_query_result_max_size"]
         return cls(
             read_only_mode=params["read_only_mode"],
             disabled_tools=params["disabled_tools"],
             confirmation_required_tools=params["confirmation_required_tools"],
-            max_query_result_size=params["operational_insights_query_result_max_size"],
+            max_query_result_size=(
+                None
+                if requested is None
+                else clamp_max_query_result_size(requested, warn=False)
+            ),
+            max_query_result_size_requested=requested,
         )
 
 

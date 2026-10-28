@@ -213,7 +213,7 @@ tool_gating_options = compose(
         "tool's result. Unset means no limit: the full result is returned. "
         "When set, rows are streamed and reading stops once the budget is "
         "reached; the response then reports truncated: true. Values above "
-        "4194304 (4 MB) are clamped with a warning.",
+        "4194304 (4 MiB) are clamped to 4 MiB with a warning.",
     ),
 )
 """Per-tool opt-outs, confirmation requirements, and the query result budget. Shared by every server."""
