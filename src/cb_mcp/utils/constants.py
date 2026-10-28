@@ -57,6 +57,12 @@ MAX_MAX_QUERY_RESULT_SIZE = 4 * 1024 * 1024  # 4 MB
 # exist but are too wide to return") rather than looking like an empty result.
 MIN_MAX_QUERY_RESULT_SIZE = 0
 
+# Upper bound on the length of an error message returned to the MCP client (see
+# cb_mcp.utils.responses.error_message). A server error is ~100-200 characters;
+# this only bites on unexpected non-SDK exceptions that embed large payloads.
+# Longer text is cut and marked "... [truncated]".
+MAX_ERROR_MESSAGE_LENGTH = 500
+
 # Allowed Transport Types
 ALLOWED_TRANSPORTS = ["stdio", "http", "sse"]
 NETWORK_TRANSPORTS = ["http", "sse"]
