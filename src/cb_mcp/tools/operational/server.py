@@ -56,11 +56,21 @@ _ISO_UTC_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
 
 # cluster.bucket() returns once the bucket config is fetched, but the per-node KV
 # sessions keep bootstrapping in the background. A bucket.ping() in that window
-# reports each unfinished session as an error with this text (DA-2336). The
-# Python SDK has no Bucket.wait_until_ready, and Cluster.wait_until_ready does
-# not wait for bucket sessions, so the bucket ping is retried until those
-# entries clear or the budget runs out. A node that is really down keeps
-# failing and is still reported once the budget is spent.
+# reports each unfinished session as an error with this text (DA-2336).
+#
+# Why a targeted retry and not Cluster.wait_until_ready: that call does see the
+# bucket's KV sessions (core diagnostics() walks every open bucket), but it waits
+# for DiagnosticsResult.state == Online, which needs every endpoint Connected
+# across all open buckets and all services and ignores service_types. One
+# unrelated bucket or service can stall it, and on timeout it raises
+# UnAmbiguousTimeoutException instead of returning a partial report. The Python
+# SDK has no Bucket.wait_until_ready.
+#
+# Why matching on the text is safe: the core only uses this message when the
+# session is not bootstrapped yet and has no last_bootstrap_error_. A real
+# bootstrap failure (auth, TLS, ...) reports its own message, so it is not
+# retried and comes back at once. A node that never finishes bootstrapping is
+# still reported once the budget is spent.
 _BOOTSTRAP_INCOMPLETE = "Bootstrap incomplete"
 BUCKET_PING_BOOTSTRAP_WAIT_SECONDS = 2.5
 BUCKET_PING_RETRY_DELAY_SECONDS = 0.1
