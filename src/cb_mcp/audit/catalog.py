@@ -65,11 +65,20 @@ SERVICE_PACKAGE_BLOCKS: dict[str, int] = {
 #: Relative offset of the first read event inside a Tier-2 block.
 READ_OFFSET = 48
 
+#: Relative offset of the first event of an **unsplit** category, which has one
+#: event rather than a read/write pair. Its own band, between the read and write
+#: bands, so the offset keeps saying what the id is: 48-63 read, 64-79 unsplit,
+#: 80-95 write. Putting an unsplit event at the read offset instead would have
+#: made a non-filterable event sit in the band a consumer reads as filterable,
+#: and putting it at the write offset would have labelled a ``SELECT`` a write.
+UNSPLIT_OFFSET = 64
+
 #: A category's write event sits this far above its read event.
 WRITE_DELTA = 32
 
 #: Highest slot the intra-block template reserves for categories: reads occupy
-#: ``base + 48 + n`` for ``n`` in 0..15, writes ``base + 80 + n``.
+#: ``base + 48 + n`` for ``n`` in 0..15, unsplit events ``base + 64 + n``, and
+#: writes ``base + 80 + n``.
 MAX_SLOT = 15
 
 #: Explicit slot allocation for Tier-2 categories — ``category -> n``, where a
@@ -157,6 +166,42 @@ for _package, _slots in CATEGORY_SLOTS.items():
 #: established.
 RETIRED_SLOTS: dict[str, dict[str, int]] = {}
 
+#: Categories that emit **one** event per call rather than a read/write pair.
+#:
+#: ``query`` and ``search`` record that an operation happened without saying
+#: whether it read or wrote. Both cover surfaces where the distinction was
+#: judged unreliable enough to be worth more as a single honest event than as
+#: two that might be wrong: a SQL++ or Analytics statement's class depends on
+#: the statement, which means either inspecting it -- a leading-keyword check
+#: books a plain read behind a CTE as a write, and a full parse costs tens of
+#: milliseconds on every call -- or guessing. Vector operations sit inside
+#: these two categories and follow them.
+#:
+#: The single event takes :data:`UNSPLIT_OFFSET`, its own band, and is **not
+#: filterable**. One event covers the category's writes as well as its reads,
+#: so allowing it to be switched off would let an operator turn down read noise
+#: and lose the record of a mutation with it. The cost is that this category's
+#: noise cannot be reduced at all; ``CB_MCP_AUDIT_LOG_DISABLED_EVENTS`` refuses
+#: these ids like any other non-filterable event.
+#:
+#: Because the band is its own, an id still says what it is without a lookup:
+#: the read band is filterable, the unsplit and write bands are not. A category
+#: occupies exactly one band, so its offsets in the other two stay unused --
+#: ``query`` leaves 61491 and 61523 empty, ``search`` 61494 and 61526. Those
+#: gaps are the shared axis working, not numbers waiting to be reclaimed:
+#: filling them would put a category at one offset in one package's block and
+#: a different offset in another's, and ``base + 48 + n`` would stop being
+#: true.
+#:
+#: The ``filterable`` flag in ``descriptor.json`` remains the authority for a
+#: consumer that would rather not decode offsets at all.
+UNSPLIT_CATEGORIES: frozenset[str] = frozenset({"query", "search"})
+
+
+def is_unsplit(category: str) -> bool:
+    """True when ``category`` emits one event rather than a read/write pair."""
+    return category in UNSPLIT_CATEGORIES
+
 
 def categories_for(package: str) -> tuple[str, ...]:
     """Category axis for ``package``'s Tier-2 block, ordered by slot.
@@ -221,11 +266,18 @@ def tool_call_event_id(category: str, operation_class: str, package: str) -> int
         raise ValueError(
             f"operation_class must be 'read' or 'write', got {operation_class!r}."
         )
-    base = (
-        SERVICE_PACKAGE_BLOCKS[package]
-        + READ_OFFSET
-        + category_index(category, package)
-    )
+    block = SERVICE_PACKAGE_BLOCKS[package]
+    slot = category_index(category, package)
+
+    # An unsplit category has one id, in its own band, so the operation class
+    # cannot move it. Returning that id rather than raising on a "write" keeps
+    # every caller that still passes a class working, including the fail-closed
+    # path, which asks for a write and must still get an id. The read and write
+    # offsets for such a category are simply never issued.
+    if is_unsplit(category):
+        return block + UNSPLIT_OFFSET + slot
+
+    base = block + READ_OFFSET + slot
     return base + WRITE_DELTA if operation_class == "write" else base
 
 
@@ -351,8 +403,18 @@ class ToolCallEvent:
 
         An operator can turn read noise down but cannot switch off the record
         of who changed what.
+
+        An **unsplit** category is never filterable, whatever its class says.
+        Its one event covers the writes in the category as well as the reads,
+        so making it filterable would let an operator who only wanted less
+        noise switch off the record of a mutation -- the one thing the
+        read/write split existed to prevent. Filterability therefore cannot be
+        inferred from the id's offset for these categories; the ``filterable``
+        flag in ``descriptor.json`` is the authority.
         """
-        return self.operation_class == "read"
+        return (
+            self.operation_class == "read" and self.category not in UNSPLIT_CATEGORIES
+        )
 
 
 #: Human-readable names for the tool-call categories, used to build the
@@ -373,10 +435,26 @@ _CATEGORY_LABELS: dict[str, str] = {
 
 
 def tool_call_event(category: str, operation_class: str, package: str) -> ToolCallEvent:
-    """Build the :class:`ToolCallEvent` for a category and operation class."""
+    """Build the :class:`ToolCallEvent` for a category and operation class.
+
+    For an unsplit category the class is normalised to ``"read"``. It carries no
+    meaning there -- one id serves every call -- and leaving the caller's value
+    in place would let a record claim ``filterable=False`` while holding the
+    read-offset id that :data:`FILTERABLE_IDS` lists.
+    """
     label = _CATEGORY_LABELS[category]
-    verb = "read" if operation_class == "read" else "write"
     article = "An" if label[0].lower() in "aeiou" else "A"
+
+    if is_unsplit(category):
+        return ToolCallEvent(
+            id=tool_call_event_id(category, operation_class, package),
+            event_name=label,
+            description=f"{article} {label} operation was requested through a tool",
+            category=category,
+            operation_class="read",
+        )
+
+    verb = "read" if operation_class == "read" else "write"
     return ToolCallEvent(
         id=tool_call_event_id(category, operation_class, package),
         event_name=f"{label} {verb}",
@@ -389,11 +467,18 @@ def tool_call_event(category: str, operation_class: str, package: str) -> ToolCa
 def all_tool_call_events(
     package: str,
 ) -> list[ToolCallEvent]:
-    """Every Tier-2 tool-call entry for ``package``, for descriptor generation."""
+    """Every Tier-2 tool-call entry for ``package``, for descriptor generation.
+
+    An unsplit category contributes one entry. The descriptor is what a SIEM
+    author reads to know which ids a build can emit, so listing the write id of
+    an unsplit category would advertise an event that can never arrive.
+    """
     return [
         tool_call_event(category, operation_class, package)
         for category in categories_for(package)
-        for operation_class in ("read", "write")
+        for operation_class in (
+            ("read",) if is_unsplit(category) else ("read", "write")
+        )
     ]
 
 
@@ -416,7 +501,7 @@ def build_descriptor() -> dict:
     # would make the other server's records look unknown.
     #
     # ``service_package`` is carried on each entry because the tool-call names
-    # repeat across blocks: "query read" is 61491 in operational and 65587 in
+    # repeat across blocks: "query" is 61507 in operational and 65603 in
     # operational_insights, and the name alone cannot tell them apart.
     entries += [
         {
@@ -476,6 +561,9 @@ __all__ = [
     "categories_for",
     "MAX_SLOT",
     "RETIRED_SLOTS",
+    "UNSPLIT_CATEGORIES",
+    "UNSPLIT_OFFSET",
+    "is_unsplit",
     "CORE_BLOCK",
     "FILTERABLE_IDS",
     "OPERATIONAL_BLOCK",

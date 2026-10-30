@@ -31,11 +31,9 @@ def test_accessors_are_safe_with_no_state_installed():
     assert state.current() is None
     assert state.get_refusal() is None
     assert state.get_confirmation() is None
-    assert state.get_statement_class() is None
     # Recording must not raise when nothing is tracking.
     state.record_refusal(event_id=1, event_name="x", outcome="denied", reason="r")
     state.record_confirmation(state.CONFIRMATION_SKIPPED)
-    state.record_statement_class("write")
 
 
 def test_install_and_reset():
@@ -121,13 +119,11 @@ def test_first_refusal_wins():
         state.reset(token)
 
 
-def test_confirmation_and_statement_class():
+def test_confirmation_is_recorded_and_last_write_wins():
     token = state.install()
     try:
         state.record_confirmation(state.CONFIRMATION_ACCEPTED)
-        state.record_statement_class("write")
         assert state.get_confirmation() == "accepted"
-        assert state.get_statement_class() == "write"
         # Last write wins for these, unlike refusals.
         state.record_confirmation(state.CONFIRMATION_DECLINED)
         assert state.get_confirmation() == "declined"
@@ -153,7 +149,6 @@ def test_mutation_from_a_worker_thread_is_visible():
                 outcome="blocked",
                 reason="read_only_mode",
             )
-            state.record_statement_class("write")
 
         with ThreadPoolExecutor(max_workers=1) as pool:
             pool.submit(context.run, in_worker).result()
@@ -162,7 +157,6 @@ def test_mutation_from_a_worker_thread_is_visible():
         refusal = state.get_refusal()
         assert refusal is not None
         assert refusal["event_id"] == 57488
-        assert state.get_statement_class() == "write"
     finally:
         state.reset(token)
 
