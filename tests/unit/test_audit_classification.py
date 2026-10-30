@@ -143,9 +143,9 @@ def test_repository_write_tools_are_classified_write(tool_name):
     """The audit class must agree with the server's own categorisation.
 
     Except in an unsplit category, which has no write class to agree with: a
-    `search` write and a `search` read are one event, and that event is
-    filterable. `drop_search_index` is therefore a write the audit log does not
-    mark as one -- the accepted cost of collapsing the category.
+    `search` write and a `search` read are one event. `drop_search_index` is
+    therefore a write the audit log does not mark as one -- the accepted cost of
+    collapsing the category.
     """
     category, operation_class = classify_tool(tool_name, package=PACKAGE)
     if is_unsplit(category):

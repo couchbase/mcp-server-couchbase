@@ -255,9 +255,12 @@ def classify_tool(
 
     Args:
         tool_name: The MCP tool name as registered.
-        operation_class_override: Supplied for statement-classified tools once
-            the statement has been inspected, so a SQL++ DML call is booked
-            against the query *write* ID rather than the read ID.
+        operation_class_override: Replaces the table's operation class when
+            given. No production caller passes it any more; it is kept so
+            existing callers (including the fail-closed path, which asks for a
+            write) keep working. For an unsplit category such as ``query`` or
+            ``search`` it is tolerated and has no effect on the event: one id
+            serves every call whatever class is passed.
 
     Unknown tools fail closed to a write class.
     """

@@ -533,6 +533,34 @@ async def test_sqlpp_uses_the_single_query_id_and_omits_required_scope(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_search_write_uses_the_single_search_id_and_omits_required_scope(
+    tmp_path,
+):
+    """A Search write books as `search`, with no `required_scope`.
+
+    `search` is unsplit, so `drop_search_index` -- a write -- shares 61510 with
+    the Search reads. The record must not claim a scope it cannot derive:
+    "read" on a destructive call would be wrong, and "write" would imply a
+    per-call class the category no longer has.
+    """
+    audit = _build_logger(tmp_path)
+    mcp = _server(audit)
+
+    @mcp.tool
+    def drop_search_index(ctx: Context, index_name: str) -> str:
+        """drops a Search index"""
+        return "ok"
+
+    async with Client(mcp) as client:
+        await client.call_tool("drop_search_index", {"index_name": "idx"})
+
+    calls = [r for r in _records(audit) if r.get("tool_name") == "drop_search_index"]
+    assert [r["id"] for r in calls] == [61510]
+    assert calls[0]["name"] == "search"
+    assert "required_scope" not in calls[0]
+
+
+@pytest.mark.asyncio
 async def test_disabled_event_is_not_written(tmp_path):
     audit = _build_logger(tmp_path, disabled_events="61490")  # document read
     mcp = _server(audit)
