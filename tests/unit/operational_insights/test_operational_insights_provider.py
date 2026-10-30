@@ -39,10 +39,30 @@ def test_get_cluster_connects_lazily_and_caches():
         second = provider.get_cluster(ctx=MagicMock())
 
     connect.assert_called_once_with(
-        "http://localhost:8095", "Administrator", "hunter2", None, None, None, None
+        "http://localhost:8095",
+        "Administrator",
+        "hunter2",
+        None,
+        None,
+        None,
+        None,
+        handle_request_timeout_seconds=30,
     )
     assert first is cluster
     assert second is cluster
+
+
+def test_get_cluster_passes_the_configured_async_query_result_timeout():
+    provider = OperationalInsightsClusterProvider(
+        settings={**_SETTINGS, "operational_insights_async_query_result_timeout": 90}
+    )
+    with patch(
+        "providers.operational_insights.connect_to_operational_insights_cluster",
+        return_value=MagicMock(),
+    ) as connect:
+        provider.get_cluster(ctx=MagicMock())
+
+    assert connect.call_args.kwargs["handle_request_timeout_seconds"] == 90
 
 
 def test_close_calls_shutdown_not_close():
@@ -79,6 +99,7 @@ def test_get_configuration_omits_secrets_and_reserved_keys():
     assert config["username"] == "Administrator"
     assert config["password_configured"] is True
     assert "password" not in config
+    assert config["operational_insights_async_query_result_timeout"] == 30
     for reserved in (
         "read_only_mode",
         "disabled_tools",

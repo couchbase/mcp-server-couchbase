@@ -12,21 +12,25 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from cb_mcp.servers.operational_insights.constants import (
+    DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT,
+)
 from cb_mcp.utils.operational_insights.connection import (
-    HANDLE_REQUEST_TIMEOUT_SECONDS,
     connect_to_operational_insights_cluster,
 )
 
 
-def _assert_handle_request_timeout(options) -> None:
-    """The cluster must be created with the raised handle_request_timeout.
+def _assert_handle_request_timeout(
+    options, seconds: int = DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT
+) -> None:
+    """The cluster must be created with the configured handle_request_timeout.
 
     The SDK default (10s) is a deadline on the whole of fetch_results(), row
     stream included, so leaving it in place makes any async result that takes
     longer than that to download unfetchable.
     """
     assert options["timeout_options"]["handle_request_timeout"] == timedelta(
-        seconds=HANDLE_REQUEST_TIMEOUT_SECONDS
+        seconds=seconds
     )
 
 
@@ -159,6 +163,24 @@ class TestOperationalInsightsConnectionModule:
             # ClusterOptions.
             assert options["security_options"] == "sec-opts"
             _assert_handle_request_timeout(options)
+
+    def test_handle_request_timeout_is_configurable(self) -> None:
+        with (
+            patch("cb_mcp.utils.operational_insights.connection.Credential"),
+            patch(
+                "cb_mcp.utils.operational_insights.connection.Cluster.create_instance",
+                return_value=MagicMock(),
+            ) as mock_create,
+        ):
+            connect_to_operational_insights_cluster(
+                "http://localhost:8095",
+                "Administrator",
+                "hunter2",
+                handle_request_timeout_seconds=120,
+            )
+
+            _endpoint, _credential, options = mock_create.call_args.args
+            _assert_handle_request_timeout(options, seconds=120)
 
     def test_missing_connection_string_raises(self) -> None:
         with pytest.raises(ValueError, match="connection_string"):

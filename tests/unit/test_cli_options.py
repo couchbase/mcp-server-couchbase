@@ -483,3 +483,72 @@ class TestAuditDiagnosticOrdering:
         first = cli.audit
         second = cli.audit
         assert first is second
+
+
+class TestOperationalInsightsAsyncQueryResultTimeout:
+    """``CB_MCP_OPERATIONAL_INSIGHTS_ASYNC_QUERY_RESULT_TIMEOUT`` reaches settings.
+
+    The provider reads the value from settings and passes it to the SDK as
+    ``handle_request_timeout``, so settings is where it has to land.
+    """
+
+    ENV_VAR = "CB_MCP_OPERATIONAL_INSIGHTS_ASYNC_QUERY_RESULT_TIMEOUT"
+    KEY = "operational_insights_async_query_result_timeout"
+
+    def _settings(self, args: list[str], env: dict[str, str] | None = None) -> dict:
+        base = {k: v for k, v in os.environ.items() if k != self.ENV_VAR}
+        lifespan_fn, fake_mcp = _capture_lifespan(
+            ["operational-insights", *args], env={**base, **(env or {})}
+        )
+        captured: dict = {}
+
+        async def drive() -> None:
+            async with lifespan_fn(fake_mcp) as app_context:
+                captured.update(app_context.settings)
+
+        asyncio.run(drive())
+        return captured
+
+    def test_defaults_to_30_seconds(self):
+        assert self._settings([])[self.KEY] == 30
+
+    def test_env_var_is_honoured(self):
+        assert self._settings([], env={self.ENV_VAR: "90"})[self.KEY] == 90
+
+    def test_flag_overrides_env_var(self):
+        settings = self._settings(
+            ["--operational-insights-async-query-result-timeout", "45"],
+            env={self.ENV_VAR: "90"},
+        )
+        assert settings[self.KEY] == 45
+
+    @pytest.mark.parametrize("value", ["0", "-5", "abc", "1.5", "", "9" * 30])
+    def test_invalid_values_fall_back_to_the_default(self, value):
+        """A bad value must not stop the server: it starts with the default."""
+        assert self._settings([], env={self.ENV_VAR: value})[self.KEY] == 30
+
+    def test_invalid_value_is_warned_about_once_after_logging_is_up(self):
+        """The warning comes from the post-logging step, not the settings build.
+
+        Emitted while settings are built, it would go to logging.lastResort
+        instead of the operator's configured sinks.
+        """
+        with (
+            patch("cb_mcp.servers.operational_insights.cli.logger") as cli_logger,
+            patch("mcp_server.CliParams.from_click", wraps=CliParams.from_click),
+            patch("cb_mcp.utils.cli_params.LoggingParams.apply") as apply,
+        ):
+            apply.side_effect = lambda **_: cli_logger.warning.assert_not_called()
+            settings = self._settings([], env={self.ENV_VAR: "0"})
+
+        assert settings[self.KEY] == 30
+        cli_logger.warning.assert_called_once()
+        message = cli_logger.warning.call_args.args[0]
+        assert self.ENV_VAR in message
+        assert "'0'" in message
+        assert "30" in message
+
+    def test_valid_value_logs_no_warning(self):
+        with patch("cb_mcp.servers.operational_insights.cli.logger") as cli_logger:
+            self._settings([], env={self.ENV_VAR: " 45 "})
+        cli_logger.warning.assert_not_called()

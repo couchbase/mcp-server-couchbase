@@ -7,6 +7,7 @@ from couchbase_operational_insights.cluster import Cluster
 from fastmcp import Context
 
 from cb_mcp.servers.operational_insights.constants import (
+    DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT,
     OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE,
 )
 from cb_mcp.utils.operational_insights.connection import (
@@ -67,6 +68,10 @@ class OperationalInsightsClusterProvider:
             self._settings.get("client_cert_path"),  # type: ignore[arg-type]
             self._settings.get("client_key_path"),  # type: ignore[arg-type]
             self._settings.get("client_cert_password"),  # type: ignore[arg-type]
+            handle_request_timeout_seconds=self._settings.get(
+                "operational_insights_async_query_result_timeout",
+                DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT,
+            ),
         )
 
     def close(self) -> None:
@@ -106,6 +111,10 @@ class OperationalInsightsClusterProvider:
             "client_cert_path_configured": bool(s.get("client_cert_path")),
             "client_key_path_configured": bool(s.get("client_key_path")),
             "client_cert_password_configured": bool(s.get("client_cert_password")),
+            "operational_insights_async_query_result_timeout": s.get(
+                "operational_insights_async_query_result_timeout",
+                DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT,
+            ),
         }
 
     def is_connected(

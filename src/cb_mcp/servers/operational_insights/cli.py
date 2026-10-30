@@ -4,14 +4,27 @@ Lives here rather than ``core/cli/options.py``: the shared ``credential_options`
 in that module is Couchbase-specific (a ``couchbase://`` connection string,
 mTLS client cert/key) and its own docstring already says a server backed by
 a different service should define its own. This module imports only
-``click`` and the shared ``compose`` helper, so it stays free of the
-``couchbase_operational_insights`` SDK import and can be imported at CLI
-module scope.
+``click``, the standard library and SDK-free ``cb_mcp`` modules, so it stays
+free of the ``couchbase_operational_insights`` SDK import and can be imported
+at CLI module scope.
 """
+
+import logging
+from collections.abc import Mapping
+from datetime import timedelta
+from typing import Any
 
 import click
 
 from ...core.cli.options import compose
+from .constants import (
+    DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT,
+    OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE,
+)
+
+logger = logging.getLogger(f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.cli")
+
+ASYNC_QUERY_RESULT_TIMEOUT_KEY = "operational_insights_async_query_result_timeout"
 
 #: Options are optional (no ``required=True``): the server must be able to
 #: start in "lazy" mode for --help and tool discovery, matching the
@@ -76,4 +89,73 @@ operational_insights_credential_options = compose(
         help="Decryption password for the client key/PKCS#12 bundle, if it "
         "is encrypted. Omit if the file is unencrypted.",
     ),
+    click.option(
+        "--operational-insights-async-query-result-timeout",
+        "operational_insights_async_query_result_timeout",
+        envvar="CB_MCP_OPERATIONAL_INSIGHTS_ASYNC_QUERY_RESULT_TIMEOUT",
+        # A string, not IntRange(min=1): a bad value is warned about and
+        # replaced by the default in resolve_async_query_result_timeout rather
+        # than exiting 2 during argument parsing, which would take a
+        # container deployment down over one setting.
+        type=str,
+        default=None,
+        help="Timeout, in seconds, for each async query handle request: "
+        "starting the query, checking its status, fetching, discarding and "
+        "cancelling. For a fetch it bounds the whole download, so a result "
+        "that takes longer than this to read fails. Must be a positive "
+        f"integer; defaults to {DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT}. Any "
+        "other value is logged as a warning and the default is used.",
+    ),
 )
+
+
+def resolve_async_query_result_timeout(value: str | None, *, warn: bool) -> int:
+    """The async query result timeout to use, in seconds.
+
+    ``None`` (flag and environment variable unset) is the default, silently.
+    Anything that is not a positive integer — ``0``, ``-5``, ``1.5``, ``abc``,
+    or a number too large for a ``timedelta`` — falls back to the default.
+
+    ``warn=False`` falls back silently, for the settings build, which runs
+    before logging is configured: a warning emitted then bypasses the
+    configured sinks. ``warn_about_operational_insights_settings`` re-runs this
+    with ``warn=True`` once the handlers exist.
+    """
+    if value is None:
+        return DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT
+    try:
+        seconds = int(str(value).strip())
+        if seconds < 1:
+            raise ValueError(value)
+        timedelta(seconds=seconds)
+    except (ValueError, OverflowError):
+        if warn:
+            logger.warning(
+                f"CB_MCP_OPERATIONAL_INSIGHTS_ASYNC_QUERY_RESULT_TIMEOUT {value!r} "
+                "is not a positive integer; using the default "
+                f"{DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT} seconds."
+            )
+        return DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT
+    return seconds
+
+
+def resolve_operational_insights_settings(
+    settings: Mapping[str, Any],
+) -> dict[str, Any]:
+    """The credential settings slice with the timeout replaced by its effective value."""
+    return {
+        **settings,
+        ASYNC_QUERY_RESULT_TIMEOUT_KEY: resolve_async_query_result_timeout(
+            settings[ASYNC_QUERY_RESULT_TIMEOUT_KEY], warn=False
+        ),
+    }
+
+
+def warn_about_operational_insights_settings(settings: Mapping[str, Any]) -> None:
+    """Log the warnings ``resolve_operational_insights_settings`` held back.
+
+    Takes the raw settings slice. Call after ``LoggingParams.apply``.
+    """
+    resolve_async_query_result_timeout(
+        settings[ASYNC_QUERY_RESULT_TIMEOUT_KEY], warn=True
+    )

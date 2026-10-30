@@ -181,6 +181,7 @@ def _build_server(
     # First: everything after this is logged.
     cli.logging.apply(sdk_log_hook=spec.sdk_log_hook)
     cli.gating.warn_if_clamped()
+    server.credentials.warn_about(params)
     auth = cli.resolve_auth(spec)
     # Resolved from the credentials this run was given, so a tool that only
     # works on one kind of cluster is never registered against the other.
