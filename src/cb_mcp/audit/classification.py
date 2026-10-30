@@ -9,6 +9,13 @@ what it is allowed to do. That single classification drives both the event ID
 (read versus write range within the package block) and ``required_scope``,
 keeping the two consistent by construction.
 
+In an unsplit category (:data:`~cb_mcp.audit.catalog.UNSPLIT_CATEGORIES`) it
+drives neither: the id comes from the category alone and the tool-call record
+carries no ``required_scope``. The class is still the scope the *tool* needs --
+what read-only mode gates on and what a scope-denial record reports -- so it
+continues to mirror ``TOOL_SET``. It is not, and never was, a claim about what
+a particular statement did.
+
 A tool with no entry **fails closed** — recorded against a write ID, which is
 never filterable — so a newly added tool can never be silently under-audited.
 Such a record also carries ``unclassified: true`` so a reviewer is never misled
@@ -101,8 +108,12 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "mutate_subdocument": ("kv", "write"),
         # -- query (SQL++) ---------------------------------------------------
         # `query` is an unsplit category: one event per call, whatever the
-        # statement does. The class below is recorded for shape only and does
-        # not reach the id -- see catalog.UNSPLIT_CATEGORIES.
+        # statement does. The class below no longer reaches the id, the
+        # filterable flag or the tool-call record's required_scope, which is
+        # omitted -- see catalog.UNSPLIT_CATEGORIES. It is still the scope the
+        # *tool* needs, which is what a scope-denial record reports and what
+        # read-only mode gates on, so it stays in step with TOOL_SET rather
+        # than describing the statement.
         "run_sql_plus_plus_query": ("query", "read"),
         "explain_sql_plus_plus_query": ("query", "read"),
         # Embeds the query text, then runs a SELECT with APPROX_VECTOR_DISTANCE
@@ -146,6 +157,9 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # query, so a reviewer filtering on `index read` should not get search
         # traffic mixed in. `search` is unsplit, so index management and search
         # queries share its single id (61510) and are told apart by tool_name.
+        # The classes below therefore differ inside one category without
+        # affecting the id: they are the scopes the tools need, and
+        # upsert/drop genuinely need write while the rest do not.
         "list_search_indexes": ("search", "read"),
         "get_search_index_definition": ("search", "read"),
         "run_search": ("search", "read"),
@@ -188,8 +202,10 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "operational_insights_get_schema_for_collection": ("schema", "read"),
         # -- query (SQL++ over Analytics) -----------------------------------
         # `query` is an unsplit category: one event per call, whatever the
-        # statement does. The class below is recorded for shape only and does
-        # not reach the id -- see catalog.UNSPLIT_CATEGORIES.
+        # statement does. As on the operational server, the class below is the
+        # scope the tool needs rather than a claim about the statement. These
+        # are read because Analytics enforces QueryOptions(read_only=True)
+        # which puts them in OI's READ_ONLY_TOOLS.
         "operational_insights_run_query_sync": ("query", "read"),
         "operational_insights_run_query_async": ("query", "read"),
         "operational_insights_explain_query": ("query", "read"),
