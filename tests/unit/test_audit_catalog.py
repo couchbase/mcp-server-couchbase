@@ -89,7 +89,6 @@ def test_core_event_ids_are_the_prd_values(event, expected_id, expected_name):
         ("cluster", 61488, 61520),
         ("schema", 61489, 61521),
         ("kv", 61490, 61522),
-        ("query", 61491, 61523),
         ("index", 61492, 61524),
         ("performance", 61493, 61525),
     ],
@@ -115,7 +114,11 @@ def test_unknown_category_and_class_are_rejected():
 
 
 def test_writes_are_never_filterable_and_reads_always_are():
+    """Except in an unsplit category, whose one event covers both."""
     for event in all_tool_call_events("operational"):
+        if catalog.is_unsplit(event.category):
+            assert event.filterable is False, event.event_name
+            continue
         assert event.filterable is (event.operation_class == "read")
 
 
@@ -184,8 +187,8 @@ def test_descriptor_entries_are_well_formed():
             "filterable",
         }
         assert required <= set(entry), entry
-        # Tool-call names repeat across blocks -- "query read" is 61491 in
-        # operational and 65587 in operational_insights -- so a Tier-2 entry
+        # Tool-call names repeat across blocks -- "query" is 61507 in
+        # operational and 65603 in operational_insights -- so a Tier-2 entry
         # must name its package or a SIEM author cannot tell them apart. Core
         # events are shared by every package and carry no such field.
         if entry["category"] == "tool_call":
@@ -259,8 +262,9 @@ def test_operational_insights_ids_sit_in_its_own_block():
     """Same offsets, different block -- and never the operational numbers."""
     base = catalog.SERVICE_PACKAGE_BLOCKS["operational_insights"]
     assert base == 0x10000
-    assert catalog.tool_call_event_id("query", "read", "operational_insights") == 65587
-    assert catalog.tool_call_event_id("query", "write", "operational_insights") == 65619
+    assert catalog.tool_call_event_id("query", "read", "operational_insights") == 65603
+    # `query` is unsplit: the class cannot move the id off the read offset.
+    assert catalog.tool_call_event_id("query", "write", "operational_insights") == 65603
     assert catalog.tool_call_event_id("config", "read", "operational_insights") == 65591
     # The collision this block exists to prevent: the same tool name in both
     # servers must never resolve to the same id.
@@ -283,7 +287,7 @@ def test_retiring_a_category_does_not_move_its_neighbours(monkeypatch):
     }
     monkeypatch.setattr(catalog, "CATEGORY_SLOTS", {"operational": trimmed})
     assert catalog.tool_call_event_id("performance", "read", "operational") == 61493
-    assert catalog.tool_call_event_id("query", "read", "operational") == 61491
+    assert catalog.tool_call_event_id("query", "read", "operational") == 61507
 
 
 def test_next_free_slot_takes_the_lowest_never_allocated(monkeypatch):
@@ -346,5 +350,77 @@ def test_slot_table_ids_are_the_shipped_numbers():
 
 def test_search_ids_are_the_shipped_numbers():
     """Pinned literally, like every other shipped id."""
-    assert tool_call_event_id("search", "read", "operational") == 61494
-    assert tool_call_event_id("search", "write", "operational") == 61526
+    assert tool_call_event_id("search", "read", "operational") == 61510
+    # `search` is unsplit: both classes land here and the write offset is
+    # never issued.
+    assert tool_call_event_id("search", "write", "operational") == 61510
+
+
+# -- the unsplit categories --------------------------------------------
+
+
+@pytest.mark.parametrize("package", ["operational", "operational_insights"])
+def test_query_has_one_id_whatever_the_operation_class(package):
+    """`query` records that a query happened, not what it did.
+
+    Both classes resolve to the read-offset id, so a caller that still passes
+    "write" -- the fail-closed path does -- cannot produce an id the catalogue
+    no longer publishes.
+    """
+    read_id = catalog.tool_call_event_id("query", "read", package)
+    write_id = catalog.tool_call_event_id("query", "write", package)
+    assert read_id == write_id
+    # Not filterable: the one event covers the category's writes too, so
+    # letting it be switched off would lose a mutation record.
+    assert read_id not in catalog.FILTERABLE_IDS
+
+
+@pytest.mark.parametrize("package", ["operational", "operational_insights"])
+def test_the_descriptor_lists_one_query_entry_per_package(package):
+    """A descriptor entry is a promise that the id can arrive.
+
+    Listing a retired `query write` id would advertise an event no build can
+    emit, and a SIEM author would write a rule that never fires.
+    """
+    events = [e for e in catalog.all_tool_call_events(package) if e.category == "query"]
+    assert len(events) == 1
+    assert events[0].event_name == "query"
+
+
+@pytest.mark.parametrize(
+    ("package", "category"),
+    [
+        ("operational", "query"),
+        ("operational", "search"),
+        ("operational_insights", "query"),
+    ],
+)
+def test_an_unsplit_category_leaves_its_read_and_write_offsets_unused(
+    package, category
+):
+    """A category occupies exactly one band, so two offsets stay empty.
+
+    Nothing may advertise an id no build can emit: a descriptor entry promises
+    a SIEM author that the id can arrive, so a rule written against one of
+    these would never fire. The gaps are the shared axis working -- filling
+    them would give a category a different offset in each package's block.
+    """
+    base = (
+        catalog.SERVICE_PACKAGE_BLOCKS[package]
+        + catalog.READ_OFFSET
+        + catalog.CATEGORY_SLOTS[package][category]
+    )
+    assert base not in catalog.ALL_IDS, "read offset must stay unused"
+    assert base + catalog.WRITE_DELTA not in catalog.ALL_IDS, "write offset too"
+
+
+def test_every_other_category_still_splits_read_from_write():
+    """The change is scoped to the unsplit set; nothing else loses its pair."""
+    for package in catalog.SERVICE_PACKAGE_BLOCKS:
+        for category in catalog.categories_for(package):
+            if catalog.is_unsplit(category):
+                continue
+            read_id = catalog.tool_call_event_id(category, "read", package)
+            write_id = catalog.tool_call_event_id(category, "write", package)
+            assert write_id - read_id == catalog.WRITE_DELTA, (package, category)
+            assert write_id not in catalog.FILTERABLE_IDS, (package, category)

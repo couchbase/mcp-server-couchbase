@@ -327,7 +327,7 @@
         },
         {
           "name": "CB_MCP_AUDIT_LOG_DISABLED_EVENTS",
-          "description": "Audit events to suppress, as comma-separated numeric event ids (for example '61490,61491'), or a path to a file with one id per line. Ids are listed in the audit descriptor shipped with the package. Only filterable events can be suppressed: write and security events are always recorded, and an attempt to disable one is refused with a warning.",
+          "description": "Audit events to suppress, as comma-separated numeric event ids (for example '61490,61492'), or a path to a file with one id per line. Ids are listed in the audit descriptor shipped with the package. Only filterable events can be suppressed: write and security events are always recorded, and an attempt to disable one is refused with a warning.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -771,7 +771,7 @@
         {
           "type": "named",
           "name": "--audit-log-disabled-events",
-          "description": "Audit events to suppress, as comma-separated numeric event ids (for example '61490,61491'), or a path to a file with one id per line. Ids are listed in the audit descriptor shipped with the package. Only filterable events can be suppressed: write and security events are always recorded, and an attempt to disable one is refused with a warning.",
+          "description": "Audit events to suppress, as comma-separated numeric event ids (for example '61490,61492'), or a path to a file with one id per line. Ids are listed in the audit descriptor shipped with the package. Only filterable events can be suppressed: write and security events are always recorded, and an attempt to disable one is refused with a warning.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
@@ -1041,7 +1041,7 @@
         },
         {
           "name": "CB_MCP_AUDIT_LOG_DISABLED_EVENTS",
-          "description": "Audit events to suppress, as comma-separated numeric event ids (for example '61490,61491'), or a path to a file with one id per line. Ids are listed in the audit descriptor shipped with the package. Only filterable events can be suppressed: write and security events are always recorded, and an attempt to disable one is refused with a warning.",
+          "description": "Audit events to suppress, as comma-separated numeric event ids (for example '61490,61492'), or a path to a file with one id per line. Ids are listed in the audit descriptor shipped with the package. Only filterable events can be suppressed: write and security events are always recorded, and an attempt to disable one is refused with a warning.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -1443,7 +1443,7 @@
         {
           "type": "named",
           "name": "--audit-log-disabled-events",
-          "description": "Audit events to suppress, as comma-separated numeric event ids (for example '61490,61491'), or a path to a file with one id per line. Ids are listed in the audit descriptor shipped with the package. Only filterable events can be suppressed: write and security events are always recorded, and an attempt to disable one is refused with a warning.",
+          "description": "Audit events to suppress, as comma-separated numeric event ids (for example '61490,61492'), or a path to a file with one id per line. Ids are listed in the audit descriptor shipped with the package. Only filterable events can be suppressed: write and security events are always recorded, and an attempt to disable one is refused with a warning.",
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
@@ -1776,7 +1776,7 @@
         },
         {
           "name": "CB_MCP_AUDIT_LOG_DISABLED_EVENTS",
-          "description": "Audit events to suppress, as comma-separated numeric event ids (for example '61490,61491'), or a path to a file with one id per line. Ids are listed in the audit descriptor shipped with the package. Only filterable events can be suppressed: write and security events are always recorded, and an attempt to disable one is refused with a warning.",
+          "description": "Audit events to suppress, as comma-separated numeric event ids (for example '61490,61492'), or a path to a file with one id per line. Ids are listed in the audit descriptor shipped with the package. Only filterable events can be suppressed: write and security events are always recorded, and an attempt to disable one is refused with a warning.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -2089,7 +2089,7 @@
         },
         {
           "name": "CB_MCP_AUDIT_LOG_DISABLED_EVENTS",
-          "description": "Audit events to suppress, as comma-separated numeric event ids (for example '61490,61491'), or a path to a file with one id per line. Ids are listed in the audit descriptor shipped with the package. Only filterable events can be suppressed: write and security events are always recorded, and an attempt to disable one is refused with a warning.",
+          "description": "Audit events to suppress, as comma-separated numeric event ids (for example '61490,61492'), or a path to a file with one id per line. Ids are listed in the audit descriptor shipped with the package. Only filterable events can be suppressed: write and security events are always recorded, and an attempt to disable one is refused with a warning.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
