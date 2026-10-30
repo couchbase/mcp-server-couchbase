@@ -22,7 +22,7 @@
 # come back, so document count is irrelevant and a small seed keeps the
 # workflow fast.
 #
-# Variables it reads (OI_ANALYTICS_PORT, CLUSTER_USERNAME, CLUSTER_PASSWORD)
+# Variables it reads (OPERATIONAL_INSIGHTS_ANALYTICS_PORT, CLUSTER_USERNAME, CLUSTER_PASSWORD)
 # must already be set — see accuracy.yml's job-level `env:`.
 set -euo pipefail
 
@@ -39,7 +39,7 @@ import time
 from couchbase_operational_insights.cluster import Cluster
 from couchbase_operational_insights.credential import Credential
 
-endpoint = "http://127.0.0.1:${OI_ANALYTICS_PORT}"
+endpoint = "http://127.0.0.1:${OPERATIONAL_INSIGHTS_ANALYTICS_PORT}"
 credential = Credential.from_username_and_password(
     "${CLUSTER_USERNAME}", "${CLUSTER_PASSWORD}"
 )

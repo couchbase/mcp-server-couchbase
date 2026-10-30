@@ -1,10 +1,10 @@
 """Accuracy tests for the Operational Insights metadata tools.
 
 Covers:
-  - oi_get_databases_in_cluster
-  - oi_get_scopes_in_database
-  - oi_get_collections_in_scope
-  - oi_get_schema_for_collection
+  - operational_insights_get_databases_in_cluster
+  - operational_insights_get_scopes_in_database
+  - operational_insights_get_collections_in_scope
+  - operational_insights_get_schema_for_collection
   - get_server_configuration_status (registered by this server too, under the
     same name the operational server uses)
 
@@ -39,34 +39,33 @@ def _build_cases(
 ) -> list[AccuracyCase]:
     cases: list[AccuracyCase] = [
         AccuracyCase(
-            test_id="oi_get_databases_in_cluster",
+            test_id="operational_insights_get_databases_in_cluster",
             prompt="What databases exist on this cluster? List them.",
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="oi_get_databases_in_cluster",
+                    tool_name="operational_insights_get_databases_in_cluster",
                     parameters={},
                 ),
             ],
         ),
         AccuracyCase(
-            test_id="oi_get_scopes_in_database",
+            test_id="operational_insights_get_scopes_in_database",
             prompt=f"List the scopes in the '{database}' database.",
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="oi_get_scopes_in_database",
+                    tool_name="operational_insights_get_scopes_in_database",
                     parameters={"database_name": database},
                 ),
             ],
         ),
         AccuracyCase(
-            test_id="oi_get_collections_in_scope",
+            test_id="operational_insights_get_collections_in_scope",
             prompt=(
-                f"What collections are in scope '{scope}' of database "
-                f"'{database}'?"
+                f"What collections are in scope '{scope}' of database '{database}'?"
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="oi_get_collections_in_scope",
+                    tool_name="operational_insights_get_collections_in_scope",
                     parameters={
                         "database_name": database,
                         "scope_name": scope,
@@ -95,7 +94,7 @@ def _build_cases(
             prompt="I just connected to this cluster. What data is on it?",
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="oi_get_databases_in_cluster",
+                    tool_name="operational_insights_get_databases_in_cluster",
                     parameters=Matcher.any_value(),
                 ),
             ],
@@ -104,12 +103,12 @@ def _build_cases(
 
     # Schema inference samples real document content, so these two run
     # against a collection that already holds data — travel-sample's
-    # inventory.airline unless CB_OI_TEST_COLLECTION points elsewhere.
+    # inventory.airline unless CB_OPERATIONAL_INSIGHTS_TEST_COLLECTION points elsewhere.
     schema_db, schema_scope, schema_collection = schema_keyspace
 
     cases.append(
         AccuracyCase(
-            test_id="oi_get_schema_for_collection",
+            test_id="operational_insights_get_schema_for_collection",
             prompt=(
                 f"What is the schema / document structure of collection "
                 f"'{schema_collection}' in scope '{schema_scope}' of database "
@@ -117,7 +116,7 @@ def _build_cases(
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="oi_get_schema_for_collection",
+                    tool_name="operational_insights_get_schema_for_collection",
                     parameters={
                         "database_name": schema_db,
                         "scope_name": schema_scope,
@@ -146,7 +145,7 @@ def _build_cases(
             ),
             expected_tools=[
                 ExpectedToolCall(
-                    tool_name="oi_get_schema_for_collection",
+                    tool_name="operational_insights_get_schema_for_collection",
                     parameters=Matcher.any_value(),
                 ),
             ],
@@ -166,15 +165,15 @@ def metadata_cases(
 # Schema cases are split into their own test so they can run against a
 # different keyspace (one holding real documents) than the metadata cases.
 METADATA_CASE_IDS = [
-    "oi_get_databases_in_cluster",
-    "oi_get_scopes_in_database",
-    "oi_get_collections_in_scope",
+    "operational_insights_get_databases_in_cluster",
+    "operational_insights_get_scopes_in_database",
+    "operational_insights_get_collections_in_scope",
     "get_server_configuration_status",
     "conversational_whats_on_this_cluster",
 ]
 
 COLLECTION_CASE_IDS = [
-    "oi_get_schema_for_collection",
+    "operational_insights_get_schema_for_collection",
     "conversational_what_fields_do_docs_have",
 ]
 

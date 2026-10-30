@@ -1,6 +1,6 @@
 """Result-validation evals for the OI query tools (LLM-as-judge).
 
-Covers oi_run_query_sync, oi_explain_query, and the async lifecycle as the
+Covers operational_insights_run_query_sync, operational_insights_explain_query, and the async lifecycle as the
 model experiences it end-to-end (start a query, poll it, report the rows).
 
 Seeded data gives these cases real ground truth: the collection holds three

@@ -6,7 +6,7 @@ they spawn ``python -m mcp_server`` with no subcommand, gate on
 ``CB_CONNECTION_STRING``, and tell the agent to default to a
 bucket/scope/collection. The Operational Insights server is a different
 process (``mcp_server operational-insights``), different credentials
-(``CB_OI_*``), and a different vocabulary (database/scope/collection, no
+(``CB_OPERATIONAL_INSIGHTS_*``), and a different vocabulary (database/scope/collection, no
 buckets) — so this conftest overrides the three fixtures that carry those
 assumptions and leaves the rest (``judge``, ``result_storage``,
 ``openai_model``, ``accuracy_run_id``, ``commit_sha``) inherited unchanged.
@@ -28,11 +28,11 @@ from contextlib import asynccontextmanager
 
 import pytest
 from _test_env import (
-    build_oi_env,
-    get_oi_test_collection,
-    get_oi_test_database,
-    get_oi_test_scope,
-    oi_env_available,
+    build_operational_insights_env,
+    get_operational_insights_test_collection,
+    get_operational_insights_test_database,
+    get_operational_insights_test_scope,
+    operational_insights_env_available,
 )
 from mcp import ClientSession, StdioServerParameters, stdio_client
 
@@ -57,10 +57,10 @@ def pytest_collection_modifyitems(config, items):
     skip = pytest.mark.skip(
         reason=(
             "Operational Insights accuracy tests require a live OI cluster. "
-            "Set CB_OI_CONNECTION_STRING/CB_OI_USERNAME/CB_OI_PASSWORD."
+            "Set CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING/CB_OPERATIONAL_INSIGHTS_USERNAME/CB_OPERATIONAL_INSIGHTS_PASSWORD."
         )
     )
-    available = oi_env_available()
+    available = operational_insights_env_available()
     for item in items:
         path = str(item.fspath).replace(os.sep, "/")
         if _OI_ACCURACY_DIR not in path:
@@ -74,7 +74,7 @@ def pytest_collection_modifyitems(config, items):
 
 #: Fallback keyspace for the cases that need a collection of real documents
 #: they did not create themselves — currently only the schema-inference ones,
-#: since ``oi_get_schema_for_collection`` samples actual document content.
+#: since ``operational_insights_get_schema_for_collection`` samples actual document content.
 #:
 #: travel-sample is the sample dataset the OI docs walk you through loading,
 #: and ``inventory.airline`` is its most stable collection: a flat, fully
@@ -83,8 +83,8 @@ def pytest_collection_modifyitems(config, items):
 #: means a developer with the standard sample data loaded runs these cases
 #: without setting anything.
 #:
-#: Overridable: ``CB_OI_TEST_DATABASE`` / ``CB_OI_TEST_SCOPE`` /
-#: ``CB_OI_TEST_COLLECTION`` still win, for a cluster without travel-sample
+#: Overridable: ``CB_OPERATIONAL_INSIGHTS_TEST_DATABASE`` / ``CB_OPERATIONAL_INSIGHTS_TEST_SCOPE`` /
+#: ``CB_OPERATIONAL_INSIGHTS_TEST_COLLECTION`` still win, for a cluster without travel-sample
 #: or one where a different collection is more representative. Those vars
 #: also drive the integration tier, where ``Default``/``Default`` is the
 #: right default — so the override is read here rather than changing
@@ -96,37 +96,41 @@ TRAVEL_SAMPLE_COLLECTION = "airline"
 
 @pytest.fixture()
 def oi_database() -> str:
-    return get_oi_test_database()
+    return get_operational_insights_test_database()
 
 
 @pytest.fixture()
 def oi_scope() -> str:
-    return get_oi_test_scope()
+    return get_operational_insights_test_scope()
 
 
 @pytest.fixture()
 def oi_collection() -> str | None:
-    """The collection named by ``CB_OI_TEST_COLLECTION``, or None if unset.
+    """The collection named by ``CB_OPERATIONAL_INSIGHTS_TEST_COLLECTION``, or None if unset.
 
     Kept nullable so a case can tell "explicitly configured" from "falling
     back"; cases that just need *a* populated collection should use
     ``schema_keyspace`` instead.
     """
-    return get_oi_test_collection()
+    return get_operational_insights_test_collection()
 
 
 @pytest.fixture()
 def schema_keyspace(oi_collection: str | None) -> tuple[str, str, str]:
     """A (database, scope, collection) holding real documents to infer from.
 
-    Returns the ``CB_OI_TEST_*`` trio when a collection is configured, and
+    Returns the ``CB_OPERATIONAL_INSIGHTS_TEST_*`` trio when a collection is configured, and
     otherwise falls back to travel-sample's ``inventory.airline``. The
     fallback is deliberately all-or-nothing: mixing a configured database
     with travel-sample's scope would name a keyspace that exists on neither
     cluster.
     """
     if oi_collection:
-        return get_oi_test_database(), get_oi_test_scope(), oi_collection
+        return (
+            get_operational_insights_test_database(),
+            get_operational_insights_test_scope(),
+            oi_collection,
+        )
     return (
         TRAVEL_SAMPLE_DATABASE,
         TRAVEL_SAMPLE_SCOPE,
@@ -167,7 +171,7 @@ async def _create_oi_mcp_session() -> AsyncIterator[ClientSession]:
     from the accuracy tier would pull in that package's collection hooks.
     The spawn itself is four lines, so it is duplicated rather than shared.
     """
-    env = build_oi_env()
+    env = build_operational_insights_env()
     params = StdioServerParameters(
         command=sys.executable,
         args=["-m", "mcp_server", "operational-insights"],

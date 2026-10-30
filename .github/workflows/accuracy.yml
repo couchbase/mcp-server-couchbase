@@ -10,10 +10,10 @@ name: Accuracy (LLM evals)
 #   * operational        -> couchbase:enterprise-8.0.0 (service container,
 #                           8091-8096), the `services:` block below.
 #   * operational-insights -> couchbase/enterprise-analytics + adobe/s3mock,
-#                           brought up by scripts/oi_ci_cluster/docker-compose.yml.
+#                           brought up by scripts/operational_insights_ci_cluster/docker-compose.yml.
 #
 # Both images publish 8091/8095 by default, so the OI pair is remapped to
-# 18091/18095 via the compose file's ${OI_ADMIN_PORT}/${OI_ANALYTICS_PORT}
+# 18091/18095 via the compose file's ${OPERATIONAL_INSIGHTS_ADMIN_PORT}/${OPERATIONAL_INSIGHTS_ANALYTICS_PORT}
 # references. Nothing else in the OI tooling hardcodes a port, so the
 # integration tier (which keeps 8091/8095) is unaffected.
 
@@ -51,17 +51,17 @@ env:
   CB_MCP_TEST_BUCKET: travel-sample
 
   # --- Operational Insights cluster -------------------------------------
-  # Mirrors oi-integration-tests.yml so both tiers exercise the same
+  # Mirrors operational-insights-integration-tests.yml so both tiers exercise the same
   # topology, with two deliberate differences, noted inline below.
-  OI_IMAGE: couchbase/enterprise-analytics:2.2.1
+  OPERATIONAL_INSIGHTS_IMAGE: couchbase/enterprise-analytics:2.2.1
   S3MOCK_IMAGE: adobe/s3mock:5.2.3
   S3MOCK_BUCKET: cloud-storage-container
   S3MOCK_STORE_ROOT: fs
   S3MOCK_RETAIN_FILES_ON_EXIT: "true"
   # Difference 1: remapped off 8091/8095, which the couchbase service
   # container above already holds.
-  OI_ADMIN_PORT: 18091
-  OI_ANALYTICS_PORT: 18095
+  OPERATIONAL_INSIGHTS_ADMIN_PORT: 18091
+  OPERATIONAL_INSIGHTS_ANALYTICS_PORT: 18095
   BLOB_STORAGE_SCHEME: s3
   BLOB_STORAGE_REGION: us-east-1
   BLOB_STORAGE_ENDPOINT: http://s3mock:9090
@@ -83,11 +83,11 @@ env:
   # a random address when a hostname resolves to more than one (localhost
   # -> 127.0.0.1 and ::1), and the ::1 that container port publishing does
   # not forward causes an immediate connection reset. Port matches
-  # OI_ANALYTICS_PORT; kept literal because one env entry cannot reference
+  # OPERATIONAL_INSIGHTS_ANALYTICS_PORT; kept literal because one env entry cannot reference
   # a sibling.
-  CB_OI_CONNECTION_STRING: http://127.0.0.1:18095
-  CB_OI_USERNAME: Administrator
-  CB_OI_PASSWORD: password
+  CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING: http://127.0.0.1:18095
+  CB_OPERATIONAL_INSIGHTS_USERNAME: Administrator
+  CB_OPERATIONAL_INSIGHTS_PASSWORD: password
 
 jobs:
   accuracy:
@@ -208,19 +208,19 @@ jobs:
       # --- Operational Insights cluster -----------------------------------
       # Reuses the same compose file + configure script the OI integration
       # workflow drives, so the two tiers cannot drift apart. Ports come from
-      # OI_ADMIN_PORT/OI_ANALYTICS_PORT in this workflow's env (18091/18095),
+      # OPERATIONAL_INSIGHTS_ADMIN_PORT/OPERATIONAL_INSIGHTS_ANALYTICS_PORT in this workflow's env (18091/18095),
       # keeping clear of the couchbase service container's 8091-8096.
       - name: Start OI containers
-        run: docker compose -f scripts/oi_ci_cluster/docker-compose.yml up -d --wait
+        run: docker compose -f scripts/operational_insights_ci_cluster/docker-compose.yml up -d --wait
 
       - name: Configure OI cluster
-        run: ./scripts/oi_ci_cluster/configure_cluster.sh
+        run: ./scripts/operational_insights_ci_cluster/configure_cluster.sh
 
       # Only the accuracy tier needs this: its schema-inference cases sample
       # real document content, so they need a populated collection. The OI
       # integration tests create their own throwaway collections instead.
       - name: Seed travel-sample dataset into OI
-        run: ./scripts/oi_ci_cluster/load_travel_sample.sh
+        run: ./scripts/operational_insights_ci_cluster/load_travel_sample.sh
 
       # Resolve a human-readable run id for the results file:
       #   1. workflow_dispatch input wins if set
@@ -260,7 +260,7 @@ jobs:
       - name: Run accuracy / eval tests
         env:
           # Couchbase (operational). The OI credentials the operational-insights
-          # tests need (CB_OI_*) come from the job-level env above — without
+          # tests need (CB_OPERATIONAL_INSIGHTS_*) come from the job-level env above — without
           # them that whole directory skips itself at collection time.
           CB_CONNECTION_STRING: couchbase://localhost
           CB_MCP_TRANSPORT: stdio
@@ -302,8 +302,8 @@ jobs:
       # local repro.
       - name: Dump OI container logs
         if: failure()
-        run: docker compose -f scripts/oi_ci_cluster/docker-compose.yml logs --no-color --tail 300
+        run: docker compose -f scripts/operational_insights_ci_cluster/docker-compose.yml logs --no-color --tail 300
 
       - name: Tear down OI containers
         if: always()
-        run: docker compose -f scripts/oi_ci_cluster/docker-compose.yml down -v
+        run: docker compose -f scripts/operational_insights_ci_cluster/docker-compose.yml down -v
