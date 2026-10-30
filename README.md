@@ -599,6 +599,7 @@ You can run several server instances behind a load balancer. Each instance keeps
 - Without sticky sessions, a stateful instance rejects every request whose session was created on a different instance. Use stateless mode in that case.
 - Route on the `Mcp-Session-Id` header, not on cookies. Many MCP clients do not keep cookies.
 - If an instance restarts or fails over, its sessions and any pending confirmation prompts are lost. The client must start a new session.
+- **Operational Insights async queries** keep their `query_handle` in the memory of the instance that started the query, also in stateless mode. Polling, discarding or cancelling the query on a different instance returns `Unknown query_handle`. Use these tools with a single instance, or with sticky sessions so that all calls reach the instance that started the query. Stateless mode sends no `Mcp-Session-Id`, so it needs another affinity key, such as the client IP address.
 
 #### Health check
 
