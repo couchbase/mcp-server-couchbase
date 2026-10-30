@@ -524,10 +524,27 @@ class TestOperationalInsightsAsyncQueryResultTimeout:
         )
         assert settings[self.KEY] == 45
 
-    @pytest.mark.parametrize("value", ["0", "-5", "abc", "1.5", "", "9" * 30])
+    @pytest.mark.parametrize("value", ["0", "-5", "abc", "1.5", ""])
     def test_invalid_values_fall_back_to_the_default(self, value):
         """A bad value must not stop the server: it starts with the default."""
         assert self._settings([], env={self.ENV_VAR: value})[self.KEY] == 30
+
+    @pytest.mark.parametrize("value", ["600", "1"])
+    def test_bounds_are_accepted_as_given(self, value):
+        assert self._settings([], env={self.ENV_VAR: value})[self.KEY] == int(value)
+
+    @pytest.mark.parametrize("value", ["601", "1000000000", "9" * 30])
+    def test_values_above_the_maximum_are_clamped_to_600(self, value):
+        assert self._settings([], env={self.ENV_VAR: value})[self.KEY] == 600
+
+    def test_clamp_is_warned_about_once(self):
+        with patch("cb_mcp.servers.operational_insights.cli.logger") as cli_logger:
+            self._settings([], env={self.ENV_VAR: "1000"})
+        cli_logger.warning.assert_called_once()
+        message = cli_logger.warning.call_args.args[0]
+        assert self.ENV_VAR in message
+        assert "1000" in message
+        assert "600" in message
 
     def test_invalid_value_is_warned_about_once_after_logging_is_up(self):
         """The warning comes from the post-logging step, not the settings build.

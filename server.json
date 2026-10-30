@@ -837,7 +837,7 @@
         },
         {
           "name": "CB_MCP_OPERATIONAL_INSIGHTS_ASYNC_QUERY_RESULT_TIMEOUT",
-          "description": "Timeout in seconds for each async query request (start, status, fetch, discard, cancel). For a fetch it covers the whole download, so a result that takes longer than this to read fails. Positive integer; any other value is logged as a warning and the default is used. Default is 30.",
+          "description": "Timeout in seconds for each async query request (start, status, fetch, discard, cancel). For a fetch it covers the whole download, so a result that takes longer than this to read fails. Positive integer, maximum 600; larger values are clamped to 600 with a warning, and any other invalid value is logged as a warning and the default is used. Default is 30.",
           "isRequired": false,
           "format": "number",
           "isSecret": false,
@@ -1885,7 +1885,7 @@
         },
         {
           "name": "CB_MCP_OPERATIONAL_INSIGHTS_ASYNC_QUERY_RESULT_TIMEOUT",
-          "description": "Timeout in seconds for each async query request (start, status, fetch, discard, cancel). For a fetch it covers the whole download, so a result that takes longer than this to read fails. Positive integer; any other value is logged as a warning and the default is used. Default is 30.",
+          "description": "Timeout in seconds for each async query request (start, status, fetch, discard, cancel). For a fetch it covers the whole download, so a result that takes longer than this to read fails. Positive integer, maximum 600; larger values are clamped to 600 with a warning, and any other invalid value is logged as a warning and the default is used. Default is 30.",
           "isRequired": false,
           "format": "number",
           "isSecret": false,
