@@ -86,6 +86,7 @@ EXPECTED_LOGGER_NAMES = {
     "cb_mcp.utils.operational.embeddings.providers.bedrock": "couchbase.mcp.operational.utils.embeddings.providers.bedrock",
     "providers.operational": "couchbase.mcp.operational.providers.operational",
     # operational-insights server
+    "cb_mcp.servers.operational_insights.cli": "couchbase.mcp.operational-insights.cli",
     "cb_mcp.tools.operational_insights.index": "couchbase.mcp.operational-insights.tools.index",
     "cb_mcp.tools.operational_insights.metadata": "couchbase.mcp.operational-insights.tools.metadata",
     "cb_mcp.tools.operational_insights.query": "couchbase.mcp.operational-insights.tools.query",

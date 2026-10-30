@@ -836,6 +836,14 @@
           "isSecret": true
         },
         {
+          "name": "CB_MCP_OPERATIONAL_INSIGHTS_ASYNC_QUERY_RESULT_TIMEOUT",
+          "description": "Timeout in seconds for each async query request (start, status, fetch, discard, cancel). For a fetch it covers the whole download, so a result that takes longer than this to read fails. Positive integer, maximum 600; larger values are clamped to 600 with a warning, and any other invalid value is logged as a warning and the default is used. Default is 30.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false,
+          "default": "30"
+        },
+        {
           "name": "CB_MCP_READ_ONLY_MODE",
           "description": "Operational Insights read only mode. Set to true to disable write operations: the operational_insights_create_index and operational_insights_cancel_async_query tools are not loaded, and queries that modify data are blocked. Set to false to allow them. Default is true.",
           "isRequired": false,
@@ -1874,6 +1882,14 @@
           "isRequired": false,
           "format": "string",
           "isSecret": true
+        },
+        {
+          "name": "CB_MCP_OPERATIONAL_INSIGHTS_ASYNC_QUERY_RESULT_TIMEOUT",
+          "description": "Timeout in seconds for each async query request (start, status, fetch, discard, cancel). For a fetch it covers the whole download, so a result that takes longer than this to read fails. Positive integer, maximum 600; larger values are clamped to 600 with a warning, and any other invalid value is logged as a warning and the default is used. Default is 30.",
+          "isRequired": false,
+          "format": "number",
+          "isSecret": false,
+          "default": "30"
         },
         {
           "name": "CB_MCP_READ_ONLY_MODE",
