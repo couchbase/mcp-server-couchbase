@@ -11,20 +11,11 @@ from couchbase_operational_insights.options import (
 )
 
 from ...servers.operational_insights.constants import (
+    DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT,
     OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE,
 )
 
 logger = logging.getLogger(f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.utils.connection")
-
-#: The SDK's ``handle_request_timeout`` (default 10s) bounds every async-query
-#: handle request — start, status, fetch, discard and cancel. For
-#: ``fetch_results()`` it is a deadline on the whole call, row stream
-#: included, not a gap between reads: a result that takes longer than this to
-#: download fails part-way with "Unable to complete iteration. Request timed
-#: out." The SDK has no per-fetch timeout, so it is raised cluster-wide; the
-#: other handle requests are quick, and only wait this long on a server that
-#: has stopped answering.
-HANDLE_REQUEST_TIMEOUT_SECONDS = 30
 
 
 def connect_to_operational_insights_cluster(
@@ -35,6 +26,7 @@ def connect_to_operational_insights_cluster(
     client_cert_path: str | None = None,
     client_key_path: str | None = None,
     client_cert_password: str | None = None,
+    handle_request_timeout_seconds: int = DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT,
 ) -> Cluster:
     """Connect to an Operational Insights cluster and return the cluster object.
 
@@ -51,6 +43,16 @@ def connect_to_operational_insights_cluster(
     ``https://`` endpoint — the SDK authenticates during the TLS handshake.
     ``ca_cert_path``, if given, is the CA/trust-store PEM used to verify the
     *server's* certificate and applies to either authentication mode.
+
+    ``handle_request_timeout_seconds`` sets the SDK's ``handle_request_timeout``
+    (SDK default 10s), which bounds every async-query handle request — start,
+    status, fetch, discard and cancel. For ``fetch_results()`` it is a
+    deadline on the whole call, row stream included, not a gap between
+    reads: a result that takes longer than this to download fails part-way
+    with "Unable to complete iteration. Request timed out." The SDK has no
+    per-fetch timeout, so it is set cluster-wide; the other handle requests
+    are quick, and only wait this long on a server that has stopped
+    answering.
 
     Unlike the operational server's ``connect_to_couchbase_cluster``, the CLI
     options for this server are optional (so the server can start in "lazy",
@@ -95,7 +97,7 @@ def connect_to_operational_insights_cluster(
 
     option_kwargs: dict[str, Any] = {
         "timeout_options": TimeoutOptions(
-            handle_request_timeout=timedelta(seconds=HANDLE_REQUEST_TIMEOUT_SECONDS)
+            handle_request_timeout=timedelta(seconds=handle_request_timeout_seconds)
         )
     }
     if ca_cert_path:

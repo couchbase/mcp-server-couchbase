@@ -41,3 +41,17 @@ DEFAULT_OPERATIONAL_INSIGHTS_PORT = 8001
 #: other server's default_log_file — RotatingFileHandler is not
 #: multi-process safe.
 DEFAULT_OPERATIONAL_INSIGHTS_LOG_FILE = "mcp_server_operational_insights.log"
+
+#: Default for --operational-insights-async-query-result-timeout, in seconds.
+#: The SDK's own default (10s) is a deadline on the whole of
+#: ``fetch_results()``, row stream included, so a result that takes longer
+#: than that to download can never be fetched. See
+#: ``utils/operational_insights/connection.py``.
+DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT = 30
+
+#: Upper bound for --operational-insights-async-query-result-timeout, in
+#: seconds. A larger value is clamped to this with a warning. Every async
+#: handle request shares the timeout, so an unbounded value would also let a
+#: status, discard or cancel call hang that long on a server that has stopped
+#: answering.
+MAX_ASYNC_QUERY_RESULT_TIMEOUT = 600
