@@ -6,7 +6,7 @@
     "url": "https://github.com/couchbase/mcp-server-couchbase",
     "source": "github"
   },
-  "websiteUrl": "https://docs.couchbase.com/mcp-server/get-started/overview.html",
+  "websiteUrl": "https://docs.couchbase.com/mcp-server/1.1/reference/common-overview.html",
   "version": "1.1.0rc3",
   "packages": [
     {

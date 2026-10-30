@@ -1,12 +1,12 @@
 # Couchbase MCP Server
 
-Couchbase MCP Server is a self-hosted [Model Context Protocol (MCP)](https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro) server that connects AI agents and assistants — Claude, Cursor, Windsurf, VS Code Copilot, JetBrains AI Assistant and any other [MCP client](https://modelcontextprotocol.io/clients) — to data in Couchbase Server clusters, on [Capella](https://www.couchbase.com/products/capella/) or self-managed, and in self-managed Operational Insights clusters. An agent can inspect your cluster, explore schemas, run SQL++, full-text and vector queries, read and write documents, and diagnose query and cluster performance in natural language.
+Couchbase MCP Server is a self-hosted [MCP](https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro) Server that allows AI agents to connect to and interact with data in Couchbase Servers (whether hosted on [Capella](https://www.couchbase.com/products/capella/) or self-managed) or Operational Insights Enterprise. It provides tools across categories including Cluster Health, Data Schema, Query, and more — with safety controls via read-only mode and fine-grained tool disabling. It supports both STDIO and Streamable HTTP transports with OAuth capabilities.
 
-It is read-only by default, supports STDIO and Streamable HTTP (with OAuth 2.1), and is distributed on [PyPI](https://pypi.org/project/couchbase-mcp-server/) and [Docker Hub](https://hub.docker.com/r/couchbase/mcp-server). Enterprise support is available by licensing [Couchbase AI Data Plane](https://www.couchbase.com/downloads/?family=ai-data-plane), which also entitles use and enterprise support of Couchbase Agent Memory and Couchbase Agent Catalog.
+Couchbase MCP Server is distributed as a Python Package Index ([PyPI](https://pypi.org/project/couchbase-mcp-server/)) package and via [Docker](https://hub.docker.com/r/couchbase/mcp-server). Enterprise support for Couchbase MCP Server is available by licensing [Couchbase AI Data Plane](https://www.couchbase.com/downloads/?family=ai-data-plane), which also entitles use and enterprise support of Couchbase Agent Memory and Couchbase Agent Catalog.
 
-[![Docs](https://img.shields.io/badge/Docs-1B9E5A?logo=docusaurus&logoColor=white)](https://docs.couchbase.com/mcp-server/get-started/overview.html) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/) [![PyPI version](https://badge.fury.io/py/couchbase-mcp-server.svg)](https://pypi.org/project/couchbase-mcp-server/) [![Install in Cursor](https://img.shields.io/badge/Cursor-Install_Server-1e1e1e?logo=data:image/svg%2bxml;base64,PHN2ZyBoZWlnaHQ9IjFlbSIgc3R5bGU9ImZsZXg6bm9uZTtsaW5lLWhlaWdodDoxIiB2aWV3Qm94PSIwIDAgMjQgMjQiIHdpZHRoPSIxZW0iCiAgICB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogICAgPHRpdGxlPkN1cnNvcjwvdGl0bGU+CiAgICA8cGF0aCBkPSJNMTEuOTI1IDI0bDEwLjQyNS02LTEwLjQyNS02TDEuNSAxOGwxMC40MjUgNnoiCiAgICAgICAgZmlsbD0idXJsKCNsb2JlLWljb25zLWN1cnNvcnVuZGVmaW5lZC1maWxsLTApIj48L3BhdGg+CiAgICA8cGF0aCBkPSJNMjIuMzUgMThWNkwxMS45MjUgMHYxMmwxMC40MjUgNnoiIGZpbGw9InVybCgjbG9iZS1pY29ucy1jdXJzb3J1bmRlZmluZWQtZmlsbC0xKSI+PC9wYXRoPgogICAgPHBhdGggZD0iTTExLjkyNSAwTDEuNSA2djEybDEwLjQyNS02VjB6IiBmaWxsPSJ1cmwoI2xvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMikiPjwvcGF0aD4KICAgIDxwYXRoIGQ9Ik0yMi4zNSA2TDExLjkyNSAyNFYxMkwyMi4zNSA2eiIgZmlsbD0iIzU1NSI+PC9wYXRoPgogICAgPHBhdGggZD0iTTIyLjM1IDZsLTEwLjQyNSA2TDEuNSA2aDIwLjg1eiIgZmlsbD0iI2ZmZiI+PC9wYXRoPgogICAgPGRlZnM+CiAgICAgICAgPGxpbmVhckdyYWRpZW50IGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiBpZD0ibG9iZS1pY29ucy1jdXJzb3J1bmRlZmluZWQtZmlsbC0wIgogICAgICAgICAgICB4MT0iMTEuOTI1IiB4Mj0iMTEuOTI1IiB5MT0iMTIiIHkyPSIyNCI+CiAgICAgICAgICAgIDxzdG9wIG9mZnNldD0iLjE2IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9Ii4zOSI+PC9zdG9wPgogICAgICAgICAgICA8c3RvcCBvZmZzZXQ9Ii42NTgiIHN0b3AtY29sb3I9IiNmZmYiIHN0b3Atb3BhY2l0eT0iLjgiPjwvc3RvcD4KICAgICAgICA8L2xpbmVhckdyYWRpZW50PgogICAgICAgIDxsaW5lYXJHcmFkaWVudCBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaWQ9ImxvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMSIKICAgICAgICAgICAgeDE9IjIyLjM1IiB4Mj0iMTEuOTI1IiB5MT0iNi4wMzciIHkyPSIxMi4xNSI+CiAgICAgICAgICAgIDxzdG9wIG9mZnNldD0iLjE4MiIgc3RvcC1jb2xvcj0iI2ZmZiIgc3RvcC1vcGFjaXR5PSIuMzEiPjwvc3RvcD4KICAgICAgICAgICAgPHN0b3Agb2Zmc2V0PSIuNzE1IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9IjAiPjwvc3RvcD4KICAgICAgICA8L2xpbmVhckdyYWRpZW50PgogICAgICAgIDxsaW5lYXJHcmFkaWVudCBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaWQ9ImxvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMiIKICAgICAgICAgICAgeDE9IjExLjkyNSIgeDI9IjEuNSIgeTE9IjAiIHkyPSIxOCI+CiAgICAgICAgICAgIDxzdG9wIHN0b3AtY29sb3I9IiNmZmYiIHN0b3Atb3BhY2l0eT0iLjYiPjwvc3RvcD4KICAgICAgICAgICAgPHN0b3Agb2Zmc2V0PSIuNjY3IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9Ii4yMiI+PC9zdG9wPgogICAgICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8L2RlZnM+Cjwvc3ZnPgo=)][cursor-install-basic] [![Verified on MseeP](https://img.shields.io/badge/MseeP-Verified-green)](https://mseep.ai/app/13fce476-0e74-4b1e-ab82-1df2a3204809) [![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/Couchbase-Ecosystem/mcp-server-couchbase)](https://archestra.ai/mcp-catalog/couchbase-ecosystem__mcp-server-couchbase)
+[![Docs](https://img.shields.io/badge/Docs-1B9E5A?logo=docusaurus&logoColor=white)](https://docs.couchbase.com/mcp-server/1.1/reference/common-overview.html) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/) [![PyPI version](https://badge.fury.io/py/couchbase-mcp-server.svg)](https://pypi.org/project/couchbase-mcp-server/) [![Install in Cursor](https://img.shields.io/badge/Cursor-Install_Server-1e1e1e?logo=data:image/svg%2bxml;base64,PHN2ZyBoZWlnaHQ9IjFlbSIgc3R5bGU9ImZsZXg6bm9uZTtsaW5lLWhlaWdodDoxIiB2aWV3Qm94PSIwIDAgMjQgMjQiIHdpZHRoPSIxZW0iCiAgICB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogICAgPHRpdGxlPkN1cnNvcjwvdGl0bGU+CiAgICA8cGF0aCBkPSJNMTEuOTI1IDI0bDEwLjQyNS02LTEwLjQyNS02TDEuNSAxOGwxMC40MjUgNnoiCiAgICAgICAgZmlsbD0idXJsKCNsb2JlLWljb25zLWN1cnNvcnVuZGVmaW5lZC1maWxsLTApIj48L3BhdGg+CiAgICA8cGF0aCBkPSJNMjIuMzUgMThWNkwxMS45MjUgMHYxMmwxMC40MjUgNnoiIGZpbGw9InVybCgjbG9iZS1pY29ucy1jdXJzb3J1bmRlZmluZWQtZmlsbC0xKSI+PC9wYXRoPgogICAgPHBhdGggZD0iTTExLjkyNSAwTDEuNSA2djEybDEwLjQyNS02VjB6IiBmaWxsPSJ1cmwoI2xvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMikiPjwvcGF0aD4KICAgIDxwYXRoIGQ9Ik0yMi4zNSA2TDExLjkyNSAyNFYxMkwyMi4zNSA2eiIgZmlsbD0iIzU1NSI+PC9wYXRoPgogICAgPHBhdGggZD0iTTIyLjM1IDZsLTEwLjQyNSA2TDEuNSA2aDIwLjg1eiIgZmlsbD0iI2ZmZiI+PC9wYXRoPgogICAgPGRlZnM+CiAgICAgICAgPGxpbmVhckdyYWRpZW50IGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiBpZD0ibG9iZS1pY29ucy1jdXJzb3J1bmRlZmluZWQtZmlsbC0wIgogICAgICAgICAgICB4MT0iMTEuOTI1IiB4Mj0iMTEuOTI1IiB5MT0iMTIiIHkyPSIyNCI+CiAgICAgICAgICAgIDxzdG9wIG9mZnNldD0iLjE2IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9Ii4zOSI+PC9zdG9wPgogICAgICAgICAgICA8c3RvcCBvZmZzZXQ9Ii42NTgiIHN0b3AtY29sb3I9IiNmZmYiIHN0b3Atb3BhY2l0eT0iLjgiPjwvc3RvcD4KICAgICAgICA8L2xpbmVhckdyYWRpZW50PgogICAgICAgIDxsaW5lYXJHcmFkaWVudCBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaWQ9ImxvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMSIKICAgICAgICAgICAgeDE9IjIyLjM1IiB4Mj0iMTEuOTI1IiB5MT0iNi4wMzciIHkyPSIxMi4xNSI+CiAgICAgICAgICAgIDxzdG9wIG9mZnNldD0iLjE4MiIgc3RvcC1jb2xvcj0iI2ZmZiIgc3RvcC1vcGFjaXR5PSIuMzEiPjwvc3RvcD4KICAgICAgICAgICAgPHN0b3Agb2Zmc2V0PSIuNzE1IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9IjAiPjwvc3RvcD4KICAgICAgICA8L2xpbmVhckdyYWRpZW50PgogICAgICAgIDxsaW5lYXJHcmFkaWVudCBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSIgaWQ9ImxvYmUtaWNvbnMtY3Vyc29ydW5kZWZpbmVkLWZpbGwtMiIKICAgICAgICAgICAgeDE9IjExLjkyNSIgeDI9IjEuNSIgeTE9IjAiIHkyPSIxOCI+CiAgICAgICAgICAgIDxzdG9wIHN0b3AtY29sb3I9IiNmZmYiIHN0b3Atb3BhY2l0eT0iLjYiPjwvc3RvcD4KICAgICAgICAgICAgPHN0b3Agb2Zmc2V0PSIuNjY3IiBzdG9wLWNvbG9yPSIjZmZmIiBzdG9wLW9wYWNpdHk9Ii4yMiI+PC9zdG9wPgogICAgICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8L2RlZnM+Cjwvc3ZnPgo=)][cursor-install-basic] [![Verified on MseeP](https://img.shields.io/badge/MseeP-Verified-green)](https://mseep.ai/app/13fce476-0e74-4b1e-ab82-1df2a3204809) [![Trust Score](https://archestra.ai/mcp-catalog/api/badge/quality/Couchbase-Ecosystem/mcp-server-couchbase)](https://archestra.ai/mcp-catalog/couchbase-ecosystem__mcp-server-couchbase)
 
-Full documentation: [docs.couchbase.com/mcp-server](https://docs.couchbase.com/mcp-server/get-started/overview.html)
+Full documentation: [docs.couchbase.com/mcp-server](https://docs.couchbase.com/mcp-server/1.1/reference/common-overview.html)
 
 <a href="https://glama.ai/mcp/servers/@couchbase/mcp-server-couchbase">
   <img width="380" height="200" src="https://glama.ai/mcp/servers/@couchbase/mcp-server-couchbase/badge" alt="Couchbase Server MCP server" />
@@ -338,9 +338,9 @@ The [Operational Insights server](#operational-insights-server) accepts the same
 | `CB_CLIENT_KEY_PATH` | `--client-key-path` | Path to the client key file for mTLS authentication | **Required if using mTLS (or Username and Password required)** |
 | `CB_CA_CERT_PATH` | `--ca-cert-path` | Path to server root certificate for TLS if server is configured with a self-signed/untrusted certificate. This will not be required if you are connecting to Capella | |
 | `CB_MCP_READ_ONLY_MODE` | `--read-only-mode` | Prevent all data modifications (KV, Query, scope/collection management, index management, and FTS index management). When enabled, write tools are not loaded. | `true` |
-| `CB_MCP_TRANSPORT` | `--transport` | Transport mode: `stdio`, `http`, `sse` | `stdio` |
-| `CB_MCP_HOST` | `--host` | Host for HTTP/SSE transport modes | `127.0.0.1` |
-| `CB_MCP_PORT` | `--port` | Port for HTTP/SSE transport modes | `8000` |
+| `CB_MCP_TRANSPORT` | `--transport` | Transport mode: `stdio`, `http` | `stdio` |
+| `CB_MCP_HOST` | `--host` | Host for the HTTP transport mode | `127.0.0.1` |
+| `CB_MCP_PORT` | `--port` | Port for the HTTP transport mode | `8000` |
 | `CB_MCP_WORKERS` | `--workers` | Number of server worker processes for the `http` transport. Values above 1 run in stateless HTTP mode (see [Multiple Workers](#multiple-workers)) | `1` |
 | `CB_MCP_STATELESS_HTTP` | `--stateless-http` | Handle each HTTP request without per-session state. Only honored with `http`; cannot be combined with confirmation-required tools (see [Multiple Workers](#multiple-workers)) | `true` when workers > 1, otherwise `false` |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
@@ -466,7 +466,7 @@ All names except `get_server_configuration_status` are prefixed `operational_ins
 | `operational_insights_list_indexes` | List secondary indexes from `System.Metadata.Index` |
 | `operational_insights_explain_query` | EXPLAIN a SQL++ statement without running it |
 | `operational_insights_run_query_sync` | Run SQL++ and return rows, up to the result size limit; can [export](#exporting-large-results) instead. Read-only mode is enforced server-side |
-| `operational_insights_run_query_async` | Start a query and return a `query_handle`; preferred for large exports |
+| `operational_insights_run_query_async` | Start a long-running query and return a `query_handle` without waiting for rows; also preferred for large [exports](#exporting-large-results). Read-only mode is enforced server-side |
 | `operational_insights_get_async_query_results` | Poll an async query; returns rows (or the export destination) when ready |
 | `operational_insights_discard_async_query_results` | Free a finished async query's results |
 | `operational_insights_cancel_async_query` | Stop a still-running async query (allowed in read-only mode) |
@@ -498,7 +498,13 @@ These settings work the same way for both servers. Every option can be set as an
 
 ### Safety Controls
 
-Three layers, from broadest to narrowest. Use them together — but remember that **none of them replaces RBAC**.
+Follow these security principles:
+
+- **Give the database user least privilege** — RBAC is the authoritative boundary (see below).
+- **Provide only the tools the agent needs, and disable the rest** — every loaded tool is something the LLM can call. Use [read-only mode](#read-only-mode) and [`CB_MCP_DISABLED_TOOLS`](#disabling-tools) to keep the tool list to the minimum.
+- **Require confirmation for sensitive tools** that you keep — see [Requiring confirmation](#requiring-confirmation-elicitation).
+
+The controls below form three layers, from broadest to narrowest. Use them together — but remember that **none of them replaces RBAC**.
 
 > [!IMPORTANT]
 > The database user's RBAC permissions are the authoritative security control. For example, disabling `upsert_document_by_id` and `delete_document_by_id` does not stop `run_sql_plus_plus_query` from running `INSERT`/`UPDATE`/`DELETE`/`MERGE` — only read-only mode or missing RBAC permissions do. Give the server's database user only the permissions it needs.
@@ -542,7 +548,7 @@ CB_MCP_CONFIRMATION_REQUIRED_TOOLS="delete_document_by_id,replace_document_by_id
 
 - If the client supports elicitation, the user is prompted before the tool runs.
 - If it doesn't, the tool runs without confirmation, for backward compatibility.
-- Confirmation needs an MCP session, so it cannot be combined with stateless HTTP (`CB_MCP_STATELESS_HTTP=true` or `CB_MCP_WORKERS` above 1). The server refuses to start with that combination.
+- Confirmation needs an MCP session, so it cannot be combined with stateless HTTP (`CB_MCP_STATELESS_HTTP=true` or `CB_MCP_WORKERS` above 1). The server refuses to start with that combination. Behind a load balancer, confirmation needs sticky sessions — see [Load balancers](#load-balancers).
 
 ### Transports
 
@@ -550,7 +556,6 @@ CB_MCP_CONFIRMATION_REQUIRED_TOOLS="delete_document_by_id,replace_document_by_id
 | --- | --- | --- |
 | `stdio` (default) | One local client that launches the server as a subprocess | — |
 | `http` | Several clients sharing one server; supports OAuth and health checks, and workers on the operational server | `http://<host>:<port>/mcp` |
-| `sse` | **Deprecated** by the MCP spec — use `http` | `http://<host>:<port>/sse` |
 
 Set the transport with `CB_MCP_TRANSPORT`, the bind address with `CB_MCP_HOST` (default `127.0.0.1`) and the port with `CB_MCP_PORT` (each server's default port when unset). Without [OAuth](#oauth-21-authorization), the HTTP endpoint is unauthenticated.
 
@@ -582,6 +587,20 @@ One process uses at most about one CPU core. `--workers N` (`CB_MCP_WORKERS`) ru
 - [Confirmation-required tools](#requiring-confirmation-elicitation) cannot be used.
 - Each process writes its own log files, named with host and process id (`mcp_server.<host>.<pid>.info.log`) — one set for the supervisor and one per worker.
 
+#### Load balancers
+
+You can run several server instances behind a load balancer. Each instance keeps its MCP sessions in its own memory, so the load balancer setting decides what works:
+
+| Load balancer | Server setting | Confirmation-required tools |
+| --- | --- | --- |
+| Sticky sessions, routed on the `Mcp-Session-Id` request header | One worker, stateful (the default) | Supported |
+| No sticky sessions | `--stateless-http=true` | Not supported — the server refuses to start if they are configured |
+
+- Without sticky sessions, a stateful instance rejects every request whose session was created on a different instance. Use stateless mode in that case.
+- Route on the `Mcp-Session-Id` header, not on cookies. Many MCP clients do not keep cookies.
+- If an instance restarts or fails over, its sessions and any pending confirmation prompts are lost. The client must start a new session.
+- **Operational Insights async queries** keep their `query_handle` in the memory of the instance that started the query, also in stateless mode. Polling, discarding or cancelling the query on a different instance returns `Unknown query_handle`. Use these tools with a single instance, or with sticky sessions so that all calls reach the instance that started the query. Stateless mode sends no `Mcp-Session-Id`, so it needs another affinity key, such as the client IP address.
+
 #### Health check
 
 In HTTP mode, `GET /health` returns `{"status": "ok", "server": "<server>"}` on the MCP port. It is a liveness check: it does not connect to the cluster (so a cluster outage doesn't restart healthy containers), needs no authentication even with OAuth enabled, and is served by every worker. See [Docker](#docker) for probe examples.
@@ -606,7 +625,7 @@ uvx couchbase-mcp-server operational \
   --oauth-mcp-base-url='<public_base_url_of_this_server>'
 ```
 
-See the [OAuth documentation](https://docs.couchbase.com/mcp-server/configuration/oauth-overview.html) for IdP setup.
+See the OAuth documentation for the [operational server](https://docs.couchbase.com/mcp-server/1.1/configuration/oauth-overview.html) and the [Operational Insights server](https://docs.couchbase.com/mcp-server/1.1/configuration-oi/oauth-overview-oi.html) for IdP setup.
 
 ### Logging
 
@@ -622,7 +641,7 @@ Each server logs to `stderr` at `info` level by default.
 uvx couchbase-mcp-server operational --log-level=debug --log-sinks=stderr,file
 ```
 
-Your MCP client usually also captures the server's stderr — see [Client Setup](#client-setup) for where. Details: [logging documentation](https://docs.couchbase.com/mcp-server/configuration/logging.html).
+Your MCP client usually also captures the server's stderr — see [Client Setup](#client-setup) for where. Details: logging documentation for the [operational server](https://docs.couchbase.com/mcp-server/1.1/configuration/logging.html) and the [Operational Insights server](https://docs.couchbase.com/mcp-server/1.1/configuration-oi/logging-oi.html).
 
 ### Auditing
 
@@ -777,6 +796,8 @@ docker inspect --format='{{json .Config.Labels}}' mcp/couchbase-src:latest
 
 ## Troubleshooting
 
+For full guides, see the troubleshooting documentation for the [operational server](https://docs.couchbase.com/mcp-server/1.1/configuration/troubleshooting.html) and the [Operational Insights server](https://docs.couchbase.com/mcp-server/1.1/configuration-oi/troubleshooting-oi.html), and the security guidelines for the [operational server](https://docs.couchbase.com/mcp-server/1.1/security/security.html) and the [Operational Insights server](https://docs.couchbase.com/mcp-server/1.1/security-oi/security-oi.html). Quick checks:
+
 - Check the connection string, username/password or certificate paths.
 - For Capella, make sure the cluster [allows connections](https://docs.couchbase.com/cloud/clusters/allow-ip-address.html) from the machine running the server.
 - Make sure the database user can access at least one bucket.
@@ -794,7 +815,7 @@ docker inspect --format='{{json .Config.Labels}}' mcp/couchbase-src:latest
 
 **Do I need to know SQL++?** No. Ask in plain English and the assistant writes the SQL++ for `run_sql_plus_plus_query`. It can also explain a query plan or ask the Index Advisor for recommendations.
 
-**STDIO, Streamable HTTP or SSE?** STDIO for a single local client. Streamable HTTP to share one server between clients, with OAuth. SSE is deprecated. See [Transports](#transports).
+**STDIO or Streamable HTTP?** STDIO for a single local client. Streamable HTTP to share one server between clients, with OAuth. See [Transports](#transports).
 
 **Is this officially supported by Couchbase?** Yes, with a [Couchbase AI Data Plane](https://www.couchbase.com/downloads/?family=ai-data-plane) license. Without one, Couchbase engineers help on a best-effort basis through GitHub issues. See [Support Policy](#usage-data-llm-risks-and-support-policy).
 

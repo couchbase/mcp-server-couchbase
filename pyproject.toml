@@ -39,7 +39,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/couchbase/mcp-server-couchbase"
-Documentation = "https://docs.couchbase.com/mcp-server/get-started/overview.html"
+Documentation = "https://docs.couchbase.com/mcp-server/1.1/reference/common-overview.html"
 Issues = "https://github.com/couchbase/mcp-server-couchbase/issues"
 
 [project.scripts]
