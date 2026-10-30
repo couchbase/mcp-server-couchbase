@@ -1,14 +1,30 @@
 import logging
+from datetime import timedelta
+from typing import Any
 
 from couchbase_operational_insights.cluster import Cluster
 from couchbase_operational_insights.credential import Credential
-from couchbase_operational_insights.options import ClusterOptions, SecurityOptions
+from couchbase_operational_insights.options import (
+    ClusterOptions,
+    SecurityOptions,
+    TimeoutOptions,
+)
 
 from ...servers.operational_insights.constants import (
     OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE,
 )
 
 logger = logging.getLogger(f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.utils.connection")
+
+#: The SDK's ``handle_request_timeout`` (default 10s) bounds every async-query
+#: handle request — start, status, fetch, discard and cancel. For
+#: ``fetch_results()`` it is a deadline on the whole call, row stream
+#: included, not a gap between reads: a result that takes longer than this to
+#: download fails part-way with "Unable to complete iteration. Request timed
+#: out." The SDK has no per-fetch timeout, so it is raised cluster-wide; the
+#: other handle requests are quick, and only wait this long on a server that
+#: has stopped answering.
+HANDLE_REQUEST_TIMEOUT_SECONDS = 30
 
 
 def connect_to_operational_insights_cluster(
@@ -77,13 +93,16 @@ def connect_to_operational_insights_cluster(
             )
         credential = Credential.from_username_and_password(username, password)
 
-    options = (
-        ClusterOptions(
-            security_options=SecurityOptions(trust_only_pem_file=ca_cert_path)
+    option_kwargs: dict[str, Any] = {
+        "timeout_options": TimeoutOptions(
+            handle_request_timeout=timedelta(seconds=HANDLE_REQUEST_TIMEOUT_SECONDS)
         )
-        if ca_cert_path
-        else None
-    )
+    }
+    if ca_cert_path:
+        option_kwargs["security_options"] = SecurityOptions(
+            trust_only_pem_file=ca_cert_path
+        )
+    options = ClusterOptions(**option_kwargs)
 
     try:
         logger.info("Connecting to Operational Insights cluster...")
