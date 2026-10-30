@@ -44,7 +44,7 @@ def mock_sdk_configure_logging():
         yield
 
 
-def _capture_lifespan(args: list[str], env: dict[str, str]):
+def _capture_lifespan(args: list[str], env: dict[str, str | None]):
     """Invoke ``mcp_server.main`` with FastMCP mocked and capture the
     lifespan closure for inspection.
 
@@ -496,9 +496,11 @@ class TestOperationalInsightsAsyncQueryResultTimeout:
     KEY = "operational_insights_async_query_result_timeout"
 
     def _settings(self, args: list[str], env: dict[str, str] | None = None) -> dict:
-        base = {k: v for k, v in os.environ.items() if k != self.ENV_VAR}
+        # CliRunner overlays env on the process environment, so a key left out
+        # is still inherited; None is what unsets it for the invocation.
         lifespan_fn, fake_mcp = _capture_lifespan(
-            ["operational-insights", *args], env={**base, **(env or {})}
+            ["operational-insights", *args],
+            env={self.ENV_VAR: None, **(env or {})},
         )
         captured: dict = {}
 
