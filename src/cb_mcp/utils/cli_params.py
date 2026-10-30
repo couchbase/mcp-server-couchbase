@@ -59,7 +59,11 @@ from ..core.cli.options import (
 )
 from ..core.serving import ServingConfig
 from ..core.spec import Deployment, ServerSpec
-from ..servers.operational_insights.cli import operational_insights_credential_options
+from ..servers.operational_insights.cli import (
+    operational_insights_credential_options,
+    resolve_operational_insights_settings,
+    warn_about_operational_insights_settings,
+)
 from ..tool_registration import prepare_tools_for_registration
 from .logging import (
     ParsedLogLevel,
@@ -99,10 +103,24 @@ class CredentialProfile(NamedTuple):
 
     options: Callable
     settings_keys: tuple[str, ...]
+    #: Optional: replaces raw values in the slice with the ones the server
+    #: uses. Must not log — it runs before logging is configured.
+    resolve: Callable[[Mapping[str, Any]], dict[str, Any]] | None = None
+    #: Optional: logs what ``resolve`` replaced. Called once logging is up.
+    warn: Callable[[Mapping[str, Any]], None] | None = None
+
+    def _raw_settings(self, params: Mapping[str, Any]) -> dict[str, Any]:
+        return {key: params[key] for key in self.settings_keys}
 
     def settings_from(self, params: Mapping[str, Any]) -> dict[str, Any]:
         """The credential slice of ``settings``, in declaration order."""
-        return {key: params[key] for key in self.settings_keys}
+        settings = self._raw_settings(params)
+        return self.resolve(settings) if self.resolve else settings
+
+    def warn_about(self, params: Mapping[str, Any]) -> None:
+        """Log the warnings ``settings_from`` held back. Call after ``LoggingParams.apply``."""
+        if self.warn:
+            self.warn(self._raw_settings(params))
 
 
 CLUSTER_CREDENTIALS = CredentialProfile(
@@ -135,7 +153,10 @@ INSIGHTS_CREDENTIALS = CredentialProfile(
         "client_cert_path",
         "client_key_path",
         "client_cert_password",
+        "operational_insights_async_query_result_timeout",
     ),
+    resolve=resolve_operational_insights_settings,
+    warn=warn_about_operational_insights_settings,
 )
 
 

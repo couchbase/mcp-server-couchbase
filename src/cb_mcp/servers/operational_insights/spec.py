@@ -60,7 +60,9 @@ SPEC = ServerSpec(
     # client_cert_path/client_key_path/client_cert_password are this server's
     # mTLS client-certificate material and have no shared-list equivalent
     # (the operational server declares its own two-key subset the same way).
-    safe_settings_keys=(),
+    # The async query result timeout is a plain number of seconds, safe to
+    # log verbatim.
+    safe_settings_keys=("operational_insights_async_query_result_timeout",),
     secret_settings_keys=(
         "client_cert_path",
         "client_key_path",
