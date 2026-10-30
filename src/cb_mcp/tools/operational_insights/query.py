@@ -39,8 +39,6 @@ from couchbase_operational_insights.options import QueryOptions
 from fastmcp import Context
 from fastmcp.server.dependencies import get_access_token
 
-from ...audit import state as audit_state
-from ...audit.emitter import get_audit_logger
 from ...servers.operational_insights.constants import (
     OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE,
 )
@@ -79,32 +77,6 @@ def _strip_leading_comments(statement: str) -> str:
         if match is None:
             return statement[pos:]
         pos = match.end()
-
-
-#: Statement forms that only read. Anything else is treated as a write.
-#:
-#: Deliberately a short allow-list rather than a parser. The Analytics dialect
-#: is not the one lark_sqlpp parses, and a misparse here would be worse than no
-#: parse at all: the fallback has to be the non-filterable class, so an
-#: unrecognised statement is recorded as a write. The cost is that a SELECT
-#: written behind a CTE is audited as a write -- noise in the log, not a gap in
-#: it.
-_READ_ONLY_STATEMENT = re.compile(r"^(SELECT|EXPLAIN)\b", re.IGNORECASE)
-
-
-def _audit_statement_class(statement: str) -> str:
-    """Classify a statement as ``"read"`` or ``"write"`` for the audit record.
-
-    These tools accept SELECT, DML and DDL through one entry point, so the
-    class cannot come from the tool name. Read ids are filterable, which is why
-    anything not provably a read is recorded as a write: a mutation booked as a
-    filterable read could be configured out of the audit log entirely.
-    """
-    return (
-        "read"
-        if _READ_ONLY_STATEMENT.match(_strip_leading_comments(statement))
-        else "write"
-    )
 
 
 def _is_copy_to_statement(statement: str) -> bool:
@@ -335,12 +307,6 @@ def operational_insights_run_query_sync(
     lacks_write_scope = token is not None and SCOPE_WRITE not in (token.scopes or [])
     enforce_readonly = read_only_mode or lacks_write_scope
 
-    # The audit category depends on the statement, not on the tool name, so it
-    # has to be reported from here. Without this the record falls back to the
-    # table entry in cb_mcp.audit.classification.
-    if get_audit_logger().active:
-        audit_state.record_statement_class(_audit_statement_class(statement))
-
     try:
         statement_to_run, destination = _resolve_copy_to(
             statement,
@@ -549,12 +515,6 @@ def operational_insights_run_query_async(
     token = get_access_token()
     lacks_write_scope = token is not None and SCOPE_WRITE not in (token.scopes or [])
     enforce_readonly = read_only_mode or lacks_write_scope
-
-    # The audit category depends on the statement, not on the tool name, so it
-    # has to be reported from here. Without this the record falls back to the
-    # table entry in cb_mcp.audit.classification.
-    if get_audit_logger().active:
-        audit_state.record_statement_class(_audit_statement_class(statement))
 
     try:
         statement_to_run, destination = _resolve_copy_to(

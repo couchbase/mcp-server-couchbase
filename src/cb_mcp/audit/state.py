@@ -98,18 +98,6 @@ def record_confirmation(status: str) -> None:
         state["confirmation"] = status
 
 
-def record_statement_class(operation_class: str) -> None:
-    """Record the read/write class of an inspected SQL++ statement.
-
-    Lets the middleware book a SQL++ call against the query *write* ID when the
-    statement actually modifies data or structure, and lets the read-only guard
-    and the audit record share a single parse of the statement.
-    """
-    state = _AUDIT_STATE.get()
-    if state is not None:
-        state["statement_class"] = operation_class
-
-
 def get_cid() -> str | None:
     """Return this request's correlation id, if state is installed."""
     state = _AUDIT_STATE.get()
@@ -128,12 +116,6 @@ def get_confirmation() -> str | None:
     return state.get("confirmation") if state else None
 
 
-def get_statement_class() -> str | None:
-    """Return the recorded SQL++ statement class, if any."""
-    state = _AUDIT_STATE.get()
-    return state.get("statement_class") if state else None
-
-
 __all__ = [
     "CONFIRMATION_ACCEPTED",
     "CONFIRMATION_DECLINED",
@@ -142,10 +124,8 @@ __all__ = [
     "get_cid",
     "get_confirmation",
     "get_refusal",
-    "get_statement_class",
     "install",
     "record_confirmation",
     "record_refusal",
-    "record_statement_class",
     "reset",
 ]

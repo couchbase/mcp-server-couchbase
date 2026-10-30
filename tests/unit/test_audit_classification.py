@@ -8,7 +8,7 @@ Coverage map:
 - every registered tool is classified, and nothing extra is
 - the repository's own write-tool lists agree with the classification
 - read-only tools are classified read
-- SQL++ statement override moves the event to the query write id
+- the query category is unsplit: one event, whatever the statement does
 - unknown tools fail closed to a write id
 - required_scope is derived from the operation class
 - unclassified_tool_names reports gaps
@@ -19,17 +19,19 @@ from __future__ import annotations
 import pytest
 
 from cb_mcp.audit.catalog import (
+    ALL_IDS,
     CATEGORY_SLOTS,
     FAILSAFE_SLOT_REQUIRED,
+    FILTERABLE_IDS,
     SERVICE_PACKAGE_BLOCKS,
     categories_for,
+    is_unsplit,
 )
 from cb_mcp.audit.classification import (
     FAILSAFE_CATEGORY,
     TOOL_CLASSIFICATION,
     classify_tool,
     is_classified,
-    is_statement_classified,
     required_scope_for,
     resolve_tool_call_event,
     unclassified_tool_names,
@@ -37,7 +39,6 @@ from cb_mcp.audit.classification import (
 from cb_mcp.tools.operational import ALL_TOOLS, READ_ONLY_TOOLS, WRITE_TOOLS
 from cb_mcp.tools.operational_insights import ALL_TOOLS as OI_ALL_TOOLS
 from cb_mcp.tools.operational_insights import WRITE_TOOLS as OI_WRITE_TOOLS
-from cb_mcp.tools.operational_insights.query import _audit_statement_class
 
 #: The operational package. Operational Insights has its own block and table
 #: its own block and table; constants for it are defined alongside these.
@@ -116,10 +117,10 @@ def test_no_stale_oi_entries():
         ("get_server_configuration_status", 65591),  # config read
         ("operational_insights_get_databases_in_cluster", 65585),  # schema read
         ("operational_insights_get_schema_for_collection", 65585),
-        # Statement-classified: 65619 is the non-filterable fallback used
-        # when the statement reported no class.
-        ("operational_insights_run_query_sync", 65619),
-        ("operational_insights_cancel_async_query", 65587),
+        # `query` is unsplit: one id for every query call.
+        ("operational_insights_run_query_sync", 65603),
+        ("operational_insights_run_query_async", 65603),
+        ("operational_insights_cancel_async_query", 65603),
         ("operational_insights_list_indexes", 65588),  # index read
         ("operational_insights_create_index", 65620),  # index write
     ],
@@ -139,8 +140,19 @@ def test_oi_write_tools_are_classified_write(tool_name):
 
 @pytest.mark.parametrize("tool_name", sorted(WRITE_TOOL_NAMES))
 def test_repository_write_tools_are_classified_write(tool_name):
-    """The audit class must agree with the server's own categorisation."""
-    _, operation_class = classify_tool(tool_name, package=PACKAGE)
+    """The audit class must agree with the server's own categorisation.
+
+    Except in an unsplit category, which has no write class to agree with: a
+    `search` write and a `search` read are one event. `drop_search_index` is
+    therefore a write the audit log does not mark as one -- the accepted cost of
+    collapsing the category.
+    """
+    category, operation_class = classify_tool(tool_name, package=PACKAGE)
+    if is_unsplit(category):
+        # No write class to agree with, but the guarantee that matters -- a
+        # write is never filterable -- still holds.
+        assert resolve_tool_call_event(tool_name, package=PACKAGE).filterable is False
+        return
     assert operation_class == "write", tool_name
     assert resolve_tool_call_event(tool_name, package=PACKAGE).filterable is False
 
@@ -176,8 +188,8 @@ def test_read_only_tools_are_classified_read(tool_name):
         ("get_schema_for_collection", 61489),
         ("create_scope", 61521),
         ("delete_collection", 61521),
-        ("explain_sql_plus_plus_query", 61491),
-        ("run_sql_plus_plus_query", 61491),
+        ("explain_sql_plus_plus_query", 61507),
+        ("run_sql_plus_plus_query", 61507),
         ("list_indexes", 61492),
         ("create_index", 61524),
         # Superseding create_index must not move the id a SIEM rule watches.
@@ -193,10 +205,12 @@ def test_read_only_tools_are_classified_read(tool_name):
         # reviewer filtering on `index read` must not get FTS traffic, and
         # `run_search` is a query, not an index operation. Moved into the
         # slot 6.
-        ("list_search_indexes", 61494),
-        ("run_search", 61494),
-        ("upsert_search_index", 61526),
-        ("drop_search_index", 61526),
+        # `search` is unsplit: index lifecycle and search queries share one id.
+        ("list_search_indexes", 61510),
+        ("run_search", 61510),
+        ("run_vector_search", 61510),
+        ("upsert_search_index", 61510),
+        ("drop_search_index", 61510),
     ],
 )
 def test_tool_maps_to_the_expected_event_id(tool_name, expected_id):
@@ -212,16 +226,20 @@ def test_tool_maps_to_the_expected_event_id(tool_name, expected_id):
     assert resolve_tool_call_event(tool_name, package=PACKAGE).id == expected_id
 
 
-def test_sqlpp_write_statement_moves_to_the_query_write_id():
-    read_event = resolve_tool_call_event("run_sql_plus_plus_query", package=PACKAGE)
-    write_event = resolve_tool_call_event(
+def test_sqlpp_resolves_to_the_single_query_event_whatever_the_class():
+    """`query` is unsplit, so an override cannot move the id.
+
+    Callers may still pass an operation class -- the fail-closed path asks for
+    a write -- and every one of them has to land on the same id, or a record
+    could claim a `query write` id that the catalogue no longer publishes.
+    """
+    event = resolve_tool_call_event("run_sql_plus_plus_query", package=PACKAGE)
+    overridden = resolve_tool_call_event(
         "run_sql_plus_plus_query", package=PACKAGE, operation_class_override="write"
     )
-    assert read_event.id == 61491
-    assert write_event.id == 61523
-    assert read_event.filterable is True
-    # A successful mutation must not be filed under a filterable read id.
-    assert write_event.filterable is False
+    assert event.id == overridden.id == 61507
+    assert event.event_name == "query"
+    assert event.filterable is False
 
 
 @pytest.mark.parametrize("package", sorted(SERVICE_PACKAGE_BLOCKS))
@@ -276,66 +294,62 @@ def test_every_classification_uses_a_known_category_and_class():
         assert operation_class in ("read", "write"), tool_name
 
 
-class TestStatementClassifiedTools:
-    """Tools that accept SELECT, DML and DDL through one entry point.
+class TestUnsplitQueryCategory:
+    """`query` emits one event per call rather than a read/write pair.
 
-    Their class cannot come from the tool name. Read ids are filterable, so a
-    mutation recorded as a read could be configured out of the audit log --
-    which is why the static fallback for each is write.
+    Deciding read-vs-write meant inspecting the statement, which was neither
+    reliable (a SELECT behind a CTE booked as a write) nor cheap (a full parse
+    per call). The category now records that a query happened and leaves what
+    it did to the statement itself.
     """
 
-    def test_the_operational_insights_query_tools_are_statement_classified(self):
-        for tool_name in (
-            "operational_insights_run_query_sync",
-            "operational_insights_run_query_async",
-        ):
-            assert is_statement_classified(tool_name, "operational_insights"), tool_name
-
-    def test_sqlpp_is_statement_classified_on_the_operational_server(self):
-        assert is_statement_classified("run_sql_plus_plus_query", PACKAGE)
-
-    def test_a_statement_classified_tool_is_not_shared_across_packages(self):
-        """The name only means something inside its own package."""
-        assert not is_statement_classified(
-            "run_sql_plus_plus_query", "operational_insights"
-        )
-        assert not is_statement_classified(
-            "operational_insights_run_query_sync", PACKAGE
-        )
-
     @pytest.mark.parametrize(
-        "tool_name",
+        ("package", "tool_name", "expected_id"),
         [
-            "operational_insights_run_query_sync",
-            "operational_insights_run_query_async",
+            ("operational", "run_sql_plus_plus_query", 61507),
+            ("operational", "explain_sql_plus_plus_query", 61507),
+            ("operational", "run_vector_query", 61507),
+            ("operational_insights", "operational_insights_run_query_sync", 65603),
+            ("operational_insights", "operational_insights_run_query_async", 65603),
+            ("operational_insights", "operational_insights_explain_query", 65603),
         ],
     )
-    def test_the_fallback_class_is_the_non_filterable_one(self, tool_name):
-        """If no class was recorded, the record must not be filterable.
-
-        The failure mode of the state channel is silence, so the static answer
-        has to be the one that cannot hide a mutation.
-        """
-        event = resolve_tool_call_event(tool_name, package="operational_insights")
-        assert event.operation_class == "write"
-        assert event.filterable is False
-
-    @pytest.mark.parametrize(
-        ("statement", "expected"),
-        [
-            ("SELECT 1", "read"),
-            ("  -- a comment\nSELECT 1", "read"),
-            ("EXPLAIN SELECT 1", "read"),
-            ("INSERT INTO x VALUES (1)", "write"),
-            ("DELETE FROM x WHERE a = 1", "write"),
-            ("CREATE INDEX i ON d(a)", "write"),
-            ("COPY d TO link AT 'p'", "write"),
-            # Not provably a read, so it is recorded as a write: noise in the
-            # log rather than a mutation that could be filtered out of it.
-            ("WITH a AS (SELECT 1) SELECT * FROM a", "write"),
-        ],
-    )
-    def test_statements_that_are_not_provably_reads_are_writes(
-        self, statement, expected
+    def test_every_query_tool_resolves_to_its_package_query_event(
+        self, package, tool_name, expected_id
     ):
-        assert _audit_statement_class(statement) == expected
+        event = resolve_tool_call_event(tool_name, package=package)
+        assert event.id == expected_id
+        assert event.event_name == "query"
+
+    @pytest.mark.parametrize("package", sorted(SERVICE_PACKAGE_BLOCKS))
+    def test_an_unsplit_category_leaves_two_offsets_unused(self, package):
+        """One event means the read and write offsets both stay empty.
+
+        Pinned so the descriptor can never advertise an id no build emits -- a
+        SIEM author would write a rule against it that never fires.
+        """
+        block = SERVICE_PACKAGE_BLOCKS[package]
+        for category in ("query", "search"):
+            if category not in CATEGORY_SLOTS[package]:
+                continue
+            read_offset = block + 48 + CATEGORY_SLOTS[package][category]
+            assert read_offset not in ALL_IDS, (package, category, "read")
+            assert read_offset + 32 not in ALL_IDS, (package, category, "write")
+
+    @pytest.mark.parametrize(
+        "event_id",
+        [
+            61507,  # operational query
+            61510,  # operational search
+            65603,  # operational_insights query
+        ],
+    )
+    def test_an_unsplit_event_is_never_filterable(self, event_id):
+        """One event covers the category's writes, so it cannot be switched off.
+
+        Were it filterable, an operator turning down read noise would lose the
+        record of a SQL++ mutation or an FTS index deletion with it -- exactly
+        what the read/write split protected. The cost of this choice is that
+        the category's noise cannot be reduced at all.
+        """
+        assert event_id not in FILTERABLE_IDS
