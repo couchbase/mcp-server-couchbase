@@ -51,11 +51,10 @@ from fastmcp.server.middleware import Middleware
 
 from ..utils.constants import LOGGER_NAMESPACE
 from . import state
-from .catalog import AuditEvent
+from .catalog import AuditEvent, is_unsplit
 from .classification import (
     classify_tool,
     is_classified,
-    is_statement_classified,
     required_scope_for,
     resolve_tool_call_event,
 )
@@ -391,15 +390,9 @@ class AuditMiddleware(Middleware):
         result: Any,
     ) -> None:
         """Emit the Tier-2 record for a call that actually reached the tool."""
-        override = (
-            state.get_statement_class()
-            if is_statement_classified(tool_name, self._service_package)
-            else None
-        )
         event = resolve_tool_call_event(
             tool_name,
             package=self._service_package,
-            operation_class_override=override,
         )
 
         outcome = OUTCOME_SUCCESS
@@ -425,7 +418,15 @@ class AuditMiddleware(Middleware):
 
         payload: dict[str, Any] = {
             "tool_name": tool_name,
-            "required_scope": required_scope_for(event.operation_class),
+            # Omitted for an unsplit category: `query` has one event whatever
+            # the statement does, so there is no per-call class to derive a
+            # required scope from, and asserting one would be a guess. A
+            # None value is dropped from the record rather than written.
+            "required_scope": (
+                None
+                if is_unsplit(event.category)
+                else required_scope_for(event.operation_class)
+            ),
             "ks": extract_keyspace(arguments),
             "cb_userid": self._cb_userid,
             "confirmation": confirmation,

@@ -683,6 +683,24 @@ class TestUpsertSearchIndex:
         assert "must be provided together" in result_bucket_only["error"]
         assert "must be provided together" in result_scope_only["error"]
 
+    @pytest.mark.parametrize("bad_mapping", ["notadict", 123, [], None])
+    def test_non_object_mapping_rejected_before_sdk_call(self, bad_mapping) -> None:
+        """A non-object params.mapping segfaults the SDK, so it must never reach it."""
+        ctx, cluster, cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
+
+        with patch(
+            "cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster
+        ):
+            result = upsert_search_index(
+                ctx, "idx1", source_name="b", params={"mapping": bad_mapping}
+            )
+
+        assert result == {
+            "success": False,
+            "error": "params.mapping must be an object",
+        }
+        cluster_index_manager.upsert_index.assert_not_called()
+
     def test_sdk_error_returns_error_dict_not_raised(self) -> None:
         ctx, cluster, cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
         cluster_index_manager.upsert_index.side_effect = Exception("invalid mapping")

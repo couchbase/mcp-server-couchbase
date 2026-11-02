@@ -332,7 +332,7 @@ class TestAuditOptions:
                 "--audit-log-tool-args",
                 "true",
                 "--audit-log-disabled-events",
-                "61490,61491",
+                "61490,61492",
             ]
         )
         assert config.enabled is True
@@ -343,7 +343,7 @@ class TestAuditOptions:
         assert config.rotation_interval_seconds == 2 * 604_800
         assert config.max_backups == 7
         assert config.tool_args is True
-        assert config.disabled_events == (61490, 61491)
+        assert config.disabled_events == (61490, 61492)
         # The process-scoped path is resolved once, here, so startup can log
         # the exact file and an operator is never left guessing.
         assert config.process_file and config.process_file.endswith(".log")

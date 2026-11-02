@@ -346,9 +346,11 @@ def test_zero_interval_turns_interval_rotation_off(tmp_path, caplog):
 
 
 def test_disabled_events_accepts_numeric_ids():
+    # 61492 is `index read`. 61507 is the unsplit `query` event, which is not
+    # filterable and is refused -- see the non-filterable test below.
     assert parse_disabled_events("61490") == {61490}
-    assert parse_disabled_events("61490, 61491") == {61490, 61491}
-    assert parse_disabled_events(" 61490 ,61491 ") == {61490, 61491}
+    assert parse_disabled_events("61490, 61492") == {61490, 61492}
+    assert parse_disabled_events(" 61490 ,61492 ") == {61490, 61492}
 
 
 def test_catalogue_names_are_not_accepted(caplog):
@@ -379,13 +381,13 @@ def test_disabled_events_from_a_file_ignores_comments_and_blanks(tmp_path):
                 "# suppress the noisy reads",
                 "61490",
                 "",
-                "   61491   ",
+                "   61492   ",
                 "# trailing comment",
             ]
         ),
         encoding="utf-8",
     )
-    assert parse_disabled_events(str(path)) == {61490, 61491}
+    assert parse_disabled_events(str(path)) == {61490, 61492}
 
 
 def test_non_filterable_events_cannot_be_suppressed(caplog):

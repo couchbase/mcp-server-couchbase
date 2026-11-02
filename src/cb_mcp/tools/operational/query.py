@@ -13,7 +13,6 @@ from fastmcp.server.dependencies import get_access_token
 from lark_sqlpp import modifies_data, modifies_structure, parse_sqlpp
 
 from ...audit import state as audit_state
-from ...audit.emitter import get_audit_logger
 from ...audit.exceptions import ReadOnlyWriteBlockedError, StatementScopeDeniedError
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.constants import SCOPE_WRITE
@@ -212,36 +211,13 @@ def run_sql_plus_plus_query(
     # EXPLAIN statements are always safe to execute and should bypass write checks.
     is_explain = _is_explain_statement(query)
 
-    # This tool is the one whose audit category depends on the statement it
-    # is given, so when auditing is active the statement must be inspected
-    # even where the write guard would not have needed to. Otherwise an
-    # *allowed* DML statement would be recorded against the query-read id,
-    # and read ids are filterable — a successful mutation could be filtered
-    # out of the audit log. The parse is done once here and shared with the
-    # guard below, so an audited call never pays for it twice, and a call
-    # made with auditing off pays nothing at all.
-    audit_active = get_audit_logger().active
-    needs_audit_classification = audit_active and not is_explain
+    # The parse exists for the write guard alone. Auditing does not need it:
+    # `query` is a single audit event whatever the statement does, so a call
+    # with writes allowed is not parsed at all.
+    if block_query_writes and not is_explain:
+        kind = _blocked_write_kind(parse_sqlpp(query))
 
-    if is_explain and audit_active:
-        audit_state.record_statement_class("read")
-
-    if (block_query_writes or needs_audit_classification) and not is_explain:
-        try:
-            kind = _blocked_write_kind(parse_sqlpp(query))
-        except Exception:
-            if block_query_writes:
-                raise
-            if audit_active:
-                audit_state.record_statement_class("write")
-            kind = None
-        else:
-            if audit_active:
-                audit_state.record_statement_class(
-                    "write" if kind is not None else "read"
-                )
-
-        if kind is not None and block_query_writes:
+        if kind is not None:
             if lacks_write_scope and not read_only_mode:
                 # lacks_write_scope implies token is not None here.
                 held_scopes = sorted(set(token.scopes or []))

@@ -409,7 +409,6 @@ async def test_read_only_block_emits_guardrail_event(tmp_path):
     @mcp.tool
     def run_sql_plus_plus_query(ctx: Context, bucket_name: str, query: str) -> str:
         """blocked by read-only mode"""
-        audit_state.record_statement_class("write")
         audit_state.record_refusal(
             event_id=ReadOnlyWriteBlockedError.audit_event.id,
             event_name=ReadOnlyWriteBlockedError.audit_event.event_name,
@@ -477,7 +476,6 @@ async def test_confirmation_skipped_is_not_claimed_when_the_call_was_blocked(tmp
     def run_sql_plus_plus_query(ctx: Context, bucket_name: str, query: str) -> str:
         """skips confirmation, then the read-only gate refuses it"""
         audit_state.record_confirmation(audit_state.CONFIRMATION_SKIPPED)
-        audit_state.record_statement_class("write")
         audit_state.record_refusal(
             event_id=ReadOnlyWriteBlockedError.audit_event.id,
             event_name=ReadOnlyWriteBlockedError.audit_event.event_name,
@@ -506,14 +504,19 @@ async def test_confirmation_skipped_is_not_claimed_when_the_call_was_blocked(tmp
 
 
 @pytest.mark.asyncio
-async def test_sqlpp_write_statement_uses_the_query_write_id(tmp_path):
+async def test_sqlpp_uses_the_single_query_id_and_omits_required_scope(tmp_path):
+    """A SQL++ call books as `query`, whatever the statement does.
+
+    ``required_scope`` is absent rather than guessed: with one event there is
+    no per-call class to derive it from, and writing "read" on a DML record --
+    or "write" on a SELECT -- would be a claim the server cannot support.
+    """
     audit = _build_logger(tmp_path)
     mcp = _server(audit)
 
     @mcp.tool
     def run_sql_plus_plus_query(ctx: Context, bucket_name: str, query: str) -> str:
         """an allowed DML statement"""
-        audit_state.record_statement_class("write")
         return "ok"
 
     async with Client(mcp) as client:
@@ -524,10 +527,37 @@ async def test_sqlpp_write_statement_uses_the_query_write_id(tmp_path):
     calls = [
         r for r in _records(audit) if r.get("tool_name") == "run_sql_plus_plus_query"
     ]
-    # 61523, not the 61491 read id: a successful mutation must not be filed as
-    # a read, because read ids are filterable and could be suppressed.
-    assert [r["id"] for r in calls] == [61523]
-    assert calls[0]["required_scope"] == "write"
+    assert [r["id"] for r in calls] == [61507]
+    assert calls[0]["name"] == "query"
+    assert "required_scope" not in calls[0]
+
+
+@pytest.mark.asyncio
+async def test_search_write_uses_the_single_search_id_and_omits_required_scope(
+    tmp_path,
+):
+    """A Search write books as `search`, with no `required_scope`.
+
+    `search` is unsplit, so `drop_search_index` -- a write -- shares 61510 with
+    the Search reads. The record must not claim a scope it cannot derive:
+    "read" on a destructive call would be wrong, and "write" would imply a
+    per-call class the category no longer has.
+    """
+    audit = _build_logger(tmp_path)
+    mcp = _server(audit)
+
+    @mcp.tool
+    def drop_search_index(ctx: Context, index_name: str) -> str:
+        """drops a Search index"""
+        return "ok"
+
+    async with Client(mcp) as client:
+        await client.call_tool("drop_search_index", {"index_name": "idx"})
+
+    calls = [r for r in _records(audit) if r.get("tool_name") == "drop_search_index"]
+    assert [r["id"] for r in calls] == [61510]
+    assert calls[0]["name"] == "search"
+    assert "required_scope" not in calls[0]
 
 
 @pytest.mark.asyncio
@@ -883,7 +913,6 @@ async def test_every_record_carries_the_resolved_caller_identity(tmp_path):
     @mcp.tool
     def run_sql_plus_plus_query(ctx: Context, bucket_name: str, query: str) -> str:
         """refused by the read-only gate"""
-        audit_state.record_statement_class("write")
         audit_state.record_refusal(
             event_id=ReadOnlyWriteBlockedError.audit_event.id,
             event_name=ReadOnlyWriteBlockedError.audit_event.event_name,

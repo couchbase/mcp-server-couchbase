@@ -255,99 +255,60 @@ def test_read_only_block_records_a_refusal_and_raises_a_value_error():
         audit_state.reset(token)
 
 
-def test_statement_class_is_recorded_when_auditing_is_active():
-    """An *allowed* DML must still be classified, or it would be filed as a read."""
-    ctx = _query_ctx(read_only_mode=False)
-    token = audit_state.install()
-    try:
-        with patch(
-            "cb_mcp.tools.operational.query.get_audit_logger",
-            return_value=SimpleNamespace(active=True),
-        ):
-            run_sql_plus_plus_query(ctx, "b", "s", "UPDATE users SET age = 25")
-        assert audit_state.get_statement_class() == "write"
-    finally:
-        audit_state.reset(token)
+def test_writes_allowed_calls_are_not_parsed_at_all():
+    """`query` is one event, so nothing needs the statement inspected.
+
+    The parse exists for the write guard. With writes allowed the guard does
+    not run, so a SQL++ call must reach the cluster without paying for a parse
+    -- the whole of DA-2340.
+    """
+    for statement in (
+        "SELECT * FROM users",
+        "UPDATE users SET age = 25",
+        "WITH t AS (SELECT 1) SELECT * FROM t",
+    ):
+        ctx = _query_ctx(read_only_mode=False)
+        token = audit_state.install()
+        try:
+            with patch("cb_mcp.tools.operational.query.parse_sqlpp") as parse:
+                run_sql_plus_plus_query(ctx, "b", "s", statement)
+            parse.assert_not_called()
+        finally:
+            audit_state.reset(token)
 
 
-def test_select_is_classified_read_when_auditing_is_active():
-    ctx = _query_ctx(read_only_mode=False)
-    token = audit_state.install()
-    try:
-        with patch(
-            "cb_mcp.tools.operational.query.get_audit_logger",
-            return_value=SimpleNamespace(active=True),
-        ):
-            run_sql_plus_plus_query(ctx, "b", "s", "SELECT * FROM users")
-        assert audit_state.get_statement_class() == "read"
-    finally:
-        audit_state.reset(token)
-
-
-def test_explain_is_classified_read_without_parsing():
+def test_explain_is_not_parsed_even_when_writes_are_blocked():
+    """EXPLAIN plans a statement without executing it, so the guard skips it."""
     ctx = _query_ctx(read_only_mode=True)
     token = audit_state.install()
     try:
-        with patch(
-            "cb_mcp.tools.operational.query.get_audit_logger",
-            return_value=SimpleNamespace(active=True),
-        ):
-            run_sql_plus_plus_query(ctx, "b", "s", "EXPLAIN SELECT * FROM users")
-        assert audit_state.get_statement_class() == "read"
-    finally:
-        audit_state.reset(token)
-
-
-def test_no_statement_parse_when_auditing_is_off_and_writes_are_allowed():
-    """Auditing off must not add cost to the busiest tool in the server."""
-    ctx = _query_ctx(read_only_mode=False)
-    token = audit_state.install()
-    try:
         with patch("cb_mcp.tools.operational.query.parse_sqlpp") as parse:
-            with patch(
-                "cb_mcp.tools.operational.query.get_audit_logger",
-                return_value=SimpleNamespace(active=False),
-            ):
-                run_sql_plus_plus_query(ctx, "b", "s", "UPDATE users SET age = 25")
-            parse.assert_not_called()
-        assert audit_state.get_statement_class() is None
+            run_sql_plus_plus_query(ctx, "b", "s", "EXPLAIN SELECT * FROM users")
+        parse.assert_not_called()
     finally:
         audit_state.reset(token)
 
 
-def test_unparseable_statement_still_runs_when_writes_are_allowed_and_auditing_on():
-    """Enabling auditing must not fail a call the server would otherwise run.
+def test_unparseable_statement_runs_when_writes_are_allowed():
+    """lark_sqlpp is a partial grammar, and nothing consults it here.
 
-    lark_sqlpp is a partial grammar: valid statements it cannot parse (MERGE, a
-    leading block comment, newer syntax) raise from ``parse_sqlpp``. With writes
-    allowed the parse is only for audit classification, so a parse failure must
-    degrade to the fail-closed 'write' class and let the query execute — not
-    surface as a tool-call failure that appears only when auditing is on.
+    Valid statements it cannot parse -- MERGE, newer syntax -- used to be
+    parsed anyway for the audit class, so enabling auditing could turn a
+    working call into a failure. With writes allowed there is now no parse at
+    all, so the statement goes straight to the cluster.
     """
     ctx = _query_ctx(read_only_mode=False)
     token = audit_state.install()
     try:
-        with (
-            patch(
-                "cb_mcp.tools.operational.query.parse_sqlpp",
-                side_effect=Exception("unparseable by the partial grammar"),
-            ),
-            patch(
-                "cb_mcp.tools.operational.query.get_audit_logger",
-                return_value=SimpleNamespace(active=True),
-            ),
-        ):
+        with patch(
+            "cb_mcp.tools.operational.query.parse_sqlpp",
+            side_effect=Exception("unparseable by the partial grammar"),
+        ) as parse:
             result = run_sql_plus_plus_query(
                 ctx, "b", "s", "MERGE INTO a USING b ON a.id = b.id"
             )
-        # Executed rather than raised, and booked against the never-filtered
-        # query write id so a possible mutation is never dropped from the log.
-        # Asserted on the outcome rather than the whole payload: what this test
-        # is about is that the call ran, not what the query tool's result looks
-        # like, and pinning the full shape made it a casualty of an unrelated
-        # change to that shape.
+        parse.assert_not_called()
         assert result == []
-        assert audit_state.get_statement_class() == "write"
     finally:
         audit_state.reset(token)
 
@@ -365,10 +326,6 @@ def test_unparseable_statement_still_fails_safe_when_writes_are_blocked():
                 "cb_mcp.tools.operational.query.parse_sqlpp",
                 side_effect=Exception("unparseable by the partial grammar"),
             ),
-            patch(
-                "cb_mcp.tools.operational.query.get_audit_logger",
-                return_value=SimpleNamespace(active=True),
-            ),
             pytest.raises(Exception, match="unparseable"),
         ):
             run_sql_plus_plus_query(
@@ -378,13 +335,12 @@ def test_unparseable_statement_still_fails_safe_when_writes_are_blocked():
         audit_state.reset(token)
 
 
-def test_statement_is_classified_before_the_cluster_is_touched():
-    """A failed DML attempt must not be booked against the filterable read id.
+def test_the_write_guard_refuses_before_the_cluster_is_touched():
+    """The guard is a policy decision and must answer before any connection.
 
     Connecting first meant an unreachable cluster raised before the statement
-    was ever inspected, so "someone tried to UPDATE and it failed" was recorded
-    as a query *read* — and read ids are filterable, so an operator turning
-    read noise down would lose it.
+    was inspected, so a refused DML surfaced as a connection error rather than
+    as a guardrail refusal -- the wrong event, and a filterable one.
     """
 
     def unreachable(_ctx):
@@ -394,21 +350,18 @@ def test_statement_is_classified_before_the_cluster_is_touched():
         request_context=SimpleNamespace(
             lifespan_context=SimpleNamespace(
                 cluster_provider=SimpleNamespace(get_cluster=unreachable),
-                read_only_mode=False,
+                read_only_mode=True,
             )
         )
     )
     token = audit_state.install()
     try:
-        with (
-            patch(
-                "cb_mcp.tools.operational.query.get_audit_logger",
-                return_value=SimpleNamespace(active=True),
-            ),
-            pytest.raises(RuntimeError, match="unreachable"),
-        ):
+        with pytest.raises(ReadOnlyWriteBlockedError):
             run_sql_plus_plus_query(ctx, "b", "s", "UPDATE users SET age = 25")
-        assert audit_state.get_statement_class() == "write"
+        refusal = audit_state.get_refusal()
+        assert refusal is not None
+        assert refusal["event_id"] == 57488
+        assert refusal["outcome"] == "blocked"
     finally:
         audit_state.reset(token)
 
@@ -708,10 +661,6 @@ def test_scope_query_is_given_the_requests_correlation_id():
                 return_value=FakeBucket(),
             ),
             patch(
-                "cb_mcp.tools.operational.query.get_audit_logger",
-                return_value=SimpleNamespace(active=False),
-            ),
-            patch(
                 "cb_mcp.tools.operational.query.get_access_token",
                 return_value=None,
             ),
@@ -786,10 +735,6 @@ def test_statement_scope_denial_records_a_refusal():
         with (
             patch(
                 "cb_mcp.tools.operational.query.get_access_token", return_value=token
-            ),
-            patch(
-                "cb_mcp.tools.operational.query.get_audit_logger",
-                return_value=SimpleNamespace(active=True),
             ),
             pytest.raises(StatementScopeDeniedError),
         ):

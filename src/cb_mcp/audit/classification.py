@@ -9,6 +9,13 @@ what it is allowed to do. That single classification drives both the event ID
 (read versus write range within the package block) and ``required_scope``,
 keeping the two consistent by construction.
 
+In an unsplit category (:data:`~cb_mcp.audit.catalog.UNSPLIT_CATEGORIES`) it
+drives neither: the id comes from the category alone and the tool-call record
+carries no ``required_scope``. The class is still the scope the *tool* needs --
+what read-only mode gates on and what a scope-denial record reports -- so it
+continues to mirror ``TOOL_SET``. It is not, and never was, a claim about what
+a particular statement did.
+
 A tool with no entry **fails closed** — recorded against a write ID, which is
 never filterable — so a newly added tool can never be silently under-audited.
 Such a record also carries ``unclassified: true`` so a reviewer is never misled
@@ -100,8 +107,13 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "delete_document_by_id": ("kv", "write"),
         "mutate_subdocument": ("kv", "write"),
         # -- query (SQL++) ---------------------------------------------------
-        # run_sql_plus_plus_query is re-classified per statement at invocation;
-        # the entry here is the class used when the statement was not inspected.
+        # `query` is an unsplit category: one event per call, whatever the
+        # statement does. The class below no longer reaches the id, the
+        # filterable flag or the tool-call record's required_scope, which is
+        # omitted -- see catalog.UNSPLIT_CATEGORIES. It is still the scope the
+        # *tool* needs, which is what a scope-denial record reports and what
+        # read-only mode gates on, so it stays in step with TOOL_SET rather
+        # than describing the statement.
         "run_sql_plus_plus_query": ("query", "read"),
         "explain_sql_plus_plus_query": ("query", "read"),
         # Embeds the query text, then runs a SELECT with APPROX_VECTOR_DISTANCE
@@ -143,10 +155,11 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # -- search (FTS) ------------------------------------------------------
         # Its own category rather than folded into index: run_search is a
         # query, so a reviewer filtering on `index read` should not get search
-        # traffic mixed in. Index management for FTS takes the search *write*
-        # id (61526) the catalogue reserves — the extension point working as
-        # designed: a new tool is a map entry, not a new id and not a SIEM
-        # rule change.
+        # traffic mixed in. `search` is unsplit, so index management and search
+        # queries share its single id (61510) and are told apart by tool_name.
+        # The classes below therefore differ inside one category without
+        # affecting the id: they are the scopes the tools need, and
+        # upsert/drop genuinely need write while the rest do not.
         "list_search_indexes": ("search", "read"),
         "get_search_index_definition": ("search", "read"),
         "run_search": ("search", "read"),
@@ -188,13 +201,13 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "operational_insights_get_collections_in_scope": ("schema", "read"),
         "operational_insights_get_schema_for_collection": ("schema", "read"),
         # -- query (SQL++ over Analytics) -----------------------------------
-        # Both accept SELECT, DML and DDL, so they are statement-classified
-        # (see STATEMENT_CLASSIFIED_TOOLS). The entry here is the fallback used
-        # when no class was recorded, and it is `write` deliberately: a read id
-        # is filterable, so guessing read would let a mutation be configured
-        # out of the audit log.
-        "operational_insights_run_query_sync": ("query", "write"),
-        "operational_insights_run_query_async": ("query", "write"),
+        # `query` is an unsplit category: one event per call, whatever the
+        # statement does. As on the operational server, the class below is the
+        # scope the tool needs rather than a claim about the statement. These
+        # are read because Analytics enforces QueryOptions(read_only=True)
+        # which puts them in OI's READ_ONLY_TOOLS.
+        "operational_insights_run_query_sync": ("query", "read"),
+        "operational_insights_run_query_async": ("query", "read"),
         "operational_insights_explain_query": ("query", "read"),
         # The async request lifecycle. Retrieving, discarding and cancelling
         # all act on a handle for a query this caller submitted, so they stay
@@ -209,35 +222,6 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "operational_insights_create_index": ("index", "write"),
     },
 }
-
-#: Tools whose read/write class depends on the statement they are given, as
-#: ``package -> {tool names}``.
-#:
-#: Each of these accepts SELECT, DML and DDL through one entry point, so a
-#: fixed class would be wrong half the time -- and wrong in the dangerous
-#: direction: read ids are filterable, so a mutation booked as a read could be
-#: suppressed from the audit log by configuration. The tool records its own
-#: class into :mod:`cb_mcp.audit.state` at invocation and the middleware reads
-#: it back.
-#:
-#: A tool listed here that fails to record a class falls back to its table
-#: entry below, which is why those entries are ``write``: the failure mode is
-#: a filterable read, so the static answer has to be the non-filterable one.
-STATEMENT_CLASSIFIED_TOOLS: dict[str, frozenset[str]] = {
-    "operational": frozenset({"run_sql_plus_plus_query"}),
-    "operational_insights": frozenset(
-        {
-            "operational_insights_run_query_sync",
-            "operational_insights_run_query_async",
-        }
-    ),
-}
-
-
-def is_statement_classified(tool_name: str, package: str) -> bool:
-    """True when ``tool_name`` reports its own read/write class per invocation."""
-    return tool_name in STATEMENT_CLASSIFIED_TOOLS.get(package, frozenset())
-
 
 #: Fail-closed operation class for a tool with no entry. Write IDs are never
 #: filterable, so an unknown tool is always recorded.
@@ -271,9 +255,12 @@ def classify_tool(
 
     Args:
         tool_name: The MCP tool name as registered.
-        operation_class_override: Supplied for statement-classified tools once
-            the statement has been inspected, so a SQL++ DML call is booked
-            against the query *write* ID rather than the read ID.
+        operation_class_override: Replaces the table's operation class when
+            given. No production caller passes it any more; it is kept so
+            existing callers (including the fail-closed path, which asks for a
+            write) keep working. For an unsplit category such as ``query`` or
+            ``search`` it is tolerated and has no effect on the event: one id
+            serves every call whatever class is passed.
 
     Unknown tools fail closed to a write class.
     """
@@ -319,8 +306,6 @@ __all__ = [
     "FAILSAFE_CATEGORY",
     "classification_for",
     "FAILSAFE_OPERATION_CLASS",
-    "STATEMENT_CLASSIFIED_TOOLS",
-    "is_statement_classified",
     "TOOL_CLASSIFICATION",
     "classify_tool",
     "is_classified",

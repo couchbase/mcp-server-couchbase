@@ -109,15 +109,6 @@
       "filterable": true
     },
     {
-      "id": 61491,
-      "name": "query read",
-      "description": "A query read operation was requested through a tool",
-      "category": "tool_call",
-      "service_package": "operational",
-      "default_enabled": true,
-      "filterable": true
-    },
-    {
       "id": 61492,
       "name": "index read",
       "description": "An index read operation was requested through a tool",
@@ -136,15 +127,6 @@
       "filterable": true
     },
     {
-      "id": 61494,
-      "name": "search read",
-      "description": "A search read operation was requested through a tool",
-      "category": "tool_call",
-      "service_package": "operational",
-      "default_enabled": true,
-      "filterable": true
-    },
-    {
       "id": 61495,
       "name": "config read",
       "description": "A config read operation was requested through a tool",
@@ -152,6 +134,24 @@
       "service_package": "operational",
       "default_enabled": true,
       "filterable": true
+    },
+    {
+      "id": 61507,
+      "name": "query",
+      "description": "A query operation was requested through a tool",
+      "category": "tool_call",
+      "service_package": "operational",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
+      "id": 61510,
+      "name": "search",
+      "description": "A search operation was requested through a tool",
+      "category": "tool_call",
+      "service_package": "operational",
+      "default_enabled": true,
+      "filterable": false
     },
     {
       "id": 61520,
@@ -181,15 +181,6 @@
       "filterable": false
     },
     {
-      "id": 61523,
-      "name": "query write",
-      "description": "A query write operation was requested through a tool",
-      "category": "tool_call",
-      "service_package": "operational",
-      "default_enabled": true,
-      "filterable": false
-    },
-    {
       "id": 61524,
       "name": "index write",
       "description": "An index write operation was requested through a tool",
@@ -202,15 +193,6 @@
       "id": 61525,
       "name": "performance write",
       "description": "A performance write operation was requested through a tool",
-      "category": "tool_call",
-      "service_package": "operational",
-      "default_enabled": true,
-      "filterable": false
-    },
-    {
-      "id": 61526,
-      "name": "search write",
-      "description": "A search write operation was requested through a tool",
       "category": "tool_call",
       "service_package": "operational",
       "default_enabled": true,
@@ -244,15 +226,6 @@
       "filterable": true
     },
     {
-      "id": 65587,
-      "name": "query read",
-      "description": "A query read operation was requested through a tool",
-      "category": "tool_call",
-      "service_package": "operational_insights",
-      "default_enabled": true,
-      "filterable": true
-    },
-    {
       "id": 65588,
       "name": "index read",
       "description": "An index read operation was requested through a tool",
@@ -271,6 +244,15 @@
       "filterable": true
     },
     {
+      "id": 65603,
+      "name": "query",
+      "description": "A query operation was requested through a tool",
+      "category": "tool_call",
+      "service_package": "operational_insights",
+      "default_enabled": true,
+      "filterable": false
+    },
+    {
       "id": 65616,
       "name": "cluster write",
       "description": "A cluster write operation was requested through a tool",
@@ -283,15 +265,6 @@
       "id": 65617,
       "name": "schema write",
       "description": "A schema write operation was requested through a tool",
-      "category": "tool_call",
-      "service_package": "operational_insights",
-      "default_enabled": true,
-      "filterable": false
-    },
-    {
-      "id": 65619,
-      "name": "query write",
-      "description": "A query write operation was requested through a tool",
       "category": "tool_call",
       "service_package": "operational_insights",
       "default_enabled": true,

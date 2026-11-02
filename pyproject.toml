@@ -1,6 +1,6 @@
 [project]
 name = "couchbase-mcp-server"
-version = "1.1.0rc2"
+version = "1.1.0rc3"
 description = "Couchbase MCP Server - Enable AI agents to connect to and interact with Couchbase clusters."
 readme = "README.md"
 requires-python = ">=3.11,<3.15"
