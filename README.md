@@ -457,13 +457,25 @@ All [common configuration](#common-configuration) applies, with these difference
 
 All names except `get_server_configuration_status` are prefixed `operational_insights_`, so both servers can be registered in one client without collisions. The write tool (marked ✏️) is **not loaded** while [read-only mode](#read-only-mode) is on, the default.
 
+#### Server Status
+
 | Tool | Description |
 | --- | --- |
 | `get_server_configuration_status` | Same tool as on the operational server |
+
+#### Data Model & Schema Discovery
+
+| Tool | Description |
+| --- | --- |
 | `operational_insights_get_databases_in_cluster` | List databases |
 | `operational_insights_get_scopes_in_database` | List scopes in a database |
 | `operational_insights_get_collections_in_scope` | List collections (datasets) in a scope |
 | `operational_insights_get_schema_for_collection` | Infer a collection's JSON schema by sampling |
+
+#### Query and Index
+
+| Tool | Description |
+| --- | --- |
 | `operational_insights_list_indexes` | List secondary indexes from `System.Metadata.Index` |
 | `operational_insights_explain_query` | EXPLAIN a SQL++ statement without running it |
 | `operational_insights_run_query_sync` | Run SQL++ and return rows, up to the result size limit; can [export](#exporting-large-results) instead. Read-only mode is enforced server-side |
