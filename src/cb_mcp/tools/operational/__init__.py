@@ -299,6 +299,10 @@ TOOL_DEPLOYMENT_REQUIREMENTS: dict[str, Deployment] = {
     "get_cluster_query_vitals": Deployment.ON_PREM,
     "get_active_queries": Deployment.ON_PREM,
     "delete_active_query": Deployment.ON_PREM,
+    # No REST call of its own: it serves the bundled reference data for
+    # ``get_cluster_metrics``, which is itself on-prem only, so on Capella
+    # there is nothing for it to look up.
+    "discover_tool_input_values": Deployment.ON_PREM,
 }
 
 # Per-tool explanations appended to a scope-denial error, reaching the

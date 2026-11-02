@@ -43,6 +43,8 @@ REST_ONLY_TOOLS = frozenset(
         "get_cluster_query_vitals",
         "get_active_queries",
         "delete_active_query",
+        # Offline, but only serves get_cluster_metrics' reference data.
+        "discover_tool_input_values",
     }
 )
 
