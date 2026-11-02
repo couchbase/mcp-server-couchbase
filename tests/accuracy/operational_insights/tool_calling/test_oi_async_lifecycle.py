@@ -43,6 +43,8 @@ from accuracy.sdk.client import AccuracyTestingClient
 from accuracy.sdk.runner import SetupHook
 from accuracy.sdk.types import ExpectedToolCall, ModelResponse, TokensUsed
 
+from .._seeding import tool_payload
+
 # Substituted into a prompt before the real handle is known. The seed replaces
 # it, so a case that somehow ran unseeded would send this literal rather than
 # a plausible-looking fake handle the model might act on.
@@ -72,23 +74,8 @@ def _extract_handle(payload: Any) -> str | None:
     serialized string the LLM path produces, so the handle may be in
     structured content or in a JSON text block.
     """
-    structured = getattr(payload, "structuredContent", None)
-    if isinstance(structured, dict):
-        handle = structured.get("query_handle")
-        if handle:
-            return handle
-
-    for block in getattr(payload, "content", None) or []:
-        text = getattr(block, "text", None)
-        if not text:
-            continue
-        try:
-            data = json.loads(text)
-        except (ValueError, TypeError):
-            continue
-        if isinstance(data, dict) and data.get("query_handle"):
-            return data["query_handle"]
-    return None
+    data = tool_payload(payload)
+    return data.get("query_handle") if data else None
 
 
 def _discard_handle(holder: _Handle) -> SetupHook:
@@ -143,10 +130,13 @@ async def _score_handle_case(
             "operational_insights_run_query_async", {"statement": statement}
         )
         handle = _extract_handle(start)
+        # Credentials are already checked at collection time, so failing to
+        # mint a handle here is a real regression in async submission, not a
+        # reason to skip.
         if not handle:
-            pytest.skip(
+            pytest.fail(
                 "Could not start an async query to mint a query_handle "
-                f"(statement: {statement!r})."
+                f"(statement: {statement!r}). Response: {start!r}"
             )
         holder.value = handle
 
@@ -167,6 +157,16 @@ async def _score_handle_case(
                 await _discard_handle(holder)(client)
 
         actual_calls = client.llm_tool_calls()
+
+    # The cases are declared before the handle exists, so they carry a
+    # placeholder matcher. Bind it to the real handle so a fabricated or
+    # placeholder handle does not score as a match.
+    for expected in expected_tools:
+        if (
+            isinstance(expected.parameters, dict)
+            and "query_handle" in expected.parameters
+        ):
+            expected.parameters["query_handle"] = holder.value
 
     accuracy = calculate_tool_calling_accuracy(expected_tools, actual_calls)
 

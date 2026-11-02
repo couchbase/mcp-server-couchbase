@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from accuracy.sdk.client import AccuracyTestingClient
 
@@ -32,10 +33,46 @@ def unique_name(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
 
+def tool_payload(result: Any) -> dict[str, Any] | None:
+    """Decode the envelope dict out of an MCP CallToolResult.
+
+    ``call_tool_silent`` returns the raw result object rather than the
+    serialized string the LLM path produces, so the envelope may be in
+    structured content or in a JSON text block.
+    """
+    structured = getattr(result, "structuredContent", None)
+    if isinstance(structured, dict):
+        return structured
+
+    for block in getattr(result, "content", None) or []:
+        text = getattr(block, "text", None)
+        if not text:
+            continue
+        try:
+            data = json.loads(text)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
 async def _run(client: AccuracyTestingClient, statement: str) -> None:
-    await client.call_tool_silent(
+    """Run ``statement`` and raise if the tool reports failure.
+
+    The query tool returns ``{"success": false, ...}`` rather than raising,
+    so without this a failed CREATE/INSERT would pass as setup and the case
+    would score the model against ground truth that does not exist. Cleanup
+    hooks also go through here, but the runner suppresses their errors.
+    """
+    result = await client.call_tool_silent(
         "operational_insights_run_query_sync", {"statement": statement}
     )
+    payload = tool_payload(result)
+    if getattr(result, "isError", False) or not payload or not payload.get("success"):
+        raise RuntimeError(
+            f"OI seeding statement failed: {statement!r}. Response: {payload or result!r}"
+        )
 
 
 def seed_scope(database: str, scope: str) -> SetupHook:

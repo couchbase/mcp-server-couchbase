@@ -45,8 +45,9 @@ _DOCS = [
 def _names_field(*expected: str) -> Matcher:
     """Match a ``fields`` list naming exactly ``expected``, in order.
 
-    Tolerates the optional ``type`` key being present or absent, which the
-    schema allows for scalar fields.
+    Tolerates the optional ``type`` key being absent, which the schema allows
+    for scalar fields, but rejects a declared type other than ``string``: the
+    prompts ask for string fields, and a mismatched type can index nothing.
     """
 
     def _ok(value: Any) -> bool:
@@ -55,6 +56,7 @@ def _names_field(*expected: str) -> Matcher:
         return all(
             isinstance(element, dict)
             and str(element.get("name", "")).lower() == want.lower()
+            and element.get("type") in (None, "string")
             for element, want in zip(value, expected, strict=True)
         )
 
@@ -62,7 +64,12 @@ def _names_field(*expected: str) -> Matcher:
 
 
 def _unnest_field(path: str) -> Matcher:
-    """Match a ``fields`` list holding one UNNEST element over ``path``."""
+    """Match a ``fields`` list holding one string UNNEST element over ``path``.
+
+    Unlike scalar fields, a primitive-array element (no ``select``) must
+    declare its ``type``: ``_format_element`` reads ``field['type']``, so an
+    untyped element makes the real tool fail.
+    """
 
     def _ok(value: Any) -> bool:
         if not isinstance(value, list) or len(value) != 1:
@@ -74,7 +81,11 @@ def _unnest_field(path: str) -> Matcher:
         # The schema accepts a bare string or a list for nested arrays.
         if isinstance(unnest, list):
             unnest = ".".join(str(part) for part in unnest)
-        return str(unnest or "").lower() == path.lower()
+        return (
+            str(unnest or "").lower() == path.lower()
+            and element.get("type") == "string"
+            and element.get("select") is None
+        )
 
     return _Predicate(_ok)
 

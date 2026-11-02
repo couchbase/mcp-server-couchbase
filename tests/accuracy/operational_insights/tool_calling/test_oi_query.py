@@ -84,6 +84,39 @@ def _export_parameters(collection: str) -> dict[str, Any]:
     }
 
 
+_QUERY_TOOLS = (
+    "operational_insights_run_query_sync",
+    "operational_insights_run_query_async",
+)
+_COPY_TO_KEYS = ("copy_to_link", "copy_to_bucket", "copy_to_path", "copy_to_format")
+
+
+def _export_calls(actual_calls: list[Any]) -> list[Any]:
+    """The query-tool calls that carry every requested copy_to_* argument."""
+    expected = _export_parameters("")
+    return [
+        call
+        for call in actual_calls
+        if call.tool_name in _QUERY_TOOLS
+        and all(
+            Matcher.value(expected[key]).match(call.parameters.get(key)) >= 0.75
+            for key in _COPY_TO_KEYS
+        )
+    ]
+
+
+def _score_export(actual_calls: list[Any]) -> float:
+    """Score the export case against *either* query tool.
+
+    ``calculate_tool_calling_accuracy`` cannot express "one of these two
+    tools, with these arguments": an expectation where every entry is
+    optional is satisfied by calling nothing at all (it returns 1.0 for an
+    empty call list). Plugged in as the case's scorer so the persisted score
+    is this one, not the shared scorer's.
+    """
+    return 1.0 if _export_calls(actual_calls) else 0.0
+
+
 def _mock_export(args: dict[str, Any]) -> str:
     """Stand in for a real COPY ... TO against object storage."""
     return json.dumps(
@@ -208,9 +241,9 @@ def _build_cases(database: str, scope: str, collection: str) -> list[AccuracyCas
                 "named 's3link', bucket 'analytics-exports', path "
                 "'exports/run1', in parquet format."
             ),
-            # Scored by test_oi_export_accuracy below rather than by the
-            # shared scorer: marking both tools optional would make the case
-            # pass even if the model called neither.
+            # Scored by _score_export rather than the shared scorer: marking
+            # both tools optional would make the case pass even if the model
+            # called neither.
             expected_tools=[],
             seed=seed,
             cleanup=cleanup,
@@ -218,6 +251,7 @@ def _build_cases(database: str, scope: str, collection: str) -> list[AccuracyCas
                 "operational_insights_run_query_sync": _mock_export,
                 "operational_insights_run_query_async": _mock_export,
             },
+            scorer=_score_export,
         ),
     ]
 
@@ -279,12 +313,7 @@ async def test_oi_export_accuracy(
     accuracy_run_id: str,
     commit_sha: str,
 ) -> None:
-    """The export case, scored against *either* query tool.
-
-    ``calculate_tool_calling_accuracy`` cannot express "one of these two
-    tools, with these arguments": an expectation where every entry is
-    optional is satisfied by calling nothing at all (verified — it returns
-    1.0 for an empty call list). So the call list is asserted directly here.
+    """The export case, scored against *either* query tool (see _score_export).
 
     What is actually being tested is the ``copy_to_*`` arguments. Whether the
     export rides on the sync or the async tool is left open on purpose, since
@@ -305,32 +334,10 @@ async def test_oi_export_accuracy(
     actual = json.dumps(
         [c.__dict__ for c in result.actual_calls], indent=2, default=str
     )
-    export_calls = [
-        call
-        for call in result.actual_calls
-        if call.tool_name
-        in (
-            "operational_insights_run_query_sync",
-            "operational_insights_run_query_async",
-        )
-    ]
-    assert export_calls, f"No query tool was called at all. Actual: {actual}"
-
-    expected = _export_parameters("")
-    matched = [
-        call
-        for call in export_calls
-        if all(
-            Matcher.value(expected[key]).match(call.parameters.get(key)) >= 0.75
-            for key in (
-                "copy_to_link",
-                "copy_to_bucket",
-                "copy_to_path",
-                "copy_to_format",
-            )
-        )
-    ]
-    assert matched, (
+    assert any(c.tool_name in _QUERY_TOOLS for c in result.actual_calls), (
+        f"No query tool was called at all. Actual: {actual}"
+    )
+    assert result.accuracy == 1.0, (
         "A query tool ran, but none carried the requested copy_to_* export "
         f"arguments. Actual: {actual}"
     )

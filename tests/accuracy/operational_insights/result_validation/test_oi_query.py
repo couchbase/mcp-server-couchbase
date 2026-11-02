@@ -106,12 +106,11 @@ def _build_cases(database: str, scope: str, collection: str) -> list[ResultCase]
             ),
             expectation=(
                 "The collection holds alpha (rating 5), beta (3) and gamma "
-                "(4). PASS if the answer reports all three names with their "
-                "correct ratings. It is also acceptable to PASS if the answer "
-                "states the query was still running and gives the handle to "
-                "check later. FAIL if it reports wrong ratings, omits "
-                "documents while claiming the results are complete, or "
-                "fabricates rows."
+                "(4). PASS only if the answer reports all three names with "
+                "their correct ratings after waiting for the query to finish. "
+                "FAIL if it stops at a handle without reporting the rows, "
+                "reports wrong ratings, omits documents while claiming the "
+                "results are complete, or fabricates rows."
             ),
             seed=seed,
             cleanup=cleanup,
