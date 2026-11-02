@@ -7,7 +7,7 @@ Couchbase MCP Server is a self-hosted [Model Context Protocol](https://modelcont
 Enterprise support is available by licensing [Couchbase AI Data Plane](https://www.couchbase.com/downloads/?family=ai-data-plane), which also entitles use and enterprise support of Couchbase Agent Memory and Couchbase Agent Catalog.
 
 - **GitHub:** <https://github.com/couchbase/mcp-server-couchbase> — full configuration reference and tool list
-- **Documentation:** <https://docs.couchbase.com/mcp-server/get-started/overview.html>
+- **Documentation:** <https://docs.couchbase.com/mcp-server/1.1/reference/common-overview.html>
 - **Dockerfile:** <https://github.com/couchbase/mcp-server-couchbase/blob/main/Dockerfile>
 
 ## Quick Start
@@ -98,7 +98,7 @@ The Operational Insights connection string is an **HTTP(S) URL**, not `couchbase
 - **Working directory:** `/app`. Relative paths (such as the default log file) resolve here.
 - **Entrypoint:** `couchbase-mcp-server` (exec form, so the server is PID 1). The container command selects the server and takes CLI flags, e.g. `operational --log-level=debug`.
 - **Defaults:** `CB_MCP_TRANSPORT=stdio`, `CB_MCP_READ_ONLY_MODE=true`.
-- **Exposed ports:** `8000` (`operational`) and `8001` (`operational-insights`), used only by the `http` and `sse` transports.
+- **Exposed ports:** `8000` (`operational`) and `8001` (`operational-insights`), used only by the `http` transport.
 - **Base:** `python:3.13-slim-trixie`. There is no `curl` or `wget` in the image — use Python for health checks (see below).
 - **Labels:** `org.opencontainers.image.revision` and `org.opencontainers.image.created` record the source commit and build time.
 
@@ -113,7 +113,7 @@ The most common variables are below. Every option — including logging rotation
 | `CB_CLIENT_CERT_PATH` / `CB_CLIENT_KEY_PATH` | mTLS authentication (used instead of username/password when set) | |
 | `CB_CA_CERT_PATH` | Root certificate for a self-signed/untrusted server certificate | |
 | `CB_MCP_READ_ONLY_MODE` | When `true`, write tools are not loaded and modifying SQL++ is blocked | `true` |
-| `CB_MCP_TRANSPORT` | `stdio`, `http`, or `sse` (deprecated) | `stdio` |
+| `CB_MCP_TRANSPORT` | `stdio` or `http` | `stdio` |
 | `CB_MCP_HOST` | Bind address for HTTP — set `0.0.0.0` in containers | `127.0.0.1` |
 | `CB_MCP_PORT` | Port for HTTP | `8000` / `8001` |
 | `CB_MCP_WORKERS` | Worker processes for `http` (`operational` only) | `1` |
@@ -191,7 +191,7 @@ Use port `8001` for `operational-insights`, or whatever `CB_MCP_PORT` is set to.
 
 ## OAuth 2.1
 
-In HTTP mode the server can validate bearer JWTs from any OAuth 2.1/OIDC provider that publishes a JWKS (Auth0, Okta, Keycloak, Cognito, Entra, …). Set `CB_MCP_OAUTH_JWT_JWKS_URI`, `CB_MCP_OAUTH_JWT_ISSUER` and `CB_MCP_OAUTH_JWT_AUDIENCE` (all three are required), and optionally `CB_MCP_OAUTH_MCP_BASE_URL` to publish Protected Resource Metadata. Tokens need the `couchbase-mcp:read` scope for read tools and `couchbase-mcp:write` for write tools. See the [OAuth documentation](https://docs.couchbase.com/mcp-server/configuration/oauth-overview.html).
+In HTTP mode the server can validate bearer JWTs from any OAuth 2.1/OIDC provider that publishes a JWKS (Auth0, Okta, Keycloak, Cognito, Entra, …). Set `CB_MCP_OAUTH_JWT_JWKS_URI`, `CB_MCP_OAUTH_JWT_ISSUER` and `CB_MCP_OAUTH_JWT_AUDIENCE` (all three are required), and optionally `CB_MCP_OAUTH_MCP_BASE_URL` to publish Protected Resource Metadata. Tokens need the `couchbase-mcp:read` scope for read tools and `couchbase-mcp:write` for write tools. See the OAuth documentation for the [operational server](https://docs.couchbase.com/mcp-server/1.1/configuration/oauth-overview.html) and the [Operational Insights server](https://docs.couchbase.com/mcp-server/1.1/configuration-oi/oauth-overview-oi.html).
 
 ## Tools
 
