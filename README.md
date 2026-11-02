@@ -198,7 +198,7 @@ Write tools (marked ✏️) are **not loaded** while [read-only mode](#read-only
 | `get_cluster_health_snapshot` 🖥️ | Per-node health: service topology, membership, orchestrator and a health rollup. Needs `ro_admin` |
 | `get_bucket_config` 🖥️ | A bucket's (or every bucket's) configuration and live state — quotas, eviction, replicas, durability, storage, compaction. Needs `ro_admin` |
 | `get_cluster_system_events` 🖥️ | The system event log (config changes, failovers, rebalances, restarts), windowed with `since_time`. Needs Full Admin or Cluster Admin |
-| `discover_tool_input_values` | Look up exact input values other tools need (e.g. every metric name for `get_cluster_metrics`). Works offline |
+| `discover_tool_input_values` 🖥️ | Look up exact input values other tools need (e.g. every metric name for `get_cluster_metrics`). Works offline |
 
 #### Data model and schema discovery
 
@@ -298,6 +298,7 @@ The 🖥️ tools reach Couchbase through admin REST endpoints that Capella does
 | `get_cluster_query_vitals` | Query service REST (`/admin/vitals`) |
 | `get_active_queries` | Query service REST (`/admin/active_requests`) |
 | `delete_active_query` | Query service REST (`DELETE /admin/active_requests/{id}`) |
+| `discover_tool_input_values` | None (works offline), but it only serves `get_cluster_metrics`, which Capella lacks |
 
 ### Embedding Providers
 
