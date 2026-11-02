@@ -183,7 +183,7 @@ Use **either** a username and password **or** a client certificate (mTLS). If bo
 
 ### Operational Tools
 
-Write tools (marked ✏️) are **not loaded** while [read-only mode](#read-only-mode) is on, the default. Tools marked 🖥️ use admin REST endpoints that Capella does not expose: they need **self-managed Couchbase Server 7.6+** and are [not registered on Capella connections](#tools-disabled-automatically-on-capella).
+Write tools (marked ✏️) are **not loaded** while [read-only mode](#read-only-mode) is on, the default. Tools marked 🖥️ are self-managed only — they use admin REST endpoints that Capella does not expose, or (`discover_tool_input_values`) only serve reference data for a tool that does — so they need **self-managed Couchbase Server 7.6+** and are [not registered on Capella connections](#tools-disabled-automatically-on-capella).
 
 #### Cluster setup and health
 
@@ -285,7 +285,7 @@ These call the Query service's own admin REST API on every query node.
 
 #### Tools disabled automatically on Capella
 
-The 🖥️ tools reach Couchbase through admin REST endpoints that Capella does not expose. When every host in `CB_CONNECTION_STRING` ends in `.cloud.couchbase.com`, the server does not register them and reports them alongside your own [disabled tools](#disabling-tools) in `get_server_configuration_status` and the startup log. SDK-based tools such as `get_cluster_health_and_services` and `get_client_connectivity_report` stay available.
+The 🖥️ tools reach Couchbase through admin REST endpoints that Capella does not expose (the one exception, `discover_tool_input_values`, is withheld because it only serves a tool that needs them). When every host in `CB_CONNECTION_STRING` ends in `.cloud.couchbase.com`, the server does not register them and reports them alongside your own [disabled tools](#disabling-tools) in `get_server_configuration_status` and the startup log. SDK-based tools such as `get_cluster_health_and_services` and `get_client_connectivity_report` stay available.
 
 | Tool | Endpoint it needs |
 | --- | --- |
