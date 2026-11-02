@@ -376,6 +376,11 @@ def upsert_search_index(
             "bucket_name and scope_name must be provided together, or omitted together"
         )
 
+    # The SDK segfaults (killing the whole server) on a non-object mapping, so reject
+    # it here instead of passing it through.
+    if params and "mapping" in params and not isinstance(params["mapping"], dict):
+        return tool_error("params.mapping must be an object")
+
     cluster = get_cluster_connection(ctx)
 
     definition = SearchIndex(
