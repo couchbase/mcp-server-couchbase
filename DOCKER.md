@@ -210,4 +210,6 @@ Write tools are only loaded when `CB_MCP_READ_ONLY_MODE=false`. Some admin tools
 
 **`operational-insights` server**
 
-`get_server_configuration_status`, `operational_insights_get_databases_in_cluster`, `operational_insights_get_scopes_in_database`, `operational_insights_get_collections_in_scope`, `operational_insights_get_schema_for_collection`, `operational_insights_list_indexes`, `operational_insights_explain_query`, `operational_insights_run_query_sync`, `operational_insights_run_query_async`, `operational_insights_get_async_query_results`, `operational_insights_discard_async_query_results`, `operational_insights_cancel_async_query`, `operational_insights_create_index`
+- **Server Status:** `get_server_configuration_status`
+- **Data Model & Schema Discovery:** `operational_insights_get_databases_in_cluster`, `operational_insights_get_scopes_in_database`, `operational_insights_get_collections_in_scope`, `operational_insights_get_schema_for_collection`
+- **Query and Index:** `operational_insights_list_indexes`, `operational_insights_explain_query`, `operational_insights_run_query_sync`, `operational_insights_run_query_async`, `operational_insights_get_async_query_results`, `operational_insights_discard_async_query_results`, `operational_insights_cancel_async_query`, `operational_insights_create_index`
