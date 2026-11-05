@@ -701,6 +701,64 @@ class TestUpsertSearchIndex:
         }
         cluster_index_manager.upsert_index.assert_not_called()
 
+    @pytest.mark.parametrize(
+        ("mapping", "bad_path"),
+        [
+            ({"types": {"hotel": "x"}}, "params.mapping.types.hotel"),
+            ({"types": {"hotel": 5}}, "params.mapping.types.hotel"),
+            ({"types": {"hotel": None}}, "params.mapping.types.hotel"),
+            ({"types": {"hotel": []}}, "params.mapping.types.hotel"),
+            (
+                {"types": {"hotel": {"properties": {"name": "x"}}}},
+                "params.mapping.types.hotel.properties.name",
+            ),
+            (
+                {"types": {"hotel": {"properties": {"a": {"properties": {"b": 5}}}}}},
+                "params.mapping.types.hotel.properties.a.properties.b",
+            ),
+            (
+                {"types": {"hotel": {"properties": {"n": {"fields": [None]}}}}},
+                "params.mapping.types.hotel.properties.n.fields[0]",
+            ),
+        ],
+    )
+    def test_non_object_type_mapping_entries_rejected_before_sdk_call(
+        self, mapping, bad_path
+    ) -> None:
+        """Non-object entries under params.mapping.types segfault the SDK (DA-2407)."""
+        ctx, cluster, cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
+
+        with patch(
+            "cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster
+        ):
+            result = upsert_search_index(
+                ctx, "idx1", source_name="b", params={"mapping": mapping}
+            )
+
+        assert result == {"success": False, "error": f"{bad_path} must be an object"}
+        cluster_index_manager.upsert_index.assert_not_called()
+
+    def test_valid_type_mapping_reaches_sdk(self) -> None:
+        ctx, cluster, cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
+        mapping = {
+            "types": {
+                "hotel": {
+                    "dynamic": False,
+                    "properties": {"name": {"fields": [{"name": "name"}]}},
+                }
+            }
+        }
+
+        with patch(
+            "cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster
+        ):
+            result = upsert_search_index(
+                ctx, "idx1", source_name="b", params={"mapping": mapping}
+            )
+
+        assert result["success"] is True
+        cluster_index_manager.upsert_index.assert_called_once()
+
     def test_sdk_error_returns_error_dict_not_raised(self) -> None:
         ctx, cluster, cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
         cluster_index_manager.upsert_index.side_effect = Exception("invalid mapping")
