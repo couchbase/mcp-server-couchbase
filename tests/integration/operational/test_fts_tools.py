@@ -204,6 +204,111 @@ def seeded_fts_index() -> Iterator[dict[str, Any]]:
 
 
 @pytest.fixture(scope="module")
+def seeded_sort_facet_index() -> Iterator[dict[str, Any]]:
+    """Create a scope-level Search index with static mappings for a numeric
+    ``rank``, a keyword ``tier`` and a text ``marker`` field (all with
+    docvalues, which sorting and faceting need), and seed three documents
+    sharing one unique marker.
+
+    Tests query by that marker so only these three documents match, whatever
+    else the collection holds. Ranks are 10/20/30 and tiers are a/a/b, so sort
+    order and facet counts are fully determined.
+    """
+    if SearchIndex is None:
+        pytest.skip("couchbase.management.search.SearchIndex is unavailable")
+
+    bucket_name = require_test_bucket()
+    scope_name = get_test_scope()
+    collection_name = get_test_collection()
+    suffix = uuid.uuid4().hex[:8]
+    index_name = f"test_fts_sf_idx_{suffix}"
+    marker = uuid.uuid4().hex[:8]
+    docs = {
+        f"test_fts_sf_{suffix}_{rank}": {"rank": rank, "tier": tier, "marker": marker}
+        for rank, tier in ((10, "a"), (20, "a"), (30, "b"))
+    }
+
+    def _field(name: str, field_type: str, **extra: Any) -> dict[str, Any]:
+        return {
+            "enabled": True,
+            "dynamic": False,
+            "fields": [
+                {
+                    "name": name,
+                    "type": field_type,
+                    "index": True,
+                    "store": True,
+                    "docvalues": True,
+                    **extra,
+                }
+            ],
+        }
+
+    cluster = _direct_cluster()
+    try:
+        bucket = cluster.bucket(bucket_name)
+        scope = bucket.scope(scope_name)
+        scope_index_manager = scope.search_indexes()
+
+        definition = SearchIndex(
+            name=index_name,
+            source_type="couchbase",
+            idx_type="fulltext-index",
+            source_name=bucket_name,
+            params={
+                "doc_config": {"mode": "scope.collection.type_field"},
+                "mapping": {
+                    "types": {
+                        f"{scope_name}.{collection_name}": {
+                            "enabled": True,
+                            "dynamic": False,
+                            "properties": {
+                                "rank": _field("rank", "number"),
+                                "tier": _field("tier", "text", analyzer="keyword"),
+                                "marker": _field("marker", "text"),
+                            },
+                        }
+                    },
+                    "default_mapping": {"enabled": False},
+                    "default_analyzer": "standard",
+                },
+            },
+        )
+
+        try:
+            scope_index_manager.upsert_index(definition)
+        except Exception as e:
+            pytest.skip(f"Could not create Search index for tests: {e}")
+
+        collection = scope.collection(collection_name)
+        mutation_results = [collection.upsert(k, v) for k, v in docs.items()]
+
+        indexed, index_error = _wait_for_seeded_document(
+            scope, index_name, marker, MutationState(*mutation_results)
+        )
+
+        try:
+            yield {
+                "index_name": index_name,
+                "bucket_name": bucket_name,
+                "scope_name": scope_name,
+                "marker": marker,
+                "doc_ids_by_rank": {v["rank"]: k for k, v in docs.items()},
+                "indexed": indexed,
+                "index_error": index_error,
+            }
+        finally:
+            with contextlib.suppress(Exception):
+                scope_index_manager.drop_index(index_name)
+            for doc_id in docs:
+                with contextlib.suppress(Exception):
+                    collection.remove(doc_id)
+    finally:
+        with contextlib.suppress(Exception):
+            cluster.close()
+
+
+@pytest.fixture(scope="module")
 def seeded_cluster_level_fts_index() -> Iterator[dict[str, str]]:
     """Create a cluster-level (legacy) Search index for the duration of the
     module, and drop it afterward. Ensures test_list_search_indexes_no_filters
@@ -476,6 +581,124 @@ async def test_run_search_matches_seeded_document(
 
     assert payload["total_hits"] == 1
     assert payload["hits"][0]["id"] == seeded_fts_index["doc_id"]
+
+
+async def _run_sort_facet_search(index: dict[str, Any], **extra: Any) -> dict[str, Any]:
+    """Run run_search over the sort/facet index, restricted to its three
+    marker-tagged documents, and return the successful payload."""
+    assert index["indexed"], (
+        f"Search index never picked up the seeded documents within "
+        f"{FTS_READY_TIMEOUT}s. Last error from the Search service: "
+        f"{index['index_error']}"
+    )
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "run_search",
+            arguments={
+                "index_name": index["index_name"],
+                "bucket_name": index["bucket_name"],
+                "scope_name": index["scope_name"],
+                "query": {"match": index["marker"], "field": "marker"},
+                **extra,
+            },
+        )
+        return _assert_query_succeeded(extract_payload(response))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sort",
+    [
+        [{"by": "field", "field": "rank", "desc": True}],
+        ["-rank"],
+    ],
+    ids=["json_object", "string"],
+)
+async def test_run_search_sort_descending(
+    seeded_sort_facet_index: dict[str, Any], sort: list[Any]
+) -> None:
+    """Both sort forms must order by rank descending. The JSON-object form used
+    to be silently ignored (arbitrary order, no error), so asserting the exact
+    order is the regression check."""
+    payload = await _run_sort_facet_search(seeded_sort_facet_index, sort=sort)
+
+    ids = seeded_sort_facet_index["doc_ids_by_rank"]
+    assert [h["id"] for h in payload["hits"]] == [ids[30], ids[20], ids[10]]
+
+
+@pytest.mark.asyncio
+async def test_run_search_sort_ascending_json_object(
+    seeded_sort_facet_index: dict[str, Any],
+) -> None:
+    """Flipping desc must flip the order, proving the sort is applied rather
+    than coincidentally matching the default order."""
+    payload = await _run_sort_facet_search(
+        seeded_sort_facet_index,
+        sort=[{"by": "field", "field": "rank", "desc": False}],
+    )
+
+    ids = seeded_sort_facet_index["doc_ids_by_rank"]
+    assert [h["id"] for h in payload["hits"]] == [ids[10], ids[20], ids[30]]
+
+
+@pytest.mark.asyncio
+async def test_run_search_numeric_range_facet(
+    seeded_sort_facet_index: dict[str, Any],
+) -> None:
+    """A numeric-range facet used to fail with "Can only add facet"."""
+    payload = await _run_sort_facet_search(
+        seeded_sort_facet_index,
+        facets={
+            "ranks": {
+                "field": "rank",
+                "size": 2,
+                "numeric_ranges": [
+                    {"name": "low", "max": 15},
+                    {"name": "high", "min": 15},
+                ],
+            }
+        },
+    )
+
+    facet = payload["facets"]["ranks"]
+    assert facet["total"] == 3
+    counts = {r["name"]: r["count"] for r in facet["numeric_ranges"]}
+    assert counts == {"low": 1, "high": 2}
+
+
+@pytest.mark.asyncio
+async def test_run_search_terms_facet(
+    seeded_sort_facet_index: dict[str, Any],
+) -> None:
+    """A terms facet (no ranges) must be accepted and counted per term."""
+    payload = await _run_sort_facet_search(
+        seeded_sort_facet_index,
+        facets={"tiers": {"field": "tier", "size": 5}},
+    )
+
+    facet = payload["facets"]["tiers"]
+    counts = {t["term"]: t["count"] for t in facet["terms"]}
+    assert counts == {"a": 2, "b": 1}
+
+
+@pytest.mark.asyncio
+async def test_run_search_sort_and_facets_together(
+    seeded_sort_facet_index: dict[str, Any],
+) -> None:
+    """The reported prompt combined both: sorted hits and facet counts must come
+    back from one call."""
+    payload = await _run_sort_facet_search(
+        seeded_sort_facet_index,
+        limit=2,
+        sort=[{"by": "field", "field": "rank", "desc": True}],
+        facets={"tiers": {"field": "tier", "size": 5}},
+    )
+
+    ids = seeded_sort_facet_index["doc_ids_by_rank"]
+    assert [h["id"] for h in payload["hits"]] == [ids[30], ids[20]]
+    # Facets aggregate over every match, not just the returned page.
+    counts = {t["term"]: t["count"] for t in payload["facets"]["tiers"]["terms"]}
+    assert counts == {"a": 2, "b": 1}
 
 
 @pytest.mark.asyncio
