@@ -70,7 +70,11 @@ def _direct_cluster():
 
 
 def _wait_for_seeded_document(
-    scope, index_name: str, marker: str, mutation_state: MutationState
+    scope,
+    index_name: str,
+    marker: str,
+    mutation_state: MutationState,
+    expected_rows: int = 1,
 ) -> tuple[bool, str | None]:
     """Block until the seeded document is findable through the Search index.
 
@@ -106,9 +110,13 @@ def _wait_for_seeded_document(
                 consistent_with=mutation_state,
                 timeout=timedelta(seconds=FTS_READY_ATTEMPT_TIMEOUT),
             )
-            if list(scope.search(index_name, request, options).rows()):
+            rows = list(scope.search(index_name, request, options).rows())
+            if len(rows) >= expected_rows:
                 return True, None
-            last_error = "query succeeded but returned no rows for the seeded marker"
+            last_error = (
+                f"query returned {len(rows)} of {expected_rows} rows "
+                "for the seeded marker"
+            )
         except Exception as e:
             # Reported back to the caller, not swallowed.
             last_error = f"{type(e).__name__}: {e}"
@@ -284,7 +292,11 @@ def seeded_sort_facet_index() -> Iterator[dict[str, Any]]:
         mutation_results = [collection.upsert(k, v) for k, v in docs.items()]
 
         indexed, index_error = _wait_for_seeded_document(
-            scope, index_name, marker, MutationState(*mutation_results)
+            scope,
+            index_name,
+            marker,
+            MutationState(*mutation_results),
+            expected_rows=len(docs),
         )
 
         try:
