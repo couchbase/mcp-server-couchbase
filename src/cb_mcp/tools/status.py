@@ -52,6 +52,8 @@ def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
     configuration = {
         **provider_config,
         "read_only_mode": settings.get("read_only_mode", True),
+        # Whether the MCP listener itself serves HTTPS (not the cluster link).
+        "tls_enabled": settings.get("tls_enabled", False),
         "disabled_tools": sorted(settings.get("disabled_tools", set())),
         "confirmation_required_tools": sorted(
             settings.get("confirmation_required_tools", set())

@@ -167,7 +167,9 @@ class TransportParams:
     ``stateless_http`` is ``None`` when the operator did not set it, meaning
     "decide from the worker count"; ``cb_mcp.core.serving.resolve_serving``
     turns it into a concrete bool. ``thread_pool_size`` comes from a hidden
-    flag and is ``None`` unless set.
+    flag and is ``None`` unless set. The ``tls_*`` fields are the operator's
+    HTTPS material as given; ``cb_mcp.core.serving.resolve_tls`` validates
+    them. ``tls_key_password`` is excluded from ``repr``.
     """
 
     transport: str
@@ -176,6 +178,9 @@ class TransportParams:
     workers: int
     stateless_http: bool | None
     thread_pool_size: int | None
+    tls_cert_path: str | None = None
+    tls_key_path: str | None = None
+    tls_key_password: str | None = field(default=None, repr=False)
 
     @classmethod
     def from_click(cls, params: Mapping[str, Any]) -> "TransportParams":
@@ -186,6 +191,9 @@ class TransportParams:
             workers=params["workers"],
             stateless_http=params["stateless_http"],
             thread_pool_size=params["thread_pool_size"],
+            tls_cert_path=params["tls_cert_path"],
+            tls_key_path=params["tls_key_path"],
+            tls_key_password=params["tls_key_password"],
         )
 
 
@@ -582,6 +590,7 @@ def build_settings(
     gated: GatedTools,
     oauth_enabled: bool,
     serving: ServingConfig,
+    tls_enabled: bool = False,
 ) -> dict[str, Any]:
     """Assemble the ``settings`` mapping the whole runtime reads.
 
@@ -596,7 +605,9 @@ def build_settings(
     strings the operator typed: the record should say what was actually
     disabled, not what was requested. The serving entries are likewise the
     resolved topology; ``thread_pool_size`` is replaced during lifespan
-    startup with the limit that actually took effect.
+    startup with the limit that actually took effect. ``tls_enabled`` says
+    whether HTTPS is actually served; the certificate paths and key password
+    are deliberately not in ``settings`` at all.
     """
     settings = dict(cli.credentials)
     settings.update(
@@ -608,6 +619,7 @@ def build_settings(
             "workers": serving.workers,
             "stateless_http": serving.stateless_http,
             "thread_pool_size": serving.thread_pool_size,
+            "tls_enabled": tls_enabled,
             **cli.oauth.as_settings(enabled=oauth_enabled),
             **cli.embedding.as_settings(),
             "disabled_tools": gated.disabled,

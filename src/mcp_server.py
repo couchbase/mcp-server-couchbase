@@ -64,7 +64,9 @@ from cb_mcp.core.contracts import ProviderLifecycle
 from cb_mcp.core.serving import (
     ServingConfig,
     ServingConfigError,
+    TlsConfig,
     resolve_serving,
+    resolve_tls,
     uvicorn_log_level,
     worker_log_file,
 )
@@ -160,6 +162,7 @@ class _BuiltServer(NamedTuple):
     cli: CliParams
     spec: ServerSpec
     serving: ServingConfig
+    tls: TlsConfig | None = None
 
 
 def _build_server(
@@ -212,10 +215,20 @@ def _build_server(
             # the mode that will actually run.
             runtime_default_stateless=fastmcp.settings.stateless_http,
         )
+        tls = resolve_tls(
+            transport=cli.transport.transport,
+            cert_path=cli.transport.tls_cert_path,
+            key_path=cli.transport.tls_key_path,
+            key_password=cli.transport.tls_key_password,
+        )
     except ServingConfigError as e:
         raise click.UsageError(str(e)) from e
     settings = build_settings(
-        cli, gated=gated, oauth_enabled=auth is not None, serving=serving
+        cli,
+        gated=gated,
+        oauth_enabled=auth is not None,
+        serving=serving,
+        tls_enabled=tls is not None,
     )
 
     # CLI-resolved configuration lives on AppContext, not in a module global,
@@ -234,7 +247,7 @@ def _build_server(
         thread_pool_size=serving.thread_pool_size,
         send_startup_ping=send_startup_ping,
     )
-    return _BuiltServer(mcp, cli, spec, serving)
+    return _BuiltServer(mcp, cli, spec, serving, tls)
 
 
 def _per_process_log_file(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -279,6 +292,7 @@ def _start_server(server_id: str, params: Mapping[str, Any]) -> None:
         host=transport.host,
         port=transport.port,
         stateless_http=built.serving.stateless_http,
+        tls=built.tls,
     )
 
 
@@ -307,6 +321,9 @@ def _run_workers(
         # Matches what FastMCP uses for its own single-process server.
         timeout_graceful_shutdown=2,
         log_level=uvicorn_log_level(built.cli.logging.level.level),
+        # Each worker builds its own SSL context from the same files; the
+        # supervisor has already checked they load.
+        **(built.tls.uvicorn_kwargs() if built.tls else {}),
     )
 
 
