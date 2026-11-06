@@ -568,6 +568,11 @@ class TestTls:
         assert cap["run_app"].call_args.kwargs["tls"] is None
         assert _settings_from(cap["lifespan"])["tls_enabled"] is False
 
+    def test_partial_env_does_not_stop_a_stdio_server(self):
+        result, cap = _invoke([], env={"CB_MCP_TLS_CERT_PATH": "/absent/server.crt"})
+        assert result.exit_code == 0, result.output
+        assert cap["run_app"].call_args.kwargs["tls"] is None
+
     def test_workers_hand_the_certificate_to_uvicorn(self, tmp_path):
         certs = write_self_signed(tmp_path, password=KEY_PHRASE)
         result, cap = _invoke(

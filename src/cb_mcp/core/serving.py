@@ -232,8 +232,20 @@ def resolve_tls(
     would restart it in a loop.
 
     On stdio there is no listener to secure, so the options are ignored with
-    a warning, as ``--stateless-http`` and the OAuth options are.
+    a warning, as ``--stateless-http`` and the OAuth options are. That check
+    comes first: a stdio client that inherits partial TLS settings from its
+    environment must still start, so none of them is validated there.
     """
+    if transport not in NETWORK_TRANSPORTS:
+        if cert_path or key_path or key_password:
+            logger.warning(
+                "TLS certificate settings are only honored for network "
+                "transports (%s); ignoring them for transport=%s.",
+                ", ".join(NETWORK_TRANSPORTS),
+                transport,
+            )
+        return None
+
     if not cert_path and not key_path:
         if key_password:
             raise ServingConfigError(
@@ -247,15 +259,6 @@ def resolve_tls(
             "HTTPS requires both --tls-cert-path and --tls-key-path; "
             f"{missing} is not set."
         )
-
-    if transport not in NETWORK_TRANSPORTS:
-        logger.warning(
-            "TLS certificate settings are only honored for network transports "
-            "(%s); ignoring them for transport=%s.",
-            ", ".join(NETWORK_TRANSPORTS),
-            transport,
-        )
-        return None
 
     for flag, path in (("--tls-cert-path", cert_path), ("--tls-key-path", key_path)):
         if not os.path.isfile(path):

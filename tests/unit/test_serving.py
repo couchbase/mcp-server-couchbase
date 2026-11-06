@@ -250,6 +250,24 @@ class TestResolveTls:
         assert "ignoring them for transport=stdio" in caplog.text
 
     @pytest.mark.parametrize(
+        "settings",
+        [
+            {"cert_path": "/absent/server.crt"},
+            {"key_path": "/absent/server.key"},
+            {"key_password": KEY_PHRASE},
+        ],
+        ids=["cert-only", "key-only", "password-only"],
+    )
+    def test_partial_settings_are_ignored_on_stdio(self, settings, caplog):
+        """A stdio client inheriting part of the TLS env must still start."""
+        assert _tls(transport="stdio", **settings) is None
+        assert "ignoring them for transport=stdio" in caplog.text
+
+    def test_nothing_configured_on_stdio_is_silent(self, caplog):
+        assert _tls(transport="stdio") is None
+        assert "TLS" not in caplog.text
+
+    @pytest.mark.parametrize(
         ("missing", "flag"),
         [("cert", "--tls-cert-path"), ("key", "--tls-key-path")],
     )
