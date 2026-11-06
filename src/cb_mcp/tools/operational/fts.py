@@ -221,8 +221,13 @@ def run_search(
     skip/fields/sort/facets/highlight_fields/disable_scoring/raw are ignored — they only
     apply when explain=False.
 
-    limit/skip/fields/sort/facets/highlight_fields/disable_scoring map to the equivalent
-    Search options. limit defaults to 10 when explain=False (matching the other query
+    sort and facets use the Search service's REST JSON shapes. sort is a list whose
+    entries are strings ("-brightness", "_score") or objects ({"by": "field", "field":
+    "brightness", "desc": true}). facets is {name: {"field": ..., "size": ...,
+    "numeric_ranges": [...] | "date_ranges": [...]}} (omit the ranges for a terms facet).
+
+    limit/skip/fields/highlight_fields/disable_scoring map to the equivalent Search
+    options. limit defaults to 10 when explain=False (matching the other query
     tools in this server) and to 1 when explain=True. raw is a passthrough dict for any
     other SearchOptions field not exposed directly (e.g. highlight_style, consistent_with).
 
@@ -251,15 +256,21 @@ def run_search(
             )
         else:
             applied_limit = limit if limit is not None else 10
+            # sort/facets go in the raw body, not SearchOptions: the SDK only accepts
+            # Sort/Facet objects there and silently ignores or rejects the REST JSON
+            # forms, whereas the Search service accepts those (and strings) directly.
+            raw_body = {**(raw or {}), "query": query}
+            if sort is not None:
+                raw_body["sort"] = sort
+            if facets is not None:
+                raw_body["facets"] = facets
             options = SearchOptions(
                 limit=applied_limit,
                 skip=skip,
                 fields=fields,
-                sort=sort,
-                facets=facets,
                 highlight_fields=highlight_fields,
                 disable_scoring=disable_scoring,
-                raw={**(raw or {}), "query": query},
+                raw=raw_body,
             )
         request = SearchRequest.create(MatchNoneQuery())
         if bucket_name and scope_name:

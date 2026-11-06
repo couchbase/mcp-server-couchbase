@@ -356,11 +356,14 @@ class TestRunSearch:
             limit=10,
             skip=0,
             fields=["type"],
-            sort=["-_score"],
-            facets={"types": {}},
             highlight_fields=["type"],
             disable_scoring=True,
-            raw={"foo": "bar", "query": {"match": "ale"}},
+            raw={
+                "foo": "bar",
+                "query": {"match": "ale"},
+                "sort": ["-_score"],
+                "facets": {"types": {}},
+            },
         )
         mock_match_none.assert_called_once_with()
         mock_search_request.create.assert_called_once_with(mock_match_none.return_value)
