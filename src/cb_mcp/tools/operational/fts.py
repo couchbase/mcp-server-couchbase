@@ -331,6 +331,28 @@ def run_search(
         return tool_error(e, index_name=index_name)
 
 
+def _find_non_object_entry(node: Any, path: str) -> str | None:
+    """Return the path of the first non-object type mapping, "properties" value or
+    "fields" entry in ``node`` (a type mapping), or None if they are all objects.
+
+    The SDK segfaults on these at any depth. default_mapping and other keys do not
+    crash it (verified against a live cluster), so they are not checked.
+    """
+    if not isinstance(node, dict):
+        return path
+    properties = node.get("properties")
+    if isinstance(properties, dict):
+        for name, child in properties.items():
+            if bad := _find_non_object_entry(child, f"{path}.properties.{name}"):
+                return bad
+    fields = node.get("fields")
+    if isinstance(fields, list):
+        for i, child in enumerate(fields):
+            if bad := _find_non_object_entry(child, f"{path}.fields[{i}]"):
+                return bad
+    return None
+
+
 def upsert_search_index(
     ctx: Context,
     index_name: str,
@@ -387,10 +409,18 @@ def upsert_search_index(
             "bucket_name and scope_name must be provided together, or omitted together"
         )
 
-    # The SDK segfaults (killing the whole server) on a non-object mapping, so reject
-    # it here instead of passing it through.
-    if params and "mapping" in params and not isinstance(params["mapping"], dict):
-        return tool_error("params.mapping must be an object")
+    # The SDK segfaults (killing the whole server) on a non-object params.mapping and on
+    # non-object entries nested under params.mapping.types, so reject those here.
+    if params and "mapping" in params:
+        mapping = params["mapping"]
+        if not isinstance(mapping, dict):
+            return tool_error("params.mapping must be an object")
+        types = mapping.get("types")
+        if isinstance(types, dict):
+            for type_name, type_mapping in types.items():
+                path = f"params.mapping.types.{type_name}"
+                if (bad_path := _find_non_object_entry(type_mapping, path)) is not None:
+                    return tool_error(f"{bad_path} must be an object")
 
     cluster = get_cluster_connection(ctx)
 

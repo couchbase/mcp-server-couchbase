@@ -1119,6 +1119,70 @@ async def test_upsert_search_index_partial_pair_returns_error() -> None:
     assert "must be provided together" in payload["error"]
 
 
+# A bad value five "properties" levels down, and a bad "fields" entry at that depth.
+_DEEP_BAD_PROPERTY: Any = "x"
+_DEEP_BAD_FIELD: Any = {"fields": [None]}
+for _ in range(5):
+    _DEEP_BAD_PROPERTY = {"properties": {"a": _DEEP_BAD_PROPERTY}}
+    _DEEP_BAD_FIELD = {"properties": {"a": _DEEP_BAD_FIELD}}
+_DEEP_PATH = "params.mapping.types.hotel" + ".properties.a" * 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mapping", "bad_path"),
+    [
+        # The first case is DA-2407 itself; the rest are the other shapes that
+        # segfault the SDK (verified against a live cluster).
+        ({"types": {"hotel": "x"}}, "params.mapping.types.hotel"),
+        ({"types": {"hotel": 5}}, "params.mapping.types.hotel"),
+        (
+            {"types": {"hotel": {"properties": {"name": None}}}},
+            "params.mapping.types.hotel.properties.name",
+        ),
+        (
+            {"types": {"hotel": {"properties": {"a": {"properties": {"b": "x"}}}}}},
+            "params.mapping.types.hotel.properties.a.properties.b",
+        ),
+        (
+            {"types": {"hotel": {"properties": {"n": {"fields": [None]}}}}},
+            "params.mapping.types.hotel.properties.n.fields[0]",
+        ),
+        ({"types": {"hotel": _DEEP_BAD_PROPERTY}}, _DEEP_PATH),
+        ({"types": {"hotel": _DEEP_BAD_FIELD}}, _DEEP_PATH + ".fields[0]"),
+    ],
+)
+async def test_upsert_search_index_non_object_mapping_entry_returns_error(
+    mapping: dict[str, Any], bad_path: str
+) -> None:
+    """A non-object entry under params.mapping.types must come back as an error
+    dict, not crash the server (DA-2407: the SDK segfaults on these). The second
+    call proves the server is still serving after the rejected one."""
+    async with create_mcp_session() as session:
+        response = await session.call_tool(
+            "upsert_search_index",
+            arguments={
+                "index_name": f"crash_probe_{uuid.uuid4().hex[:8]}",
+                "source_name": require_test_bucket(),
+                "params": {"mapping": mapping},
+            },
+        )
+        payload = extract_payload(response)
+
+        still_alive = await session.call_tool(
+            "upsert_search_index",
+            arguments={
+                "index_name": "whatever",
+                "source_name": "b",
+                "bucket_name": "b",
+            },
+        )
+        still_alive_payload = extract_payload(still_alive)
+
+    assert payload == {"success": False, "error": f"{bad_path} must be an object"}
+    assert "must be provided together" in still_alive_payload["error"]
+
+
 @pytest.mark.asyncio
 async def test_drop_search_index_partial_pair_returns_error() -> None:
     """Passing only scope_name (no bucket_name) must return a descriptive
