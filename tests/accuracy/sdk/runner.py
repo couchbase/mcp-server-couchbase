@@ -70,6 +70,10 @@ class AccuracyCase:
     seed: SetupHook | None = None
     cleanup: SetupHook | None = None
     mocks: dict[str, MockedToolFn] = field(default_factory=dict)
+    # Overrides calculate_tool_calling_accuracy for cases it cannot express
+    # (e.g. "either of two tools, with these arguments"), so the persisted
+    # score is the one the test actually asserts on.
+    scorer: Callable[[list[Any]], float] | None = None
 
 
 @dataclass
@@ -115,7 +119,10 @@ async def run_accuracy_case(
 
         actual_calls = client.llm_tool_calls()
 
-    accuracy = calculate_tool_calling_accuracy(case.expected_tools, actual_calls)
+    if case.scorer is not None:
+        accuracy = case.scorer(actual_calls)
+    else:
+        accuracy = calculate_tool_calling_accuracy(case.expected_tools, actual_calls)
 
     response = ModelResponse(
         provider="OpenAI",
