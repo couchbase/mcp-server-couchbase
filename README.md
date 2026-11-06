@@ -344,6 +344,9 @@ The [Operational Insights server](#operational-insights-server) accepts the same
 | `CB_MCP_PORT` | `--port` | Port for the HTTP transport mode | `8000` |
 | `CB_MCP_WORKERS` | `--workers` | Number of server worker processes for the `http` transport. Values above 1 run in stateless HTTP mode (see [Multiple Workers](#multiple-workers)) | `1` |
 | `CB_MCP_STATELESS_HTTP` | `--stateless-http` | Handle each HTTP request without per-session state. Only honored with `http`; cannot be combined with confirmation-required tools (see [Multiple Workers](#multiple-workers)) | `true` when workers > 1, otherwise `false` |
+| `CB_MCP_TLS_CERT_PATH` | `--tls-cert-path` | PEM certificate (or chain) for this MCP server. With `CB_MCP_TLS_KEY_PATH`, the HTTP endpoint serves HTTPS (see [HTTPS](#https)). Not related to `CB_CA_CERT_PATH` or `CB_CLIENT_CERT_PATH`, which secure the connection to the cluster | None |
+| `CB_MCP_TLS_KEY_PATH` | `--tls-key-path` | PEM private key for `CB_MCP_TLS_CERT_PATH`. Required together with it | None |
+| `CB_MCP_TLS_KEY_PASSWORD` | `--tls-key-password` | Password for `CB_MCP_TLS_KEY_PATH`, if the key is encrypted | None |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Requiring confirmation](#requiring-confirmation-elicitation)) | None |
 | `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
@@ -591,6 +594,28 @@ Then point your client at the URL:
   }
 }
 ```
+
+#### HTTPS
+
+By default the HTTP endpoint is plain HTTP. To serve HTTPS directly, without a TLS-terminating proxy in front, set `--tls-cert-path` (`CB_MCP_TLS_CERT_PATH`) and `--tls-key-path` (`CB_MCP_TLS_KEY_PATH`) to a PEM certificate and its private key. If the key is encrypted, also set `--tls-key-password` (`CB_MCP_TLS_KEY_PASSWORD`). The certificate file can hold the full chain.
+
+```bash
+uvx couchbase-mcp-server operational \
+  --connection-string='<couchbase_connection_string>' \
+  --username='<database_username>' \
+  --password='<database_password>' \
+  --transport=http \
+  --tls-cert-path=/path/to/server.crt \
+  --tls-key-path=/path/to/server.key
+```
+
+Clients then connect to `https://<host>:<port>/mcp`.
+
+- Applies to the `http` and `sse` transports, with one worker or several. It is ignored, with a warning, on `stdio`.
+- The certificate and key are required together. The server checks at startup that both files exist, that the key matches the certificate and that the password is correct, and refuses to start if not.
+- These settings secure the connection between MCP clients and this server. The connection from this server to Couchbase uses `CB_CA_CERT_PATH` and the client certificate settings instead.
+- With [OAuth](#oauth-21-authorization), set `CB_MCP_OAUTH_MCP_BASE_URL` to the `https://` URL clients use.
+- `get_server_configuration_status` reports `tls_enabled`. The certificate paths and the key password are never logged or reported.
 
 #### Multiple workers
 

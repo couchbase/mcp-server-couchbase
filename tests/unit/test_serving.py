@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import anyio
 import pytest
+from _tls_fixtures import KEY_PHRASE, write_self_signed
 from anyio.to_thread import current_default_thread_limiter
 
 from cb_mcp.core.serving import (
     ServingConfig,
     ServingConfigError,
+    TlsConfig,
     apply_thread_pool_limit,
     resolve_serving,
+    resolve_tls,
     uvicorn_log_level,
     worker_log_file,
 )
@@ -184,3 +187,99 @@ class TestInheritedRuntimeDefault:
     def test_explicit_flag_on_sse_is_still_an_error(self):
         with pytest.raises(ServingConfigError, match="no stateless mode"):
             _resolve(transport="sse", stateless_http=True)
+
+
+def _tls(**overrides) -> TlsConfig | None:
+    kwargs = {
+        "transport": "http",
+        "cert_path": None,
+        "key_path": None,
+        "key_password": None,
+    }
+    kwargs.update(overrides)
+    return resolve_tls(**kwargs)
+
+
+class TestResolveTls:
+    def test_nothing_configured_serves_plain_http(self):
+        assert _tls() is None
+
+    @pytest.mark.parametrize("transport", ["http", "sse"])
+    def test_cert_and_key_enable_tls_on_network_transports(self, tmp_path, transport):
+        files = write_self_signed(tmp_path)
+        tls = _tls(transport=transport, cert_path=files.cert, key_path=files.key)
+        assert tls == TlsConfig(files.cert, files.key, None)
+        assert tls.uvicorn_kwargs() == {
+            "ssl_certfile": files.cert,
+            "ssl_keyfile": files.key,
+        }
+
+    def test_encrypted_key_with_its_password(self, tmp_path):
+        files = write_self_signed(tmp_path, password=KEY_PHRASE)
+        tls = _tls(cert_path=files.cert, key_path=files.key, key_password=KEY_PHRASE)
+        assert tls.uvicorn_kwargs()["ssl_keyfile_password"] == KEY_PHRASE
+
+    def test_empty_password_is_treated_as_unset(self, tmp_path):
+        files = write_self_signed(tmp_path)
+        tls = _tls(cert_path=files.cert, key_path=files.key, key_password="")
+        assert tls.key_password is None
+        assert "ssl_keyfile_password" not in tls.uvicorn_kwargs()
+
+    def test_repr_hides_the_password(self, tmp_path):
+        files = write_self_signed(tmp_path, password=KEY_PHRASE)
+        tls = _tls(cert_path=files.cert, key_path=files.key, key_password=KEY_PHRASE)
+        assert KEY_PHRASE not in repr(tls)
+
+    @pytest.mark.parametrize(
+        ("given", "missing"),
+        [("cert_path", "--tls-key-path"), ("key_path", "--tls-cert-path")],
+    )
+    def test_cert_and_key_are_required_together(self, tmp_path, given, missing):
+        files = write_self_signed(tmp_path)
+        path = files.cert if given == "cert_path" else files.key
+        with pytest.raises(ServingConfigError, match=missing):
+            _tls(**{given: path})
+
+    def test_password_without_cert_is_an_error(self):
+        with pytest.raises(ServingConfigError, match="--tls-key-password requires"):
+            _tls(key_password=KEY_PHRASE)
+
+    def test_ignored_with_a_warning_on_stdio(self, tmp_path, caplog):
+        files = write_self_signed(tmp_path)
+        assert _tls(transport="stdio", cert_path=files.cert, key_path=files.key) is None
+        assert "ignoring them for transport=stdio" in caplog.text
+
+    @pytest.mark.parametrize(
+        ("missing", "flag"),
+        [("cert", "--tls-cert-path"), ("key", "--tls-key-path")],
+    )
+    def test_missing_file_is_an_error(self, tmp_path, missing, flag):
+        files = write_self_signed(tmp_path)
+        paths = {"cert_path": files.cert, "key_path": files.key}
+        paths[f"{missing}_path"] = str(tmp_path / "absent.pem")
+        with pytest.raises(ServingConfigError, match=f"{flag} file not found"):
+            _tls(**paths)
+
+    def test_key_that_does_not_match_the_certificate(self, tmp_path):
+        first = write_self_signed(tmp_path, name="first")
+        second = write_self_signed(tmp_path, name="second")
+        with pytest.raises(ServingConfigError, match="Could not load"):
+            _tls(cert_path=first.cert, key_path=second.key)
+
+    def test_wrong_password(self, tmp_path):
+        files = write_self_signed(tmp_path, password=KEY_PHRASE)
+        with pytest.raises(ServingConfigError, match="Could not load") as excinfo:
+            _tls(cert_path=files.cert, key_path=files.key, key_password="wrong")
+        assert "wrong" not in str(excinfo.value)
+
+    def test_encrypted_key_without_password_fails_instead_of_prompting(self, tmp_path):
+        files = write_self_signed(tmp_path, password=KEY_PHRASE)
+        with pytest.raises(ServingConfigError, match="Could not load"):
+            _tls(cert_path=files.cert, key_path=files.key)
+
+    def test_not_pem_is_an_error(self, tmp_path):
+        files = write_self_signed(tmp_path)
+        bogus = tmp_path / "bogus.crt"
+        bogus.write_text("not a certificate")
+        with pytest.raises(ServingConfigError, match="Could not load"):
+            _tls(cert_path=str(bogus), key_path=files.key)

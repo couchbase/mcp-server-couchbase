@@ -102,6 +102,27 @@
           "isSecret": false
         },
         {
+          "name": "CB_MCP_TLS_CERT_PATH",
+          "description": "Path to a PEM certificate (or certificate chain) file for this MCP server. When set together with CB_MCP_TLS_KEY_PATH, the server serves HTTPS instead of plain HTTP. Only honored with the http and sse transports. Not related to CB_CA_CERT_PATH/CB_CLIENT_CERT_PATH, which secure the connection to the cluster.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_TLS_KEY_PATH",
+          "description": "Path to the PEM private key for CB_MCP_TLS_CERT_PATH. Required together with CB_MCP_TLS_CERT_PATH.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_TLS_KEY_PASSWORD",
+          "description": "Password for CB_MCP_TLS_KEY_PATH, if the private key is encrypted.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
           "name": "CB_MCP_DISABLED_TOOLS",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
           "isRequired": false,
@@ -471,6 +492,30 @@
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--tls-cert-path",
+          "description": "Path to a PEM certificate (or certificate chain) file for this MCP server. When set together with --tls-key-path, the server serves HTTPS instead of plain HTTP. Only honored with the http and sse transports. Not related to --ca-cert-path/--client-cert-path, which secure the connection to the cluster.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--tls-key-path",
+          "description": "Path to the PEM private key for --tls-cert-path. Required together with --tls-cert-path.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--tls-key-password",
+          "description": "Password for --tls-key-path, if the private key is encrypted.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
         },
         {
           "type": "named",
@@ -879,6 +924,27 @@
           "isSecret": false
         },
         {
+          "name": "CB_MCP_TLS_CERT_PATH",
+          "description": "Path to a PEM certificate (or certificate chain) file for this MCP server. When set together with CB_MCP_TLS_KEY_PATH, the server serves HTTPS instead of plain HTTP. Only honored with the http and sse transports. Not related to CB_CA_CERT_PATH/CB_CLIENT_CERT_PATH, which secure the connection to the cluster.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_TLS_KEY_PATH",
+          "description": "Path to the PEM private key for CB_MCP_TLS_CERT_PATH. Required together with CB_MCP_TLS_CERT_PATH.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_TLS_KEY_PASSWORD",
+          "description": "Password for CB_MCP_TLS_KEY_PATH, if the private key is encrypted.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
+        },
+        {
           "name": "CB_MCP_DISABLED_TOOLS",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
           "isRequired": false,
@@ -1199,6 +1265,30 @@
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--tls-cert-path",
+          "description": "Path to a PEM certificate (or certificate chain) file for this MCP server. When set together with --tls-key-path, the server serves HTTPS instead of plain HTTP. Only honored with the http and sse transports. Not related to --ca-cert-path/--client-cert-path, which secure the connection to the cluster.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--tls-key-path",
+          "description": "Path to the PEM private key for --tls-cert-path. Required together with --tls-cert-path.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "type": "named",
+          "name": "--tls-key-password",
+          "description": "Password for --tls-key-path, if the private key is encrypted.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
         },
         {
           "type": "named",
@@ -1549,6 +1639,27 @@
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
+        },
+        {
+          "name": "CB_MCP_TLS_CERT_PATH",
+          "description": "Path to a PEM certificate (or certificate chain) file for this MCP server. When set together with CB_MCP_TLS_KEY_PATH, the server serves HTTPS instead of plain HTTP. Only honored with the http and sse transports. Not related to CB_CA_CERT_PATH/CB_CLIENT_CERT_PATH, which secure the connection to the cluster.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_TLS_KEY_PATH",
+          "description": "Path to the PEM private key for CB_MCP_TLS_CERT_PATH. Required together with CB_MCP_TLS_CERT_PATH.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_TLS_KEY_PASSWORD",
+          "description": "Password for CB_MCP_TLS_KEY_PATH, if the private key is encrypted.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
         },
         {
           "name": "CB_MCP_DISABLED_TOOLS",
@@ -1925,6 +2036,27 @@
           "isRequired": false,
           "format": "boolean",
           "isSecret": false
+        },
+        {
+          "name": "CB_MCP_TLS_CERT_PATH",
+          "description": "Path to a PEM certificate (or certificate chain) file for this MCP server. When set together with CB_MCP_TLS_KEY_PATH, the server serves HTTPS instead of plain HTTP. Only honored with the http and sse transports. Not related to CB_CA_CERT_PATH/CB_CLIENT_CERT_PATH, which secure the connection to the cluster.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_TLS_KEY_PATH",
+          "description": "Path to the PEM private key for CB_MCP_TLS_CERT_PATH. Required together with CB_MCP_TLS_CERT_PATH.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_TLS_KEY_PASSWORD",
+          "description": "Password for CB_MCP_TLS_KEY_PATH, if the private key is encrypted.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true
         },
         {
           "name": "CB_MCP_DISABLED_TOOLS",
