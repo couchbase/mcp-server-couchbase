@@ -23,7 +23,8 @@ tests/
     ├── conftest.py
     ├── sdk/                  # the eval engine (agent, judge, scorer, matcher, ...)
     ├── tool_calling/         # "did the LLM pick the right tool + params?"
-    └── result_validation/    # "is the LLM's final answer correct?"  (LLM-as-judge)
+    ├── result_validation/    # "is the LLM's final answer correct?"  (LLM-as-judge)
+    └── operational_insights/ # same two axes for the Operational Insights server; env-gated
 ```
 
 ## Tiers
@@ -38,6 +39,8 @@ tests/
 | Perf | `tests/perf/` | `perf` | Optional (`test_live_cluster.py` only) | No |
 | Accuracy | `tests/accuracy/` | `accuracy` | Yes | Yes |
 | └ Result validation | `tests/accuracy/result_validation/` | `accuracy` + `result_eval` | Yes | Yes |
+| └ Accuracy (Operational Insights) | `tests/accuracy/operational_insights/tool_calling/` | `accuracy` + `operational_insights` | Yes (Operational Insights) | Yes |
+| └ Result validation (Operational Insights) | `tests/accuracy/operational_insights/result_validation/` | `accuracy` + `operational_insights` + `result_eval` | Yes (Operational Insights) | Yes |
 
 The accuracy tier has two axes (see [Accuracy tier details](#accuracy-tier-details)):
 tool-calling tests under `tool_calling/` (marker `accuracy`), and answer-correctness
@@ -106,7 +109,11 @@ applied automatically by directory — test files carry no `@pytest.mark.accurac
 - **Perf** — in-process performance tests, opt-in via `CB_MCP_PERF=1`; not run in CI.
 - **Accuracy** — drive an OpenAI tool-calling agent against the live MCP
   server and score the resulting tool calls. See [Accuracy tier
-  details](#accuracy-tier-details) below.
+  details](#accuracy-tier-details) below. The Operational Insights cases under
+  `tests/accuracy/operational_insights/` need the `CB_OPERATIONAL_INSIGHTS_*`
+  credentials instead of the Couchbase ones; without them the whole directory
+  is skipped, not failed. See [Operational Insights
+  cases](#operational-insights-cases).
 
 ## Running
 
@@ -138,6 +145,9 @@ pytest tests/accuracy/tool_calling     # or: pytest -m "accuracy and not result_
 # just the result-validation axis (answer correctness, LLM-as-judge)
 pytest tests/accuracy/result_validation  # or: pytest -m result_eval
 
+# just the Operational Insights accuracy cases (needs OI creds + OPENAI_API_KEY)
+pytest tests/accuracy/operational_insights  # or: pytest -m "accuracy and operational_insights"
+
 # CI fast-path: skip the LLM tier
 pytest -m "not accuracy"
 ```
@@ -152,6 +162,16 @@ export CB_PASSWORD="..."
 export CB_MCP_TEST_BUCKET="travel-sample"
 export CB_MCP_TEST_SCOPE="_default"
 export CB_MCP_TEST_COLLECTION="_default"
+
+# Operational Insights (integration + accuracy for the operational-insights server)
+export CB_OPERATIONAL_INSIGHTS_CONNECTION_STRING="http://127.0.0.1:8095"
+export CB_OPERATIONAL_INSIGHTS_USERNAME="..."
+export CB_OPERATIONAL_INSIGHTS_PASSWORD="..."
+# Optional: the keyspace for the OI schema-inference accuracy cases
+# (default: travel-sample.inventory.airline)
+# export CB_OPERATIONAL_INSIGHTS_TEST_DATABASE="travel-sample"
+# export CB_OPERATIONAL_INSIGHTS_TEST_SCOPE="inventory"
+# export CB_OPERATIONAL_INSIGHTS_TEST_COLLECTION="airline"
 
 # OpenAI (accuracy only)
 export OPENAI_API_KEY="sk-..."
@@ -207,6 +227,15 @@ any laptop.
 - [`accuracy/conftest.py`](accuracy/conftest.py) — accuracy-only
   fixtures (`accuracy_client`, `openai_agent`, `judge`, `result_storage`,
   etc.) and the directory-based auto-marking.
+- [`accuracy/operational_insights/conftest.py`](accuracy/operational_insights/conftest.py) —
+  overrides `accuracy_client` and `openai_agent` for the Operational Insights
+  server (spawns `mcp_server operational-insights`; the agent prompt names
+  databases, not buckets), adds the `schema_keyspace` fixture, and applies the
+  `operational_insights` / `result_eval` markers plus the env-gated skip.
+- [`accuracy/operational_insights/_seeding.py`](accuracy/operational_insights/_seeding.py) —
+  OI seed/cleanup hooks. They run DDL/DML through
+  `operational_insights_run_query_sync` with `call_tool_silent`, because the
+  shared `accuracy/sdk/seeding.py` helpers call operational-server tools.
 
 ---
 
@@ -317,6 +346,37 @@ a correct answer must contain. There are two expectation styles:
 The judge defaults to the agent model; set `CB_ACCURACY_JUDGE_MODEL` to grade
 with a stronger model than the one under test.
 
+## Operational Insights cases
+
+`tests/accuracy/operational_insights/` runs both axes against the
+`operational-insights` server. It has 20 tool-calling cases and 13
+result-validation cases.
+
+| File | Family | Cases |
+| --- | --- | --- |
+| `tool_calling/test_oi_metadata.py` | databases / scopes / collections / schema | 7 |
+| `tool_calling/test_oi_query.py` | sync query, explain, async start, `copy_to_*` export | 5 |
+| `tool_calling/test_oi_index.py` | list indexes, create index (scalar, composite, array/UNNEST) | 5 |
+| `tool_calling/test_oi_async_lifecycle.py` | get results / discard / cancel an async query | 3 |
+| `result_validation/test_oi_metadata.py` | metadata tools on seeded scopes, collections, and documents | 5 |
+| `result_validation/test_oi_query.py` | sync query, explain, async lifecycle on seeded documents | 5 |
+| `result_validation/test_oi_index.py` | list and create indexes on a seeded collection | 3 |
+
+Most cases seed their own scope, collection, and documents with unique names,
+so the expected answer is fixed. The schema-inference cases need real documents
+instead. They use the `CB_OPERATIONAL_INSIGHTS_TEST_*` keyspace if it is set,
+and travel-sample's `inventory.airline` if it is not.
+
+CI (`.github/workflows/accuracy.yml`) runs the operational and Operational
+Insights cases in the same job. The OI cluster starts from
+`scripts/operational_insights_ci_cluster/docker-compose.yml` on ports
+18091/18095, so it does not conflict with the Couchbase service container.
+`scripts/operational_insights_ci_cluster/load_travel_sample.sh` then seeds a
+small travel-sample `inventory.airline` collection with SQL++. To run the OI
+cases locally, start the cluster as described for the [Operational Insights
+integration tier](#tiers), run `load_travel_sample.sh`, and set the
+`CB_OPERATIONAL_INSIGHTS_*` variables.
+
 ## Results
 
 Each run writes one JSON file to `tests/accuracy/results/<run_id>.json` with:
@@ -337,9 +397,20 @@ Each run writes one JSON file to `tests/accuracy/results/<run_id>.json` with:
        expected_tools=[ExpectedToolCall(...)],
        seed=...,       # optional; use accuracy.sdk.seed_document(...)
        cleanup=...,    # optional; use accuracy.sdk.delete_document(...)
+       scorer=...,     # optional; see below
    )
    ```
 3. Add the new `test_id` to the file's `*_CASE_IDS` list.
+
+Set `scorer` only when the 0 / 0.75 / 1.0 rubric cannot express the expected
+result, for example "either of two tools, with these arguments". It takes the
+captured tool calls and returns the score. That score replaces
+`calculate_tool_calling_accuracy` and is also the score saved in the results
+file. See `_score_export` in
+`accuracy/operational_insights/tool_calling/test_oi_query.py`.
+
+For an Operational Insights case, use the hooks in
+`accuracy/operational_insights/_seeding.py`, not `accuracy.sdk.seed_document`.
 
 ## Adding a result-validation case
 
