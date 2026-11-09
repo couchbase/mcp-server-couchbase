@@ -17,6 +17,7 @@ from conftest import (
 from cb_mcp.servers.operational.constants import FASTMCP_SERVER_NAME
 
 from ._census import EXPECTED_TOOLS, TOOL_REQUIRED_PARAMS, TOOLS_BY_CATEGORY
+from ._deployment import expected_on_target
 
 
 @pytest.mark.asyncio
@@ -25,7 +26,7 @@ async def test_tools_are_registered() -> None:
     async with create_mcp_session() as session:
         tools_response = await session.list_tools()
         tool_names = {tool.name for tool in tools_response.tools}
-        missing = EXPECTED_TOOLS - tool_names
+        missing = expected_on_target(EXPECTED_TOOLS) - tool_names
         assert not missing, f"Missing MCP tools: {sorted(missing)}"
 
 
@@ -72,8 +73,11 @@ async def test_tools_have_required_parameters() -> None:
         # Build a map of tool name -> tool for easy lookup
         tools_map = {tool.name: tool for tool in tools_response.tools}
 
+        expected = expected_on_target(set(TOOL_REQUIRED_PARAMS))
         errors = []
         for tool_name, expected_params in TOOL_REQUIRED_PARAMS.items():
+            if tool_name not in expected:
+                continue
             if tool_name not in tools_map:
                 errors.append(f"{tool_name}: tool not found")
                 continue
@@ -100,7 +104,7 @@ async def test_server_tools_are_registered() -> None:
         tools_response = await session.list_tools()
         tool_names = {tool.name for tool in tools_response.tools}
 
-        missing = TOOLS_BY_CATEGORY["server"] - tool_names
+        missing = expected_on_target(TOOLS_BY_CATEGORY["server"]) - tool_names
         assert not missing, f"Missing server tools: {sorted(missing)}"
 
 
@@ -111,7 +115,7 @@ async def test_kv_tools_are_registered() -> None:
         tools_response = await session.list_tools()
         tool_names = {tool.name for tool in tools_response.tools}
 
-        missing = TOOLS_BY_CATEGORY["kv"] - tool_names
+        missing = expected_on_target(TOOLS_BY_CATEGORY["kv"]) - tool_names
         assert not missing, f"Missing KV tools: {sorted(missing)}"
 
 
@@ -122,7 +126,7 @@ async def test_query_tools_are_registered() -> None:
         tools_response = await session.list_tools()
         tool_names = {tool.name for tool in tools_response.tools}
 
-        missing = TOOLS_BY_CATEGORY["query"] - tool_names
+        missing = expected_on_target(TOOLS_BY_CATEGORY["query"]) - tool_names
         assert not missing, f"Missing query tools: {sorted(missing)}"
 
 
@@ -133,7 +137,7 @@ async def test_index_tools_are_registered() -> None:
         tools_response = await session.list_tools()
         tool_names = {tool.name for tool in tools_response.tools}
 
-        missing = TOOLS_BY_CATEGORY["index"] - tool_names
+        missing = expected_on_target(TOOLS_BY_CATEGORY["index"]) - tool_names
         assert not missing, f"Missing index tools: {sorted(missing)}"
 
 
@@ -144,7 +148,7 @@ async def test_fts_tools_are_registered() -> None:
         tools_response = await session.list_tools()
         tool_names = {tool.name for tool in tools_response.tools}
 
-        missing = TOOLS_BY_CATEGORY["fts"] - tool_names
+        missing = expected_on_target(TOOLS_BY_CATEGORY["fts"]) - tool_names
         assert not missing, f"Missing FTS tools: {sorted(missing)}"
 
 
@@ -155,7 +159,7 @@ async def test_vector_search_tools_are_registered() -> None:
         tools_response = await session.list_tools()
         tool_names = {tool.name for tool in tools_response.tools}
 
-        missing = TOOLS_BY_CATEGORY["vector_search"] - tool_names
+        missing = expected_on_target(TOOLS_BY_CATEGORY["vector_search"]) - tool_names
         assert not missing, f"Missing vector search tools: {sorted(missing)}"
 
 
@@ -166,7 +170,7 @@ async def test_management_tools_are_registered() -> None:
         tools_response = await session.list_tools()
         tool_names = {tool.name for tool in tools_response.tools}
 
-        missing = TOOLS_BY_CATEGORY["management"] - tool_names
+        missing = expected_on_target(TOOLS_BY_CATEGORY["management"]) - tool_names
         assert not missing, f"Missing management tools: {sorted(missing)}"
 
 
@@ -177,7 +181,7 @@ async def test_performance_tools_are_registered() -> None:
         tools_response = await session.list_tools()
         tool_names = {tool.name for tool in tools_response.tools}
 
-        missing = TOOLS_BY_CATEGORY["performance"] - tool_names
+        missing = expected_on_target(TOOLS_BY_CATEGORY["performance"]) - tool_names
         assert not missing, f"Missing performance tools: {sorted(missing)}"
 
 
@@ -186,14 +190,14 @@ async def test_query_admin_tools_are_registered() -> None:
     """Verify all query-service admin tools are registered.
 
     Like the other REST-only tools above, these are only advertised on a
-    self-managed connection — see ``test_deployment_gating.py`` for the
-    Capella-withholding assertions.
+    self-managed connection, so on Capella nothing is expected here — see
+    ``test_deployment_gating.py`` for the Capella-withholding assertions.
     """
     async with create_mcp_session() as session:
         tools_response = await session.list_tools()
         tool_names = {tool.name for tool in tools_response.tools}
 
-        missing = TOOLS_BY_CATEGORY["query_admin"] - tool_names
+        missing = expected_on_target(TOOLS_BY_CATEGORY["query_admin"]) - tool_names
         assert not missing, f"Missing query-service admin tools: {sorted(missing)}"
 
 

@@ -151,6 +151,26 @@ TOOLS_BY_CATEGORY = {
     },
 }
 
+#: Tools the server registers only on a self-managed connection; on Capella they
+#: are withheld (see ``_deployment.py``). Mirrors ``TOOL_DEPLOYMENT_REQUIREMENTS``,
+#: spelled out rather than imported for the same reason as ``REST_ONLY_TOOLS`` in
+#: ``test_deployment_gating.py``: a mistaken edit to that mapping should fail a
+#: test, not silently redefine what these tests expect.
+ON_PREM_ONLY_TOOLS = frozenset(
+    {
+        "get_cluster_metrics",
+        "get_cluster_tasks",
+        "get_bucket_config",
+        "get_cluster_health_snapshot",
+        "get_cluster_system_events",
+        "get_index_stats",
+        "get_cluster_query_vitals",
+        "get_active_queries",
+        "delete_active_query",
+        "discover_tool_input_values",
+    }
+)
+
 # Expected required parameters for tools that need them
 TOOL_REQUIRED_PARAMS = {
     # tool_name is the only required argument -- omitting search_keywords is browse mode.
