@@ -46,7 +46,7 @@ from ..utils.environment import log_environment_info
 from ..utils.telemetry import send_install_ping
 from ..version import server_version
 from .contracts import ProviderLifecycle
-from .serving import apply_thread_pool_limit
+from .serving import TlsConfig, apply_thread_pool_limit
 from .spec import ServerSpec
 
 logger = logging.getLogger(f"{LOGGER_NAMESPACE}.core.app")
@@ -347,6 +347,7 @@ def run_app(
     host: str | None = None,
     port: int | None = None,
     stateless_http: bool | None = None,
+    tls: TlsConfig | None = None,
 ) -> None:
     """Run ``mcp`` on ``transport``, translating our transport names to the SDK's.
 
@@ -362,6 +363,10 @@ def run_app(
     forwarded and FastMCP decides as it always has, so an embedding host
     written before this parameter existed keeps its behaviour. SSE has no
     stateless mode, so it only ever receives ``False``.
+
+    ``tls``, when given, serves HTTPS on network transports by handing the
+    certificate and key to Uvicorn (see ``cb_mcp.core.serving.resolve_tls``).
+    Omitted, the server listens on plain HTTP as before.
     """
     sdk_transport = NETWORK_TRANSPORTS_SDK_MAPPING.get(transport, transport)
     run_kwargs: dict[str, Any] = {}
@@ -371,4 +376,6 @@ def run_app(
             run_kwargs["stateless_http"] = (
                 stateless_http and transport == STREAMABLE_HTTP_TRANSPORT
             )
+        if tls is not None:
+            run_kwargs["uvicorn_config"] = tls.uvicorn_kwargs()
     mcp.run(transport=sdk_transport, show_banner=False, **run_kwargs)  # type: ignore[arg-type]
