@@ -31,6 +31,8 @@ from conftest import (
 
 from cb_mcp.servers.operational.constants import FASTMCP_SERVER_NAME
 
+from ._deployment import skip_if_capella
+
 
 @pytest.mark.asyncio
 async def test_get_server_configuration_status() -> None:
@@ -221,6 +223,7 @@ async def test_get_cluster_metrics() -> None:
     Self-managed Couchbase Server 7.6+ only. Against Capella, expect a clean
     {"status": "error", ...} envelope rather than an unhandled exception.
     """
+    skip_if_capella("get_cluster_metrics")
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "get_cluster_metrics",
@@ -260,6 +263,7 @@ async def test_get_cluster_metrics() -> None:
 @pytest.mark.asyncio
 async def test_get_cluster_metrics_invalid_metric_reports_per_spec_error() -> None:
     """An unrecognized metric name should surface inline, not fail the whole call."""
+    skip_if_capella("get_cluster_metrics")
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "get_cluster_metrics",
@@ -301,6 +305,7 @@ async def test_get_cluster_tasks() -> None:
     An idle cluster still reports a rebalance task with status "notRunning", so
     this asserts on per-task "status" rather than on the array being empty.
     """
+    skip_if_capella("get_cluster_tasks")
     async with create_mcp_session() as session:
         response = await session.call_tool("get_cluster_tasks")
         payload = extract_payload(response)
@@ -436,6 +441,7 @@ async def test_get_cluster_health_snapshot() -> None:
     orchestrator being identified — the merge's failure mode is a quiet one,
     where nothing raises but no node is ever flagged.
     """
+    skip_if_capella("get_cluster_health_snapshot")
     async with create_mcp_session() as session:
         response = await session.call_tool("get_cluster_health_snapshot")
         payload = extract_payload(response)
@@ -506,6 +512,7 @@ async def test_get_cluster_health_snapshot_is_internally_consistent() -> None:
     nodes can look self-consistent once and name a different node set or
     orchestrator on the next call against an unchanged cluster.
     """
+    skip_if_capella("get_cluster_health_snapshot")
     async with create_mcp_session() as session:
         responses = [
             await session.call_tool("get_cluster_health_snapshot") for _ in range(2)
@@ -579,6 +586,7 @@ async def test_get_cluster_system_events() -> None:
     there is silent — the call still succeeds, it just returns the wrong end
     of the window.
     """
+    skip_if_capella("get_cluster_system_events")
     async with create_mcp_session() as session:
         response = await session.call_tool("get_cluster_system_events")
         payload = _system_events_or_skip(response, extract_payload(response))
@@ -602,6 +610,7 @@ async def test_get_cluster_system_events() -> None:
 @pytest.mark.asyncio
 async def test_get_cluster_system_events_respects_limit() -> None:
     """Verify the limit is forwarded to the server and bounds the result."""
+    skip_if_capella("get_cluster_system_events")
     async with create_mcp_session() as session:
         response = await session.call_tool("get_cluster_system_events", {"limit": 5})
         payload = _system_events_or_skip(response, extract_payload(response))
@@ -619,6 +628,7 @@ async def test_get_cluster_system_events_sends_no_version_specific_params() -> N
     exposes only since_time and limit, so this passes on both — the regression it
     guards is a filter parameter creeping back into the query string.
     """
+    skip_if_capella("get_cluster_system_events")
     async with create_mcp_session() as session:
         for arguments in ({}, {"limit": 3}, {"since_time": "2020-01-01T00:00:00Z"}):
             response = await session.call_tool("get_cluster_system_events", arguments)
@@ -633,6 +643,7 @@ async def test_get_cluster_system_events_since_time_is_inclusive() -> None:
     The paging advice in the docstring — page on next_since_time, dedupe on
     uuid — is only correct if sinceTime is inclusive, so that is pinned here.
     """
+    skip_if_capella("get_cluster_system_events")
     async with create_mcp_session() as session:
         response = await session.call_tool("get_cluster_system_events")
         payload = _system_events_or_skip(response, extract_payload(response))
@@ -659,6 +670,7 @@ async def test_get_cluster_system_events_rejects_unbounded_limit() -> None:
     The full event log is several megabytes; forwarding -1 would put all of it
     into a single tool result.
     """
+    skip_if_capella("get_cluster_system_events")
     async with create_mcp_session() as session:
         for limit in (-1, 10000):
             response = await session.call_tool(
