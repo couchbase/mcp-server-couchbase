@@ -20,8 +20,8 @@ The rule these pin:
   error says which entry is wrong and why, so the operator can fix it without
   reading the source.
 
-The wildcard class is marked OPEN: it encodes a behaviour that was discussed but
-not finally decided; change or drop it when it is.
+A ``*`` in an entry's host matches any text, dots included; it is not allowed in
+the scheme or port.
 """
 
 from __future__ import annotations
@@ -329,7 +329,7 @@ class TestHostHeaderIsNotUsed:
         assert _admitted(response)
 
 
-# --- OPEN: wildcards (discussed; leaning towards fnmatch-style) -----------------
+# --- Wildcards: a '*' in the host matches any text ------------------------------
 
 
 @pytest.mark.asyncio
