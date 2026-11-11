@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import socket
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
@@ -65,7 +65,7 @@ def utc_timestamp() -> str:
     Sync Gateway's audit format. ``datetime.isoformat`` would emit microseconds
     and a ``+00:00`` offset, so the value is assembled explicitly.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return f"{now.strftime('%Y-%m-%dT%H:%M:%S')}.{now.microsecond // 1000:03d}Z"
 
 
