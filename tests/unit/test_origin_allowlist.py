@@ -20,7 +20,8 @@ The rule these pin:
   error says which entry is wrong and why, so the operator can fix it without
   reading the source.
 
-A ``*`` in an entry's host matches any text, dots included; it is not allowed in
+A ``*`` in an entry's host matches hostname characters, dots included, but never a
+port or path; it is not allowed in
 the scheme or port.
 """
 
@@ -329,7 +330,7 @@ class TestHostHeaderIsNotUsed:
         assert _admitted(response)
 
 
-# --- Wildcards: a '*' in the host matches any text ------------------------------
+# --- Wildcards: a '*' in the host stays inside the host ------------------------------
 
 
 @pytest.mark.asyncio
@@ -359,6 +360,19 @@ class TestWildcards:
     )
     async def test_non_matching_origins_are_rejected(self, make_app, origin):
         assert (await _send(make_app(self.PATTERN), origin=origin)).status_code == 403
+
+    @pytest.mark.parametrize(
+        "origin",
+        [
+            "https://app.example.com:8443",  # the entry names the default port
+            "https://app.example.com/x",
+            "https://app.example.com@evil.com",
+        ],
+    )
+    async def test_trailing_wildcard_stays_inside_the_host(self, make_app, origin):
+        app = make_app("https://app.example.*")
+        assert _admitted(await _send(app, origin="https://app.example.com"))
+        assert (await _send(app, origin=origin)).status_code == 403
 
     async def test_wildcard_and_exact_entries_combine(self, make_app):
         app = make_app("https://*.example.com,http://localhost:3000")
@@ -521,6 +535,7 @@ BAD_ENTRIES = [
     pytest.param("https://example.com:99999", r"port", id="port-out-of-range"),
     pytest.param("https://", r"host", id="no-host"),
     pytest.param("null", r"null.*(iframe|sandbox|file)", id="null"),
+    pytest.param("https://bücher.example", r"non-ASCII.*xn--bcher-kva", id="idn-host"),
 ]
 
 
@@ -712,10 +727,9 @@ class TestCors:
         assert (
             response.headers["access-control-allow-origin"] == "https://app.example.com"
         )
-        assert (
-            "mcp-session-id"
-            in response.headers.get("access-control-expose-headers", "").lower()
-        )
+        exposed = response.headers.get("access-control-expose-headers", "").lower()
+        assert "mcp-session-id" in exposed
+        assert "www-authenticate" in exposed
 
     async def test_unlisted_origins_get_no_cors_headers_on_the_rejection(
         self, make_app

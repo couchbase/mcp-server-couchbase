@@ -183,7 +183,7 @@ def transport_options(*, default_port: int) -> Callable:
             callback=validate_allowed_origins,
             help="Comma-separated origins (scheme://host[:port], for example "
             "https://app.example.com) allowed to call the server over http or "
-            "sse; a '*' in the host matches any text. When set, requests with "
+            "sse; a '*' in the host matches any hostname characters (never a port). When set, requests with "
             "no Origin header (most non-browser MCP clients) are rejected "
             "too, and /health stays open. Unset, empty or a lone '*' allows "
             "every origin. Ignored with --transport=stdio. This guards "

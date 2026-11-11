@@ -55,7 +55,8 @@ An entry is `scheme://host[:port]`:
 
 - Any scheme works: `https://`, `chrome-extension://<id>`, `vscode-webview://<id>`.
 - Default ports are optional: `https://a.com` and `https://a.com:443` are the same entry.
-- A `*` in the **host** matches any text: `https://*.example.com`. It is not allowed in the scheme or port.
+- A `*` in the **host** matches any run of hostname characters (letters, digits, `.`, `-`, `_`): `https://*.example.com`. It is not allowed in the scheme or port, and it never reaches into the port, so `https://app.example.*` admits `https://app.example.com` but not `https://app.example.com:8443`.
+- **Internationalized hostnames are rejected, not converted.** Browsers send them in punycode, so `https://bücher.example` could never match what a browser sends (`https://xn--bcher-kva.example`). Rather than accept an entry that silently admits nobody, startup fails and the error shows the form to list. Converting automatically would not work for wildcards, because `*` is not valid in IDNA.
 - Matching ignores case.
 
 A lone `*` means "allow everything", but combining it with other entries is an
@@ -82,8 +83,11 @@ origins on the list**:
 - MCP calls are `POST`s with `Content-Type: application/json`, so the browser
   first sends a preflight `OPTIONS` request asking "may this origin send that?".
   The server answers it with `Access-Control-Allow-Origin: <the origin>`.
-- Replies to listed origins carry the same header. `Mcp-Session-Id` is exposed
-  as well, because an MCP client reads it from the `initialize` reply.
+- Replies to listed origins carry the same header. Two response headers are
+  exposed, because browsers hide all others from page code: `Mcp-Session-Id`
+  (an MCP client reads it from the `initialize` reply) and `WWW-Authenticate`
+  (a 401 challenge carries the URL a browser OAuth client uses to discover the
+  authorization server).
 - An origin that is not listed gets no CORS headers, and its request is
   refused with `403` anyway.
 - With no list set, no CORS headers are sent and nothing changes.

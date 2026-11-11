@@ -37,7 +37,7 @@ ORIGIN_FORMAT_HINT = (
     "Each entry must be an origin: scheme://host[:port], for example "
     "https://app.example.com, http://localhost:3000 or "
     "chrome-extension://<extension-id>. A '*' in the host "
-    "(https://*.example.com) matches any text. Use '*' on its own to allow "
+    "(https://*.example.com) matches any hostname characters. Use '*' on its own to allow "
     "every origin."
 )
 
@@ -132,6 +132,7 @@ def _normalize(entry: str) -> str:
     host = parts.hostname
     if not host:
         raise _BadEntryError("missing host")
+    _check_ascii_host(host)
     port = _port(parts)
 
     # urlsplit has already lowercased the scheme and the host.
@@ -139,6 +140,29 @@ def _normalize(entry: str) -> str:
     if port is not None and port != _DEFAULT_PORTS.get(parts.scheme):
         origin += f":{port}"
     return origin
+
+
+def _check_ascii_host(host: str) -> None:
+    """Reject internationalized hostnames instead of accepting an entry that can never match.
+
+    Browsers send such a host in punycode (``xn--...``), so an entry written
+    with the original letters would be accepted at startup and then never
+    admit anyone. Failing loudly, with the form to write, beats converting:
+    ``*`` is not valid in IDNA, so a conversion could not cover wildcards.
+    """
+    if host.isascii():
+        return
+    if "*" in host:
+        fix = "write each non-ASCII label in its punycode (xn--) form"
+    else:
+        try:
+            fix = f"list {host.encode('idna').decode('ascii')!r} instead"
+        except UnicodeError:
+            fix = "write it in its punycode (xn--) form"
+    raise _BadEntryError(
+        f"host {host!r} contains non-ASCII characters; browsers send "
+        f"internationalized names in punycode, so {fix}"
+    )
 
 
 def _check_scheme(entry: str, parts: SplitResult) -> None:
@@ -251,10 +275,16 @@ def _origin_header(scope: Scope) -> str | None:
     return None
 
 
+#: What a '*' may stand for: characters that can appear in a hostname. Not '.*',
+#: which would also swallow ':' and '/', so 'https://app.example.*' would admit
+#: 'https://app.example.com:8443' although the entry names the default port.
+_HOST_CHARS = "[a-z0-9._-]*"
+
+
 def _wildcard_regex(entry: str) -> re.Pattern[str]:
     # Not fnmatch: '[' and ']' are literal in an IPv6 origin, but fnmatch
     # would read them as a character class.
-    return re.compile(".*".join(re.escape(part) for part in entry.split("*")))
+    return re.compile(_HOST_CHARS.join(re.escape(part) for part in entry.split("*")))
 
 
 def origin_middleware(allowed_origins: Iterable[str]) -> list[Middleware]:
@@ -263,8 +293,11 @@ def origin_middleware(allowed_origins: Iterable[str]) -> list[Middleware]:
     CORS comes first (outermost) so a browser's preflight ``OPTIONS`` is
     answered before it reaches the MCP app. Only listed origins get
     ``Access-Control-Allow-Origin``: a page we admit can also read the reply,
-    and a page we do not admit never can. ``Mcp-Session-Id`` is exposed
-    because an MCP client reads it from the ``initialize`` response.
+    and a page we do not admit never can. Two response headers are exposed,
+    since browsers hide any others from page code: ``Mcp-Session-Id``, which an
+    MCP client reads from the ``initialize`` response, and ``WWW-Authenticate``,
+    whose 401 challenge carries the ``resource_metadata`` URL a browser OAuth
+    client uses to discover the authorization server.
     """
     origins = tuple(allowed_origins)
     if not origins:
@@ -281,7 +314,7 @@ def origin_middleware(allowed_origins: Iterable[str]) -> list[Middleware]:
             allow_origin_regex=any_listed,
             allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
             allow_headers=["*"],
-            expose_headers=["Mcp-Session-Id"],
+            expose_headers=["Mcp-Session-Id", "WWW-Authenticate"],
         ),
         Middleware(OriginAllowlistMiddleware, allowed_origins=origins),
     ]

@@ -602,11 +602,13 @@ uvx couchbase-mcp-server operational --transport=http \
   --allowed-origins='https://app.example.com,http://localhost:3000,https://*.example.org'
 ```
 
-- Each entry is `scheme://host[:port]`. Any scheme is accepted (`chrome-extension://<id>`, `vscode-webview://<id>`), default ports (80 for `http`, 443 for `https`) are optional, and a `*` in the host matches any text. `*` is not allowed in the scheme or port.
+- Each entry is `scheme://host[:port]`. Any scheme is accepted (`chrome-extension://<id>`, `vscode-webview://<id>`), default ports (80 for `http`, 443 for `https`) are optional, and a `*` in the host matches any hostname characters. `*` is not allowed in the scheme or port.
 - Unset, empty, or a lone `*` means no check: every request is admitted.
 - Once a list is set, a request is admitted only if it carries an `Origin` header matching an entry. **Requests with no `Origin` header are rejected (403)**, which includes most non-browser MCP clients such as desktop apps and CLI agents. Set this only when browsers are the clients you need to admit or defend against. `Origin: null` is always rejected.
 - `/health` stays reachable regardless of `Origin`.
-- Listed origins also receive CORS headers (`Access-Control-Allow-Origin`, with `Mcp-Session-Id` exposed), so a browser page on a listed origin can read the replies. Unlisted origins get none.
+- Listed origins also receive CORS headers (`Access-Control-Allow-Origin`, with `Mcp-Session-Id` and `WWW-Authenticate` exposed), so a browser page on a listed origin can read the replies. Unlisted origins get none.
+- A `*` matches only hostname characters (letters, digits, `.`, `-`, `_`), so it never reaches into the port: `https://app.example.*` admits `https://app.example.com` but not `https://app.example.com:8443`.
+- **Internationalized hostnames are rejected at startup**, not converted. Browsers send them in punycode (`https://xn--bcher-kva.example` for `bücher.example`), so an entry written with the original letters could never match. List the `xn--` form; the startup error shows it for you.
 - A malformed entry stops the server at startup with an error naming each bad entry and why. A lone `*` cannot be combined with other entries.
 - Ignored with the `stdio` transport. The `Host` header is not checked.
 

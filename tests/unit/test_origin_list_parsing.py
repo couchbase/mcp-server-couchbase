@@ -157,6 +157,8 @@ BAD = [
     ("https://", r"missing host"),
     ("https://:3000", r"missing host"),
     ("null", r"null.*(iframe|sandbox|file)"),
+    ("https://bücher.example", r"non-ASCII.*xn--bcher-kva\.example"),
+    ("https://*.bücher.example", r"non-ASCII.*punycode"),
     ("NULL", r"null.*(iframe|sandbox|file)"),
     ("https://a .com", r"whitespace"),
 ]
