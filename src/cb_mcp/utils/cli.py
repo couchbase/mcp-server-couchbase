@@ -16,7 +16,6 @@ from logging import getLogger
 
 import click
 
-from ..core.origin_guard import OriginListError, parse_allowed_origins
 from .constants import LOGGER_NAMESPACE
 from .logging import (
     ParsedLogLevel,
@@ -87,6 +86,14 @@ def validate_allowed_origins(
     ``--workers`` process handoff unchanged and is parsed again in
     ``TransportParams``.
     """
+    # Imported here, not at the top: origin_guard imports cb_mcp.utils (for its
+    # constants), and this module is part of that package's import, so a
+    # top-level import makes "import cb_mcp.core.origin_guard" circular.
+    from ..core.origin_guard import (  # noqa: PLC0415
+        OriginListError,
+        parse_allowed_origins,
+    )
+
     try:
         parse_allowed_origins(value)
     except OriginListError as e:
