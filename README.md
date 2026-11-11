@@ -606,6 +606,7 @@ uvx couchbase-mcp-server operational --transport=http \
 - Unset, empty, or a lone `*` means no check: every request is admitted.
 - Once a list is set, a request is admitted only if it carries an `Origin` header matching an entry. **Requests with no `Origin` header are rejected (403)**, which includes most non-browser MCP clients such as desktop apps and CLI agents. Set this only when browsers are the clients you need to admit or defend against. `Origin: null` is always rejected.
 - `/health` stays reachable regardless of `Origin`.
+- Listed origins also receive CORS headers (`Access-Control-Allow-Origin`, with `Mcp-Session-Id` exposed), so a browser page on a listed origin can read the replies. Unlisted origins get none.
 - A malformed entry stops the server at startup with an error naming each bad entry and why. A lone `*` cannot be combined with other entries.
 - Ignored with the `stdio` transport. The `Host` header is not checked.
 

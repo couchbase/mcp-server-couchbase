@@ -665,3 +665,65 @@ class TestSseTransport:
         missing = await asyncio.wait_for(_send(app, "GET", "/sse"), timeout=5)
         assert evil.status_code == 403
         assert missing.status_code == 403
+
+
+# --- CORS: a listed web page must be able to read the replies -------------------
+
+
+async def _preflight(app, origin: str) -> httpx.Response:
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        return await client.options(
+            "/mcp",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,mcp-session-id",
+            },
+        )
+
+
+@pytest.mark.asyncio
+class TestCors:
+    async def test_preflight_from_a_listed_origin_is_answered(self, make_app):
+        response = await _preflight(make_app(ALLOWED), "https://app.example.com")
+        assert response.status_code == 200
+        assert (
+            response.headers["access-control-allow-origin"] == "https://app.example.com"
+        )
+
+    async def test_preflight_from_an_unlisted_origin_is_not_granted(self, make_app):
+        response = await _preflight(make_app(ALLOWED), "https://evil.com")
+        assert "access-control-allow-origin" not in response.headers
+
+    async def test_replies_to_listed_origins_carry_cors_headers(self, make_app):
+        # /health rather than /mcp: the lifespan does not run in these tests,
+        # so an admitted /mcp call fails inside the MCP layer before CORS can
+        # decorate the reply.
+        response = await _send(
+            make_app(ALLOWED),
+            method="GET",
+            path="/health",
+            origin="https://app.example.com",
+        )
+        assert response.status_code == 200
+        assert (
+            response.headers["access-control-allow-origin"] == "https://app.example.com"
+        )
+        assert (
+            "mcp-session-id"
+            in response.headers.get("access-control-expose-headers", "").lower()
+        )
+
+    async def test_unlisted_origins_get_no_cors_headers_on_the_rejection(
+        self, make_app
+    ):
+        response = await _send(make_app(ALLOWED), origin="https://evil.com")
+        assert response.status_code == 403
+        assert "access-control-allow-origin" not in response.headers
+
+    async def test_no_cors_headers_without_a_list(self, make_app):
+        response = await _send(make_app(None), origin="https://app.example.com")
+        assert "access-control-allow-origin" not in response.headers

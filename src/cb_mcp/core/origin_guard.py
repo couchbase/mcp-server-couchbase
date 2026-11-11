@@ -19,6 +19,7 @@ from collections.abc import Iterable
 from urllib.parse import SplitResult, urlsplit
 
 from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import PlainTextResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -257,7 +258,14 @@ def _wildcard_regex(entry: str) -> re.Pattern[str]:
 
 
 def origin_middleware(allowed_origins: Iterable[str]) -> list[Middleware]:
-    """The middleware stack that enforces ``allowed_origins``; empty when there is no list."""
+    """The middleware stack that enforces ``allowed_origins``; empty when there is no list.
+
+    CORS comes first (outermost) so a browser's preflight ``OPTIONS`` is
+    answered before it reaches the MCP app. Only listed origins get
+    ``Access-Control-Allow-Origin``: a page we admit can also read the reply,
+    and a page we do not admit never can. ``Mcp-Session-Id`` is exposed
+    because an MCP client reads it from the ``initialize`` response.
+    """
     origins = tuple(allowed_origins)
     if not origins:
         return []
@@ -266,4 +274,14 @@ def origin_middleware(allowed_origins: Iterable[str]) -> list[Middleware]:
         "(requests without one are rejected): %s",
         ", ".join(origins),
     )
-    return [Middleware(OriginAllowlistMiddleware, allowed_origins=origins)]
+    any_listed = "|".join(_wildcard_regex(e).pattern for e in origins)
+    return [
+        Middleware(
+            CORSMiddleware,
+            allow_origin_regex=any_listed,
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=["*"],
+            expose_headers=["Mcp-Session-Id"],
+        ),
+        Middleware(OriginAllowlistMiddleware, allowed_origins=origins),
+    ]

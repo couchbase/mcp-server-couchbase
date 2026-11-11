@@ -39,6 +39,7 @@ The same value can come from the `CB_MCP_ALLOWED_ORIGINS` environment variable.
 | List set, request has **no** `Origin` | `403`. |
 | `Origin: null` | Always `403`. It cannot be listed. |
 | `GET /health` | Always admitted. |
+| Origin is on the list | The reply also carries CORS headers, so the page can read it (see [CORS](#cors-letting-listed-pages-read-the-reply)). |
 | `stdio` transport | The option is ignored (a warning is logged). |
 
 The one that surprises people is the fourth row. Browsers always send `Origin`
@@ -59,6 +60,44 @@ An entry is `scheme://host[:port]`:
 
 A lone `*` means "allow everything", but combining it with other entries is an
 error, because the intent would be unclear.
+
+## CORS: letting listed pages read the reply
+
+Browsers have a second rule, separate from the allow-list. A page may *send* a
+request to another origin, but the browser hides the reply from the page unless
+the server says that origin may read it. That permission is called CORS
+(Cross-Origin Resource Sharing), and only the server being called can grant it,
+by adding a header to its reply.
+
+| | Allow-list | CORS |
+| --- | --- | --- |
+| Who enforces it | The server | The browser |
+| What it decides | Whether the server handles the request at all | Whether the page may read the reply |
+| Without it | Unknown pages can call the server | Listed pages can call it but cannot read the answer |
+
+Without CORS the allow-list would admit a listed page and the browser would
+still throw the answer away. So the server also sends CORS headers, **only to
+origins on the list**:
+
+- MCP calls are `POST`s with `Content-Type: application/json`, so the browser
+  first sends a preflight `OPTIONS` request asking "may this origin send that?".
+  The server answers it with `Access-Control-Allow-Origin: <the origin>`.
+- Replies to listed origins carry the same header. `Mcp-Session-Id` is exposed
+  as well, because an MCP client reads it from the `initialize` reply.
+- An origin that is not listed gets no CORS headers, and its request is
+  refused with `403` anyway.
+- With no list set, no CORS headers are sent and nothing changes.
+
+```
+page (https://app.example.com)                 MCP server
+   | -- OPTIONS  Origin: https://app.example.com -->  |  preflight
+   | <- 200  Access-Control-Allow-Origin: ... --------|  listed: allowed
+   | -- POST /mcp  Origin: https://app.example.com -->|  the real call
+   | <- 200 + Access-Control-Allow-Origin: ... -------|  page can read it
+```
+
+CORS only affects browsers. A script can ignore it, which is one more reason
+the allow-list is not authentication.
 
 ## What this does not do
 
@@ -103,7 +142,7 @@ TransportParams.allowed_origins                  (utils/cli_params.py)
 origin_middleware(...)     (origin_guard.py)     -> run_app / create_app
       |
       v
-OriginAllowlistMiddleware                        checks each request
+CORSMiddleware  ->  OriginAllowlistMiddleware    CORS headers, then the check
 ```
 
 1. **Parsing** (`parse_allowed_origins`). Splits the comma list, normalizes each
@@ -126,6 +165,16 @@ OriginAllowlistMiddleware                        checks each request
    Entries without `*` are matched from a set; entries with `*` are turned into
    regular expressions. It does not use `fnmatch` because `[` and `]` in an IPv6
    origin such as `http://[::1]:3000` would be read as a character class.
+
+   In front of it sits Starlette's `CORSMiddleware`, built from the same list
+   (`origin_middleware`), so preflights are answered before the guard runs:
+
+   ```python
+   return [
+       Middleware(CORSMiddleware, allow_origin_regex=any_listed, ...),
+       Middleware(OriginAllowlistMiddleware, allowed_origins=origins),
+   ]
+   ```
 
 3. **Wiring.** `run_app` (`core/app.py`) passes the middleware to FastMCP for
    `http` and `sse`. With `--workers`, `create_app` in `src/mcp_server.py` does
