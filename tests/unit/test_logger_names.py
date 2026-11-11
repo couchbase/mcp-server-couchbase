@@ -54,6 +54,7 @@ EXPECTED_LOGGER_NAMES = {
     "cb_mcp.audit.sink": "couchbase.mcp.audit.sink",
     "cb_mcp.auth": "couchbase.mcp.auth",
     "cb_mcp.core.app": "couchbase.mcp.core.app",
+    "cb_mcp.core.origin_guard": "couchbase.mcp.core.origin_guard",
     "cb_mcp.core.serving": "couchbase.mcp.core.serving",
     "cb_mcp.tool_registration": "couchbase.mcp.tool_registration",
     "cb_mcp.utils.cli": "couchbase.mcp.utils.cli",

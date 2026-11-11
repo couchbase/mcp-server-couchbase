@@ -156,8 +156,16 @@ def _admitted(response: httpx.Response) -> bool:
 class TestNoAllowlist:
     @pytest.mark.parametrize(
         "allowed",
-        [None, "", "   ", ",", " , , "],
-        ids=["unset", "empty", "blank", "comma", "commas-and-blanks"],
+        [None, "", "   ", ",", " , , ", "*", " * "],
+        ids=[
+            "unset",
+            "empty",
+            "blank",
+            "comma",
+            "commas-and-blanks",
+            "bare-star",
+            "bare-star-padded",
+        ],
     )
     async def test_everything_is_admitted(self, make_app, allowed):
         app = make_app(allowed)
@@ -210,6 +218,14 @@ class TestAdmission:
         app = make_app("https://app.example.com:8443")
         assert _admitted(await _send(app, origin="https://app.example.com:8443"))
         assert (await _send(app, origin="https://app.example.com")).status_code == 403
+
+    async def test_other_schemes_are_matched_exactly(self, make_app):
+        """Browser extensions and webviews send their own scheme as the origin."""
+        app = make_app("chrome-extension://abcdef,vscode-webview://1a2b")
+        assert _admitted(await _send(app, origin="chrome-extension://abcdef"))
+        assert _admitted(await _send(app, origin="vscode-webview://1a2b"))
+        assert (await _send(app, origin="chrome-extension://abcdeg")).status_code == 403
+        assert (await _send(app, origin="https://abcdef")).status_code == 403
 
     async def test_ipv6_origin(self, make_app):
         app = make_app("http://[::1]:3000")
@@ -421,7 +437,7 @@ class TestCli:
         "value",
         [
             "app.example.com",  # no scheme
-            "ftp://example.com",  # not http(s)
+            "my_app://example.com",  # '_' is not valid in a scheme
             "https://example.com/path",  # an origin has no path
             "https://example.com?x=1",
             "https://user@example.com",  # no credentials
@@ -455,8 +471,8 @@ class TestCli:
         run_app.assert_not_called()
         uvicorn_run.assert_not_called()
 
-    @pytest.mark.parametrize("value", ["", "  ", ",", " , "])
-    def test_blank_list_is_accepted_as_no_list(self, value):
+    @pytest.mark.parametrize("value", ["", "  ", ",", " , ", "*"])
+    def test_blank_list_or_bare_star_is_accepted_as_no_list(self, value):
         result, run_app, _ = _invoke(
             ["--transport", "http", "--allowed-origins", value]
         )
@@ -495,7 +511,7 @@ class TestCli:
 BAD_ENTRIES = [
     pytest.param("app.example.com", r"scheme", id="no-scheme"),
     pytest.param("*.example.com", r"scheme", id="wildcard-without-scheme"),
-    pytest.param("ftp://example.com", r"scheme.*http|http.*scheme", id="not-http"),
+    pytest.param("my_app://example.com", r"scheme.*not valid", id="invalid-scheme"),
     pytest.param("https://example.com/path", r"path", id="path"),
     pytest.param("https://example.com/", r"path|slash", id="trailing-slash"),
     pytest.param("https://example.com?x=1", r"query", id="query"),
@@ -543,12 +559,12 @@ class TestErrorReporting:
     def test_every_bad_entry_is_reported_in_one_go(self):
         """No fix-one-restart-find-the-next loop."""
         output = _bad_list(
-            "app.example.com,https://ok.example.com,ftp://x.example.com,"
+            "app.example.com,https://ok.example.com,my_app://x.example.com,"
             "https://y.example.com/path"
         )
         for entry in (
             "app.example.com",
-            "ftp://x.example.com",
+            "my_app://x.example.com",
             "https://y.example.com/path",
         ):
             assert entry in output
@@ -586,6 +602,14 @@ class TestErrorReporting:
         output = _bad_list("https://app.example.com/dashboard")
         assert re.search(r"path", output, re.IGNORECASE)
         assert "https://app.example.com" in output
+
+    @pytest.mark.parametrize(
+        "value", ["*,https://a.example.com", "https://a.example.com,*"]
+    )
+    def test_bare_star_cannot_be_mixed_with_other_entries(self, value):
+        output = _bad_list(value)
+        assert "'*'" in output
+        assert re.search(r"cannot be combined", output, re.IGNORECASE)
 
     def test_is_a_usage_error_not_a_traceback(self):
         output = _bad_list("nonsense")

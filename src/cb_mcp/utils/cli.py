@@ -16,6 +16,7 @@ from logging import getLogger
 
 import click
 
+from ..core.origin_guard import OriginListError, parse_allowed_origins
 from .constants import LOGGER_NAMESPACE
 from .logging import (
     ParsedLogLevel,
@@ -72,6 +73,26 @@ def validate_max_query_result_size(
     first); the tolerant parsing in ``max_query_result_size_from`` covers the
     separate case of an embedding host that builds settings without the CLI.
     """
+    return value
+
+
+def validate_allowed_origins(
+    ctx: click.Context, param: click.Parameter, value: str | None
+) -> str | None:
+    """Click callback for ``--allowed-origins``.
+
+    Fails startup on a malformed list, naming every bad entry and why, rather
+    than quietly enforcing a different list than the operator meant. Returns
+    the raw string, not the parsed tuple: it is JSON-native, so it crosses the
+    ``--workers`` process handoff unchanged and is parsed again in
+    ``TransportParams``.
+    """
+    try:
+        parse_allowed_origins(value)
+    except OriginListError as e:
+        raise click.BadParameter(
+            f"{e}\n(set by --allowed-origins or CB_MCP_ALLOWED_ORIGINS)"
+        ) from None
     return value
 
 

@@ -344,6 +344,7 @@ The [Operational Insights server](#operational-insights-server) accepts the same
 | `CB_MCP_PORT` | `--port` | Port for the HTTP transport mode | `8000` |
 | `CB_MCP_WORKERS` | `--workers` | Number of server worker processes for the `http` transport. Values above 1 run in stateless HTTP mode (see [Multiple Workers](#multiple-workers)) | `1` |
 | `CB_MCP_STATELESS_HTTP` | `--stateless-http` | Handle each HTTP request without per-session state. Only honored with `http`; cannot be combined with confirmation-required tools (see [Multiple Workers](#multiple-workers)) | `true` when workers > 1, otherwise `false` |
+| `CB_MCP_ALLOWED_ORIGINS` | `--allowed-origins` | Comma-separated origins (`scheme://host[:port]`) allowed to call the `http`/`sse` endpoint; see [Restricting browser origins](#restricting-browser-origins). Unset, empty or `*` allows every origin | unset |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Requiring confirmation](#requiring-confirmation-elicitation)) | None |
 | `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
@@ -591,6 +592,24 @@ Then point your client at the URL:
   }
 }
 ```
+
+#### Restricting browser origins
+
+A malicious web page can make your browser send requests to a server on your machine or network (for example through DNS rebinding). Browsers label every such request with an `Origin` header that page JavaScript cannot change, so `--allowed-origins` (`CB_MCP_ALLOWED_ORIGINS`) lets you name the origins that may call the server:
+
+```bash
+uvx couchbase-mcp-server operational --transport=http \
+  --allowed-origins='https://app.example.com,http://localhost:3000,https://*.example.org'
+```
+
+- Each entry is `scheme://host[:port]`. Any scheme is accepted (`chrome-extension://<id>`, `vscode-webview://<id>`), default ports (80 for `http`, 443 for `https`) are optional, and a `*` in the host matches any text. `*` is not allowed in the scheme or port.
+- Unset, empty, or a lone `*` means no check: every request is admitted.
+- Once a list is set, a request is admitted only if it carries an `Origin` header matching an entry. **Requests with no `Origin` header are rejected (403)**, which includes most non-browser MCP clients such as desktop apps and CLI agents. Set this only when browsers are the clients you need to admit or defend against. `Origin: null` is always rejected.
+- `/health` stays reachable regardless of `Origin`.
+- A malformed entry stops the server at startup with an error naming each bad entry and why. A lone `*` cannot be combined with other entries.
+- Ignored with the `stdio` transport. The `Host` header is not checked.
+
+This protects against web pages, not against other clients: any non-browser program can send any `Origin`. It is not authentication; use [OAuth](#oauth-21-authorization) for that.
 
 #### Multiple workers
 

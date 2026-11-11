@@ -117,6 +117,7 @@ The most common variables are below. Every option — including logging rotation
 | `CB_MCP_HOST` | Bind address for HTTP — set `0.0.0.0` in containers | `127.0.0.1` |
 | `CB_MCP_PORT` | Port for HTTP | `8000` / `8001` |
 | `CB_MCP_WORKERS` | Worker processes for `http` (`operational` only) | `1` |
+| `CB_MCP_ALLOWED_ORIGINS` | Comma-separated web origins allowed to call the HTTP endpoint (e.g. `https://app.example.com`). When set, requests without an `Origin` header are rejected, so non-browser clients are turned away. Unset or `*` allows all | |
 | `CB_MCP_DISABLED_TOOLS` | Tools to hide — comma-separated list or a file path | |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | Tools that ask the user to confirm first — comma-separated list or a file path | |
 | `CB_MCP_LOG_LEVEL` | `off`, `error`, `warning`, `info`, `debug` | `info` |
