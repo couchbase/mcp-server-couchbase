@@ -516,7 +516,11 @@ class TestSubDocumentMutateIn:
                 "cb_mcp.tools.operational.kv.get_cluster_connection",
                 return_value=cluster,
             ),
-            pytest.raises(RuntimeError, match=r"^\(spec 1: missing\.path\) "),
+            pytest.raises(
+                RuntimeError,
+                match=r"^\(spec 1: missing\.path\) PathNotFoundException: "
+                r"Path could not be found\.$",
+            ),
         ):
             mutate_subdocument(
                 ctx,

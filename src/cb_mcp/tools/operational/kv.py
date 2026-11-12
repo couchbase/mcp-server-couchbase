@@ -441,7 +441,9 @@ def mutate_subdocument(
             f"Error performing sub-document mutation in {keyspace}: {detail_prefix}{e}",
             exc_info=True,
         )
-        raise RuntimeError(f"{detail_prefix}{e}") from e
+        raise RuntimeError(
+            f"{detail_prefix}{type(e).__name__}: {getattr(e, 'message', None) or e}"
+        ) from e
 
     response: dict[str, Any] = {}
     for index, (op, path) in enumerate(spec_meta):
