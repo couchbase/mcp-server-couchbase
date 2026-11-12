@@ -20,7 +20,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from _operational_insights_fakes import make_operational_insights_ctx
+from couchbase_operational_insights.errors import (
+    TimeoutError as OperationalInsightsTimeoutError,
+)
 
+from cb_mcp.servers.operational_insights.cli import (
+    OPERATIONAL_INSIGHTS_ASYNC_QUERY_RESULT_TIMEOUT_KEY,
+)
+from cb_mcp.servers.operational_insights.constants import (
+    DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT,
+    MAX_ASYNC_QUERY_RESULT_TIMEOUT,
+)
 from cb_mcp.tools.operational_insights.query import (
     operational_insights_cancel_async_query,
     operational_insights_discard_async_query_results,
@@ -32,6 +42,8 @@ from cb_mcp.utils.operational_insights.handle_registry import (
     QueryResultsRegistry,
     UnknownHandleError,
 )
+
+TIMEOUT_ENV_VAR = "CB_MCP_OPERATIONAL_INSIGHTS_ASYNC_QUERY_RESULT_TIMEOUT"
 
 
 def _make_ctx(*, read_only_mode: bool = False):
@@ -358,6 +370,136 @@ class TestGetAsyncQueryResults:
             "error": "boom",
             "query_handle": token,
         }
+
+
+class TestAsyncQueryTimeouts:
+    """SDK timeouts become a message that says what timed out and which setting to change."""
+
+    def test_download_timeout_says_query_finished_and_names_setting(self) -> None:
+        ctx, cluster, registry = _make_ctx()
+        ctx.request_context.lifespan_context.settings = {
+            OPERATIONAL_INSIGHTS_ASYNC_QUERY_RESULT_TIMEOUT_KEY: 45
+        }
+        token, handle = _start(ctx, cluster)
+        status = handle.fetch_status.return_value
+        status.results_ready.return_value = True
+        result = MagicMock()
+        result.rows.side_effect = OperationalInsightsTimeoutError(
+            message="Unable to complete iteration. Request timed out."
+        )
+        status.result_handle.return_value.fetch_results.return_value = result
+
+        out = operational_insights_get_async_query_results(ctx, token)
+
+        assert out["success"] is False
+        assert out["ready"] is True
+        assert out["timed_out"] is True
+        assert out["query_handle"] == token
+        assert "query finished successfully" in out["error"]
+        assert "45-second" in out["error"]
+        assert "Request timed out" not in out["error"]
+        assert TIMEOUT_ENV_VAR in out["suggestion"]
+        assert "currently 45 seconds" in out["suggestion"]
+        # The results are still on the server, so the token must survive.
+        registry.get(token)
+
+    def test_download_timeout_from_fetch_results_call(self) -> None:
+        ctx, cluster, _ = _make_ctx()
+        token, handle = _start(ctx, cluster)
+        status = handle.fetch_status.return_value
+        status.results_ready.return_value = True
+        status.result_handle.return_value.fetch_results.side_effect = (
+            OperationalInsightsTimeoutError(message="Request timed out.")
+        )
+
+        out = operational_insights_get_async_query_results(ctx, token)
+
+        assert out["ready"] is True
+        assert out["timed_out"] is True
+        # No settings configured: the default is reported.
+        assert f"{DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT}-second" in out["error"]
+
+    def test_download_timeout_at_maximum_does_not_suggest_raising(self) -> None:
+        ctx, cluster, _ = _make_ctx()
+        ctx.request_context.lifespan_context.settings = {
+            OPERATIONAL_INSIGHTS_ASYNC_QUERY_RESULT_TIMEOUT_KEY: (
+                MAX_ASYNC_QUERY_RESULT_TIMEOUT
+            )
+        }
+        token, handle = _start(ctx, cluster)
+        status = handle.fetch_status.return_value
+        status.results_ready.return_value = True
+        status.result_handle.return_value.fetch_results.side_effect = (
+            OperationalInsightsTimeoutError(message="Request timed out.")
+        )
+
+        out = operational_insights_get_async_query_results(ctx, token)
+
+        assert "already at its maximum" in out["suggestion"]
+        assert "can raise" not in out["suggestion"]
+
+    def test_error_fits_under_the_length_cap(self) -> None:
+        ctx, cluster, _ = _make_ctx()
+        token, handle = _start(ctx, cluster)
+        status = handle.fetch_status.return_value
+        status.results_ready.return_value = True
+        status.result_handle.return_value.fetch_results.side_effect = (
+            OperationalInsightsTimeoutError(message="Request timed out.")
+        )
+
+        out = operational_insights_get_async_query_results(ctx, token)
+
+        assert not out["error"].endswith("[truncated]")
+
+    def test_status_timeout_is_not_reported_as_a_finished_query(self) -> None:
+        ctx, cluster, _ = _make_ctx()
+        token, handle = _start(ctx, cluster)
+        handle.fetch_status.side_effect = OperationalInsightsTimeoutError(
+            message="Request timed out."
+        )
+
+        out = operational_insights_get_async_query_results(ctx, token)
+
+        assert out["success"] is False
+        assert out["timed_out"] is True
+        assert "ready" not in out
+        assert "check the query status" in out["error"]
+        assert TIMEOUT_ENV_VAR in out["suggestion"]
+
+    @pytest.mark.parametrize(
+        ("tool", "action"),
+        [
+            (operational_insights_discard_async_query_results, "discard the results"),
+            (operational_insights_cancel_async_query, "cancel the query"),
+        ],
+    )
+    def test_discard_and_cancel_timeouts(self, tool, action) -> None:
+        ctx, cluster, _ = _make_ctx()
+        token, handle = _start(ctx, cluster)
+        handle.fetch_status.side_effect = OperationalInsightsTimeoutError(
+            message="Request timed out."
+        )
+
+        out = tool(ctx, token)
+
+        assert out["timed_out"] is True
+        assert action in out["error"]
+        assert out["query_handle"] == token
+
+    def test_start_timeout(self) -> None:
+        ctx, cluster, _ = _make_ctx()
+        cluster.start_query.side_effect = OperationalInsightsTimeoutError(
+            message="Request timed out."
+        )
+        with patch(
+            "cb_mcp.tools.operational_insights.query.get_access_token",
+            return_value=None,
+        ):
+            out = operational_insights_run_query_async(ctx, "SELECT 1")
+
+        assert out["timed_out"] is True
+        assert "start the query" in out["error"]
+        assert out["statement"] == "SELECT 1"
 
 
 class TestDiscardAsyncQueryResults:
