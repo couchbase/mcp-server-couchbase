@@ -13,11 +13,12 @@ a raw-SQL++ path for vector only.
 not removed -- kept for backward compatibility, to be removed in a future 2.0
 release.
 
-Error handling follows `create_index`'s convention: `get_cluster_connection`
+Error handling: failures are raised, not returned. `get_cluster_connection`
 and `connect_to_bucket` are called outside the `try` block and propagate
 uncaught (can't reach the thing we were asked to create an index on); every
-validation failure and query error past that point is returned as
-`tool_error` rather than raised.
+validation failure and query error past that point is logged and re-raised.
+The registration wrapper (`utils/error_handling.py`) turns the exception into
+the tool error and bounds its message length.
 """
 
 import json
@@ -29,7 +30,7 @@ from fastmcp import Context
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.operational.connection import connect_to_bucket, format_keyspace
 from ...utils.operational.context import get_cluster_connection
-from ...utils.responses import tool_error, tool_success
+from ...utils.responses import tool_success
 from ...utils.sqlpp import safe_field_path, safe_ident
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.vector_index")
@@ -373,8 +374,8 @@ def create_query_index(
 
     Returns {"success": True, "index_name", "index_type", "keyspace", "deferred",
     "statement" (the exact SQL++ DDL executed, for debugging/auditing)} on
-    success, with a "next_step" hint when deferred is True. On failure returns
-    {"success": False, "error": ...}.
+    success, with a "next_step" hint when deferred is True. On failure the call
+    fails with the reason.
     """
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
@@ -447,14 +448,10 @@ def create_query_index(
         # apply to the chosen shape) -- expected, not exceptional, so no
         # traceback noise.
         logger.warning(f"Rejected {index_type} index {index_name!r} on {keyspace}: {e}")
-        return tool_error(
-            e, index_name=index_name, keyspace=keyspace, index_type=index_type
-        )
+        raise
     except Exception as e:
         logger.error(
             f"Error creating {index_type} index {index_name!r} on {keyspace}: {e}",
             exc_info=True,
         )
-        return tool_error(
-            e, index_name=index_name, keyspace=keyspace, index_type=index_type
-        )
+        raise

@@ -22,7 +22,6 @@ from ...utils.operational.query_utils import (
     evaluate_query_plan,
     extract_plan_from_explain_results,
 )
-from ...utils.responses import error_message
 from ...utils.sqlpp import safe_ident
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.query")
@@ -276,8 +275,7 @@ def run_sql_plus_plus_query(
         return results
     except Exception as e:
         logger.error(f"Error running query: {e!s}", exc_info=True)
-        # The full SDK dump stays in the log; the client gets the short message.
-        raise RuntimeError(error_message(e)) from e
+        raise
 
 
 def explain_sql_plus_plus_query(
@@ -337,8 +335,7 @@ def run_cluster_query(ctx: Context, query: str, **kwargs: Any) -> list[dict[str,
         return results
     except Exception as e:
         logger.error(f"Error running cluster query: {e}", exc_info=True)
-        # The full SDK dump stays in the log; the client gets the short message.
-        raise RuntimeError(error_message(e)) from e
+        raise
 
 
 def _run_query_tool_with_empty_message(

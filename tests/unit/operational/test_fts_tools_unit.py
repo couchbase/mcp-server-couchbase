@@ -17,6 +17,7 @@ Covers:
 
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -171,33 +172,31 @@ class TestListSearchIndexes:
         bucket.scope.assert_called_once_with("s")
         bucket.collections.assert_not_called()
 
-    def test_scope_without_bucket_returns_error(self) -> None:
+    def test_scope_without_bucket_raises_value_error(self) -> None:
         ctx, _cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
 
-        result = list_search_indexes(ctx, scope_name="s")
+        with pytest.raises(
+            ValueError, match="bucket_name is required when filtering by scope_name"
+        ):
+            list_search_indexes(ctx, scope_name="s")
 
-        assert result == [
-            {
-                "success": False,
-                "error": "bucket_name is required when filtering by scope_name",
-            }
-        ]
-
-    def test_sdk_error_returns_error_entry_not_raised(self) -> None:
+    def test_sdk_error_propagates(self) -> None:
         ctx, cluster, cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
         cluster_index_manager.get_all_indexes.side_effect = Exception(
             "search unavailable"
         )
 
-        with patch(
-            "cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster
+        with (
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(Exception, match="search unavailable"),
         ):
-            result = list_search_indexes(ctx)
-
-        assert result == [{"success": False, "error": "search unavailable"}]
+            list_search_indexes(ctx)
 
     def test_connection_failure_propagates(self) -> None:
-        """The one case that must still raise: the cluster is unreachable."""
+        """An unreachable cluster propagates the connection error."""
         ctx, _cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
 
         with (
@@ -256,32 +255,29 @@ class TestGetSearchIndexDefinition:
         assert result["bucket"] == "b"
         assert result["scope"] == "s"
 
-    def test_partial_pair_returns_error(self) -> None:
+    def test_partial_pair_raises_value_error(self) -> None:
         ctx, _cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
 
-        result_bucket_only = get_search_index_definition(ctx, "idx1", bucket_name="b")
-        result_scope_only = get_search_index_definition(ctx, "idx1", scope_name="s")
+        with pytest.raises(ValueError, match="must be provided together"):
+            get_search_index_definition(ctx, "idx1", bucket_name="b")
+        with pytest.raises(ValueError, match="must be provided together"):
+            get_search_index_definition(ctx, "idx1", scope_name="s")
 
-        assert "must be provided together" in result_bucket_only["error"]
-        assert "must be provided together" in result_scope_only["error"]
-
-    def test_sdk_error_returns_error_dict_not_raised(self) -> None:
+    def test_sdk_error_propagates(self) -> None:
         ctx, cluster, cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
         cluster_index_manager.get_index.side_effect = Exception("index not found")
 
-        with patch(
-            "cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster
+        with (
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(Exception, match="index not found"),
         ):
-            result = get_search_index_definition(ctx, "idx1")
-
-        assert result == {
-            "success": False,
-            "error": "index not found",
-            "index_name": "idx1",
-        }
+            get_search_index_definition(ctx, "idx1")
 
     def test_connection_failure_propagates(self) -> None:
-        """The one case that must still raise: the cluster is unreachable."""
+        """An unreachable cluster propagates the connection error."""
         ctx, _cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
 
         with (
@@ -418,14 +414,13 @@ class TestRunSearch:
         scope_obj.search.assert_called_once()
         cluster.search.assert_not_called()
 
-    def test_partial_pair_returns_error(self) -> None:
+    def test_partial_pair_raises_value_error(self) -> None:
         ctx, _cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
 
-        result = run_search(ctx, "idx1", {"match": "ale"}, bucket_name="b")
+        with pytest.raises(ValueError, match="must be provided together"):
+            run_search(ctx, "idx1", {"match": "ale"}, bucket_name="b")
 
-        assert "must be provided together" in result["error"]
-
-    def test_sdk_error_returns_error_dict_not_raised(self) -> None:
+    def test_sdk_error_propagates(self) -> None:
         ctx, cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
         cluster.search.side_effect = Exception("query failed")
 
@@ -437,17 +432,12 @@ class TestRunSearch:
             patch("cb_mcp.tools.operational.fts.SearchOptions"),
             patch("cb_mcp.tools.operational.fts.MatchNoneQuery"),
             patch("cb_mcp.tools.operational.fts.SearchRequest"),
+            pytest.raises(Exception, match="query failed"),
         ):
-            result = run_search(ctx, "idx1", {"match": "ale"})
-
-        assert result == {
-            "success": False,
-            "error": "query failed",
-            "index_name": "idx1",
-        }
+            run_search(ctx, "idx1", {"match": "ale"})
 
     def test_connection_failure_propagates(self) -> None:
-        """The one case that must still raise: the cluster is unreachable."""
+        """An unreachable cluster propagates the connection error."""
         ctx, _cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
 
         with (
@@ -508,7 +498,7 @@ class TestRunSearchExplain:
             explain=True, limit=5, raw={"query": {"match": "ale"}}
         )
 
-    def test_sdk_error_returns_error_dict_not_raised(self) -> None:
+    def test_sdk_error_propagates(self) -> None:
         ctx, cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
         cluster.search.side_effect = Exception("explain failed")
 
@@ -520,17 +510,12 @@ class TestRunSearchExplain:
             patch("cb_mcp.tools.operational.fts.SearchOptions"),
             patch("cb_mcp.tools.operational.fts.MatchNoneQuery"),
             patch("cb_mcp.tools.operational.fts.SearchRequest"),
+            pytest.raises(Exception, match="explain failed"),
         ):
-            result = run_search(ctx, "idx1", {"match": "ale"}, explain=True)
-
-        assert result == {
-            "success": False,
-            "error": "explain failed",
-            "index_name": "idx1",
-        }
+            run_search(ctx, "idx1", {"match": "ale"}, explain=True)
 
     def test_connection_failure_propagates(self) -> None:
-        """The one case that must still raise: the cluster is unreachable."""
+        """An unreachable cluster propagates the connection error."""
         ctx, _cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
 
         with (
@@ -673,35 +658,29 @@ class TestUpsertSearchIndex:
             "scope": "s",
         }
 
-    def test_partial_pair_returns_error(self) -> None:
+    def test_partial_pair_raises_value_error(self) -> None:
         ctx, _cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
 
-        result_bucket_only = upsert_search_index(
-            ctx, "idx1", source_name="b", bucket_name="b"
-        )
-        result_scope_only = upsert_search_index(
-            ctx, "idx1", source_name="b", scope_name="s"
-        )
-
-        assert "must be provided together" in result_bucket_only["error"]
-        assert "must be provided together" in result_scope_only["error"]
+        with pytest.raises(ValueError, match="must be provided together"):
+            upsert_search_index(ctx, "idx1", source_name="b", bucket_name="b")
+        with pytest.raises(ValueError, match="must be provided together"):
+            upsert_search_index(ctx, "idx1", source_name="b", scope_name="s")
 
     @pytest.mark.parametrize("bad_mapping", ["notadict", 123, [], None])
     def test_non_object_mapping_rejected_before_sdk_call(self, bad_mapping) -> None:
         """A non-object params.mapping segfaults the SDK, so it must never reach it."""
         ctx, cluster, cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
 
-        with patch(
-            "cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster
+        with (
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(ValueError, match=r"params\.mapping must be an object"),
         ):
-            result = upsert_search_index(
+            upsert_search_index(
                 ctx, "idx1", source_name="b", params={"mapping": bad_mapping}
             )
-
-        assert result == {
-            "success": False,
-            "error": "params.mapping must be an object",
-        }
         cluster_index_manager.upsert_index.assert_not_called()
 
     @pytest.mark.parametrize(
@@ -731,14 +710,16 @@ class TestUpsertSearchIndex:
         """Non-object entries under params.mapping.types segfault the SDK (DA-2407)."""
         ctx, cluster, cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
 
-        with patch(
-            "cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster
+        with (
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(ValueError, match=re.escape(f"{bad_path} must be an object")),
         ):
-            result = upsert_search_index(
+            upsert_search_index(
                 ctx, "idx1", source_name="b", params={"mapping": mapping}
             )
-
-        assert result == {"success": False, "error": f"{bad_path} must be an object"}
         cluster_index_manager.upsert_index.assert_not_called()
 
     def test_valid_type_mapping_reaches_sdk(self) -> None:
@@ -762,23 +743,21 @@ class TestUpsertSearchIndex:
         assert result["success"] is True
         cluster_index_manager.upsert_index.assert_called_once()
 
-    def test_sdk_error_returns_error_dict_not_raised(self) -> None:
+    def test_sdk_error_propagates(self) -> None:
         ctx, cluster, cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
         cluster_index_manager.upsert_index.side_effect = Exception("invalid mapping")
 
-        with patch(
-            "cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster
+        with (
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(Exception, match="invalid mapping"),
         ):
-            result = upsert_search_index(ctx, "idx1", source_name="b")
-
-        assert result == {
-            "success": False,
-            "error": "invalid mapping",
-            "index_name": "idx1",
-        }
+            upsert_search_index(ctx, "idx1", source_name="b")
 
     def test_connection_failure_propagates(self) -> None:
-        """The one case that must still raise: the cluster is unreachable."""
+        """An unreachable cluster propagates the connection error."""
         ctx, _cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
 
         with (
@@ -835,32 +814,29 @@ class TestDropSearchIndex:
             "scope": "s",
         }
 
-    def test_partial_pair_returns_error(self) -> None:
+    def test_partial_pair_raises_value_error(self) -> None:
         ctx, _cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
 
-        result_bucket_only = drop_search_index(ctx, "idx1", bucket_name="b")
-        result_scope_only = drop_search_index(ctx, "idx1", scope_name="s")
+        with pytest.raises(ValueError, match="must be provided together"):
+            drop_search_index(ctx, "idx1", bucket_name="b")
+        with pytest.raises(ValueError, match="must be provided together"):
+            drop_search_index(ctx, "idx1", scope_name="s")
 
-        assert "must be provided together" in result_bucket_only["error"]
-        assert "must be provided together" in result_scope_only["error"]
-
-    def test_sdk_error_returns_error_dict_not_raised(self) -> None:
+    def test_sdk_error_propagates(self) -> None:
         ctx, cluster, cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
         cluster_index_manager.drop_index.side_effect = Exception("index not found")
 
-        with patch(
-            "cb_mcp.tools.operational.fts.get_cluster_connection", return_value=cluster
+        with (
+            patch(
+                "cb_mcp.tools.operational.fts.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(Exception, match="index not found"),
         ):
-            result = drop_search_index(ctx, "idx1")
-
-        assert result == {
-            "success": False,
-            "error": "index not found",
-            "index_name": "idx1",
-        }
+            drop_search_index(ctx, "idx1")
 
     def test_connection_failure_propagates(self) -> None:
-        """The one case that must still raise: the cluster is unreachable."""
+        """An unreachable cluster propagates the connection error."""
         ctx, _cluster, _cluster_index_manager, _bucket = _make_ctx_with_fts_managers()
 
         with (

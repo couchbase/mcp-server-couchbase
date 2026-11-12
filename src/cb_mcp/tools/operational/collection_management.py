@@ -16,7 +16,7 @@ from fastmcp import Context
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.operational.connection import connect_to_bucket
 from ...utils.operational.context import get_cluster_connection
-from ...utils.responses import tool_error, tool_success
+from ...utils.responses import tool_success
 
 logger = logging.getLogger(
     f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.collection_management"
@@ -26,8 +26,8 @@ logger = logging.getLogger(
 def create_scope(ctx: Context, bucket_name: str, scope_name: str) -> dict[str, Any]:
     """Create a new scope in a bucket.
 
-    Returns {"success": True, ...} on success, or {"success": False,
-    "error": ...} on failure — e.g. the scope already exists.
+    Returns {"success": True, ...} on success. On failure the call
+    fails with the reason — e.g. the scope already exists.
     """
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
@@ -45,10 +45,7 @@ def create_scope(ctx: Context, bucket_name: str, scope_name: str) -> dict[str, A
             f"Error creating scope '{scope_name}' in bucket '{bucket_name}': {e}",
             exc_info=True,
         )
-        return tool_error(
-            e,
-            message=f"Failed to create scope '{scope_name}' in bucket '{bucket_name}'.",
-        )
+        raise
 
 
 def create_collection(
@@ -56,8 +53,8 @@ def create_collection(
 ) -> dict[str, Any]:
     """Create a new collection in an existing scope.
 
-    Returns {"success": True, ...} on success, or {"success": False,
-    "error": ...} on failure — e.g. the collection already exists or the scope
+    Returns {"success": True, ...} on success. On failure the call
+    fails with the reason — e.g. the collection already exists or the scope
     does not exist.
     """
     keyspace = f"{bucket_name}.{scope_name}.{collection_name}"
@@ -75,7 +72,7 @@ def create_collection(
         )
     except Exception as e:
         logger.error(f"Error creating collection {keyspace}: {e}", exc_info=True)
-        return tool_error(e, message=f"Failed to create collection {keyspace}.")
+        raise
 
 
 def delete_scope(ctx: Context, bucket_name: str, scope_name: str) -> dict[str, Any]:
@@ -84,8 +81,8 @@ def delete_scope(ctx: Context, bucket_name: str, scope_name: str) -> dict[str, A
     This permanently removes the scope AND every collection (and all documents)
     within it, and cannot be undone.
 
-    Returns {"success": True, ...} on success, or {"success": False,
-    "error": ...} on failure — e.g. the scope does not exist.
+    Returns {"success": True, ...} on success. On failure the call
+    fails with the reason — e.g. the scope does not exist.
     """
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
@@ -103,10 +100,7 @@ def delete_scope(ctx: Context, bucket_name: str, scope_name: str) -> dict[str, A
             f"Error dropping scope '{scope_name}' in bucket '{bucket_name}': {e}",
             exc_info=True,
         )
-        return tool_error(
-            e,
-            message=f"Failed to delete scope '{scope_name}' from bucket '{bucket_name}'.",
-        )
+        raise
 
 
 def delete_collection(
@@ -117,8 +111,8 @@ def delete_collection(
     This permanently removes the collection and all its documents, and cannot be
     undone.
 
-    Returns {"success": True, ...} on success, or {"success": False,
-    "error": ...} on failure — e.g. the collection does not exist.
+    Returns {"success": True, ...} on success. On failure the call
+    fails with the reason — e.g. the collection does not exist.
     """
     keyspace = f"{bucket_name}.{scope_name}.{collection_name}"
     cluster = get_cluster_connection(ctx)
@@ -135,4 +129,4 @@ def delete_collection(
         )
     except Exception as e:
         logger.error(f"Error dropping collection {keyspace}: {e}", exc_info=True)
-        return tool_error(e, message=f"Failed to delete collection {keyspace}.")
+        raise

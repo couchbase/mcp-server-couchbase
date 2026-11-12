@@ -169,16 +169,15 @@ async def test_get_cluster_health_and_services_with_service_types() -> None:
 
 @pytest.mark.asyncio
 async def test_get_cluster_health_and_services_invalid_service_type() -> None:
-    """An unrecognized service_types entry must return an error envelope."""
+    """An unrecognized service_types entry must produce an error response."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "get_cluster_health_and_services",
             arguments={"service_types": ["not_a_real_service"]},
         )
-        payload = extract_payload(response)
-
-        assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
-        assert payload.get("status") == "error", f"Expected error status: {payload}"
+        assert is_error_response(response), (
+            f"Expected an error response: {extract_payload(response)}"
+        )
 
 
 @pytest.mark.asyncio
@@ -221,7 +220,7 @@ async def test_get_cluster_metrics() -> None:
     """Verify get_cluster_metrics returns a stats-range response envelope.
 
     Self-managed Couchbase Server 7.6+ only. Against Capella, expect a clean
-    {"status": "error", ...} envelope rather than an unhandled exception.
+    error response (isError) rather than an unhandled exception.
     """
     skip_if_capella("get_cluster_metrics")
     async with create_mcp_session() as session:
@@ -242,15 +241,16 @@ async def test_get_cluster_metrics() -> None:
         )
         payload = extract_payload(response)
 
-        assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
-        if payload.get("status") == "error":
+        if is_error_response(response):
             # Only the documented Capella rejection is an acceptable error here —
             # anything else (bad nodes, bounds rejection, connectivity) is a real
             # failure this test should catch, not silently pass through.
-            assert "Capella" in payload.get("error", ""), (
+            assert "Capella" in str(payload), (
                 f"Expected only a Capella-rejection error, got: {payload}"
             )
             return
+
+        assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
 
         assert payload.get("status") == "success", (
             f"Expected a status envelope: {payload}"
@@ -277,15 +277,16 @@ async def test_get_cluster_metrics_invalid_metric_reports_per_spec_error() -> No
         )
         payload = extract_payload(response)
 
-        assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
-        if payload.get("status") == "error":
+        if is_error_response(response):
             # Only the documented Capella rejection is an acceptable error here —
             # anything else (bad nodes, bounds rejection, connectivity) is a real
             # failure this test should catch, not silently pass through.
-            assert "Capella" in payload.get("error", ""), (
+            assert "Capella" in str(payload), (
                 f"Expected only a Capella-rejection error, got: {payload}"
             )
             return
+
+        assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
 
         data = payload.get("data")
         assert isinstance(data, list) and len(data) == 1

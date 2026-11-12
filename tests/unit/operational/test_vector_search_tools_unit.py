@@ -5,11 +5,11 @@ Covers:
   distance_metric/select_fields/where interpolation, Composite vs Hyperscale
   arity), embedding-provider resolution and failure handling, the
   num_probes/rerank/top_n_scan dependency guard, cluster-connection-
-  failure propagation vs. everything-else returning tool_error.
+  failure propagation vs. everything-else raising ValueError.
 - run_vector_search: VectorQuery/VectorSearch/SearchRequest
   construction, hybrid (scalar_query present) vs. vector-only branching,
   cluster-level vs. scoped search branching, the bucket/scope invalid-combo
-  guard, and the same raise-vs-error-dict split as run_vector_query.
+  guard, and the same raw-propagation vs. ValueError split as run_vector_query.
 
 Follows tests/unit/operational/test_fts_tools_unit.py's pattern: a fake
 Context via SimpleNamespace (tools only touch ctx through patched
@@ -19,6 +19,7 @@ module's own import path.
 
 from __future__ import annotations
 
+import re
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -77,22 +78,21 @@ class TestRunVectorQueryValidation:
             ({"rerank": False, "top_n_scan": 10}, "rerank requires num_probes"),
         ],
     )
-    def test_tuning_param_without_prerequisite_is_error(
+    def test_tuning_param_without_prerequisite_raises_value_error(
         self, kwargs: dict, expected: str
     ) -> None:
         ctx = _make_ctx()
-        result = run_vector_query(
-            ctx,
-            "b",
-            "s",
-            "c",
-            "embedding",
-            "query text",
-            distance_metric="l2_squared",
-            **kwargs,
-        )
-        assert result["success"] is False
-        assert result["error"] == expected
+        with pytest.raises(ValueError, match=re.escape(expected)):
+            run_vector_query(
+                ctx,
+                "b",
+                "s",
+                "c",
+                "embedding",
+                "query text",
+                distance_metric="l2_squared",
+                **kwargs,
+            )
 
     def test_connection_failure_propagates(self) -> None:
         """A cluster that can't be reached at all must still raise."""
@@ -117,7 +117,7 @@ class TestRunVectorQueryValidation:
 
     def test_bucket_connection_failure_propagates(self) -> None:
         """A bucket that can't be reached is the same class of problem as an
-        unreachable cluster -- it must also raise, not become tool_error."""
+        unreachable cluster -- it must also raise."""
         ctx = _make_ctx()
         cluster = MagicMock()
 
@@ -305,7 +305,7 @@ class TestRunVectorQueryConstruction:
         assert result["cluster_major_version"] is None
         assert "warning" not in result
 
-    def test_embedding_config_error_returns_tool_error_not_raise(self) -> None:
+    def test_embedding_config_error_propagates(self) -> None:
         ctx = _make_ctx()
         cluster = MagicMock()
 
@@ -316,40 +316,33 @@ class TestRunVectorQueryConstruction:
                     "CB_MCP_EMBEDDING_MODEL_PROVIDER is not configured."
                 )
             ),
+            pytest.raises(
+                EmbeddingConfigError, match="CB_MCP_EMBEDDING_MODEL_PROVIDER"
+            ),
         ):
-            result = run_vector_query(
+            run_vector_query(
                 ctx, "b", "s", "c", "embedding", "query", distance_metric="l2_squared"
             )
 
-        assert result["success"] is False
-        assert "CB_MCP_EMBEDDING_MODEL_PROVIDER" in result["error"]
-
 
 class TestRunVectorSearchValidation:
-    def test_bucket_without_scope_is_error(self) -> None:
+    def test_bucket_without_scope_raises_value_error(self) -> None:
         ctx = _make_ctx()
-        result = run_vector_search(
-            ctx, "idx1", "embedding", "query text", bucket_name="b"
-        )
-        assert result["success"] is False
-        assert "bucket_name" in result["error"]
+        with pytest.raises(ValueError, match="bucket_name"):
+            run_vector_search(ctx, "idx1", "embedding", "query text", bucket_name="b")
 
     def test_empty_scalar_query_is_rejected_not_silently_vector_only(self) -> None:
         """{} is falsy but not None -- must be rejected explicitly rather
         than silently becoming a vector-only search that still claims
         is_hybrid=True (the truthy-vs-is-not-None mismatch this guards)."""
         ctx = _make_ctx()
-        result = run_vector_search(
-            ctx, "idx1", "embedding", "query text", scalar_query={}
-        )
-        assert result["success"] is False
-        assert "scalar_query" in result["error"]
+        with pytest.raises(ValueError, match="scalar_query"):
+            run_vector_search(ctx, "idx1", "embedding", "query text", scalar_query={})
 
     def test_empty_prefilter_is_rejected(self) -> None:
         ctx = _make_ctx()
-        result = run_vector_search(ctx, "idx1", "embedding", "query text", prefilter={})
-        assert result["success"] is False
-        assert "prefilter" in result["error"]
+        with pytest.raises(ValueError, match="prefilter"):
+            run_vector_search(ctx, "idx1", "embedding", "query text", prefilter={})
 
     def test_connection_failure_propagates(self) -> None:
         ctx = _make_ctx()
@@ -365,7 +358,7 @@ class TestRunVectorSearchValidation:
 
     def test_bucket_connection_failure_propagates(self) -> None:
         """Same class of problem as an unreachable cluster -- must raise,
-        not become tool_error. Exercises the scoped-index path, which is the
+        not be wrapped. Exercises the scoped-index path, which is the
         only one that calls connect_to_bucket at all."""
         ctx = _make_ctx()
         cluster = MagicMock()
@@ -561,15 +554,13 @@ class TestRunVectorSearchConstruction:
         )
         cluster.search.assert_not_called()
 
-    def test_embedding_failure_returns_tool_error_not_raise(self) -> None:
+    def test_embedding_failure_propagates(self) -> None:
         ctx = _make_ctx()
         cluster = MagicMock()
 
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             _patch_embedding(side_effect=RuntimeError("upstream 500")),
+            pytest.raises(RuntimeError, match="upstream 500"),
         ):
-            result = run_vector_search(ctx, "idx1", "embedding", "query")
-
-        assert result["success"] is False
-        assert "upstream 500" in result["error"]
+            run_vector_search(ctx, "idx1", "embedding", "query")

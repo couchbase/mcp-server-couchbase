@@ -4,11 +4,11 @@ Backed by reference datasets bundled under ``cb_mcp/utils/operational/reference_
 the format. This tool never touches the cluster, so it keeps working when the cluster is
 unreachable, which is exactly when someone is likely to be looking up a metric name.
 
-Error handling: everything is reported through ``tool_success``/``tool_error``
-(``utils/responses.py``) rather than raised. There is no cluster call here, so the "let connection
-failures propagate" carve-out other read tools use does not apply. Each error carries the valid
-values for whatever was wrong, so the caller can correct itself in one round trip instead of
-guessing again.
+Error handling: failures are raised, not returned; the registration wrapper
+(``utils/error_handling.py``) turns them into the tool error and bounds the message length. There
+is no cluster call here, so the "let connection failures propagate" carve-out other read tools use
+does not apply. Each guard message carries the valid values for whatever was wrong, so the caller
+can correct itself in one round trip instead of guessing again.
 """
 
 import logging
@@ -25,7 +25,7 @@ from ...utils.operational.reference_data import (
     sample_records,
     search,
 )
-from ...utils.responses import tool_error, tool_success
+from ...utils.responses import tool_success
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.reference")
 
@@ -88,9 +88,9 @@ def discover_tool_input_values(
     Returns {"success": True, "dataset": ..., "chapters": ..., ...} plus either "record_count" and
     "sample_records" (browse -- a preview, since every dataset is currently treated as too large to
     list in full) or "matches" (total found), "returned" and "results" (ranked, each record plus
-    its "score") (search). On failure returns {"success": False, "error": ...} listing the valid
-    values for whatever was wrong -- e.g. an unrecognised tool_name comes back with
-    "available_tool_names", a bad chapter filter with "valid_chapter_fields" or "valid_values".
+    its "score") (search). On failure the call fails with a reason listing the valid
+    values for whatever was wrong -- e.g. an unrecognised tool_name lists the available tool
+    names, a bad chapter filter lists the valid chapter fields or the valid values.
     Zero matches is a successful response with an empty "results" list -- refine your keywords, drop
     a chapter_filter, or lower min_score and call again.
     """
@@ -98,7 +98,7 @@ def discover_tool_input_values(
     if dataset_path is None:
         message = f"No reference data is registered for tool_name={tool_name!r}."
         logger.warning(f"Rejected discover_tool_input_values request: {message}")
-        return tool_error(message, available_tool_names=registered_tool_names())
+        raise ValueError(f"{message} Available tool names: {registered_tool_names()}")
 
     try:
         envelope = load_envelope(dataset_path)
@@ -107,44 +107,29 @@ def discover_tool_input_values(
         logger.error(
             f"Failed to read reference dataset {dataset_path}: {e}", exc_info=True
         )
-        return tool_error(e, tool_name=tool_name)
+        raise
 
     # Every bad filter is reported at once, not just the first: returning on the first one would
     # make the caller fix it, retry, and only then discover the second. The response carries the
     # full chapter listing, so one round trip is enough to correct all of them.
     filters = chapter_filters or {}
-    invalid_filters: list[dict[str, Any]] = []
+    invalid_filters: list[str] = []
     for field, value in filters.items():
         if field not in dataset_chapters:
             invalid_filters.append(
-                {
-                    "filter": field,
-                    "problem": (
-                        f"{field!r} is not a chapter field for this dataset, so it cannot "
-                        "be filtered on."
-                    ),
-                }
+                f"{field!r} is not a chapter field for this dataset, so it cannot "
+                f"be filtered on. Valid chapter fields: {sorted(dataset_chapters)}."
             )
         elif value not in dataset_chapters[field]:
             invalid_filters.append(
-                {
-                    "filter": field,
-                    "problem": f"{value!r} is not a value of chapter {field!r}.",
-                    "valid_values": sorted(dataset_chapters[field]),
-                }
+                f"{value!r} is not a value of chapter {field!r}. "
+                f"Valid values: {sorted(dataset_chapters[field])}."
             )
 
     if invalid_filters:
-        message = "Invalid chapter_filters: " + " ".join(
-            entry["problem"] for entry in invalid_filters
-        )
+        message = "Invalid chapter_filters: " + " ".join(invalid_filters)
         logger.warning(f"Rejected discover_tool_input_values request: {message}")
-        return tool_error(
-            message,
-            invalid_filters=invalid_filters,
-            valid_chapter_fields=sorted(dataset_chapters),
-            chapters=dataset_chapters,
-        )
+        raise ValueError(message)
 
     # A bare string instead of a list is a harmless caller slip -- wrap it rather than spending a
     # round trip on an error.
@@ -238,7 +223,7 @@ def discover_tool_input_values(
         logger.error(
             f"Reference data search failed for {tool_name!r}: {e}", exc_info=True
         )
-        return tool_error(e, tool_name=tool_name)
+        raise
 
     logger.info(
         f"discover_tool_input_values({tool_name!r}) matched {total_matches} record(s), "

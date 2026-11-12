@@ -11,13 +11,13 @@ What these pin down, in order of what it would cost to get wrong:
    ``COPY ... TO``, since it is one.
 """
 
+import re
 from unittest.mock import patch
 
 import pytest
 from _operational_insights_fakes import make_operational_insights_ctx
 
 from cb_mcp.tools.operational_insights.query import (
-    CopyToError,
     build_copy_to_statement,
     operational_insights_get_async_query_results,
     operational_insights_run_query_async,
@@ -80,7 +80,7 @@ class TestBuildCopyToStatement:
     @pytest.mark.parametrize("fmt", ["xml", "avro", "tsv"])
     def test_unsupported_format_is_rejected(self, fmt: str) -> None:
         """``tsv`` is here on purpose: the server rejects it outright."""
-        with pytest.raises(CopyToError, match="not supported"):
+        with pytest.raises(ValueError, match="not supported"):
             build_copy_to_statement(
                 STATEMENT, link="l", bucket="b", path="p", output_format=fmt
             )
@@ -92,7 +92,7 @@ class TestBuildCopyToStatement:
         with "TYPE/AS Expression is required for csv format", so offering it
         would error on every call.
         """
-        with pytest.raises(CopyToError, match="not supported"):
+        with pytest.raises(ValueError, match="not supported"):
             build_copy_to_statement(
                 STATEMENT, link="l", bucket="b", path="p", output_format="csv"
             )
@@ -113,7 +113,7 @@ class TestBuildCopyToStatement:
         That makes the character class the only thing standing between a link
         name and SQL++ injection.
         """
-        with pytest.raises(CopyToError):
+        with pytest.raises(ValueError):
             build_copy_to_statement(STATEMENT, link=link, bucket="b", path="p")
 
     @pytest.mark.parametrize("link", ["s3TestLink", "my_link", "my-link", "_l"])
@@ -188,10 +188,8 @@ class TestRunQuerySyncExport:
         """
         ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
 
-        result = self._run(ctx, cluster, **partial)
-
-        assert result["success"] is False
-        assert "required to export" in result["error"]
+        with pytest.raises(ValueError, match=re.escape("required to export")):
+            self._run(ctx, cluster, **partial)
         cluster.execute_query.assert_not_called()
 
     @pytest.mark.parametrize(
@@ -216,34 +214,28 @@ class TestRunQuerySyncExport:
         """
         ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
 
-        result = self._run(ctx, cluster, **blank)
-
-        assert result["success"] is False
-        assert "required to export" in result["error"]
+        with pytest.raises(ValueError, match=re.escape("required to export")):
+            self._run(ctx, cluster, **blank)
         cluster.execute_query.assert_not_called()
 
     def test_format_without_destination_is_rejected(self) -> None:
         ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
 
-        result = self._run(ctx, cluster, copy_to_format="parquet")
-
-        assert result["success"] is False
-        assert "without a destination" in result["error"]
+        with pytest.raises(ValueError, match=re.escape("without a destination")):
+            self._run(ctx, cluster, copy_to_format="parquet")
         cluster.execute_query.assert_not_called()
 
-    def test_invalid_link_is_an_error_envelope_not_a_raise(self) -> None:
+    def test_invalid_link_raises_value_error(self) -> None:
         ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
 
-        result = self._run(
-            ctx,
-            cluster,
-            copy_to_link="bad; DROP DATASET x",
-            copy_to_bucket="b",
-            copy_to_path="p",
-        )
-
-        assert result["success"] is False
-        assert "not a valid link name" in result["error"]
+        with pytest.raises(ValueError, match=re.escape("not a valid link name")):
+            self._run(
+                ctx,
+                cluster,
+                copy_to_link="bad; DROP DATASET x",
+                copy_to_bucket="b",
+                copy_to_path="p",
+            )
         cluster.execute_query.assert_not_called()
 
 
@@ -253,27 +245,27 @@ class TestExportUnderReadOnlyMode:
     def test_blocked_when_read_only(self) -> None:
         ctx, cluster = make_operational_insights_ctx(read_only_mode=True)
 
-        with patch(
-            "cb_mcp.tools.operational_insights.query.get_access_token",
-            return_value=None,
+        with (
+            patch(
+                "cb_mcp.tools.operational_insights.query.get_access_token",
+                return_value=None,
+            ),
+            pytest.raises(ValueError, match=re.escape("blocked under read-only mode")),
         ):
-            result = operational_insights_run_query_sync(ctx, STATEMENT, **DESTINATION)
-
-        assert result["success"] is False
-        assert "blocked under read-only mode" in result["error"]
+            operational_insights_run_query_sync(ctx, STATEMENT, **DESTINATION)
         cluster.execute_query.assert_not_called()
 
     def test_async_blocked_when_read_only(self) -> None:
         ctx, cluster = make_operational_insights_ctx(read_only_mode=True)
 
-        with patch(
-            "cb_mcp.tools.operational_insights.query.get_access_token",
-            return_value=None,
+        with (
+            patch(
+                "cb_mcp.tools.operational_insights.query.get_access_token",
+                return_value=None,
+            ),
+            pytest.raises(ValueError, match=re.escape("blocked under read-only mode")),
         ):
-            result = operational_insights_run_query_async(ctx, STATEMENT, **DESTINATION)
-
-        assert result["success"] is False
-        assert "blocked under read-only mode" in result["error"]
+            operational_insights_run_query_async(ctx, STATEMENT, **DESTINATION)
         cluster.start_query.assert_not_called()
 
 

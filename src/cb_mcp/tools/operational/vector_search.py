@@ -20,18 +20,16 @@ Both tools turn query text into a vector via the pluggable embedding-provider
 abstraction in utils.operational.embeddings, selected by the CB_MCP_EMBEDDING_MODEL_*
 settings (see registry.PROVIDER_CONFIG_DOCS for exactly what each provider
 needs). Embedding config is entirely optional at server startup -- these
-tools fail with an actionable tool_error at call time if it's missing, they
+tools fail with an actionable error at call time if it's missing, they
 are not hidden from tool discovery.
 
-Error handling deliberately widens fts.py's convention: there, only
-get_cluster_connection's exception propagates and connect_to_bucket's
-failures are folded into the tool_error envelope. Here, both
-get_cluster_connection and connect_to_bucket are treated as the same class
-of problem -- can't reach the thing we were asked to search -- and both
-propagate uncaught. Everything past that point (missing embedding config, an
-embedding request failure, a malformed query, an index that doesn't exist)
-is a problem *with the request*, not the connection, and is reported back
-via tool_success/tool_error instead of raising.
+Error handling: failures are raised -- invalid argument combinations as
+ValueError, everything else (can't reach the cluster or bucket, missing
+embedding config, an embedding request failure, a malformed query, an index
+that doesn't exist) as the original exception. Successful calls return
+tool_success payloads. The wrapper applied at registration
+(utils/error_handling.py) turns a raised exception into a tool error and
+bounds the message length.
 """
 
 import logging
@@ -50,7 +48,7 @@ from ...utils.operational.connection import (
 )
 from ...utils.operational.context import get_cluster_connection
 from ...utils.operational.embeddings import embed_query_text
-from ...utils.responses import tool_error, tool_success
+from ...utils.responses import tool_success
 from ...utils.sqlpp import quote_literal, safe_ident
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.vector_search")
@@ -90,7 +88,7 @@ def run_vector_query(
     Embedding: query_text is embedded using the model configured via
     CB_MCP_EMBEDDING_MODEL_PROVIDER/CB_MCP_EMBEDDING_MODEL/CB_MCP_EMBEDDING_MODEL_API_KEY/CB_MCP_EMBEDDING_MODEL_ENDPOINT
     (plus CB_MCP_EMBEDDING_MODEL_AWS_* for provider=bedrock). If no provider is configured,
-    this tool returns {"success": False, "error": ...} explaining what to set
+    this tool fails with an error explaining what to set
     -- it is not hidden from tool discovery when unconfigured.
 
     Index selection: this tool queries a Couchbase 8.0+ GSI vector index
@@ -139,7 +137,7 @@ def run_vector_query(
     "cluster_major_version", and a "warning" key only when the detected
     cluster major version is below 8 (informational -- a pre-8.0 cluster
     fails the query naturally with its own "unknown function" error rather
-    than being blocked here)} or {"success": False, "error": ...}.
+    than being blocked here)}, or fails with an error.
     The document is nested under "document" rather than merged into the hit
     directly -- a document field literally named "id" or "distance" would
     otherwise silently collide with (and could overwrite) this tool's own
@@ -149,13 +147,12 @@ def run_vector_query(
     # Each tuning option requires the ones before it: nprobes, then rerank,
     # then topNScan (APPROX_VECTOR_DISTANCE's positional signature).
     if rerank is not None and num_probes is None:
-        return tool_error("rerank requires num_probes")
+        raise ValueError("rerank requires num_probes")
     if top_n_scan is not None and (num_probes is None or rerank is None):
-        return tool_error("top_n_scan requires num_probes and rerank")
+        raise ValueError("top_n_scan requires num_probes and rerank")
 
     # Connection problems -- can't reach the cluster, or this bucket doesn't
-    # exist / isn't reachable -- propagate uncaught rather than becoming a
-    # tool_error; see the module docstring.
+    # exist / isn't reachable -- propagate uncaught.
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     logger.debug(
@@ -232,12 +229,7 @@ def run_vector_query(
         return response
     except Exception as e:
         logger.error(f"Error running vector search: {e}", exc_info=True)
-        return tool_error(
-            e,
-            bucket_name=bucket_name,
-            scope_name=scope_name,
-            collection_name=collection_name,
-        )
+        raise
 
 
 def run_vector_search(
@@ -258,7 +250,7 @@ def run_vector_search(
     Embedding: vector_query_text is embedded using the model configured via
     CB_MCP_EMBEDDING_MODEL_PROVIDER/CB_MCP_EMBEDDING_MODEL/CB_MCP_EMBEDDING_MODEL_API_KEY/CB_MCP_EMBEDDING_MODEL_ENDPOINT
     (plus CB_MCP_EMBEDDING_MODEL_AWS_* for provider=bedrock). If no provider is configured,
-    this tool returns {"success": False, "error": ...} explaining what to set
+    this tool fails with an error explaining what to set
 
     Unlike run_vector_query's GSI-backed search, this tool always targets a
     *named* Search (FTS) index -- index_name is required. Pass both
@@ -307,25 +299,24 @@ def run_vector_search(
 
     Returns {"success": True, "index_name", "vector_field", "num_candidates",
     "limit", "total_hits", "hits": [{"id", "score", "fields"}], "is_hybrid",
-    "is_prefiltered"} or {"success": False, "error": ...}.
+    "is_prefiltered"}, or fails with an error.
     """
 
     if (bucket_name is None) != (scope_name is None):
-        return tool_error(
+        raise ValueError(
             "bucket_name and scope_name must be provided together, or omitted together"
         )
     if scalar_query is not None and not scalar_query:
-        return tool_error(
+        raise ValueError(
             "scalar_query must be a non-empty query body when provided, or omitted entirely"
         )
     if prefilter is not None and not prefilter:
-        return tool_error(
+        raise ValueError(
             "prefilter must be a non-empty query body when provided, or omitted entirely"
         )
 
     # Connection problems -- can't reach the cluster, or this bucket doesn't
-    # exist / isn't reachable -- propagate uncaught rather than becoming a
-    # tool_error; see the module docstring.
+    # exist / isn't reachable -- propagate uncaught.
     cluster = get_cluster_connection(ctx)
     bucket = (
         connect_to_bucket(cluster, bucket_name) if bucket_name and scope_name else None
@@ -396,4 +387,4 @@ def run_vector_search(
         logger.error(
             f"Error running Search vector search on {index_name!r}: {e}", exc_info=True
         )
-        return tool_error(e, index_name=index_name)
+        raise

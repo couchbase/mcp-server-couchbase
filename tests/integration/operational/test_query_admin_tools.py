@@ -21,9 +21,10 @@ import pytest
 from conftest import create_mcp_session, extract_payload, is_error_response
 
 
-def _is_capella_rejection(payload: dict) -> bool:
-    error = payload.get("error", "")
-    return "Capella" in error
+def _is_capella_rejection(response) -> bool:
+    """True for the Capella error, or the tool being withheld on Capella."""
+    text = str(extract_payload(response))
+    return "Capella" in text or "unknown tool" in text.lower()
 
 
 @pytest.mark.asyncio
@@ -33,17 +34,15 @@ async def test_get_cluster_query_vitals() -> None:
         response = await session.call_tool("get_cluster_query_vitals")
         if is_error_response(response):
             # Withheld entirely for a Capella deployment — see
-            # test_deployment_gating.py for the dedicated assertions on this.
+            # test_deployment_gating.py for the dedicated assertions on this —
+            # or rejected with a Capella error.
+            assert _is_capella_rejection(response), (
+                f"Expected only a Capella rejection, got: {extract_payload(response)}"
+            )
             return
 
         payload = extract_payload(response)
         assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
-        if payload.get("status") == "error":
-            assert _is_capella_rejection(payload), (
-                f"Expected only a Capella-rejection error, got: {payload}"
-            )
-            return
-
         assert payload.get("status") == "success", (
             f"Expected a status envelope: {payload}"
         )
@@ -63,16 +62,13 @@ async def test_get_active_queries() -> None:
     async with create_mcp_session() as session:
         response = await session.call_tool("get_active_queries")
         if is_error_response(response):
+            assert _is_capella_rejection(response), (
+                f"Expected only a Capella rejection, got: {extract_payload(response)}"
+            )
             return
 
         payload = extract_payload(response)
         assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
-        if payload.get("status") == "error":
-            assert _is_capella_rejection(payload), (
-                f"Expected only a Capella-rejection error, got: {payload}"
-            )
-            return
-
         assert payload.get("status") == "success", (
             f"Expected a status envelope: {payload}"
         )
@@ -108,13 +104,13 @@ async def test_delete_active_query_with_bogus_id_reports_delivery() -> None:
             arguments={"request_id": "00000000-0000-0000-0000-000000000000"},
         )
         if is_error_response(response):
+            assert _is_capella_rejection(response), (
+                f"Expected only a Capella rejection, got: {extract_payload(response)}"
+            )
             return
 
         payload = extract_payload(response)
         assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
-        if payload.get("success") is False and _is_capella_rejection(payload):
-            return
-
         assert payload.get("success") is True, (
             f"Expected the request to be delivered successfully: {payload}"
         )

@@ -5,7 +5,7 @@ The integration suite covers happy paths and the "document already exists"
 cover the unexpected-SDK-error branches that can't reliably be triggered
 end-to-end:
 
-- upsert_document_by_id returns {"success": False, "error": ...} on unexpected exception.
+- upsert_document_by_id lets an unexpected exception propagate.
 - insert / replace / delete error branches (parallel coverage).
 """
 
@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import couchbase.subdocument as subdoc
+import pytest
 from couchbase.exceptions import PathMismatchException, PathNotFoundException
 
 from cb_mcp.tools.operational.kv import (
@@ -53,20 +54,19 @@ def _make_ctx_with_collection() -> tuple[SimpleNamespace, MagicMock, MagicMock]:
 class TestUpsertDocument:
     """upsert_document_by_id error branch."""
 
-    def test_returns_false_on_sdk_error(self) -> None:
-        """An unexpected SDK error must be swallowed and surfaced with its
-        reason — callers rely on the structured return rather than exception
-        handling."""
+    def test_sdk_error_propagates(self) -> None:
+        """An unexpected SDK error must propagate raw, carrying its reason."""
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.upsert.side_effect = Exception("transient error")
 
-        with patch(
-            "cb_mcp.tools.operational.kv.get_cluster_connection",
-            return_value=cluster,
+        with (
+            patch(
+                "cb_mcp.tools.operational.kv.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(Exception, match="transient error"),
         ):
-            result = upsert_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
-
-        assert result == {"success": False, "error": "transient error"}
+            upsert_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
         collection.upsert.assert_called_once_with("doc1", {"a": 1})
 
     def test_returns_true_on_success(self) -> None:
@@ -85,55 +85,58 @@ class TestUpsertDocument:
 class TestInsertDocument:
     """insert_document_by_id error branch (parallels upsert)."""
 
-    def test_returns_false_on_sdk_error(self) -> None:
-        """Document-exists or any other SDK error must return a failure dict
+    def test_sdk_error_propagates(self) -> None:
+        """Document-exists or any other SDK error must propagate
         with the reason."""
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.insert.side_effect = Exception("DocumentExistsException")
 
-        with patch(
-            "cb_mcp.tools.operational.kv.get_cluster_connection",
-            return_value=cluster,
+        with (
+            patch(
+                "cb_mcp.tools.operational.kv.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(Exception, match="DocumentExistsException"),
         ):
-            result = insert_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
-
-        assert result == {"success": False, "error": "DocumentExistsException"}
+            insert_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
 
 
 class TestReplaceDocument:
     """replace_document_by_id error branch (parallels upsert)."""
 
-    def test_returns_false_on_sdk_error(self) -> None:
-        """Document-not-found or any other SDK error must return a failure
-        dict with the reason."""
+    def test_sdk_error_propagates(self) -> None:
+        """Document-not-found or any other SDK error must propagate
+        with the reason."""
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.replace.side_effect = Exception("DocumentNotFoundException")
 
-        with patch(
-            "cb_mcp.tools.operational.kv.get_cluster_connection",
-            return_value=cluster,
+        with (
+            patch(
+                "cb_mcp.tools.operational.kv.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(Exception, match="DocumentNotFoundException"),
         ):
-            result = replace_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
-
-        assert result == {"success": False, "error": "DocumentNotFoundException"}
+            replace_document_by_id(ctx, "b", "s", "c", "doc1", {"a": 1})
 
 
 class TestDeleteDocument:
     """delete_document_by_id error branch (parallels upsert)."""
 
-    def test_returns_false_on_sdk_error(self) -> None:
-        """Document-not-found or any other SDK error must return a failure
-        dict with the reason."""
+    def test_sdk_error_propagates(self) -> None:
+        """Document-not-found or any other SDK error must propagate
+        with the reason."""
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.remove.side_effect = Exception("DocumentNotFoundException")
 
-        with patch(
-            "cb_mcp.tools.operational.kv.get_cluster_connection",
-            return_value=cluster,
+        with (
+            patch(
+                "cb_mcp.tools.operational.kv.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(Exception, match="DocumentNotFoundException"),
         ):
-            result = delete_document_by_id(ctx, "b", "s", "c", "doc1")
-
-        assert result == {"success": False, "error": "DocumentNotFoundException"}
+            delete_document_by_id(ctx, "b", "s", "c", "doc1")
 
 
 class _FakeLookupInResult:
@@ -250,31 +253,34 @@ class TestSubDocumentLookupIn:
             "error": str(PathMismatchException("Path mismatch.")),
         }
 
-    def test_no_paths_returns_error(self) -> None:
+    def test_no_paths_raises_value_error(self) -> None:
         """Calling with no paths at all is a usage error, not an SDK call."""
         ctx, cluster, collection = _make_ctx_with_collection()
 
-        with patch(
-            "cb_mcp.tools.operational.kv.get_cluster_connection",
-            return_value=cluster,
+        with (
+            patch(
+                "cb_mcp.tools.operational.kv.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(ValueError, match="At least one of get_paths"),
         ):
-            result = lookup_subdocument(ctx, "b", "s", "c", "doc1")
+            lookup_subdocument(ctx, "b", "s", "c", "doc1")
 
-        assert "error" in result
         collection.lookup_in.assert_not_called()
 
-    def test_lookup_in_sdk_error_returns_error(self) -> None:
-        """An unexpected SDK/connection error is logged and returned, not raised."""
+    def test_lookup_in_sdk_error_propagates(self) -> None:
+        """An unexpected SDK/connection error propagates raw."""
         ctx, cluster, collection = _make_ctx_with_collection()
         collection.lookup_in.side_effect = Exception("connection reset")
 
-        with patch(
-            "cb_mcp.tools.operational.kv.get_cluster_connection",
-            return_value=cluster,
+        with (
+            patch(
+                "cb_mcp.tools.operational.kv.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(Exception, match="connection reset"),
         ):
-            result = lookup_subdocument(ctx, "b", "s", "c", "doc1", get_paths=["name"])
-
-        assert result == {"error": "connection reset"}
+            lookup_subdocument(ctx, "b", "s", "c", "doc1", get_paths=["name"])
 
     def test_count_path_mismatch_reported_not_raised(self) -> None:
         """A PathMismatchException on a count spec (e.g. counting a scalar field)
@@ -493,9 +499,9 @@ class TestSubDocumentMutateIn:
         expected_specs = [subdoc.array_insert("tags[0]", "first")]
         collection.mutate_in.assert_called_once_with("doc1", expected_specs)
 
-    def test_atomic_sdk_error_returns_error_not_raised(self) -> None:
+    def test_atomic_sdk_error_raises_with_spec_detail_first(self) -> None:
         """mutate_in is atomic: any failing spec fails the whole call. The error
-        must be logged and returned, not raised, and mutate_in called exactly once
+        must be logged and raised with the failing spec's path leading the message, and mutate_in called exactly once
         (no partial-success retry logic)."""
         ctx, cluster, collection = _make_ctx_with_collection()
         error_context = SimpleNamespace(
@@ -505,11 +511,14 @@ class TestSubDocumentMutateIn:
         sdk_error._context = error_context
         collection.mutate_in.side_effect = sdk_error
 
-        with patch(
-            "cb_mcp.tools.operational.kv.get_cluster_connection",
-            return_value=cluster,
+        with (
+            patch(
+                "cb_mcp.tools.operational.kv.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(RuntimeError, match=r"^\(spec 1: missing\.path\) "),
         ):
-            result = mutate_subdocument(
+            mutate_subdocument(
                 ctx,
                 "b",
                 "s",
@@ -519,35 +528,35 @@ class TestSubDocumentMutateIn:
                 replace_specs=[{"path": "missing.path", "value": 2}],
             )
 
-        assert "error" in result
-        assert "missing.path" in result["error"]
         collection.mutate_in.assert_called_once()
 
-    def test_no_specs_returns_error(self) -> None:
+    def test_no_specs_raises_value_error(self) -> None:
         """Calling with no mutation specs at all is a usage error, not an SDK call."""
         ctx, cluster, collection = _make_ctx_with_collection()
 
-        with patch(
-            "cb_mcp.tools.operational.kv.get_cluster_connection",
-            return_value=cluster,
+        with (
+            patch(
+                "cb_mcp.tools.operational.kv.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(ValueError, match="At least one mutation spec"),
         ):
-            result = mutate_subdocument(ctx, "b", "s", "c", "doc1")
+            mutate_subdocument(ctx, "b", "s", "c", "doc1")
 
-        assert "error" in result
         collection.mutate_in.assert_not_called()
 
-    def test_malformed_spec_missing_key_returns_error_not_raised(self) -> None:
+    def test_malformed_spec_missing_key_raises_value_error(self) -> None:
         """A spec dict missing a required key (e.g. 'value') must be reported as
-        an error, not raise an uncaught KeyError."""
+        a ValueError, not an uncaught KeyError."""
         ctx, cluster, collection = _make_ctx_with_collection()
 
-        with patch(
-            "cb_mcp.tools.operational.kv.get_cluster_connection",
-            return_value=cluster,
+        with (
+            patch(
+                "cb_mcp.tools.operational.kv.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(ValueError, match="Invalid mutation spec"),
         ):
-            result = mutate_subdocument(
-                ctx, "b", "s", "c", "doc1", upsert_specs=[{"path": "a"}]
-            )
+            mutate_subdocument(ctx, "b", "s", "c", "doc1", upsert_specs=[{"path": "a"}])
 
-        assert "error" in result
         collection.mutate_in.assert_not_called()
