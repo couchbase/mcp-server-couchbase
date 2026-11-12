@@ -43,7 +43,7 @@ from ..utils.constants import (
 )
 from ..utils.context import AppContext
 from ..utils.environment import log_environment_info
-from ..utils.telemetry import send_install_ping
+from ..utils.telemetry import send_install_ping, wrap_with_telemetry
 from ..version import server_version
 from .contracts import ProviderLifecycle
 from .serving import apply_thread_pool_limit
@@ -312,7 +312,12 @@ def build_app(
     # Register tools; FastMCP 3.x add_tool has no annotations kwarg, so wrap first.
     for tool in tools:
         annotations = spec.annotations.get(tool.__name__)
-        tool_obj = FunctionTool.from_function(tool, annotations=annotations)
+        tool_obj = FunctionTool.from_function(
+            wrap_with_telemetry(
+                tool, server_id=spec.id, transport=str(settings.get("transport"))
+            ),
+            annotations=annotations,
+        )
         mcp.add_tool(tool_obj)
 
     logger.info(f"Registered {len(tools)} tool(s) for server '{spec.id}'")
