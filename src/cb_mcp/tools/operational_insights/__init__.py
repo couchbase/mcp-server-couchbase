@@ -46,6 +46,12 @@ from .query import (
     operational_insights_run_query_async,
     operational_insights_run_query_sync,
 )
+from .query_rest import (
+    operational_insights_cancel_async_query_rest,
+    operational_insights_discard_async_query_results_rest,
+    operational_insights_get_async_query_results_rest,
+    operational_insights_run_query_async_rest,
+)
 
 # The Operational Insights server's tool inventory, and the single source of
 # truth for it.
@@ -87,6 +93,14 @@ TOOL_SET = ToolSet(
         # answered an in-flight handle by recommending a tool that was not
         # loaded.
         operational_insights_cancel_async_query,
+        # REST-backed variants of the four async tools above (query_rest.py),
+        # registered alongside them for comparison. Same classification, for
+        # the same reasons: run is runtime-gated, the other three end or read
+        # a query the caller started.
+        operational_insights_run_query_async_rest,
+        operational_insights_get_async_query_results_rest,
+        operational_insights_discard_async_query_results_rest,
+        operational_insights_cancel_async_query_rest,
     ),
     write=(operational_insights_create_index,),
 )
@@ -121,6 +135,17 @@ TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
         destructiveHint=True
     ),
     "operational_insights_cancel_async_query": ToolAnnotations(destructiveHint=True),
+    # The *_rest variants carry their SDK counterparts' annotations.
+    "operational_insights_run_query_async_rest": ToolAnnotations(),
+    "operational_insights_get_async_query_results_rest": ToolAnnotations(
+        readOnlyHint=True
+    ),
+    "operational_insights_discard_async_query_results_rest": ToolAnnotations(
+        destructiveHint=True
+    ),
+    "operational_insights_cancel_async_query_rest": ToolAnnotations(
+        destructiveHint=True
+    ),
     # operational_insights_create_index issues DDL (matches create_index on the operational
     # server).
     "operational_insights_create_index": ToolAnnotations(),
@@ -134,6 +159,9 @@ TOOL_SCOPE_HINTS: dict[str, str] = {
         f"A '{SCOPE_WRITE}'-only token cannot invoke SQL++; '{SCOPE_READ}' is required."
     ),
     "operational_insights_run_query_async": (
+        f"A '{SCOPE_WRITE}'-only token cannot invoke SQL++; '{SCOPE_READ}' is required."
+    ),
+    "operational_insights_run_query_async_rest": (
         f"A '{SCOPE_WRITE}'-only token cannot invoke SQL++; '{SCOPE_READ}' is required."
     ),
 }
@@ -159,15 +187,19 @@ __all__ = [
     "get_server_configuration_status",
     "get_tools",
     "operational_insights_cancel_async_query",
+    "operational_insights_cancel_async_query_rest",
     "operational_insights_create_index",
     "operational_insights_discard_async_query_results",
+    "operational_insights_discard_async_query_results_rest",
     "operational_insights_explain_query",
     "operational_insights_get_async_query_results",
+    "operational_insights_get_async_query_results_rest",
     "operational_insights_get_collections_in_scope",
     "operational_insights_get_databases_in_cluster",
     "operational_insights_get_schema_for_collection",
     "operational_insights_get_scopes_in_database",
     "operational_insights_list_indexes",
     "operational_insights_run_query_async",
+    "operational_insights_run_query_async_rest",
     "operational_insights_run_query_sync",
 ]

@@ -20,6 +20,13 @@ _LIFECYCLE = (
     "operational_insights_get_async_query_results",
     "operational_insights_discard_async_query_results",
     "operational_insights_cancel_async_query",
+    # The REST-backed variants form their own complete lifecycle: their
+    # handles are not accepted by the SDK tools, so each set must be
+    # stoppable on its own.
+    "operational_insights_run_query_async_rest",
+    "operational_insights_get_async_query_results_rest",
+    "operational_insights_discard_async_query_results_rest",
+    "operational_insights_cancel_async_query_rest",
 )
 
 

@@ -55,3 +55,24 @@ DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT = 30
 #: status, discard or cancel call hang that long on a server that has stopped
 #: answering.
 MAX_ASYNC_QUERY_RESULT_TIMEOUT = 600
+
+#: Retry policy for the REST-backed async tools (``*_rest``). Same retry
+#: *rules* as the SDK's ``RetryHandler`` (connect failures, HTTP 503, and
+#: errors the server marks ``retriable``), with tighter limits: the SDK allows
+#: 7 retries and waits of up to 60s, which can hold one tool call open for
+#: minutes while a model waits on it.
+REST_MAX_RETRIES = 3
+
+#: Backoff bounds, in seconds. Each wait is drawn uniformly from
+#: ``[0, min(REST_BACKOFF_MAX_SECONDS, REST_BACKOFF_MIN_SECONDS * 2**(attempt-1))]``
+#: — the SDK's full-jitter exponential shape.
+REST_BACKOFF_MIN_SECONDS = 0.1
+REST_BACKOFF_MAX_SECONDS = 2.0
+
+#: Ceiling on the total time one call may spend sleeping between retries.
+REST_RETRY_BUDGET_SECONDS = 10.0
+
+#: Server-side timeout sent with every REST-started query. Matches what the
+#: SDK sends by default: its 10-minute query timeout plus the 5s it adds so
+#: the client side always fires first.
+REST_QUERY_TIMEOUT = "605000.0ms"

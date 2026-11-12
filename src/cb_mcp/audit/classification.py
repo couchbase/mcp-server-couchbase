@@ -217,6 +217,12 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         "operational_insights_get_async_query_results": ("query", "read"),
         "operational_insights_discard_async_query_results": ("query", "read"),
         "operational_insights_cancel_async_query": ("query", "read"),
+        # REST-backed variants of the same lifecycle: same resource, same
+        # scope, so the same event ids as their SDK counterparts.
+        "operational_insights_run_query_async_rest": ("query", "read"),
+        "operational_insights_get_async_query_results_rest": ("query", "read"),
+        "operational_insights_discard_async_query_results_rest": ("query", "read"),
+        "operational_insights_cancel_async_query_rest": ("query", "read"),
         # -- index -----------------------------------------------------------
         "operational_insights_list_indexes": ("index", "read"),
         "operational_insights_create_index": ("index", "write"),

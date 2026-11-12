@@ -1,8 +1,8 @@
 """Accessors that narrow the shared provider to this server's contract.
 
 ``cb_mcp.utils.context.get_cluster_provider`` returns a
-``ProviderLifecycle`` — only what the shared machinery calls. Both functions
-here do the same two things: fail loudly if the lifespan never populated the
+``ProviderLifecycle`` — only what the shared machinery calls. Every accessor
+here does the same two things: fail loudly if the lifespan never populated the
 provider, then narrow to ``OperationalInsightsProvider`` so this server's
 extra members (``get_cluster``'s Operational Insights ``Cluster``, and ``handle_registry``)
 are named by a contract rather than reached for and hoped about.
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from couchbase_operational_insights.cluster import Cluster
 
     from .handle_registry import QueryResultsRegistry
+    from .rest_client import OperationalInsightsRestClient
 
 _PROVIDER_MISSING = (
     "Cluster provider not initialized. "
@@ -63,3 +64,12 @@ def get_operational_insights_handle_registry(ctx: Context) -> QueryResultsRegist
     ``ClusterProvider``.
     """
     return _provider(ctx).handle_registry
+
+
+def get_operational_insights_rest_client(ctx: Context) -> OperationalInsightsRestClient:
+    """Return the REST client behind the ``*_rest`` async query tools.
+
+    Unlike the registry, it holds no per-query state — only a connection
+    pool — so it is safe to share across workers' requests.
+    """
+    return _provider(ctx).get_rest_client(ctx)

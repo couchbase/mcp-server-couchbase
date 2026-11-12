@@ -23,6 +23,11 @@ dependencies = [
     # Fuzzy matching for discover_tool_input_values.
     "rapidfuzz>=3.13.0,<4.0.0",
     "couchbase-operational-insights>=1.0.0,<2.0.0",
+    # Incremental JSON parsing for the REST-backed async query tools
+    # (utils/operational_insights/rest_client.py). Already installed via
+    # couchbase-operational-insights; declared because it is imported
+    # directly. Same constraint the SDK uses.
+    "ijson~=3.4",
     "openai>=3.0.0,<4.0.0",
     # Imported directly by the --workers supervisor (src/mcp_server.py), so
     # declared rather than relied on through fastmcp/mcp. Lower bound matches

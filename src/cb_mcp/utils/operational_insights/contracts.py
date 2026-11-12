@@ -24,6 +24,8 @@ from .handle_registry import QueryResultsRegistry
 if TYPE_CHECKING:
     from couchbase_operational_insights.cluster import Cluster
 
+    from .rest_client import OperationalInsightsRestClient
+
 
 class OperationalInsightsProvider(ProviderLifecycle, Protocol):
     """Resolves an Operational Insights cluster, and owns its handle registry.
@@ -48,4 +50,8 @@ class OperationalInsightsProvider(ProviderLifecycle, Protocol):
 
     def get_cluster(self, ctx: Context) -> Cluster:
         """Return (or begin returning) a cluster for this request."""
+        ...
+
+    def get_rest_client(self, ctx: Context) -> OperationalInsightsRestClient:
+        """Return the stateless REST client used by the ``*_rest`` async tools."""
         ...

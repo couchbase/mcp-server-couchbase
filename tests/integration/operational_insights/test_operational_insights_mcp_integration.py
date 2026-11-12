@@ -31,6 +31,11 @@ OPERATIONAL_INSIGHTS_EXPECTED_TOOLS = {
     "operational_insights_discard_async_query_results",
     "operational_insights_create_index",
     "operational_insights_cancel_async_query",
+    # REST-backed variants of the async lifecycle (query_rest.py).
+    "operational_insights_run_query_async_rest",
+    "operational_insights_get_async_query_results_rest",
+    "operational_insights_discard_async_query_results_rest",
+    "operational_insights_cancel_async_query_rest",
 }
 
 

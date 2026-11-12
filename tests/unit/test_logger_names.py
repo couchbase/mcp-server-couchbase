@@ -90,7 +90,9 @@ EXPECTED_LOGGER_NAMES = {
     "cb_mcp.tools.operational_insights.index": "couchbase.mcp.operational-insights.tools.index",
     "cb_mcp.tools.operational_insights.metadata": "couchbase.mcp.operational-insights.tools.metadata",
     "cb_mcp.tools.operational_insights.query": "couchbase.mcp.operational-insights.tools.query",
+    "cb_mcp.tools.operational_insights.query_rest": "couchbase.mcp.operational-insights.tools.query_rest",
     "cb_mcp.utils.operational_insights.connection": "couchbase.mcp.operational-insights.utils.connection",
+    "cb_mcp.utils.operational_insights.rest_client": "couchbase.mcp.operational-insights.utils.rest_client",
     "providers.operational_insights": "couchbase.mcp.operational-insights.providers.operational_insights",
 }
 

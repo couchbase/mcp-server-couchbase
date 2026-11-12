@@ -14,6 +14,9 @@ from cb_mcp.utils.operational_insights.connection import (
     connect_to_operational_insights_cluster,
 )
 from cb_mcp.utils.operational_insights.handle_registry import QueryResultsRegistry
+from cb_mcp.utils.operational_insights.rest_client import (
+    OperationalInsightsRestClient,
+)
 
 logger = logging.getLogger(
     f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.providers.operational_insights"
@@ -46,6 +49,26 @@ class OperationalInsightsClusterProvider:
         # connection. See handle_registry.py for why it lives here rather
         # than on the shared AppContext.
         self.handle_registry = QueryResultsRegistry()
+        # The *_rest async tools' HTTP client. Holds a connection pool only —
+        # no query state — and is created on first use like the cluster.
+        self._rest_client: OperationalInsightsRestClient | None = None
+
+    def get_rest_client(
+        self, ctx: Context
+    ) -> OperationalInsightsRestClient:  # ctx unused; settings come from init
+        """Return the shared REST client, creating it on the first call."""
+        if self._rest_client is not None:
+            return self._rest_client
+        with self._lock:
+            if self._rest_client is None:
+                self._rest_client = OperationalInsightsRestClient.from_settings(
+                    self._settings,
+                    timeout_seconds=self._settings.get(
+                        "operational_insights_async_query_result_timeout",
+                        DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT,
+                    ),
+                )
+        return self._rest_client
 
     def get_cluster(
         self, ctx: Context
@@ -83,6 +106,10 @@ class OperationalInsightsClusterProvider:
         shared lifespan calls only ``close()`` on this provider and never
         learns which verb the underlying client actually needs.
         """
+        rest_client = self._rest_client
+        if rest_client is not None:
+            rest_client.close()
+            self._rest_client = None
         cluster = self._cluster
         if cluster is not None:
             cluster.shutdown()
