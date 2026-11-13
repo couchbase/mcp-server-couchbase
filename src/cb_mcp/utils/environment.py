@@ -55,6 +55,8 @@ _SAFE_SETTINGS_KEYS = (
     "workers",
     "stateless_http",
     "thread_pool_size",
+    # Which web origins may call the server; hostnames, not credentials.
+    "allowed_origins",
     "disabled_tools",
     "confirmation_required_tools",
     # The effective query result budget in bytes, already clamped. A plain

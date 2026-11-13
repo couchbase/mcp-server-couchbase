@@ -61,6 +61,7 @@ from fastmcp.server.http import StarletteWithLifespan
 from cb_mcp.core.app import build_app, run_app
 from cb_mcp.core.cli import DefaultGroup
 from cb_mcp.core.contracts import ProviderLifecycle
+from cb_mcp.core.origin_guard import origin_guard_kwargs
 from cb_mcp.core.serving import (
     ServingConfig,
     ServingConfigError,
@@ -279,6 +280,7 @@ def _start_server(server_id: str, params: Mapping[str, Any]) -> None:
         host=transport.host,
         port=transport.port,
         stateless_http=built.serving.stateless_http,
+        allowed_origins=transport.allowed_origins,
     )
 
 
@@ -331,7 +333,10 @@ def create_app() -> StarletteWithLifespan:
         server_id, _per_process_log_file(params), send_startup_ping=False
     )
     # The supervisor already resolved this configuration as stateless.
-    return built.mcp.http_app(stateless_http=built.serving.stateless_http)
+    return built.mcp.http_app(
+        stateless_http=built.serving.stateless_http,
+        **origin_guard_kwargs(built.cli.transport.allowed_origins),
+    )
 
 
 # --- The command line ---------------------------------------------------------

@@ -102,6 +102,13 @@
           "isSecret": false
         },
         {
+          "name": "CB_MCP_ALLOWED_ORIGINS",
+          "description": "Comma-separated web origins (scheme://host[:port], '*' allowed in the host) permitted to call the http endpoint. When set, requests with an unlisted Origin header are rejected (403); requests with no Origin header are admitted. Unset, empty or '*' allows every origin. Ignored with stdio.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
           "name": "CB_MCP_DISABLED_TOOLS",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
           "isRequired": false,
@@ -879,6 +886,13 @@
           "isSecret": false
         },
         {
+          "name": "CB_MCP_ALLOWED_ORIGINS",
+          "description": "Comma-separated web origins (scheme://host[:port], '*' allowed in the host) permitted to call the http endpoint. When set, requests with an unlisted Origin header are rejected (403); requests with no Origin header are admitted. Unset, empty or '*' allows every origin. Ignored with stdio.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
           "name": "CB_MCP_DISABLED_TOOLS",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
           "isRequired": false,
@@ -1551,6 +1565,13 @@
           "isSecret": false
         },
         {
+          "name": "CB_MCP_ALLOWED_ORIGINS",
+          "description": "Comma-separated web origins (scheme://host[:port], '*' allowed in the host) permitted to call the http endpoint. When set, requests with an unlisted Origin header are rejected (403); requests with no Origin header are admitted. Unset, empty or '*' allows every origin. Ignored with stdio.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
           "name": "CB_MCP_DISABLED_TOOLS",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
           "isRequired": false,
@@ -1924,6 +1945,13 @@
           "description": "Handle each HTTP request without per-session state (default: true when workers > 1, otherwise false). Only honored with the http transport; cannot be combined with CB_MCP_CONFIRMATION_REQUIRED_TOOLS.",
           "isRequired": false,
           "format": "boolean",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_ALLOWED_ORIGINS",
+          "description": "Comma-separated web origins (scheme://host[:port], '*' allowed in the host) permitted to call the http endpoint. When set, requests with an unlisted Origin header are rejected (403); requests with no Origin header are admitted. Unset, empty or '*' allows every origin. Ignored with stdio.",
+          "isRequired": false,
+          "format": "string",
           "isSecret": false
         },
         {

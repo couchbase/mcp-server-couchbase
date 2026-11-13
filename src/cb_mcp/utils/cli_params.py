@@ -57,6 +57,7 @@ from ..core.cli.options import (
     tool_gating_options,
     transport_options,
 )
+from ..core.origin_guard import parse_allowed_origins
 from ..core.serving import ServingConfig
 from ..core.spec import Deployment, ServerSpec
 from ..servers.operational_insights.cli import (
@@ -107,7 +108,7 @@ class CredentialProfile(NamedTuple):
     #: uses. Must not log — it runs before logging is configured.
     resolve: Callable[[Mapping[str, Any]], dict[str, Any]] | None = None
     #: Optional: logs what ``resolve`` replaced. Called once logging is up.
-    warn: Callable[[Mapping[str, Any]], None] | None = None
+    log_warnings: Callable[[Mapping[str, Any]], None] | None = None
 
     def _raw_settings(self, params: Mapping[str, Any]) -> dict[str, Any]:
         return {key: params[key] for key in self.settings_keys}
@@ -119,8 +120,8 @@ class CredentialProfile(NamedTuple):
 
     def warn_about(self, params: Mapping[str, Any]) -> None:
         """Log the warnings ``settings_from`` held back. Call after ``LoggingParams.apply``."""
-        if self.warn:
-            self.warn(self._raw_settings(params))
+        if self.log_warnings:
+            self.log_warnings(self._raw_settings(params))
 
 
 CLUSTER_CREDENTIALS = CredentialProfile(
@@ -156,7 +157,7 @@ INSIGHTS_CREDENTIALS = CredentialProfile(
         "operational_insights_async_query_result_timeout",
     ),
     resolve=resolve_operational_insights_settings,
-    warn=warn_about_operational_insights_settings,
+    log_warnings=warn_about_operational_insights_settings,
 )
 
 
@@ -176,6 +177,8 @@ class TransportParams:
     workers: int
     stateless_http: bool | None
     thread_pool_size: int | None
+    #: Normalized origin allow-list; empty means every origin is admitted.
+    allowed_origins: tuple[str, ...] = ()
 
     @classmethod
     def from_click(cls, params: Mapping[str, Any]) -> "TransportParams":
@@ -186,6 +189,8 @@ class TransportParams:
             workers=params["workers"],
             stateless_http=params["stateless_http"],
             thread_pool_size=params["thread_pool_size"],
+            # Already validated by the Click callback, so this cannot raise.
+            allowed_origins=parse_allowed_origins(params["allowed_origins"]),
         )
 
 
@@ -608,6 +613,7 @@ def build_settings(
             "workers": serving.workers,
             "stateless_http": serving.stateless_http,
             "thread_pool_size": serving.thread_pool_size,
+            "allowed_origins": list(cli.transport.allowed_origins),
             **cli.oauth.as_settings(enabled=oauth_enabled),
             **cli.embedding.as_settings(),
             "disabled_tools": gated.disabled,

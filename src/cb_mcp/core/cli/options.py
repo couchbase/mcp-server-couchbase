@@ -17,6 +17,7 @@ from collections.abc import Callable
 import click
 
 from ...utils.cli import (
+    validate_allowed_origins,
     validate_log_level,
     validate_log_path,
     validate_log_sinks,
@@ -172,6 +173,23 @@ def transport_options(*, default_port: int) -> Callable:
             "processes) and false otherwise. Only honored with "
             "--transport=http; cannot be combined with "
             "--confirmation-required-tools.",
+        ),
+        click.option(
+            "--allowed-origins",
+            "allowed_origins",
+            envvar="CB_MCP_ALLOWED_ORIGINS",
+            show_envvar=True,
+            default=None,
+            callback=validate_allowed_origins,
+            help="Comma-separated origins (scheme://host[:port], for example "
+            "https://app.example.com) allowed to call the server over http or "
+            "sse; a '*' in the host matches any text. Enforced by FastMCP's "
+            "origin guard: a request whose Origin header is not listed is "
+            "rejected, but one with no Origin header (most non-browser MCP "
+            "clients) is admitted. Unset, empty or a lone '*' allows every "
+            "origin. Ignored with --transport=stdio. This guards against "
+            "malicious web pages, not other clients; it is not "
+            "authentication.",
         ),
         # Deliberately hidden and undocumented: an internal tuning knob, not
         # yet part of the supported surface. See cb_mcp.core.serving.

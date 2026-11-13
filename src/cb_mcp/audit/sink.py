@@ -56,7 +56,7 @@ import socket
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Protocol
 
@@ -825,7 +825,7 @@ class AuditSink(_QueuedSink):
         the first free one: reusing an index freed by pruning would give a
         brand-new backup the sort position of the file it replaced.
         """
-        stamp = datetime.now(timezone.utc).strftime(_BACKUP_TIMESTAMP_FORMAT)
+        stamp = datetime.now(UTC).strftime(_BACKUP_TIMESTAMP_FORMAT)
         candidate = self.path.with_name(f"{self.path.name}.{stamp}")
         if not candidate.exists() and not _with_gz(candidate).exists():
             return candidate

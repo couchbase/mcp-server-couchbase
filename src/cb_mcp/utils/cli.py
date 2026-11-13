@@ -75,6 +75,34 @@ def validate_max_query_result_size(
     return value
 
 
+def validate_allowed_origins(
+    ctx: click.Context, param: click.Parameter, value: str | None
+) -> str | None:
+    """Click callback for ``--allowed-origins``.
+
+    Fails startup on a malformed list, naming every bad entry and why, rather
+    than quietly enforcing a different list than the operator meant. Returns
+    the raw string, not the parsed tuple: it is JSON-native, so it crosses the
+    ``--workers`` process handoff unchanged and is parsed again in
+    ``TransportParams``.
+    """
+    # Imported here, not at the top: origin_guard imports cb_mcp.utils (for its
+    # constants), and this module is part of that package's import, so a
+    # top-level import makes "import cb_mcp.core.origin_guard" circular.
+    from ..core.origin_guard import (  # noqa: PLC0415
+        OriginListError,
+        parse_allowed_origins,
+    )
+
+    try:
+        parse_allowed_origins(value)
+    except OriginListError as e:
+        raise click.BadParameter(
+            f"{e}\n(set by --allowed-origins or CB_MCP_ALLOWED_ORIGINS)"
+        ) from None
+    return value
+
+
 def validate_log_path(ctx: click.Context, param: click.Parameter, value: str) -> str:
     """Click callback for ``--log-file`` (the base path for per-level files).
 
