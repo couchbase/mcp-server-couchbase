@@ -7,8 +7,9 @@ unreachable, which is exactly when someone is likely to be looking up a metric n
 Error handling: failures are raised, not returned; the registration wrapper
 (``utils/error_handling.py``) turns them into the tool error and bounds the message length. There
 is no cluster call here, so the "let connection failures propagate" carve-out other read tools use
-does not apply. Each guard message carries the valid values for whatever was wrong, so the caller
-can correct itself in one round trip instead of guessing again.
+does not apply. Guard messages say what was wrong and how to correct it in one round trip: an
+unknown tool_name lists the registered names, and bad chapter filters point at the chapters block
+(their valid values are too long to fit the error cap).
 """
 
 import logging
@@ -88,9 +89,10 @@ def discover_tool_input_values(
     Returns {"success": True, "dataset": ..., "chapters": ..., ...} plus either "record_count" and
     "sample_records" (browse -- a preview, since every dataset is currently treated as too large to
     list in full) or "matches" (total found), "returned" and "results" (ranked, each record plus
-    its "score") (search). On failure the call fails with a reason listing the valid
-    values for whatever was wrong -- e.g. an unrecognised tool_name lists the available tool
-    names, a bad chapter filter lists the valid chapter fields or the valid values.
+    its "score") (search). On failure the call fails with a reason -- e.g. an
+    unrecognised tool_name lists the available tool names, and a bad chapter filter names the
+    rejected filters and says to repeat the call without chapter_filters to read the valid
+    fields and values from the chapters block.
     Zero matches is a successful response with an empty "results" list -- refine your keywords, drop
     a chapter_filter, or lower min_score and call again.
     """
@@ -110,25 +112,29 @@ def discover_tool_input_values(
         raise
 
     # Every bad filter is reported at once, not just the first: returning on the first one would
-    # make the caller fix it, retry, and only then discover the second. The response carries the
-    # full chapter listing, so one round trip is enough to correct all of them.
+    # make the caller fix it, retry, and only then discover the second. Only the offending names are
+    # listed, never the valid values -- those can run to hundreds of characters per filter and would
+    # be cut by the error cap. The message points at the chapters block instead, which every
+    # response (browse included) carries in full.
     filters = chapter_filters or {}
     invalid_filters: list[str] = []
     for field, value in filters.items():
         if field not in dataset_chapters:
-            invalid_filters.append(
-                f"{field!r} is not a chapter field for this dataset, so it cannot "
-                f"be filtered on. Valid chapter fields: {sorted(dataset_chapters)}."
-            )
+            invalid_filters.append(f"{field!r} (not a chapter field)")
         elif value not in dataset_chapters[field]:
-            invalid_filters.append(
-                f"{value!r} is not a value of chapter {field!r}. "
-                f"Valid values: {sorted(dataset_chapters[field])}."
-            )
+            invalid_filters.append(f"{field!r}={value!r} (not a value of that chapter)")
 
     if invalid_filters:
-        message = "Invalid chapter_filters: " + " ".join(invalid_filters)
+        message = (
+            "Invalid chapter_filters. Call again without chapter_filters: the response's "
+            "chapters block lists every valid field and value. Rejected: "
+            + ", ".join(invalid_filters)
+        )
         logger.warning(f"Rejected discover_tool_input_values request: {message}")
+        logger.debug(
+            f"Valid chapters for {tool_name!r}: "
+            f"{ {field: sorted(values) for field, values in dataset_chapters.items()} }"
+        )
         raise ValueError(message)
 
     # A bare string instead of a list is a harmless caller slip -- wrap it rather than spending a

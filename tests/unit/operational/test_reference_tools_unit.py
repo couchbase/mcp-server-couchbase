@@ -8,14 +8,18 @@ temporary datasets rather than leaning on the shipped one, so they stay meaningf
 Couchbase metrics reference changes.
 """
 
+import asyncio
 import json
 import resource
 import sys
 from collections.abc import Iterator
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 from cb_mcp.tools.operational.reference import discover_tool_input_values
+from cb_mcp.utils.constants import MAX_ERROR_MESSAGE_LENGTH
+from cb_mcp.utils.error_handling import wrap_with_error_handling
 from cb_mcp.utils.operational import reference_data
 
 METRICS_TOOL = "get_cluster_metrics"
@@ -300,23 +304,21 @@ class TestChapterFilters:
             assert row["category"] == "Data Service Metrics"
             assert row["metric_type"] == "gauge"
 
-    def test_unknown_chapter_field_names_the_valid_ones(self):
+    def test_unknown_chapter_field_is_named(self):
         with pytest.raises(ValueError) as excinfo:
             discover_tool_input_values(METRICS_TOOL, ["disk"], {"not_a_chapter": "x"})
 
-        message = str(excinfo.value)
-        assert "'not_a_chapter' is not a chapter field" in message
-        assert "category" in message
+        assert "'not_a_chapter' (not a chapter field)" in str(excinfo.value)
 
-    def test_unknown_chapter_value_lists_the_valid_values(self):
+    def test_unknown_chapter_value_is_named(self):
         with pytest.raises(ValueError) as excinfo:
             discover_tool_input_values(
                 METRICS_TOOL, ["disk"], {"category": "Nope Metrics"}
             )
 
-        message = str(excinfo.value)
-        assert "'Nope Metrics' is not a value of chapter 'category'" in message
-        assert "Data Service Metrics" in message
+        assert "'category'='Nope Metrics' (not a value of that chapter)" in str(
+            excinfo.value
+        )
 
     def test_every_bad_filter_is_reported_in_one_response(self):
         """Reporting only the first would cost a round trip per bad filter."""
@@ -332,27 +334,44 @@ class TestChapterFilters:
             )
 
         message = str(excinfo.value)
-        assert "'not_a_chapter' is not a chapter field" in message
-        assert "'Nope Metrics' is not a value of chapter 'category'" in message
-        assert (
-            "metric_type" not in message.split("Valid chapter fields", maxsplit=1)[0]
-        ), "the valid filter must not be reported as a problem"
-        # Everything needed to fix both at once is in this single message.
-        assert "Data Service Metrics" in message
+        assert "'not_a_chapter' (not a chapter field)" in message
+        assert "'category'='Nope Metrics'" in message
+        assert "metric_type" not in message, "the valid filter must not be reported"
 
-    def test_valid_values_for_every_bad_filter_survive_in_full(self):
-        """The raised message names the valid values for every bad filter in full."""
+    def test_message_points_at_the_chapters_block_instead_of_listing_values(self):
         with pytest.raises(ValueError) as excinfo:
-            discover_tool_input_values(
-                METRICS_TOOL,
-                ["disk"],
-                {"category": "bad1", "unit": "bad2", "metric_type": "bad3"},
+            discover_tool_input_values(METRICS_TOOL, ["disk"], {"category": "bad"})
+
+        message = str(excinfo.value)
+        assert "without chapter_filters" in message
+        assert "chapters block" in message
+        assert "XDCR Metrics" not in message
+
+    def test_valid_chapters_are_logged_at_debug_not_in_the_message(self, caplog):
+        with caplog.at_level("DEBUG"), pytest.raises(ValueError):
+            discover_tool_input_values(METRICS_TOOL, ["disk"], {"category": "bad"})
+
+        debug = [r.getMessage() for r in caplog.records if r.levelname == "DEBUG"]
+        assert any("XDCR Metrics" in line for line in debug)
+
+    def test_three_bad_filters_fit_the_error_cap_through_the_wrapper(self):
+        """The case that used to be cut at 500 characters, via the registration wrapper."""
+        wrapped = wrap_with_error_handling(discover_tool_input_values)
+
+        with pytest.raises(ToolError) as excinfo:
+            asyncio.run(
+                wrapped(
+                    METRICS_TOOL,
+                    ["disk"],
+                    {"category": "bad1", "unit": "bad2", "metric_type": "bad3"},
+                )
             )
 
         message = str(excinfo.value)
-        assert "XDCR Metrics" in message
-        assert "histogram" in message
-        assert "nanoseconds" in message
+        assert "truncated" not in message
+        assert len(message) < MAX_ERROR_MESSAGE_LENGTH
+        for rejected in ("'category'='bad1'", "'unit'='bad2'", "'metric_type'='bad3'"):
+            assert rejected in message
 
     def test_filters_are_validated_in_browse_mode_too(self):
         with pytest.raises(ValueError, match="Invalid chapter_filters"):
