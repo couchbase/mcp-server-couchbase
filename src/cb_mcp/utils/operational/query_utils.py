@@ -3,6 +3,8 @@
 from collections import Counter
 from typing import Any
 
+from ..sqlpp import find_query_placeholders
+
 
 def extract_plan_from_explain_results(explain_results):
     if not explain_results:
@@ -37,8 +39,60 @@ def _walk_plan(
             _walk_plan(item, operators, indexes_used, keyspaces)
 
 
-def evaluate_query_plan(plan: dict[str, Any] | None) -> dict[str, Any]:
-    """Evaluate an EXPLAIN plan and return optimization findings."""
+def analyze_parameter_binding(
+    statement: str,
+    named_parameters: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Compare a statement's placeholders against the values supplied for them.
+
+    Only names and counts are reported, never the bound values themselves.
+
+    Positional placeholders (``$1``, ``?``) are always counted as unbound:
+    the query tools bind ``$name`` placeholders only.
+
+    ``unused_named`` reports values bound under a name the statement never
+    references. The server ignores them, which leaves the real placeholder
+    unbound.
+    """
+    placeholders = find_query_placeholders(statement)
+    bound_named = set(named_parameters or {})
+    unbound_named = sorted(placeholders.named - bound_named)
+
+    return {
+        "parameterized": bool(placeholders),
+        "detected": {
+            "named": sorted(placeholders.named),
+            "positional": placeholders.positional,
+        },
+        "bound": {"named": sorted(bound_named)},
+        "unbound": {
+            "named": unbound_named,
+            "positional": placeholders.positional,
+        },
+        "unused_named": sorted(bound_named - placeholders.named),
+        "fully_bound": not unbound_named and placeholders.positional == 0,
+    }
+
+
+# Appended to a plan finding when the EXPLAIN ran with placeholders unbound.
+_UNBOUND_CAVEAT = (
+    " Parameter values were not supplied for this EXPLAIN, so the optimizer "
+    "planned without them and may pick a different index at runtime. Re-run "
+    "with named_parameters to confirm."
+)
+
+
+def evaluate_query_plan(
+    plan: dict[str, Any] | None,
+    *,
+    parameters_unbound: bool = False,
+) -> dict[str, Any]:
+    """Evaluate an EXPLAIN plan and return optimization findings.
+
+    ``parameters_unbound`` marks the evaluation as provisional: findings are
+    tagged ``confidence: "possible"`` instead of ``"definite"`` and carry a
+    caveat. Severity is unchanged.
+    """
     if not plan:
         return {
             "summary": "No query plan found in EXPLAIN output.",
@@ -95,11 +149,25 @@ def evaluate_query_plan(plan: dict[str, Any] | None) -> dict[str, Any]:
             }
         )
 
-    summary = (
-        "Plan has optimization opportunities."
-        if any(f["severity"] == "warning" for f in findings)
-        else "Plan looks healthy for common query-plan checks."
-    )
+    for finding in findings:
+        finding["confidence"] = "possible" if parameters_unbound else "definite"
+        if parameters_unbound:
+            finding["message"] += _UNBOUND_CAVEAT
+
+    if any(f["severity"] == "warning" for f in findings):
+        summary = (
+            "Plan has possible optimization opportunities, but parameters were "
+            "unbound so the plan may not match runtime."
+            if parameters_unbound
+            else "Plan has optimization opportunities."
+        )
+    else:
+        summary = (
+            "No common anti-patterns detected, but parameters were unbound so "
+            "the plan may not match runtime."
+            if parameters_unbound
+            else "Plan looks healthy for common query-plan checks."
+        )
 
     return {
         "summary": summary,
