@@ -157,7 +157,17 @@ BAD = [
     ("https://*.bücher.example", r"non-ASCII.*punycode"),
     ("NULL", r"null.*(iframe|sandbox|file)"),
     ("https://a .com", r"whitespace"),
+    ("https://app.example.com\\path", r"host contains '\\\\'"),
+    ("https://app^example.com", r"host contains '\^'"),
+    ("https://%61pp.example.com", r"host contains '%'.*decode"),
+    ("https://example.com:²", r"port '²' is not a number"),
+    ("https://example.com:\uff11\uff12\uff13", r"port .* is not a number"),
 ]
+
+
+class TestForbiddenHostCharactersOnlyApplyToHttp:
+    def test_a_custom_scheme_keeps_its_opaque_host(self):
+        assert parse_allowed_origins("app://my%20app") == ("app://my%20app",)
 
 
 class TestRejection:

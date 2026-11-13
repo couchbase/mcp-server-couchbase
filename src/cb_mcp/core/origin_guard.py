@@ -140,6 +140,7 @@ def _normalize(entry: str) -> str:
     if not host:
         raise _BadEntryError("missing host")
     _check_ascii_host(host)
+    _check_http_host_characters(parts.scheme, host)
     _check_not_ipv6(host)
     port = _port(parts)
 
@@ -171,6 +172,28 @@ def _check_ascii_host(host: str) -> None:
         f"host {host!r} contains non-ASCII characters; browsers send "
         f"internationalized names in punycode, so {fix}"
     )
+
+
+# Characters a browser rejects or rewrites in an http(s) host, so an entry
+# containing one can never equal the Origin it sends.
+_FORBIDDEN_HTTP_HOST_CHARS = frozenset('\\^%<>|"`{}')
+
+
+def _check_http_host_characters(scheme: str, host: str) -> None:
+    """Reject http(s) hosts a browser could never send as written.
+
+    ``\\`` starts a path, ``%`` is decoded (``%61`` becomes ``a``) and the
+    rest make the host invalid, so such an entry would be accepted at startup
+    and then never admit anyone.
+    """
+    if scheme not in ("http", "https"):
+        return
+    bad = sorted(_FORBIDDEN_HTTP_HOST_CHARS.intersection(host))
+    if bad:
+        raise _BadEntryError(
+            f"host contains {' '.join(map(repr, bad))}, which browsers do not "
+            "allow in a host name (or decode, for '%'); write the plain host"
+        )
 
 
 def _check_not_ipv6(host: str) -> None:
@@ -231,11 +254,11 @@ def _port(parts: SplitResult) -> int | None:
             raise _BadEntryError(
                 "a wildcard '*' is only supported in the host, not the port"
             ) from None
-        if not port_text.isdigit():
+        # str.isdigit() also accepts '²' and full-width digits, which int()
+        # cannot or should not read, so require plain ASCII digits.
+        if not (port_text.isascii() and port_text.isdigit()):
             raise _BadEntryError(f"port {port_text!r} is not a number") from None
-        raise _BadEntryError(
-            f"port {int(port_text)} is out of range (1-65535)"
-        ) from None
+        raise _BadEntryError(f"port {port_text} is out of range (1-65535)") from None
     if port is None and parts.netloc.endswith(":"):
         raise _BadEntryError("port '' is not a number")
     if port == 0:
