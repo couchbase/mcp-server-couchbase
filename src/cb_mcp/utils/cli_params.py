@@ -108,7 +108,7 @@ class CredentialProfile(NamedTuple):
     #: uses. Must not log — it runs before logging is configured.
     resolve: Callable[[Mapping[str, Any]], dict[str, Any]] | None = None
     #: Optional: logs what ``resolve`` replaced. Called once logging is up.
-    warn: Callable[[Mapping[str, Any]], None] | None = None
+    log_warnings: Callable[[Mapping[str, Any]], None] | None = None
 
     def _raw_settings(self, params: Mapping[str, Any]) -> dict[str, Any]:
         return {key: params[key] for key in self.settings_keys}
@@ -120,8 +120,8 @@ class CredentialProfile(NamedTuple):
 
     def warn_about(self, params: Mapping[str, Any]) -> None:
         """Log the warnings ``settings_from`` held back. Call after ``LoggingParams.apply``."""
-        if self.warn:
-            self.warn(self._raw_settings(params))
+        if self.log_warnings:
+            self.log_warnings(self._raw_settings(params))
 
 
 CLUSTER_CREDENTIALS = CredentialProfile(
@@ -157,7 +157,7 @@ INSIGHTS_CREDENTIALS = CredentialProfile(
         "operational_insights_async_query_result_timeout",
     ),
     resolve=resolve_operational_insights_settings,
-    warn=warn_about_operational_insights_settings,
+    log_warnings=warn_about_operational_insights_settings,
 )
 
 
