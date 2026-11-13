@@ -34,6 +34,7 @@ from conftest import (
     extract_payload,
     get_test_collection,
     get_test_scope,
+    is_error_response,
     require_test_bucket,
 )
 from couchbase.mutation_state import MutationState
@@ -443,15 +444,15 @@ async def test_list_search_indexes_by_bucket_only(
 @pytest.mark.asyncio
 async def test_list_search_indexes_scope_without_bucket_returns_error() -> None:
     """scope_name without bucket_name must be rejected with a descriptive
-    error entry, not a raised MCP error."""
+    error (isError response)."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "list_search_indexes", arguments={"scope_name": get_test_scope()}
         )
         payload = extract_payload(response)
 
-    assert isinstance(payload, list) and len(payload) == 1
-    assert "bucket_name is required" in payload[0]["error"]
+    assert is_error_response(response)
+    assert "bucket_name is required" in str(payload)
 
 
 @pytest.mark.asyncio
@@ -480,8 +481,8 @@ async def test_get_search_index_definition_scope_level(
 
 @pytest.mark.asyncio
 async def test_get_search_index_definition_partial_pair_returns_error() -> None:
-    """Passing only bucket_name (no scope_name) must return a descriptive
-    error dict, not a raised MCP error."""
+    """Passing only bucket_name (no scope_name) must produce a descriptive
+    error (isError response)."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "get_search_index_definition",
@@ -489,16 +490,16 @@ async def test_get_search_index_definition_partial_pair_returns_error() -> None:
         )
         payload = extract_payload(response)
 
-    assert isinstance(payload, dict)
-    assert "must be provided together" in payload["error"]
+    assert is_error_response(response)
+    assert "must be provided together" in str(payload)
 
 
 @pytest.mark.asyncio
 async def test_get_search_index_definition_not_found_returns_error(
     seeded_fts_index: dict[str, Any],
 ) -> None:
-    """Looking up a nonexistent index name must return an error dict
-    rather than raising or returning None."""
+    """Looking up a nonexistent index name must produce an error
+    (isError response)."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "get_search_index_definition",
@@ -508,21 +509,19 @@ async def test_get_search_index_definition_not_found_returns_error(
                 "scope_name": seeded_fts_index["scope_name"],
             },
         )
-        payload = extract_payload(response)
+        extract_payload(response)
 
-    assert isinstance(payload, dict)
-    assert "error" in payload
+    assert is_error_response(response)
 
 
 def _assert_query_succeeded(payload: object) -> dict[str, Any]:
     """Fail with the tool's own error message rather than a bare KeyError.
 
-    run_search reports Search-service failures as {"error": ...}, so
-    indexing into a success key first turns a real, readable server error
-    (e.g. "pindex not available") into an opaque KeyError.
+    run_search raises on Search-service failures (surfaced as an error response), so the payload is
+    the error text; indexing into a success key first would turn a real,
+    readable server error (e.g. "pindex not available") into an opaque error.
     """
-    assert isinstance(payload, dict), f"Expected a dict payload, got: {payload!r}"
-    assert "error" not in payload, f"run_search failed: {payload['error']}"
+    assert isinstance(payload, dict), f"run_search failed: {payload!r}"
     return payload
 
 
@@ -872,8 +871,7 @@ async def test_upsert_and_drop_search_index_cluster_level_round_trip() -> None:
             confirm_response = await session.call_tool(
                 "get_search_index_definition", arguments={"index_name": index_name}
             )
-            confirm_payload = extract_payload(confirm_response)
-            assert "error" in confirm_payload
+            assert is_error_response(confirm_response)
     finally:
         cluster = _direct_cluster()
         try:
@@ -1102,8 +1100,8 @@ async def test_upsert_search_index_updates_existing_index() -> None:
 
 @pytest.mark.asyncio
 async def test_upsert_search_index_partial_pair_returns_error() -> None:
-    """Passing only bucket_name (no scope_name) must return a descriptive
-    error dict, not a raised MCP error."""
+    """Passing only bucket_name (no scope_name) must produce a descriptive
+    error (isError response)."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "upsert_search_index",
@@ -1115,8 +1113,8 @@ async def test_upsert_search_index_partial_pair_returns_error() -> None:
         )
         payload = extract_payload(response)
 
-    assert isinstance(payload, dict)
-    assert "must be provided together" in payload["error"]
+    assert is_error_response(response)
+    assert "must be provided together" in str(payload)
 
 
 # A bad value five "properties" levels down, and a bad "fields" entry at that depth.
@@ -1156,7 +1154,7 @@ async def test_upsert_search_index_non_object_mapping_entry_returns_error(
     mapping: dict[str, Any], bad_path: str
 ) -> None:
     """A non-object entry under params.mapping.types must come back as an error
-    dict, not crash the server (DA-2407: the SDK segfaults on these). The second
+    response, not crash the server (DA-2407: the SDK segfaults on these). The second
     call proves the server is still serving after the rejected one."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
@@ -1179,14 +1177,16 @@ async def test_upsert_search_index_non_object_mapping_entry_returns_error(
         )
         still_alive_payload = extract_payload(still_alive)
 
-    assert payload == {"success": False, "error": f"{bad_path} must be an object"}
-    assert "must be provided together" in still_alive_payload["error"]
+    assert is_error_response(response)
+    assert f"{bad_path} must be an object" in str(payload)
+    assert is_error_response(still_alive)
+    assert "must be provided together" in str(still_alive_payload)
 
 
 @pytest.mark.asyncio
 async def test_drop_search_index_partial_pair_returns_error() -> None:
-    """Passing only scope_name (no bucket_name) must return a descriptive
-    error dict, not a raised MCP error."""
+    """Passing only scope_name (no bucket_name) must produce a descriptive
+    error (isError response)."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "drop_search_index",
@@ -1194,20 +1194,19 @@ async def test_drop_search_index_partial_pair_returns_error() -> None:
         )
         payload = extract_payload(response)
 
-    assert isinstance(payload, dict)
-    assert "must be provided together" in payload["error"]
+    assert is_error_response(response)
+    assert "must be provided together" in str(payload)
 
 
 @pytest.mark.asyncio
 async def test_drop_search_index_not_found_returns_error() -> None:
-    """Dropping a nonexistent index name must return an error dict rather
-    than raising or returning None."""
+    """Dropping a nonexistent index name must produce an error
+    (isError response)."""
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "drop_search_index",
             arguments={"index_name": f"does_not_exist_{uuid.uuid4().hex[:8]}"},
         )
-        payload = extract_payload(response)
+        extract_payload(response)
 
-    assert isinstance(payload, dict)
-    assert "error" in payload
+    assert is_error_response(response)

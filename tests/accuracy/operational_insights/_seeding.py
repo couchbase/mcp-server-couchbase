@@ -60,10 +60,10 @@ def tool_payload(result: Any) -> dict[str, Any] | None:
 async def _run(client: AccuracyTestingClient, statement: str) -> None:
     """Run ``statement`` and raise if the tool reports failure.
 
-    The query tool returns ``{"success": false, ...}`` rather than raising,
-    so without this a failed CREATE/INSERT would pass as setup and the case
-    would score the model against ground truth that does not exist. Cleanup
-    hooks also go through here, but the runner suppresses their errors.
+    The silent client call returns an ``isError`` result instead of raising,
+    so without this check a failed CREATE/INSERT would pass as setup and the
+    case would score the model against ground truth that does not exist.
+    Cleanup hooks also go through here, but the runner suppresses their errors.
     """
     result = await client.call_tool_silent(
         "operational_insights_run_query_sync", {"statement": statement}

@@ -2,8 +2,7 @@
 
 Ported from the ``analytics-mcp`` prototype (branch
 ``DA-2027/Add-enterprise-tools``). Mocks the cluster so these tests can cover
-the error branches (returned as ``{"success": False, "error": ...}``, never
-raised) without a live cluster.
+the error branches (raised as the underlying SDK exception) without a live cluster.
 
 Also covers the read-only wiring that the prototype never had:
 ``operational_insights_run_query_sync`` passes ``QueryOptions(readonly=True)`` to the SDK itself
@@ -14,9 +13,11 @@ same conditions — the server itself classifies COPY ... TO as read-only
 external storage or a KV collection.
 """
 
+import re
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from _operational_insights_fakes import make_operational_insights_ctx
 
 from cb_mcp.tools.operational_insights.query import (
@@ -41,17 +42,12 @@ class TestRunQuerySync:
             "truncated": False,
         }
 
-    def test_returns_error_envelope_on_sdk_error(self) -> None:
+    def test_propagates_sdk_error(self) -> None:
         ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.side_effect = Exception("syntax error")
 
-        result = operational_insights_run_query_sync(ctx, "SELECT bad(")
-
-        assert result == {
-            "success": False,
-            "error": "syntax error",
-            "statement": "SELECT bad(",
-        }
+        with pytest.raises(Exception, match="syntax error"):
+            operational_insights_run_query_sync(ctx, "SELECT bad(")
 
     def test_passes_readonly_true_under_read_only_mode(self) -> None:
         ctx, cluster = make_operational_insights_ctx(read_only_mode=True)
@@ -120,17 +116,12 @@ class TestExplainQuery:
         cluster.execute_query.assert_called_once_with("EXPLAIN SELECT 1 AS one")
         assert result == {"success": True, "plan": [{"plan": {}}]}
 
-    def test_returns_error_envelope_on_sdk_error(self) -> None:
+    def test_propagates_sdk_error(self) -> None:
         ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.side_effect = Exception("syntax error")
 
-        result = operational_insights_explain_query(ctx, "SELECT bad(")
-
-        assert result == {
-            "success": False,
-            "error": "syntax error",
-            "statement": "SELECT bad(",
-        }
+        with pytest.raises(Exception, match="syntax error"):
+            operational_insights_explain_query(ctx, "SELECT bad(")
 
 
 class TestIsCopyToStatement:
@@ -180,31 +171,28 @@ class TestRunQuerySyncBlocksCopyToUnderReadOnly:
     def test_blocked_under_read_only_mode(self) -> None:
         ctx, cluster = make_operational_insights_ctx(read_only_mode=True)
 
-        with patch(
-            "cb_mcp.tools.operational_insights.query.get_access_token",
-            return_value=None,
+        with (
+            patch(
+                "cb_mcp.tools.operational_insights.query.get_access_token",
+                return_value=None,
+            ),
+            pytest.raises(ValueError, match=re.escape("COPY")),
         ):
-            result = operational_insights_run_query_sync(
-                ctx, "COPY ds TO 's3://bucket/path'"
-            )
-
-        assert result["success"] is False
-        assert "COPY" in result["error"]
+            operational_insights_run_query_sync(ctx, "COPY ds TO 's3://bucket/path'")
         cluster.execute_query.assert_not_called()
 
     def test_blocked_for_a_read_only_token(self) -> None:
         ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
         token = SimpleNamespace(scopes=[SCOPE_READ])
 
-        with patch(
-            "cb_mcp.tools.operational_insights.query.get_access_token",
-            return_value=token,
+        with (
+            patch(
+                "cb_mcp.tools.operational_insights.query.get_access_token",
+                return_value=token,
+            ),
+            pytest.raises(ValueError),
         ):
-            result = operational_insights_run_query_sync(
-                ctx, "COPY ds TO 's3://bucket/path'"
-            )
-
-        assert result["success"] is False
+            operational_insights_run_query_sync(ctx, "COPY ds TO 's3://bucket/path'")
         cluster.execute_query.assert_not_called()
 
     def test_allowed_in_write_mode(self) -> None:

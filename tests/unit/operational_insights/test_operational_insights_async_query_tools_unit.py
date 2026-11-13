@@ -4,7 +4,7 @@ Ported from the ``analytics-mcp`` prototype (branch
 ``DA-2027/Add-enterprise-tools``). Mocks both the cluster and the handle
 registry so the whole handle lifecycle (start -> poll -> fetch / discard /
 cancel) can be covered without a live cluster, including the error branches
--- which are returned as {"success": False, "error": ...}, never raised.
+-- which are raised as the underlying exception.
 
 Also covers the read-only wiring that the prototype never had:
 ``operational_insights_run_query_async`` passes ``QueryOptions(readonly=True)`` to the SDK itself
@@ -14,6 +14,7 @@ same conditions -- mirroring ``operational_insights_run_query_sync``'s tests in
 test_operational_insights_query_tools_unit.py.
 """
 
+import re
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -93,21 +94,19 @@ class TestRunQueryAsync:
         assert registry.get(token).handle is handle
         assert registry.count() == 1
 
-    def test_returns_error_envelope_on_sdk_error(self) -> None:
+    def test_propagates_sdk_error(self) -> None:
         ctx, cluster, registry = _make_ctx()
         cluster.start_query.side_effect = Exception("syntax error")
 
-        with patch(
-            "cb_mcp.tools.operational_insights.query.get_access_token",
-            return_value=None,
+        with (
+            patch(
+                "cb_mcp.tools.operational_insights.query.get_access_token",
+                return_value=None,
+            ),
+            pytest.raises(Exception, match="syntax error"),
         ):
-            result = operational_insights_run_query_async(ctx, "SELECT bad(")
+            operational_insights_run_query_async(ctx, "SELECT bad(")
 
-        assert result == {
-            "success": False,
-            "error": "syntax error",
-            "statement": "SELECT bad(",
-        }
         assert registry.count() == 0
 
     def test_passes_readonly_true_under_read_only_mode(self) -> None:
@@ -168,16 +167,14 @@ class TestRunQueryAsyncBlocksCopyToUnderReadOnly:
     def test_blocked_under_read_only_mode(self) -> None:
         ctx, cluster, _ = _make_ctx(read_only_mode=True)
 
-        with patch(
-            "cb_mcp.tools.operational_insights.query.get_access_token",
-            return_value=None,
+        with (
+            patch(
+                "cb_mcp.tools.operational_insights.query.get_access_token",
+                return_value=None,
+            ),
+            pytest.raises(ValueError, match=re.escape("COPY")),
         ):
-            result = operational_insights_run_query_async(
-                ctx, "COPY ds TO 's3://bucket/path'"
-            )
-
-        assert result["success"] is False
-        assert "COPY" in result["error"]
+            operational_insights_run_query_async(ctx, "COPY ds TO 's3://bucket/path'")
         cluster.start_query.assert_not_called()
 
     def test_allowed_in_write_mode(self) -> None:
@@ -256,14 +253,11 @@ class TestGetAsyncQueryResults:
         # The query stays tracked so it can be checked again later.
         assert registry.count() == 1
 
-    def test_unknown_token_returns_error_envelope(self) -> None:
+    def test_unknown_token_raises_unknown_handle_error(self) -> None:
         ctx, _, _ = _make_ctx()
 
-        result = operational_insights_get_async_query_results(ctx, "nope")
-
-        assert result["success"] is False
-        assert "nope" in result["error"]
-        assert result["query_handle"] == "nope"
+        with pytest.raises(UnknownHandleError, match=re.escape("nope")):
+            operational_insights_get_async_query_results(ctx, "nope")
 
     def test_can_be_fetched_twice(self) -> None:
         ctx, cluster, registry = _make_ctx()
@@ -344,20 +338,15 @@ class TestGetAsyncQueryResults:
         assert metrics["result_count"] == 1
         assert metrics["elapsed_time_ms"] == 12.5
 
-    def test_returns_error_envelope_on_fetch_error(self) -> None:
+    def test_propagates_fetch_error(self) -> None:
         ctx, cluster, _ = _make_ctx()
         token, handle = _start(ctx, cluster)
         status = handle.fetch_status.return_value
         status.results_ready.return_value = True
         status.result_handle.return_value.fetch_results.side_effect = Exception("boom")
 
-        result = operational_insights_get_async_query_results(ctx, token)
-
-        assert result == {
-            "success": False,
-            "error": "boom",
-            "query_handle": token,
-        }
+        with pytest.raises(Exception, match="boom"):
+            operational_insights_get_async_query_results(ctx, token)
 
 
 class TestDiscardAsyncQueryResults:
@@ -388,13 +377,11 @@ class TestDiscardAsyncQueryResults:
         assert result["ready"] is False
         assert registry.count() == 1
 
-    def test_unknown_token_returns_error_envelope(self) -> None:
+    def test_unknown_token_raises_unknown_handle_error(self) -> None:
         ctx, _, _ = _make_ctx()
 
-        result = operational_insights_discard_async_query_results(ctx, "nope")
-
-        assert result["success"] is False
-        assert "nope" in result["error"]
+        with pytest.raises(UnknownHandleError, match=re.escape("nope")):
+            operational_insights_discard_async_query_results(ctx, "nope")
 
 
 class TestCancelAsyncQuery:
@@ -442,43 +429,31 @@ class TestCancelAsyncQuery:
         result_handle.discard_results.assert_called_once()
         assert registry.count() == 0
 
-    def test_returns_error_envelope_on_status_error(self) -> None:
+    def test_propagates_status_error(self) -> None:
         ctx, cluster, registry = _make_ctx()
         token, handle = _start(ctx, cluster)
         handle.fetch_status.side_effect = Exception("status unavailable")
 
-        result = operational_insights_cancel_async_query(ctx, token)
-
-        assert result == {
-            "success": False,
-            "error": "status unavailable",
-            "query_handle": token,
-        }
+        with pytest.raises(Exception, match="status unavailable"):
+            operational_insights_cancel_async_query(ctx, token)
         assert registry.count() == 1
 
-    def test_returns_error_envelope_on_sdk_error(self) -> None:
+    def test_propagates_sdk_error(self) -> None:
         ctx, cluster, registry = _make_ctx()
         token, handle = _start(ctx, cluster)
         handle.fetch_status.return_value.results_ready.return_value = False
         handle.cancel.side_effect = Exception("already finished")
 
-        result = operational_insights_cancel_async_query(ctx, token)
-
-        assert result == {
-            "success": False,
-            "error": "already finished",
-            "query_handle": token,
-        }
+        with pytest.raises(Exception, match="already finished"):
+            operational_insights_cancel_async_query(ctx, token)
         # Cancel failed, so the handle is deliberately still tracked.
         assert registry.count() == 1
 
-    def test_unknown_token_returns_error_envelope(self) -> None:
+    def test_unknown_token_raises_unknown_handle_error(self) -> None:
         ctx, _, _ = _make_ctx()
 
-        result = operational_insights_cancel_async_query(ctx, "nope")
-
-        assert result["success"] is False
-        assert "nope" in result["error"]
+        with pytest.raises(UnknownHandleError, match=re.escape("nope")):
+            operational_insights_cancel_async_query(ctx, "nope")
 
 
 class TestQueryResultsRegistry:
@@ -545,9 +520,10 @@ def test_unknown_token_error_is_not_quoted(tool) -> None:
     """DA-2354: every handle-taking tool reports the message unquoted."""
     ctx, _, _ = _make_ctx()
 
-    error = tool(ctx, "bogus")["error"]
+    with pytest.raises(UnknownHandleError) as excinfo:
+        tool(ctx, "bogus")
 
-    assert error == (
+    assert str(excinfo.value) == (
         "Unknown query_handle 'bogus'. It may be invalid, already "
         "discarded/cancelled, or created by a different server process."
     )

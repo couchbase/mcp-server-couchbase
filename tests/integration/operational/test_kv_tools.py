@@ -21,6 +21,7 @@ from conftest import (
     extract_payload,
     get_test_collection,
     get_test_scope,
+    is_error_response,
     require_test_bucket,
 )
 
@@ -314,13 +315,9 @@ async def test_insert_document_fails_if_exists() -> None:
                 "document_content": {"name": "Should Not Be Inserted"},
             },
         )
-        payload = extract_payload(response)
 
-        # insert returns {"success": False, "error": ...} when document already exists
-        assert payload.get("success") is False, (
-            f"Insert should fail when document exists, got {payload}"
-        )
-        assert "error" in payload
+        # insert fails when document already exists
+        assert is_error_response(response), "Insert should fail when document exists"
 
         # Clean up
         await session.call_tool(
@@ -425,13 +422,11 @@ async def test_replace_document_fails_if_not_exists() -> None:
                 "document_content": {"name": "Should Not Be Created"},
             },
         )
-        payload = extract_payload(response)
 
-        # replace returns {"success": False, "error": ...} when document doesn't exist
-        assert payload.get("success") is False, (
-            f"Replace should fail when document doesn't exist, got {payload}"
+        # replace fails when document doesn't exist
+        assert is_error_response(response), (
+            "Replace should fail when document doesn't exist"
         )
-        assert "error" in payload
 
 
 @pytest.mark.asyncio
@@ -487,13 +482,11 @@ async def test_delete_document_fails_if_not_exists() -> None:
                 "document_id": doc_id,
             },
         )
-        payload = extract_payload(response)
 
-        # delete returns {"success": False, "error": ...} when document doesn't exist
-        assert payload.get("success") is False, (
-            f"Delete should fail when document doesn't exist, got {payload}"
+        # delete fails when document doesn't exist
+        assert is_error_response(response), (
+            "Delete should fail when document doesn't exist"
         )
-        assert "error" in payload
 
 
 @pytest.mark.asyncio
@@ -784,8 +777,8 @@ async def test_lookup_subdocument_missing_path_reports_error_not_raise() -> None
 
 @pytest.mark.asyncio
 async def test_lookup_subdocument_no_paths_returns_error() -> None:
-    """Calling with no get/exists/count paths at all must report an error in the
-    payload without failing the MCP call itself."""
+    """Calling with no get/exists/count paths at all must fail the MCP call with
+    a tool error."""
     bucket = require_test_bucket()
     scope = get_test_scope()
     collection = get_test_collection()
@@ -801,19 +794,15 @@ async def test_lookup_subdocument_no_paths_returns_error() -> None:
                 "document_id": doc_id,
             },
         )
-        payload = extract_payload(response)
-
-        is_error = getattr(response, "isError", None) or getattr(
-            response, "is_error", False
+        assert is_error_response(response), (
+            "Expected a tool error when no paths are provided"
         )
-        assert not is_error
-        assert "error" in payload, "Expected an error key when no paths are provided"
 
 
 @pytest.mark.asyncio
 async def test_lookup_subdocument_document_not_found() -> None:
-    """A document_id that does not exist must return {"error": ...} without
-    raising an MCP-level error."""
+    """A document_id that does not exist must fail the MCP call with a tool
+    error."""
     bucket = require_test_bucket()
     scope = get_test_scope()
     collection = get_test_collection()
@@ -830,13 +819,9 @@ async def test_lookup_subdocument_document_not_found() -> None:
                 "get_paths": ["name"],
             },
         )
-        payload = extract_payload(response)
-
-        is_error = getattr(response, "isError", None) or getattr(
-            response, "is_error", False
+        assert is_error_response(response), (
+            "Expected a tool error when document does not exist"
         )
-        assert not is_error
-        assert "error" in payload, "Expected an error key when document does not exist"
 
 
 @pytest.mark.asyncio
@@ -1043,13 +1028,7 @@ async def test_mutate_subdocument_insert_fails_if_path_exists() -> None:
                 "insert_specs": [{"path": "status", "value": "should-not-land"}],
             },
         )
-        payload = extract_payload(response)
-
-        is_error = getattr(response, "isError", None) or getattr(
-            response, "is_error", False
-        )
-        assert not is_error
-        assert "error" in payload
+        assert is_error_response(response)
 
         get_response = await session.call_tool(
             "get_document_by_id",
@@ -1168,8 +1147,9 @@ async def test_mutate_subdocument_array_add_unique() -> None:
                 "array_add_unique_specs": [{"path": "tags", "value": "a"}],
             },
         )
-        dup_payload = extract_payload(dup_response)
-        assert "error" in dup_payload, "Adding a duplicate value must fail atomically"
+        assert is_error_response(dup_response), (
+            "Adding a duplicate value must fail atomically"
+        )
 
         new_response = await session.call_tool(
             "mutate_subdocument",
@@ -1241,8 +1221,7 @@ async def test_mutate_subdocument_create_parents() -> None:
                 "create_parents": False,
             },
         )
-        no_parents_payload = extract_payload(no_parents_response)
-        assert "error" in no_parents_payload
+        assert is_error_response(no_parents_response)
 
         with_parents_response = await session.call_tool(
             "mutate_subdocument",
@@ -1283,8 +1262,8 @@ async def test_mutate_subdocument_create_parents() -> None:
 
 @pytest.mark.asyncio
 async def test_mutate_subdocument_no_specs_returns_error() -> None:
-    """Calling with no mutation specs at all must report an error in the
-    payload without failing the MCP call itself."""
+    """Calling with no mutation specs at all must fail the MCP call with a tool
+    error."""
     bucket = require_test_bucket()
     scope = get_test_scope()
     collection = get_test_collection()
@@ -1300,13 +1279,9 @@ async def test_mutate_subdocument_no_specs_returns_error() -> None:
                 "document_id": doc_id,
             },
         )
-        payload = extract_payload(response)
-
-        is_error = getattr(response, "isError", None) or getattr(
-            response, "is_error", False
+        assert is_error_response(response), (
+            "Expected a tool error when no specs are provided"
         )
-        assert not is_error
-        assert "error" in payload, "Expected an error key when no specs are provided"
 
 
 @pytest.mark.asyncio

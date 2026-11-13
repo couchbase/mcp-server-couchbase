@@ -268,17 +268,16 @@ async def test_cluster_connection_with_bucket() -> None:
         payload = extract_payload(response)
 
         assert payload, "No data returned from test_cluster_connection"
-        assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
 
         # If bucket doesn't exist, we get an error - mark for skip (can't skip inside async cm)
-        if payload.get("status") == "error":
-            error = payload.get("error", "")
-            if "BucketNotFoundException" in error:
+        if is_error_response(response):
+            if "BucketNotFoundException" in str(payload):
                 skip_reason = f"Test bucket '{bucket}' not found on cluster"
             else:
                 # Other error - fail the test
                 raise AssertionError(f"Connection failed: {payload}")
         else:
+            assert isinstance(payload, dict), f"Expected dict, got {type(payload)}"
             assert payload.get("status") == "success", f"Connection failed: {payload}"
             assert payload.get("bucket_name") == bucket
             assert payload.get("bucket_connected") is True

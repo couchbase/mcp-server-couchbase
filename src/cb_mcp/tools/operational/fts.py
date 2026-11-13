@@ -15,11 +15,11 @@ upsert_search_index's params is unaffected by this — see its own docstring.
 upsert_search_index and drop_search_index are write operations — not loaded when
 READ_ONLY_MODE is True — and require the couchbase-mcp:write OAuth scope.
 
-Error handling: these tools only let an exception propagate when the cluster itself
-can't be reached (get_cluster_connection). Everything else — bad input combinations,
-an index that doesn't exist, a malformed query — is reported back via the
-tool_success/tool_error envelopes from utils.responses instead of raising, so the
-caller (an LLM) sees an actionable message rather than a bare stack trace.
+Error handling: failures are raised — invalid input combinations as ValueError, SDK
+failures (an index that doesn't exist, a malformed query, an unreachable cluster) as
+the original exception. Successful calls return tool_success payloads. The wrapper
+applied at registration (utils/error_handling.py) turns a raised exception into a
+tool error and bounds the message length.
 """
 
 import logging
@@ -33,7 +33,7 @@ from fastmcp import Context
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.operational.connection import connect_to_bucket
 from ...utils.operational.context import get_cluster_connection
-from ...utils.responses import tool_error, tool_success
+from ...utils.responses import tool_success
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.fts")
 
@@ -63,7 +63,7 @@ def list_search_indexes(
     get_search_index_definition rejects a bucket without a scope.
     """
     if scope_name and not bucket_name:
-        return [tool_error("bucket_name is required when filtering by scope_name")]
+        raise ValueError("bucket_name is required when filtering by scope_name")
 
     cluster = get_cluster_connection(ctx)
 
@@ -113,7 +113,7 @@ def list_search_indexes(
         return results
     except Exception as e:
         logger.error(f"Error listing Search indexes: {e}", exc_info=True)
-        return [tool_error(e)]
+        raise
 
 
 def get_search_index_definition(
@@ -132,11 +132,11 @@ def get_search_index_definition(
     Returns {"success": True, "name", "source_type", "idx_type", "source_name", "uuid",
     "params" (mapping/analyzer configuration), "source_uuid", "source_params",
     "plan_params" (num replicas/partitions), "bucket", "scope"}. If no index with this
-    name exists at the given location, returns {"success": False, "error": ...} —
+    name exists at the given location, the call fails —
     confirm the exact name and location first with list_search_indexes.
     """
     if bool(bucket_name) != bool(scope_name):
-        return tool_error(
+        raise ValueError(
             "bucket_name and scope_name must be provided together, or omitted together"
         )
 
@@ -169,7 +169,7 @@ def get_search_index_definition(
         )
     except Exception as e:
         logger.error(f"Error fetching Search index {index_name!r}: {e}", exc_info=True)
-        return tool_error(e, index_name=index_name)
+        raise
 
 
 def run_search(
@@ -234,15 +234,15 @@ def run_search(
     Returns {"success": True, "index_name", "explain", "limit" (the limit actually
     applied, since it defaults differently depending on explain), "total_hits",
     "hits", "facets", "metadata": {"errors","metrics"}} on success, or
-    {"success": False, "error": ...} if the input is invalid or the query fails (e.g. bad
-    query syntax, index not found). total_hits counts the hits actually returned, so it is
+    fails if the input is invalid or the query fails (e.g. bad query syntax, index not
+    found). total_hits counts the hits actually returned, so it is
     capped by limit — for how many documents matched overall, read
     metadata.metrics.total_rows instead, and don't report total_hits as the size of the
     match set. hits entries are {"id","score","fields","fragments"} when explain=False, or
     {"id","score","explanation"} when explain=True (facets is empty in that case).
     """
     if bool(bucket_name) != bool(scope_name):
-        return tool_error(
+        raise ValueError(
             "bucket_name and scope_name must be provided together, or omitted together"
         )
 
@@ -328,7 +328,7 @@ def run_search(
         logger.error(
             f"Error running Search query on {index_name!r}: {e}", exc_info=True
         )
-        return tool_error(e, index_name=index_name)
+        raise
 
 
 def _find_non_object_entry(node: Any, path: str) -> str | None:
@@ -401,11 +401,10 @@ def upsert_search_index(
     and source_uuid are passed through to the SDK as-is and rarely need to be set.
 
     Returns {"success": True, "index_name", "bucket", "scope"} on success, or
-    {"success": False, "error": ...} on failure — e.g. an invalid mapping or a stale
-    uuid on an update.
+    fails — e.g. on an invalid mapping or a stale uuid on an update.
     """
     if bool(bucket_name) != bool(scope_name):
-        return tool_error(
+        raise ValueError(
             "bucket_name and scope_name must be provided together, or omitted together"
         )
 
@@ -414,13 +413,13 @@ def upsert_search_index(
     if params and "mapping" in params:
         mapping = params["mapping"]
         if not isinstance(mapping, dict):
-            return tool_error("params.mapping must be an object")
+            raise ValueError("params.mapping must be an object")
         types = mapping.get("types")
         if isinstance(types, dict):
             for type_name, type_mapping in types.items():
                 path = f"params.mapping.types.{type_name}"
                 if (bad_path := _find_non_object_entry(type_mapping, path)) is not None:
-                    return tool_error(f"{bad_path} must be an object")
+                    raise ValueError(f"{bad_path} must be an object")
 
     cluster = get_cluster_connection(ctx)
 
@@ -451,7 +450,7 @@ def upsert_search_index(
         return tool_success(index_name=index_name, bucket=bucket_name, scope=scope_name)
     except Exception as e:
         logger.error(f"Error upserting Search index {index_name!r}: {e}", exc_info=True)
-        return tool_error(e, index_name=index_name)
+        raise
 
 
 def drop_search_index(
@@ -475,11 +474,10 @@ def drop_search_index(
     invalid.
 
     Returns {"success": True, "index_name", "bucket", "scope"} on success, or
-    {"success": False, "error": ...} on failure — e.g. no index with this name exists
-    at the given location.
+    fails — e.g. if no index with this name exists at the given location.
     """
     if bool(bucket_name) != bool(scope_name):
-        return tool_error(
+        raise ValueError(
             "bucket_name and scope_name must be provided together, or omitted together"
         )
 
@@ -500,4 +498,4 @@ def drop_search_index(
         return tool_success(index_name=index_name, bucket=bucket_name, scope=scope_name)
     except Exception as e:
         logger.error(f"Error dropping Search index {index_name!r}: {e}", exc_info=True)
-        return tool_error(e, index_name=index_name)
+        raise

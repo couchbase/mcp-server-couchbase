@@ -9,6 +9,7 @@ from .core.spec import Deployment, ServerSpec
 from .utils.config import parse_tool_names
 from .utils.constants import LOGGER_NAMESPACE
 from .utils.elicitation import wrap_with_confirmation
+from .utils.error_handling import wrap_with_error_handling
 from .utils.scope_enforcement import (
     required_scopes_for_tool,
     wrap_with_scope_check,
@@ -57,8 +58,10 @@ def prepare_tools_for_registration(
     filters disabled tools out, and wraps tools with elicitation and (when
     OAuth is active) per-tool scope enforcement.
 
-    Wrap order is ``scope_check ⟶ confirmation ⟶ tool``: the scope check runs
-    first so unauthorized callers never trigger an elicitation prompt. Scope
+    Wrap order is ``scope_check ⟶ confirmation ⟶ error_handling ⟶ tool``: the
+    scope check runs first so unauthorized callers never trigger an
+    elicitation prompt. Error handling is innermost so it only converts the
+    tool's own failures, never a refusal raised by the gates around it. Scope
     checks are no-ops at runtime when no access token is present (stdio /
     unauthenticated), so ``enforce_scopes`` only affects whether the wrapper
     is installed — not whether it does work per call.
@@ -151,7 +154,7 @@ def prepare_tools_for_registration(
 
     final_tools: list[Callable] = []
     for tool in enabled_tools:
-        wrapped = tool
+        wrapped = wrap_with_error_handling(tool)
         if tool.__name__ in active_confirmation_tool_names:
             wrapped = wrap_with_confirmation(wrapped)
         if enforce_scopes:

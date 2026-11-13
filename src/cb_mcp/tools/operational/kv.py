@@ -20,7 +20,7 @@ from fastmcp import Context
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.operational.connection import connect_to_bucket, format_keyspace
 from ...utils.operational.context import get_cluster_connection
-from ...utils.responses import tool_error, tool_success
+from ...utils.responses import tool_success
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.kv")
 
@@ -64,8 +64,8 @@ def upsert_document_by_id(
 
     DO NOT use this as a fallback when insert_document_by_id or replace_document_by_id fails.
 
-    Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. permission denied, network error, invalid content)."""
+    Returns {"success": True} on success. On failure the call
+    fails with the reason (e.g. permission denied, network error, invalid content)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
@@ -77,7 +77,7 @@ def upsert_document_by_id(
         return tool_success()
     except Exception as e:
         logger.error(f"Error upserting document in {keyspace}: {e}", exc_info=True)
-        return tool_error(e)
+        raise
 
 
 def delete_document_by_id(
@@ -89,8 +89,8 @@ def delete_document_by_id(
 ) -> dict[str, Any]:
     """Delete a document by its ID.
 
-    Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document not found, permission denied, network error)."""
+    Returns {"success": True} on success. On failure the call
+    fails with the reason (e.g. document not found, permission denied, network error)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
@@ -102,7 +102,7 @@ def delete_document_by_id(
         return tool_success()
     except Exception as e:
         logger.error(f"Error deleting document from {keyspace}: {e}", exc_info=True)
-        return tool_error(e)
+        raise
 
 
 def insert_document_by_id(
@@ -118,8 +118,8 @@ def insert_document_by_id(
     IMPORTANT: If this operation fails, DO NOT automatically try replace or upsert.
     Report the failure to the user. They can choose to 'replace' or 'upsert' if desired.
 
-    Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document already exists, permission denied, network error)."""
+    Returns {"success": True} on success. On failure the call
+    fails with the reason (e.g. document already exists, permission denied, network error)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
@@ -131,7 +131,7 @@ def insert_document_by_id(
         return tool_success()
     except Exception as e:
         logger.error(f"Error inserting document in {keyspace}: {e}", exc_info=True)
-        return tool_error(e)
+        raise
 
 
 def replace_document_by_id(
@@ -147,8 +147,8 @@ def replace_document_by_id(
     IMPORTANT: If this operation fails, DO NOT automatically try insert or upsert.
     Report the failure to the user. They can choose to 'insert' or 'upsert' if desired.
 
-    Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document does not exist, permission denied, network error)."""
+    Returns {"success": True} on success. On failure the call
+    fails with the reason (e.g. document does not exist, permission denied, network error)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
@@ -160,7 +160,7 @@ def replace_document_by_id(
         return tool_success()
     except Exception as e:
         logger.error(f"Error replacing document in {keyspace}: {e}", exc_info=True)
-        return tool_error(e)
+        raise
 
 
 def lookup_subdocument(
@@ -199,7 +199,7 @@ def lookup_subdocument(
     thumb, keep the combined number of paths across all three to 16 or fewer — Couchbase
     limits subdocument operations per call, though the exact limit is server-side and may
     change. If the server rejects the call (too many paths, or another constraint like path
-    length or nesting depth), the whole call fails with {"error": "..."}.
+    length or nesting depth), the whole call fails with the server's reason.
 
     A path that doesn't exist (or otherwise fails, e.g. count on a non-array/object) does
     NOT fail the whole call — it is reported individually as {"error": ...} in the
@@ -213,7 +213,7 @@ def lookup_subdocument(
         "count": {"<path>": {"value": <count>} | {"error": "..."}},
     }
     On a connection/lookup failure, or an invalid request (no paths / too many paths),
-    returns {"error": "<message>"} instead.
+    the call fails with the reason.
     """
     get_paths = get_paths or []
     exists_paths = exists_paths or []
@@ -238,7 +238,7 @@ def lookup_subdocument(
             "At least one of get_paths, exists_paths, or count_paths must be provided"
         )
         logger.error(f"Error performing sub-document lookup in {keyspace}: {error}")
-        return {"error": error}
+        raise ValueError(error)
 
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
@@ -251,7 +251,7 @@ def lookup_subdocument(
         logger.error(
             f"Error performing sub-document lookup in {keyspace}: {e}", exc_info=True
         )
-        return {"error": str(e)}
+        raise
 
     response: dict[str, Any] = {}
     for index, (op, path) in enumerate(spec_meta):
@@ -329,7 +329,7 @@ def mutate_subdocument(
     At least one spec must be provided. As a rule of thumb, keep the combined number of
     specs across all categories to 16 or fewer — Couchbase limits subdocument operations
     per call, though the exact limit is server-side and may change. If the server rejects
-    the call, the whole call fails with {"error": "..."} and nothing is mutated.
+    the call, the whole call fails with the reason and nothing is mutated.
 
     Returns a dict with a key for each requested category, mapping path -> {"success": true}
     (or, for counter_specs, {"success": true, "value": <new value>}):
@@ -338,8 +338,8 @@ def mutate_subdocument(
         "counter": {"<path>": {"success": true, "value": <new value>}},
         ...
     }
-    On a connection/mutation failure, or an invalid request, returns {"error": "<message>"}
-    instead and no mutations are applied.
+    On a connection/mutation failure, or an invalid request, the call fails with the
+    reason and no mutations are applied.
     """
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
 
@@ -417,12 +417,12 @@ def mutate_subdocument(
     except (KeyError, TypeError, CouchbaseException) as e:
         error = f"Invalid mutation spec: {e}"
         logger.warning(f"Error building sub-document mutation for {keyspace}: {error}")
-        return {"error": error}
+        raise ValueError(error) from e
 
     if not specs:
         error = "At least one mutation spec must be provided"
         logger.warning(f"Error performing sub-document mutation in {keyspace}: {error}")
-        return {"error": error}
+        raise ValueError(error)
 
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
@@ -434,14 +434,16 @@ def mutate_subdocument(
     except Exception as e:
         error_context = getattr(e, "error_context", None)
         failed_index = getattr(error_context, "first_error_index", None)
-        detail = ""
+        detail_prefix = ""
         if failed_index is not None and 0 <= failed_index < len(spec_meta):
-            detail = f" (spec {failed_index}: {spec_meta[failed_index][1]})"
+            detail_prefix = f"(spec {failed_index}: {spec_meta[failed_index][1]}) "
         logger.error(
-            f"Error performing sub-document mutation in {keyspace}: {e}{detail}",
+            f"Error performing sub-document mutation in {keyspace}: {detail_prefix}{e}",
             exc_info=True,
         )
-        return {"error": f"{e}{detail}"}
+        raise RuntimeError(
+            f"{detail_prefix}{type(e).__name__}: {getattr(e, 'message', None) or e}"
+        ) from e
 
     response: dict[str, Any] = {}
     for index, (op, path) in enumerate(spec_meta):
