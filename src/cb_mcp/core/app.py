@@ -46,7 +46,7 @@ from ..utils.environment import log_environment_info
 from ..utils.telemetry import send_install_ping
 from ..version import server_version
 from .contracts import ProviderLifecycle
-from .origin_guard import origin_middleware
+from .origin_guard import origin_guard_kwargs
 from .serving import apply_thread_pool_limit
 from .spec import ServerSpec
 
@@ -365,9 +365,9 @@ def run_app(
     written before this parameter existed keeps its behaviour. SSE has no
     stateless mode, so it only ever receives ``False``.
 
-    ``allowed_origins`` (see ``cb_mcp.core.origin_guard``) restricts which web
-    origins may call a network transport; stdio has no HTTP requests to
-    check, so a list given with it is ignored with a warning.
+    ``allowed_origins`` (see ``cb_mcp.core.origin_guard``) is handed to
+    FastMCP's Host/Origin guard on network transports; stdio has no HTTP
+    requests to check, so a list given with it is ignored with a warning.
     """
     sdk_transport = NETWORK_TRANSPORTS_SDK_MAPPING.get(transport, transport)
     run_kwargs: dict[str, Any] = {}
@@ -377,9 +377,7 @@ def run_app(
             run_kwargs["stateless_http"] = (
                 stateless_http and transport == STREAMABLE_HTTP_TRANSPORT
             )
-        middleware = origin_middleware(allowed_origins)
-        if middleware:
-            run_kwargs["middleware"] = middleware
+        run_kwargs.update(origin_guard_kwargs(allowed_origins))
     elif tuple(allowed_origins):
         logger.warning(
             "Allowed origins are ignored with the stdio transport: it has no "

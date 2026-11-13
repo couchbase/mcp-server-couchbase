@@ -61,7 +61,7 @@ from fastmcp.server.http import StarletteWithLifespan
 from cb_mcp.core.app import build_app, run_app
 from cb_mcp.core.cli import DefaultGroup
 from cb_mcp.core.contracts import ProviderLifecycle
-from cb_mcp.core.origin_guard import origin_middleware
+from cb_mcp.core.origin_guard import origin_guard_kwargs
 from cb_mcp.core.serving import (
     ServingConfig,
     ServingConfigError,
@@ -333,11 +333,10 @@ def create_app() -> StarletteWithLifespan:
         server_id, _per_process_log_file(params), send_startup_ping=False
     )
     # The supervisor already resolved this configuration as stateless.
-    http_app_kwargs: dict[str, Any] = {"stateless_http": built.serving.stateless_http}
-    middleware = origin_middleware(built.cli.transport.allowed_origins)
-    if middleware:
-        http_app_kwargs["middleware"] = middleware
-    return built.mcp.http_app(**http_app_kwargs)
+    return built.mcp.http_app(
+        stateless_http=built.serving.stateless_http,
+        **origin_guard_kwargs(built.cli.transport.allowed_origins),
+    )
 
 
 # --- The command line ---------------------------------------------------------

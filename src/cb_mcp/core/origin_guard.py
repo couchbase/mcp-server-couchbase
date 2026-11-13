@@ -1,29 +1,36 @@
-"""Origin allow-list for the network transports.
+"""Origin allow-list for the network transports, enforced by FastMCP.
 
 Browsers stamp every cross-origin request with an ``Origin`` header that page
 JavaScript cannot change, so an allow-list on it stops a malicious web page
-from using a visitor's browser to reach this server (DNS rebinding and
-friends). Non-browser clients send any ``Origin`` they like, or none, so this
-is a guard against browsers, not a client authentication mechanism; use OAuth
-for that.
+from using a visitor's browser to reach this server. Non-browser clients send
+any ``Origin`` they like, or none, so this is a guard against browsers, not a
+client authentication mechanism; use OAuth for that.
 
-This module holds the list's parsing and validation, and the middleware that
-enforces it. An allow-list is a security setting, so a typo must never quietly
-turn into "allow everything": a malformed list is an error that names every
-bad entry and says why.
+The check itself is FastMCP's own Host/Origin guard
+(``fastmcp.server.http.HostOriginGuardMiddleware``); this module validates the
+operator's list and hands it over (:func:`origin_guard_kwargs`). Validation is
+ours because FastMCP does none: a malformed entry would simply never match. An
+allow-list is a security setting, so a typo must never quietly turn into "allow
+everything": a malformed list is an error that names every bad entry and says
+why.
+
+What FastMCP's guard does with the list (``host_origin_protection="auto"``):
+
+* A request with **no** ``Origin`` is admitted.
+* A request whose ``Origin`` matches an entry is admitted; any other ``Origin``
+  gets ``403``. This covers every route, ``/health`` included.
+* On a server bound to a loopback address, ``Host`` is validated too (``421``
+  for a foreign host), and an ``Origin`` that is itself a loopback address is
+  admitted whatever the list says. Bound to anything else (``0.0.0.0`` in a
+  container), ``Host`` is not checked, so proxies and Docker names just work.
 """
 
 import logging
-import re
 from collections.abc import Iterable
+from typing import Any
 from urllib.parse import SplitResult, urlsplit
 
-from starlette.middleware import Middleware
-from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import PlainTextResponse
-from starlette.types import ASGIApp, Receive, Scope, Send
-
-from ..utils.constants import HEALTH_CHECK_PATH, LOGGER_NAMESPACE
+from ..utils.constants import LOGGER_NAMESPACE
 
 logger = logging.getLogger(f"{LOGGER_NAMESPACE}.core.origin_guard")
 
@@ -37,7 +44,7 @@ ORIGIN_FORMAT_HINT = (
     "Each entry must be an origin: scheme://host[:port], for example "
     "https://app.example.com, http://localhost:3000 or "
     "chrome-extension://<extension-id>. A '*' in the host "
-    "(https://*.example.com) matches any hostname characters. Use '*' on its own to allow "
+    "(https://*.example.com) matches any text. Use '*' on its own to allow "
     "every origin."
 )
 
@@ -133,10 +140,11 @@ def _normalize(entry: str) -> str:
     if not host:
         raise _BadEntryError("missing host")
     _check_ascii_host(host)
+    _check_not_ipv6(host)
     port = _port(parts)
 
     # urlsplit has already lowercased the scheme and the host.
-    origin = f"{parts.scheme}://{f'[{host}]' if ':' in host else host}"
+    origin = f"{parts.scheme}://{host}"
     if port is not None and port != _DEFAULT_PORTS.get(parts.scheme):
         origin += f":{port}"
     return origin
@@ -163,6 +171,20 @@ def _check_ascii_host(host: str) -> None:
         f"host {host!r} contains non-ASCII characters; browsers send "
         f"internationalized names in punycode, so {fix}"
     )
+
+
+def _check_not_ipv6(host: str) -> None:
+    """Reject IPv6 literals instead of accepting an entry that can never match.
+
+    FastMCP compares origins with ``fnmatch``, which reads the ``[...]`` around
+    an IPv6 address as a character class, so ``http://[::1]:3000`` never
+    matches the ``Origin`` a browser sends for it.
+    """
+    if ":" in host:
+        raise _BadEntryError(
+            f"IPv6 address [{host}] cannot be matched: the origin check reads "
+            "the brackets as a pattern; list a hostname that resolves to it instead"
+        )
 
 
 def _check_scheme(entry: str, parts: SplitResult) -> None:
@@ -221,100 +243,24 @@ def _port(parts: SplitResult) -> int | None:
     return port
 
 
-class OriginAllowlistMiddleware:
-    """Reject HTTP requests whose ``Origin`` is not on the allow-list.
+def origin_guard_kwargs(allowed_origins: Iterable[str]) -> dict[str, Any]:
+    """The FastMCP arguments that enforce ``allowed_origins``; empty when there is no list.
 
-    With an empty list nothing is enforced. With a list, a request is admitted
-    only if it carries an ``Origin`` matching an entry, so a request with no
-    ``Origin`` is refused too. ``/health`` is always admitted. The ``Host``
-    header is never consulted.
-
-    ``allowed_origins`` is the output of :func:`parse_allowed_origins`.
-    """
-
-    def __init__(self, app: ASGIApp, allowed_origins: Iterable[str] = ()) -> None:
-        self.app = app
-        entries = tuple(allowed_origins)
-        self._enforce = bool(entries)
-        self._exact = frozenset(e for e in entries if "*" not in e)
-        self._patterns = [_wildcard_regex(e) for e in entries if "*" in e]
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if (
-            scope["type"] != "http"
-            or not self._enforce
-            or scope.get("path") == HEALTH_CHECK_PATH
-        ):
-            await self.app(scope, receive, send)
-            return
-
-        origin = _origin_header(scope)
-        if origin is not None and self._allows(origin):
-            await self.app(scope, receive, send)
-            return
-
-        client = scope.get("client")
-        logger.warning(
-            "Rejected request with Origin %r from %s: not in the allowed origins",
-            origin,
-            client[0] if client else "unknown",
-        )
-        await PlainTextResponse("Forbidden Origin", status_code=403)(
-            scope, receive, send
-        )
-
-    def _allows(self, origin: str) -> bool:
-        origin = origin.strip().lower()
-        return origin in self._exact or any(p.fullmatch(origin) for p in self._patterns)
-
-
-def _origin_header(scope: Scope) -> str | None:
-    for name, value in scope.get("headers", []):
-        if name == b"origin":
-            return value.decode("latin-1")
-    return None
-
-
-#: What a '*' may stand for: characters that can appear in a hostname. Not '.*',
-#: which would also swallow ':' and '/', so 'https://app.example.*' would admit
-#: 'https://app.example.com:8443' although the entry names the default port.
-_HOST_CHARS = "[a-z0-9._-]*"
-
-
-def _wildcard_regex(entry: str) -> re.Pattern[str]:
-    # Not fnmatch: '[' and ']' are literal in an IPv6 origin, but fnmatch
-    # would read them as a character class.
-    return re.compile(_HOST_CHARS.join(re.escape(part) for part in entry.split("*")))
-
-
-def origin_middleware(allowed_origins: Iterable[str]) -> list[Middleware]:
-    """The middleware stack that enforces ``allowed_origins``; empty when there is no list.
-
-    CORS comes first (outermost) so a browser's preflight ``OPTIONS`` is
-    answered before it reaches the MCP app. Only listed origins get
-    ``Access-Control-Allow-Origin``: a page we admit can also read the reply,
-    and a page we do not admit never can. Two response headers are exposed,
-    since browsers hide any others from page code: ``Mcp-Session-Id``, which an
-    MCP client reads from the ``initialize`` response, and ``WWW-Authenticate``,
-    whose 401 challenge carries the ``resource_metadata`` URL a browser OAuth
-    client uses to discover the authorization server.
+    Splat into ``FastMCP.run`` / ``FastMCP.http_app``. ``"auto"`` rather than
+    ``True`` on purpose: ``True`` validates ``Host`` on every request against
+    loopback names only, which answers ``421`` to any container, proxy or
+    public hostname. ``"auto"`` leaves ``Host`` alone unless the server is
+    bound to loopback. It has to be passed with the list: FastMCP's default
+    (``host_origin_protection=False``) installs no guard at all, so
+    ``allowed_origins`` on its own would do nothing. With no list we pass
+    nothing and FastMCP's default applies.
     """
     origins = tuple(allowed_origins)
     if not origins:
-        return []
+        return {}
     logger.info(
-        "Only requests with an Origin header matching one of these are accepted "
-        "(requests without one are rejected): %s",
+        "Origin allow-list active; requests with an Origin header not matching "
+        "one of these are rejected: %s",
         ", ".join(origins),
     )
-    any_listed = "|".join(_wildcard_regex(e).pattern for e in origins)
-    return [
-        Middleware(
-            CORSMiddleware,
-            allow_origin_regex=any_listed,
-            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-            allow_headers=["*"],
-            expose_headers=["Mcp-Session-Id", "WWW-Authenticate"],
-        ),
-        Middleware(OriginAllowlistMiddleware, allowed_origins=origins),
-    ]
+    return {"host_origin_protection": "auto", "allowed_origins": list(origins)}

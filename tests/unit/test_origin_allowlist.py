@@ -1,28 +1,26 @@
 """Origin allow-list (``--allowed-origins`` / ``CB_MCP_ALLOWED_ORIGINS``).
 
-Written ahead of the implementation, so they are black-box on purpose: they drive
-the real CLI and send requests to the real ASGI app the server would serve,
-once per serving path (single process, and the ``--workers`` factory), and know
-nothing about how the check is built.
+Black-box on purpose: they drive the real CLI and send requests to the real ASGI
+app the server would serve, once per serving path (single process, and the
+``--workers`` factory). The check is FastMCP's own Host/Origin guard, so these
+pin what an operator actually gets from it:
 
-The rule these pin:
-
-* No list (unset, empty, blank, only commas): no origin check, everything is
-  admitted, exactly as today.
-* List set: a request is admitted only if it carries an ``Origin`` header that
-  matches an entry. A *missing* ``Origin`` is rejected too, so non-browser
-  clients stop working once the list is set. That is the accepted trade-off.
-* ``Host`` plays no part in the decision. DNS rebinding is stopped because the
-  attacker's origin is not on the list (and, for same-origin ``GET`` requests
-  where browsers omit ``Origin``, because a missing one is rejected).
-* Rejections are 403.
+* No list (unset, empty, blank, only commas, a lone ``*``): no check, everything
+  is admitted, exactly as before.
+* List set: a request whose ``Origin`` is not listed gets ``403`` (``null``
+  included). A request with **no** ``Origin`` is admitted: FastMCP's guard only
+  judges an ``Origin`` that is present, so non-browser clients keep working.
+* On a server bound to loopback, ``Host`` is validated too (``421`` for a foreign
+  host, which is what stops DNS rebinding), and an ``Origin`` that is itself a
+  loopback address is admitted whatever the list says. Bound to anything else
+  (``0.0.0.0``, as in a container) ``Host`` is not checked.
+* The guard covers every route, ``/health`` included, when an ``Origin`` is sent.
 * A malformed list fails startup instead of silently becoming "allow all", and the
   error says which entry is wrong and why, so the operator can fix it without
   reading the source.
 
-A ``*`` in an entry's host matches hostname characters, dots included, but never a
-port or path; it is not allowed in
-the scheme or port.
+Most tests run "exposed" (``--host 0.0.0.0``, requests to a public name), where
+only the list decides; the loopback behaviour has its own class.
 """
 
 from __future__ import annotations
@@ -57,6 +55,11 @@ MCP_HEADERS = {
     "Content-Type": "application/json",
 }
 ALLOWED = "https://app.example.com,http://localhost:3000"
+#: A server reachable by name (``--host 0.0.0.0``, as in a container) and one
+#: bound to loopback. They differ in which FastMCP checks apply.
+EXPOSED = "http://mcp.mycompany.com:8000"
+LOOPBACK = "http://127.0.0.1:8000"
+EXPOSE_ALL = "0.0.0.0"  # noqa: S104 - a flag value, nothing binds
 
 
 @pytest.fixture(autouse=True)
@@ -115,6 +118,8 @@ def make_app(request):
 
     def build(allowed: str | None, *extra: str, env: dict[str, str] | None = None):
         args = ["--transport", "http", *extra]
+        if "--host" not in extra:
+            args += ["--host", EXPOSE_ALL]
         if allowed is not None:
             args += ["--allowed-origins", allowed]
         return builder(args, env)
@@ -129,6 +134,7 @@ async def _send(
     *,
     origin: str | None = None,
     host: str | None = None,
+    base: str = EXPOSED,
 ) -> httpx.Response:
     headers = dict(MCP_HEADERS)
     if origin is not None:
@@ -138,9 +144,7 @@ async def _send(
     # The lifespan never runs here, so an admitted request may fail inside the
     # MCP layer (500). Only "was it turned away at the door" is asserted.
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-    async with httpx.AsyncClient(
-        transport=transport, base_url="http://testserver"
-    ) as client:
+    async with httpx.AsyncClient(transport=transport, base_url=base) as client:
         if method == "POST":
             return await client.post(path, json=INITIALIZE, headers=headers)
         return await client.request(method, path, headers=headers)
@@ -178,6 +182,12 @@ class TestNoAllowlist:
         app = make_app(None, env={"CB_MCP_ALLOWED_ORIGINS": ""})
         assert _admitted(await _send(app, origin="https://evil.com"))
 
+    async def test_no_host_check_either_on_loopback(self, make_app):
+        """Without a list FastMCP's guard is off entirely, as it always was."""
+        app = make_app(None, "--host", "127.0.0.1")
+        response = await _send(app, host="evil.com:8000", base=LOOPBACK)
+        assert _admitted(response)
+
 
 # --- List configured: who gets in ---------------------------------------------
 
@@ -203,7 +213,7 @@ class TestAdmission:
     async def test_empty_entries_between_commas_are_ignored(self, make_app):
         app = make_app("https://a.example.com,,https://b.example.com,")
         assert _admitted(await _send(app, origin="https://b.example.com"))
-        assert (await _send(app, origin="")).status_code == 403
+        assert (await _send(app, origin="https://c.example.com")).status_code == 403
 
     async def test_scheme_and_host_match_case_insensitively(self, make_app):
         app = make_app("https://app.example.com")
@@ -228,11 +238,6 @@ class TestAdmission:
         assert (await _send(app, origin="chrome-extension://abcdeg")).status_code == 403
         assert (await _send(app, origin="https://abcdef")).status_code == 403
 
-    async def test_ipv6_origin(self, make_app):
-        app = make_app("http://[::1]:3000")
-        assert _admitted(await _send(app, origin="http://[::1]:3000"))
-        assert (await _send(app, origin="http://[::1]:3001")).status_code == 403
-
     async def test_duplicate_entries_are_harmless(self, make_app):
         app = make_app("https://a.example.com,https://A.example.com:443")
         assert _admitted(await _send(app, origin="https://a.example.com"))
@@ -252,10 +257,8 @@ class TestRejection:
             "https://evilapp.example.com",  # listed host as a suffix
             "http://localhost:3001",  # wrong port on a listed host
             "http://127.0.0.1:3000",  # localhost and 127.0.0.1 differ
-            "https://app.example.com/",  # not a valid Origin value
-            "https://app.example.com/path",
+            "https://app.example.com/path",  # not a valid Origin value
             "null",  # sandboxed iframes, file:// pages
-            "",
             "*",
         ],
     )
@@ -264,12 +267,16 @@ class TestRejection:
         assert response.status_code == 403
 
     @pytest.mark.parametrize("method", ["POST", "GET"])
-    async def test_missing_origin_is_rejected_when_the_list_is_set(
+    async def test_missing_origin_is_admitted_when_the_list_is_set(
         self, make_app, method
     ):
-        """Non-browser clients stop working once the list is set. Accepted."""
+        """FastMCP's guard only judges an Origin that is present. Accepted.
+
+        Non-browser clients (desktop apps, CLI agents) send none and keep
+        working; the list is a guard against web pages, not authentication.
+        """
         response = await _send(make_app(ALLOWED), method)
-        assert response.status_code == 403
+        assert _admitted(response)
 
     async def test_the_literal_null_origin_is_not_a_wildcard(self, make_app):
         assert (await _send(make_app(ALLOWED), origin="null")).status_code == 403
@@ -281,52 +288,58 @@ class TestRejection:
         assert "jsonrpc" not in response.text
 
 
-# --- Host plays no part: DNS rebinding and Docker ------------------------------
+# --- Host: validated on loopback only ------------------------------------------
 
 
 @pytest.mark.asyncio
-class TestHostHeaderIsNotUsed:
-    async def test_rebinding_post_is_rejected(self, make_app):
-        """Attacker page and rebound server share one name, so Origin == Host.
+class TestHostHandling:
+    """FastMCP validates ``Host`` only when the server is bound to loopback."""
 
-        That equality must not admit the request: the attacker's origin is not
-        on the list.
+    async def test_exposed_server_accepts_any_host_so_docker_and_proxies_work(
+        self, make_app
+    ):
+        for host in ("mcp.mycompany.com", "couchbase-mcp:8000", "10.0.3.7:8000"):
+            response = await _send(
+                make_app(ALLOWED), origin="https://app.example.com", host=host
+            )
+            assert _admitted(response), host
+
+    async def test_exposed_server_does_not_judge_a_request_without_origin(
+        self, make_app
+    ):
+        """The accepted gap: no Origin and no Host check, so nothing to refuse."""
+        response = await _send(make_app(ALLOWED), host="evil.com:8000")
+        assert _admitted(response)
+
+    async def test_loopback_server_rejects_a_foreign_host(self, make_app):
+        """DNS rebinding: the page reaches the server under the attacker's name."""
+        app = make_app(ALLOWED, "--host", "127.0.0.1")
+        for origin in (None, "http://evil.com:8000"):
+            response = await _send(
+                app, origin=origin, host="evil.com:8000", base=LOOPBACK
+            )
+            assert response.status_code == 421, origin
+
+    async def test_loopback_server_still_rejects_unlisted_internet_origins(
+        self, make_app
+    ):
+        app = make_app(ALLOWED, "--host", "127.0.0.1")
+        response = await _send(app, origin="https://evil.com", base=LOOPBACK)
+        assert response.status_code == 403
+
+    async def test_loopback_server_admits_listed_origins(self, make_app):
+        app = make_app(ALLOWED, "--host", "127.0.0.1")
+        response = await _send(app, origin="https://app.example.com", base=LOOPBACK)
+        assert _admitted(response)
+
+    async def test_loopback_server_admits_any_loopback_origin(self, make_app):
+        """FastMCP's same-machine fallback: a local page needs no list entry.
+
+        The cost of that fallback, accepted: a hostile page served from another
+        port on the same machine is treated as local.
         """
-        response = await _send(
-            make_app(ALLOWED),
-            origin="http://evil.com:8086",
-            host="evil.com:8086",
-        )
-        assert response.status_code == 403
-
-    async def test_rebinding_get_without_origin_is_rejected(self, make_app):
-        """Browsers omit Origin on same-origin GET; a missing one is rejected."""
-        response = await _send(make_app(ALLOWED), "GET", host="evil.com:8086")
-        assert response.status_code == 403
-
-    async def test_rebinding_against_loopback_names_is_rejected(self, make_app):
-        response = await _send(
-            make_app(ALLOWED),
-            origin="http://localhost:8086",
-            host="localhost:8086",
-        )
-        assert response.status_code == 403
-
-    @pytest.mark.parametrize(
-        "host",
-        [
-            "mcp.mycompany.com",
-            "couchbase-mcp:8000",  # Docker Compose service name
-            "10.0.3.7:8000",  # container IP
-            "internal-lb.corp:443",
-            "evil.com",
-        ],
-    )
-    async def test_a_listed_origin_is_admitted_whatever_the_host(self, make_app, host):
-        """No allowed-hosts list to maintain: Docker and proxy setups just work."""
-        response = await _send(
-            make_app(ALLOWED), origin="https://app.example.com", host=host
-        )
+        app = make_app(ALLOWED, "--host", "127.0.0.1")
+        response = await _send(app, origin="http://localhost:9999", base=LOOPBACK)
         assert _admitted(response)
 
 
@@ -381,34 +394,34 @@ class TestWildcards:
         assert (await _send(app, origin="http://localhost:3001")).status_code == 403
 
 
-# --- Health probes are never turned away ----------------------------------------
+# --- Health probes -----------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 class TestHealthEndpoint:
-    """Probes (Docker, Kubernetes, load balancers) must never be turned away.
-
-    Mirrors the OAuth rule that /health stays open while /mcp is guarded:
-    rejecting a probe would restart a healthy server.
-    """
+    """Probes send no Origin, so the guard has nothing to refuse."""
 
     async def test_reachable_without_an_origin(self, make_app):
         response = await _send(make_app(ALLOWED), "GET", HEALTH_CHECK_PATH)
         assert response.status_code == 200
 
-    @pytest.mark.parametrize(
-        "origin", ["https://evil.com", "null", "", "https://app.example.com"]
-    )
-    async def test_reachable_with_any_origin(self, make_app, origin):
-        response = await _send(
-            make_app(ALLOWED), "GET", HEALTH_CHECK_PATH, origin=origin
-        )
+    @pytest.mark.parametrize("host", ["10.0.3.7:8000", "couchbase-mcp:8000"])
+    async def test_reachable_by_pod_ip_or_service_name(self, make_app, host):
+        response = await _send(make_app(ALLOWED), "GET", HEALTH_CHECK_PATH, host=host)
         assert response.status_code == 200
 
-    async def test_mcp_is_still_guarded_next_to_it(self, make_app):
+    async def test_a_bad_origin_is_refused_here_too(self, make_app):
+        """The guard wraps every route, /health included. Accepted: probes and
+        browsers do not mix, and a browser sending an Origin is what it judges."""
+        response = await _send(
+            make_app(ALLOWED), "GET", HEALTH_CHECK_PATH, origin="https://evil.com"
+        )
+        assert response.status_code == 403
+
+    async def test_mcp_is_guarded_next_to_it(self, make_app):
         app = make_app(ALLOWED)
         assert (await _send(app, "GET", HEALTH_CHECK_PATH)).status_code == 200
-        assert (await _send(app)).status_code == 403
+        assert (await _send(app, origin="https://evil.com")).status_code == 403
 
 
 # --- CLI wiring and startup validation ------------------------------------------
@@ -446,6 +459,30 @@ class TestCli:
         )
         assert result.exit_code == 0, result.output
         run_app.assert_called_once()
+
+    def test_the_normalized_list_reaches_the_server(self):
+        result, run_app, _ = _invoke(
+            [
+                "--transport",
+                "http",
+                "--allowed-origins",
+                " HTTPS://App.Example.com:443 , http://localhost:3000,",
+            ]
+        )
+        assert result.exit_code == 0, result.output
+        assert run_app.call_args.kwargs["allowed_origins"] == (
+            "https://app.example.com",
+            "http://localhost:3000",
+        )
+
+    @pytest.mark.parametrize("value", [None, "", "*"])
+    def test_no_list_reaches_the_server_as_empty(self, value):
+        args = ["--transport", "http"]
+        if value is not None:
+            args += ["--allowed-origins", value]
+        result, run_app, _ = _invoke(args)
+        assert result.exit_code == 0, result.output
+        assert run_app.call_args.kwargs["allowed_origins"] == ()
 
     @pytest.mark.parametrize(
         "value",
@@ -536,6 +573,7 @@ BAD_ENTRIES = [
     pytest.param("https://", r"host", id="no-host"),
     pytest.param("null", r"null.*(iframe|sandbox|file)", id="null"),
     pytest.param("https://bücher.example", r"non-ASCII.*xn--bcher-kva", id="idn-host"),
+    pytest.param("http://[::1]:3000", r"IPv6.*cannot be matched", id="ipv6"),
 ]
 
 
@@ -671,73 +709,12 @@ class TestErrorReporting:
 class TestSseTransport:
     """SSE is a network transport too: the guard applies to it."""
 
-    async def test_unlisted_and_missing_origins_are_rejected(self):
-        app = _single_process_app(["--transport", "sse", "--allowed-origins", ALLOWED])
+    async def test_unlisted_origin_is_rejected(self):
+        app = _single_process_app(
+            ["--transport", "sse", "--host", EXPOSE_ALL, "--allowed-origins", ALLOWED]
+        )
         # A wrongly admitted SSE request would stream forever; fail fast instead.
         evil = await asyncio.wait_for(
             _send(app, "GET", "/sse", origin="https://evil.com"), timeout=5
         )
-        missing = await asyncio.wait_for(_send(app, "GET", "/sse"), timeout=5)
         assert evil.status_code == 403
-        assert missing.status_code == 403
-
-
-# --- CORS: a listed web page must be able to read the replies -------------------
-
-
-async def _preflight(app, origin: str) -> httpx.Response:
-    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-    async with httpx.AsyncClient(
-        transport=transport, base_url="http://testserver"
-    ) as client:
-        return await client.options(
-            "/mcp",
-            headers={
-                "Origin": origin,
-                "Access-Control-Request-Method": "POST",
-                "Access-Control-Request-Headers": "content-type,mcp-session-id",
-            },
-        )
-
-
-@pytest.mark.asyncio
-class TestCors:
-    async def test_preflight_from_a_listed_origin_is_answered(self, make_app):
-        response = await _preflight(make_app(ALLOWED), "https://app.example.com")
-        assert response.status_code == 200
-        assert (
-            response.headers["access-control-allow-origin"] == "https://app.example.com"
-        )
-
-    async def test_preflight_from_an_unlisted_origin_is_not_granted(self, make_app):
-        response = await _preflight(make_app(ALLOWED), "https://evil.com")
-        assert "access-control-allow-origin" not in response.headers
-
-    async def test_replies_to_listed_origins_carry_cors_headers(self, make_app):
-        # /health rather than /mcp: the lifespan does not run in these tests,
-        # so an admitted /mcp call fails inside the MCP layer before CORS can
-        # decorate the reply.
-        response = await _send(
-            make_app(ALLOWED),
-            method="GET",
-            path="/health",
-            origin="https://app.example.com",
-        )
-        assert response.status_code == 200
-        assert (
-            response.headers["access-control-allow-origin"] == "https://app.example.com"
-        )
-        exposed = response.headers.get("access-control-expose-headers", "").lower()
-        assert "mcp-session-id" in exposed
-        assert "www-authenticate" in exposed
-
-    async def test_unlisted_origins_get_no_cors_headers_on_the_rejection(
-        self, make_app
-    ):
-        response = await _send(make_app(ALLOWED), origin="https://evil.com")
-        assert response.status_code == 403
-        assert "access-control-allow-origin" not in response.headers
-
-    async def test_no_cors_headers_without_a_list(self, make_app):
-        response = await _send(make_app(None), origin="https://app.example.com")
-        assert "access-control-allow-origin" not in response.headers

@@ -50,12 +50,6 @@ class TestNormalization:
     def test_leading_zeros_in_a_port_are_normalized(self):
         assert parse_allowed_origins("http://a.com:08080") == ("http://a.com:8080",)
 
-    def test_ipv6_literals(self):
-        assert parse_allowed_origins("http://[::1]:3000,http://[::1]:80") == (
-            "http://[::1]:3000",
-            "http://[::1]",
-        )
-
     def test_duplicates_collapse_after_normalization(self):
         assert parse_allowed_origins("https://a.com,HTTPS://A.com:443") == (
             "https://a.com",
@@ -158,6 +152,8 @@ BAD = [
     ("https://:3000", r"missing host"),
     ("null", r"null.*(iframe|sandbox|file)"),
     ("https://bücher.example", r"non-ASCII.*xn--bcher-kva\.example"),
+    ("http://[::1]:3000", r"IPv6 address \[::1\] cannot be matched"),
+    ("https://[2001:db8::1]", r"IPv6 address .* cannot be matched"),
     ("https://*.bücher.example", r"non-ASCII.*punycode"),
     ("NULL", r"null.*(iframe|sandbox|file)"),
     ("https://a .com", r"whitespace"),

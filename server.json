@@ -103,7 +103,7 @@
         },
         {
           "name": "CB_MCP_ALLOWED_ORIGINS",
-          "description": "Comma-separated web origins (scheme://host[:port], '*' allowed in the host) permitted to call the http endpoint. When set, requests without an Origin header are rejected. Unset, empty or '*' allows every origin. Ignored with stdio.",
+          "description": "Comma-separated web origins (scheme://host[:port], '*' allowed in the host) permitted to call the http endpoint. When set, requests with an unlisted Origin header are rejected (403); requests with no Origin header are admitted. Unset, empty or '*' allows every origin. Ignored with stdio.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -887,7 +887,7 @@
         },
         {
           "name": "CB_MCP_ALLOWED_ORIGINS",
-          "description": "Comma-separated web origins (scheme://host[:port], '*' allowed in the host) permitted to call the http endpoint. When set, requests without an Origin header are rejected. Unset, empty or '*' allows every origin. Ignored with stdio.",
+          "description": "Comma-separated web origins (scheme://host[:port], '*' allowed in the host) permitted to call the http endpoint. When set, requests with an unlisted Origin header are rejected (403); requests with no Origin header are admitted. Unset, empty or '*' allows every origin. Ignored with stdio.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -1566,7 +1566,7 @@
         },
         {
           "name": "CB_MCP_ALLOWED_ORIGINS",
-          "description": "Comma-separated web origins (scheme://host[:port], '*' allowed in the host) permitted to call the http endpoint. When set, requests without an Origin header are rejected. Unset, empty or '*' allows every origin. Ignored with stdio.",
+          "description": "Comma-separated web origins (scheme://host[:port], '*' allowed in the host) permitted to call the http endpoint. When set, requests with an unlisted Origin header are rejected (403); requests with no Origin header are admitted. Unset, empty or '*' allows every origin. Ignored with stdio.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -1949,7 +1949,7 @@
         },
         {
           "name": "CB_MCP_ALLOWED_ORIGINS",
-          "description": "Comma-separated web origins (scheme://host[:port], '*' allowed in the host) permitted to call the http endpoint. When set, requests without an Origin header are rejected. Unset, empty or '*' allows every origin. Ignored with stdio.",
+          "description": "Comma-separated web origins (scheme://host[:port], '*' allowed in the host) permitted to call the http endpoint. When set, requests with an unlisted Origin header are rejected (403); requests with no Origin header are admitted. Unset, empty or '*' allows every origin. Ignored with stdio.",
           "isRequired": false,
           "format": "string",
           "isSecret": false

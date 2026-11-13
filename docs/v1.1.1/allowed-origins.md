@@ -20,7 +20,7 @@ JavaScript cannot change or hide it, so a server can safely refuse origins it
 does not know.
 
 `--allowed-origins` lets the operator list the origins that may call the
-server. Everything else gets `403 Forbidden Origin`.
+server. A request that carries any other origin gets `403 Forbidden Origin`.
 
 ```bash
 couchbase-mcp-server operational --transport=http \
@@ -29,25 +29,27 @@ couchbase-mcp-server operational --transport=http \
 
 The same value can come from the `CB_MCP_ALLOWED_ORIGINS` environment variable.
 
+The check is not ours: it is FastMCP's own Host/Origin guard. Our part is to
+validate the list at startup (FastMCP does none, so a typo would just never
+match) and to hand it over. That choice decides the rules below.
+
 ## The rules
 
 | Situation | Result |
 | --- | --- |
-| Option unset, empty, only commas, or a lone `*` | No check. Every request is admitted, with or without `Origin`. |
-| List set, request has a matching `Origin` | Admitted. |
-| List set, request has a different `Origin` | `403`. |
-| List set, request has **no** `Origin` | `403`. |
-| `Origin: null` | Always `403`. It cannot be listed. |
-| `GET /health` | Always admitted. |
-| Origin is on the list | The reply also carries CORS headers, so the page can read it (see [CORS](#cors-letting-listed-pages-read-the-reply)). |
+| Option unset, empty, only commas, or a lone `*` | No check. Every request is admitted. |
+| List set, request has a listed `Origin` | Admitted. |
+| List set, request has an unlisted `Origin` | `403`. |
+| `Origin: null` | `403`. It cannot be listed. |
+| List set, request has **no** `Origin` | Admitted. |
+| `GET /health` with an unlisted `Origin` | `403`. Probes send none, so they pass. |
 | `stdio` transport | The option is ignored (a warning is logged). |
 
-The one that surprises people is the fourth row. Browsers always send `Origin`
-on the requests that matter, but most non-browser clients (desktop apps, CLI
-agents) send none. Once a list is set those clients are turned away, so set it
-only when browsers are what you need to admit or defend against.
-
-The `Host` header is never looked at. Protecting it is a possible follow-up.
+The fifth row is the important one. FastMCP only judges an `Origin` that is
+present. Browsers send `Origin` on the requests that matter, while desktop apps
+and CLI agents send none, so they keep working once a list is set. The price is
+that a caller can skip the check by leaving the header out. That is why this is
+a guard against web pages, not authentication.
 
 ### What an entry looks like
 
@@ -55,59 +57,46 @@ An entry is `scheme://host[:port]`:
 
 - Any scheme works: `https://`, `chrome-extension://<id>`, `vscode-webview://<id>`.
 - Default ports are optional: `https://a.com` and `https://a.com:443` are the same entry.
-- A `*` in the **host** matches any run of hostname characters (letters, digits, `.`, `-`, `_`): `https://*.example.com`. It is not allowed in the scheme or port, and it never reaches into the port, so `https://app.example.*` admits `https://app.example.com` but not `https://app.example.com:8443`.
-- **Internationalized hostnames are rejected, not converted.** Browsers send them in punycode, so `https://bücher.example` could never match what a browser sends (`https://xn--bcher-kva.example`). Rather than accept an entry that silently admits nobody, startup fails and the error shows the form to list. Converting automatically would not work for wildcards, because `*` is not valid in IDNA.
+- A `*` in the **host** matches any text: `https://*.example.com`. It is not allowed in the scheme or port. Because the default port is filled in before matching, a trailing wildcard such as `https://app.example.*` admits `https://app.example.com` but not `https://app.example.com:8443`.
 - Matching ignores case.
 
 A lone `*` means "allow everything", but combining it with other entries is an
 error, because the intent would be unclear.
 
-## CORS: letting listed pages read the reply
+### Two kinds of entry are rejected at startup
 
-Browsers have a second rule, separate from the allow-list. A page may *send* a
-request to another origin, but the browser hides the reply from the page unless
-the server says that origin may read it. That permission is called CORS
-(Cross-Origin Resource Sharing), and only the server being called can grant it,
-by adding a header to its reply.
+An entry that can never match is worse than an error: it looks like protection
+and admits nobody. So startup fails on these, with the reason and what to do:
 
-| | Allow-list | CORS |
+- **Internationalized hostnames.** Browsers send them in punycode, so
+  `https://bücher.example` could never match what a browser sends
+  (`https://xn--bcher-kva.example`). List the `xn--` form; the error prints it.
+  We reject rather than convert because `*` is not valid in IDNA, so a
+  conversion could not cover wildcards.
+- **IPv6 addresses**, such as `http://[::1]:3000`. FastMCP compares origins with
+  `fnmatch`, which reads the brackets as a pattern, so these never match. List a
+  hostname that resolves to the address instead.
+
+## Host and loopback
+
+FastMCP runs the guard in `"auto"` mode, which treats the server differently
+depending on where it is bound.
+
+| Server bound to | `Host` header | An `Origin` that is a loopback address |
 | --- | --- | --- |
-| Who enforces it | The server | The browser |
-| What it decides | Whether the server handles the request at all | Whether the page may read the reply |
-| Without it | Unknown pages can call the server | Listed pages can call it but cannot read the answer |
+| Loopback (`127.0.0.1`, the default) | Checked: a foreign host gets `421` | Admitted even if not listed |
+| Anything else (`0.0.0.0` in a container) | Not checked | Judged by the list like any other |
 
-Without CORS the allow-list would admit a listed page and the browser would
-still throw the answer away. So the server also sends CORS headers, **only to
-origins on the list**:
+On loopback this is what stops DNS rebinding: the attacker's page reaches the
+server under the attacker's name, so its `Host` is wrong and the request is
+refused, with or without an `Origin`. The cost is the second column: a page
+served from another port on the same machine counts as local and is let in.
 
-- MCP calls are `POST`s with `Content-Type: application/json`, so the browser
-  first sends a preflight `OPTIONS` request asking "may this origin send that?".
-  The server answers it with `Access-Control-Allow-Origin: <the origin>`.
-- Replies to listed origins carry the same header. Two response headers are
-  exposed, because browsers hide all others from page code: `Mcp-Session-Id`
-  (an MCP client reads it from the `initialize` reply) and `WWW-Authenticate`
-  (a 401 challenge carries the URL a browser OAuth client uses to discover the
-  authorization server).
-- An origin that is not listed gets no CORS headers, and its request is
-  refused with `403` anyway.
-- With no list set, no CORS headers are sent and nothing changes.
-
-```
-page (https://app.example.com)                 MCP server
-   | -- OPTIONS  Origin: https://app.example.com -->  |  preflight
-   | <- 200  Access-Control-Allow-Origin: ... --------|  listed: allowed
-   | -- POST /mcp  Origin: https://app.example.com -->|  the real call
-   | <- 200 + Access-Control-Allow-Origin: ... -------|  page can read it
-```
-
-CORS only affects browsers. A script can ignore it, which is one more reason
-the allow-list is not authentication.
-
-## What this does not do
-
-It is a guard against **web pages**, not against other programs. Any
-non-browser client can send whatever `Origin` it likes. It is not
-authentication. Use OAuth for that.
+On `0.0.0.0` nothing checks `Host`, on purpose. A container is reached by its
+service name, pod IP or a proxy hostname, and validating `Host` there would
+turn every such request into a `421`. A request with no `Origin` is then not
+judged at all. If that gap matters for a deployment, bind to loopback or put an
+authenticating proxy in front.
 
 ## Bad lists stop the server
 
@@ -125,10 +114,16 @@ Each entry must be an origin: scheme://host[:port], for example ...
 
 This also happens in the `--workers` supervisor before any worker is spawned.
 
-## How it is built
+## CORS is not included
 
-The feature has three parts, all in `src/cb_mcp/core/origin_guard.py` except
-the wiring.
+Browsers have a second rule: a page may send a request to another origin, but
+the page cannot read the reply unless the server grants it with CORS headers.
+This feature does not add them. An origin on the list is let through by the
+check, but a browser page on it still cannot read the replies. Anyone who needs
+that adds CORS in front of the server, for example in a reverse proxy, using the
+same origins.
+
+## How it is built
 
 ```
 CLI flag / env var
@@ -143,10 +138,10 @@ parse_allowed_origins      (origin_guard.py)     text -> normalized tuple
 TransportParams.allowed_origins                  (utils/cli_params.py)
       |
       v
-origin_middleware(...)     (origin_guard.py)     -> run_app / create_app
+origin_guard_kwargs(...)   (origin_guard.py)     -> run_app / create_app
       |
       v
-CORSMiddleware  ->  OriginAllowlistMiddleware    CORS headers, then the check
+FastMCP: host_origin_protection="auto", allowed_origins=[...]
 ```
 
 1. **Parsing** (`parse_allowed_origins`). Splits the comma list, normalizes each
@@ -154,49 +149,37 @@ CORSMiddleware  ->  OriginAllowlistMiddleware    CORS headers, then the check
    few extra checks, and collects *all* problems into one `OriginListError`.
    An empty result means "nothing to enforce".
 
-2. **Enforcement** (`OriginAllowlistMiddleware`). A small ASGI middleware. The
-   heart of it:
+2. **Handover** (`origin_guard_kwargs`). Returns the two arguments FastMCP needs,
+   or nothing when there is no list:
 
    ```python
-   origin = _origin_header(scope)
-   if origin is not None and self._allows(origin):
-       await self.app(scope, receive, send)      # let it through
-       return
-   ...
-   await PlainTextResponse("Forbidden Origin", status_code=403)(scope, receive, send)
+   return {"host_origin_protection": "auto", "allowed_origins": list(origins)}
    ```
 
-   Entries without `*` are matched from a set; entries with `*` are turned into
-   regular expressions. It does not use `fnmatch` because `[` and `]` in an IPv6
-   origin such as `http://[::1]:3000` would be read as a character class.
+   `"auto"` is deliberate. `True` would validate `Host` on every request against
+   loopback names only and answer `421` to any container or proxy. It must be
+   passed together with the list, because FastMCP's default installs no guard
+   at all and `allowed_origins` on its own would do nothing. With no list we
+   pass nothing.
 
-   In front of it sits Starlette's `CORSMiddleware`, built from the same list
-   (`origin_middleware`), so preflights are answered before the guard runs:
-
-   ```python
-   return [
-       Middleware(CORSMiddleware, allow_origin_regex=any_listed, ...),
-       Middleware(OriginAllowlistMiddleware, allowed_origins=origins),
-   ]
-   ```
-
-3. **Wiring.** `run_app` (`core/app.py`) passes the middleware to FastMCP for
-   `http` and `sse`. With `--workers`, `create_app` in `src/mcp_server.py` does
-   the same in each worker. With no list, no middleware is added at all.
+3. **Wiring.** `run_app` (`core/app.py`) splats the arguments into `mcp.run` for
+   `http` and `sse`. With `--workers`, `create_app` in `src/mcp_server.py` splats
+   them into `http_app` in each worker.
 
 The value is also shown in the settings that the server reports
 (`allowed_origins` in `get_server_configuration_status` and the startup
 diagnostic).
 
-### Why not FastMCP's built-in check?
-
-FastMCP has a Host/Origin guard, but it admits requests that have no `Origin`
-and falls back to comparing against the `Host` header, which an attacker
-controls in a rebinding attack. That is the opposite of the strict rule wanted
-here, so a small custom middleware is used instead.
-
 ## Where the tests are
 
 - `tests/unit/test_origin_list_parsing.py`: the parser and its error messages.
 - `tests/unit/test_origin_allowlist.py`: end-to-end behaviour through the real
-  CLI, for single-process, `--workers` and SSE.
+  CLI, for single-process, `--workers` and SSE, in both the exposed and the
+  loopback setup.
+
+## Not done yet
+
+- An audit event for rejected requests. FastMCP rejects before our code runs, so
+  there is not even a log line for them; this needs a hook of our own.
+- Rejecting requests that carry no `Origin`.
+- An IP allow-list.

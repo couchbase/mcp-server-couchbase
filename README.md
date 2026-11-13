@@ -595,24 +595,24 @@ Then point your client at the URL:
 
 #### Restricting browser origins
 
-A malicious web page can make your browser send requests to a server on your machine or network (for example through DNS rebinding). Browsers label every such request with an `Origin` header that page JavaScript cannot change, so `--allowed-origins` (`CB_MCP_ALLOWED_ORIGINS`) lets you name the origins that may call the server:
+A malicious web page can make your browser send requests to a server on your machine or network (for example through DNS rebinding). Browsers label every such request with an `Origin` header that page JavaScript cannot change, so `--allowed-origins` (`CB_MCP_ALLOWED_ORIGINS`) lets you name the origins that may call the server. The check is FastMCP's own Host/Origin guard; the server validates your list at startup and hands it over.
 
 ```bash
 uvx couchbase-mcp-server operational --transport=http \
   --allowed-origins='https://app.example.com,http://localhost:3000,https://*.example.org'
 ```
 
-- Each entry is `scheme://host[:port]`. Any scheme is accepted (`chrome-extension://<id>`, `vscode-webview://<id>`), default ports (80 for `http`, 443 for `https`) are optional, and a `*` in the host matches any hostname characters. `*` is not allowed in the scheme or port.
+- Each entry is `scheme://host[:port]`. Any scheme is accepted (`chrome-extension://<id>`, `vscode-webview://<id>`), default ports (80 for `http`, 443 for `https`) are optional, and a `*` in the host matches any text. `*` is not allowed in the scheme or port.
 - Unset, empty, or a lone `*` means no check: every request is admitted.
-- Once a list is set, a request is admitted only if it carries an `Origin` header matching an entry. **Requests with no `Origin` header are rejected (403)**, which includes most non-browser MCP clients such as desktop apps and CLI agents. Set this only when browsers are the clients you need to admit or defend against. `Origin: null` is always rejected.
-- `/health` stays reachable regardless of `Origin`.
-- Listed origins also receive CORS headers (`Access-Control-Allow-Origin`, with `Mcp-Session-Id` and `WWW-Authenticate` exposed), so a browser page on a listed origin can read the replies. Unlisted origins get none.
-- A `*` matches only hostname characters (letters, digits, `.`, `-`, `_`), so it never reaches into the port: `https://app.example.*` admits `https://app.example.com` but not `https://app.example.com:8443`.
-- **Internationalized hostnames are rejected at startup**, not converted. Browsers send them in punycode (`https://xn--bcher-kva.example` for `bücher.example`), so an entry written with the original letters could never match. List the `xn--` form; the startup error shows it for you.
+- Once a list is set, a request whose `Origin` header is **not** listed is rejected with `403`, and so is `Origin: null`. **A request with no `Origin` header is admitted**: FastMCP only judges an `Origin` that is present, so desktop apps and CLI agents, which send none, keep working.
+- The guard wraps every route, so `/health` also answers `403` to a request that carries an unlisted `Origin`. Probes send none.
+- On a server bound to a loopback address (the default `127.0.0.1`), `Host` is validated as well (`421` for a foreign host, which is what stops DNS rebinding), and an `Origin` that is itself a loopback address is admitted even if it is not listed. Bound to anything else, such as `0.0.0.0` in a container, `Host` is not checked.
+- **Internationalized hostnames and IPv6 addresses are rejected at startup**, not converted. Browsers send internationalized names in punycode (`https://xn--bcher-kva.example` for `bücher.example`), so an entry written with the original letters could never match; list the `xn--` form, which the startup error shows. The origin check reads the brackets of an IPv6 address as a pattern, so such an entry could never match either; list a hostname that resolves to it.
 - A malformed entry stops the server at startup with an error naming each bad entry and why. A lone `*` cannot be combined with other entries.
-- Ignored with the `stdio` transport. The `Host` header is not checked.
+- Ignored with the `stdio` transport.
+- No CORS headers are added. A browser page on a listed origin is let through by this check but still cannot read the replies unless CORS is added in front of the server, for example by a reverse proxy.
 
-This protects against web pages, not against other clients: any non-browser program can send any `Origin`. It is not authentication; use [OAuth](#oauth-21-authorization) for that.
+This protects against web pages, not against other clients: any non-browser program can send any `Origin`, or none. It is not authentication; use [OAuth](#oauth-21-authorization) for that.
 
 #### Multiple workers
 
