@@ -1,4 +1,4 @@
-"""CLI wiring for --workers, --stateless-http and the hidden --thread-pool-size.
+"""CLI wiring for --workers, --stateless-http, the --tls-* HTTPS flags and the hidden --thread-pool-size.
 
 The resolution rules themselves are covered in test_serving.py; these tests
 pin how the host applies them: which runner is called, what reaches it, what
@@ -14,10 +14,12 @@ from unittest.mock import MagicMock, patch
 import couchbase
 import fastmcp
 import pytest
+from _tls_fixtures import KEY_PHRASE, write_self_signed
 from click.testing import CliRunner
 
 import mcp_server
 from cb_mcp.core.app import run_app
+from cb_mcp.core.serving import TlsConfig
 from cb_mcp.utils.cli_params import decode_worker_config, encode_worker_config
 from cb_mcp.utils.logging import ParsedLogLevel, ParsedLogSinks
 
@@ -505,3 +507,157 @@ class TestSupervisorLogFile:
     def test_single_process_keeps_the_base_path(self, tmp_path):
         params, base = self._built_with(["--transport", "http"], tmp_path)
         assert params["log_file"] == base
+
+
+class TestTls:
+    """--tls-cert-path / --tls-key-path / --tls-key-password reach every runner."""
+
+    @pytest.fixture
+    def certs(self, tmp_path):
+        return write_self_signed(tmp_path)
+
+    @staticmethod
+    def _tls_args(certs) -> list[str]:
+        return ["--tls-cert-path", certs.cert, "--tls-key-path", certs.key]
+
+    @pytest.mark.parametrize("argv", SUBCOMMANDS)
+    def test_flags_listed_in_help(self, argv):
+        result = CliRunner().invoke(mcp_server.main, [*argv, "--help"])
+        assert result.exit_code == 0, result.output
+        for flag in ("--tls-cert-path", "--tls-key-path", "--tls-key-password"):
+            assert flag in result.output
+
+    @pytest.mark.parametrize("argv", SUBCOMMANDS)
+    def test_single_process_serves_https(self, argv, certs):
+        result, cap = _invoke([*argv, "--transport", "http", *self._tls_args(certs)])
+        assert result.exit_code == 0, result.output
+        assert cap["run_app"].call_args.kwargs["tls"] == TlsConfig(
+            certs.cert, certs.key, None
+        )
+        assert _settings_from(cap["lifespan"])["tls_enabled"] is True
+
+    def test_env_vars(self, certs):
+        result, cap = _invoke(
+            ["--transport", "http"],
+            env={
+                "CB_MCP_TLS_CERT_PATH": certs.cert,
+                "CB_MCP_TLS_KEY_PATH": certs.key,
+            },
+        )
+        assert result.exit_code == 0, result.output
+        assert cap["run_app"].call_args.kwargs["tls"].cert_path == certs.cert
+
+    def test_password_env_var(self, tmp_path):
+        certs = write_self_signed(tmp_path, password=KEY_PHRASE)
+        result, cap = _invoke(
+            ["--transport", "http", *self._tls_args(certs)],
+            env={"CB_MCP_TLS_KEY_PASSWORD": KEY_PHRASE},
+        )
+        assert result.exit_code == 0, result.output
+        assert cap["run_app"].call_args.kwargs["tls"].key_password == KEY_PHRASE
+
+    def test_plain_http_by_default(self):
+        result, cap = _invoke(["--transport", "http"])
+        assert result.exit_code == 0, result.output
+        assert cap["run_app"].call_args.kwargs["tls"] is None
+        assert _settings_from(cap["lifespan"])["tls_enabled"] is False
+
+    def test_ignored_on_stdio(self, certs):
+        result, cap = _invoke(self._tls_args(certs))
+        assert result.exit_code == 0, result.output
+        assert cap["run_app"].call_args.kwargs["tls"] is None
+        assert _settings_from(cap["lifespan"])["tls_enabled"] is False
+
+    def test_partial_env_does_not_stop_a_stdio_server(self):
+        result, cap = _invoke([], env={"CB_MCP_TLS_CERT_PATH": "/absent/server.crt"})
+        assert result.exit_code == 0, result.output
+        assert cap["run_app"].call_args.kwargs["tls"] is None
+
+    def test_workers_hand_the_certificate_to_uvicorn(self, tmp_path):
+        certs = write_self_signed(tmp_path, password=KEY_PHRASE)
+        result, cap = _invoke(
+            [
+                "--transport",
+                "http",
+                "--workers",
+                "2",
+                *self._tls_args(certs),
+                "--tls-key-password",
+                KEY_PHRASE,
+            ]
+        )
+        assert result.exit_code == 0, result.output
+        kwargs = cap["uvicorn_run"].call_args.kwargs
+        assert kwargs["ssl_certfile"] == certs.cert
+        assert kwargs["ssl_keyfile"] == certs.key
+        assert kwargs["ssl_keyfile_password"] == KEY_PHRASE
+        # Workers rebuild from the same flags, so they validate the same files.
+        _, params = decode_worker_config(os.environ[mcp_server.WORKER_CONFIG_ENV_VAR])
+        assert params["tls_cert_path"] == certs.cert
+        assert params["tls_key_path"] == certs.key
+
+    def test_workers_without_tls_pass_no_ssl_options(self):
+        result, cap = _invoke(["--transport", "http", "--workers", "2"])
+        assert result.exit_code == 0, result.output
+        assert not any(
+            k.startswith("ssl_") for k in cap["uvicorn_run"].call_args.kwargs
+        )
+
+    @pytest.mark.parametrize(
+        ("extra", "message"),
+        [
+            (["--tls-cert-path", "CERT"], "--tls-key-path is not set"),
+            (["--tls-key-path", "KEY"], "--tls-cert-path is not set"),
+            (["--tls-key-password", "x"], "--tls-key-password requires"),
+            (
+                ["--tls-cert-path", "CERT", "--tls-key-path", "MISSING"],
+                "--tls-key-path file not found",
+            ),
+        ],
+        ids=["cert-only", "key-only", "password-only", "missing-key"],
+    )
+    def test_rejected(self, certs, tmp_path, extra, message):
+        replace = {
+            "CERT": certs.cert,
+            "KEY": certs.key,
+            "MISSING": str(tmp_path / "missing.key"),
+        }
+        args = [replace.get(a, a) for a in extra]
+        result, cap = _invoke(["--transport", "http", "--workers", "2", *args])
+        assert result.exit_code == 2, result.output
+        assert message in result.output
+        cap["run_app"].assert_not_called()
+        cap["uvicorn_run"].assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("transport", "expected"),
+    [
+        (
+            "http",
+            {"uvicorn_config": {"ssl_certfile": "c.pem", "ssl_keyfile": "k.pem"}},
+        ),
+        (
+            "sse",
+            {"uvicorn_config": {"ssl_certfile": "c.pem", "ssl_keyfile": "k.pem"}},
+        ),
+        ("stdio", {}),
+    ],
+)
+def test_run_app_forwards_tls_on_network_transports(transport, expected):
+    mcp = MagicMock()
+    run_app(
+        mcp,
+        transport=transport,
+        host="h",
+        port=1,
+        tls=TlsConfig("c.pem", "k.pem"),
+    )
+    kwargs = mcp.run.call_args.kwargs
+    assert {k: v for k, v in kwargs.items() if k == "uvicorn_config"} == expected
+
+
+def test_run_app_without_tls_passes_no_uvicorn_config():
+    mcp = MagicMock()
+    run_app(mcp, transport="http", host="h", port=1)
+    assert "uvicorn_config" not in mcp.run.call_args.kwargs

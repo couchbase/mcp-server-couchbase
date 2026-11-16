@@ -173,6 +173,32 @@ def transport_options(*, default_port: int) -> Callable:
             "--transport=http; cannot be combined with "
             "--confirmation-required-tools.",
         ),
+        click.option(
+            "--tls-cert-path",
+            "tls_cert_path",
+            envvar="CB_MCP_TLS_CERT_PATH",
+            default=None,
+            help="Path to a PEM certificate (or certificate chain) file for "
+            "this MCP server. When set together with --tls-key-path, the server "
+            "serves HTTPS instead of plain HTTP. Only honored with "
+            "--transport=http or sse. Not related to --ca-cert-path or "
+            "--client-cert-path, which secure the connection to the cluster.",
+        ),
+        click.option(
+            "--tls-key-path",
+            "tls_key_path",
+            envvar="CB_MCP_TLS_KEY_PATH",
+            default=None,
+            help="Path to the PEM private key for --tls-cert-path. Required "
+            "together with --tls-cert-path.",
+        ),
+        click.option(
+            "--tls-key-password",
+            "tls_key_password",
+            envvar="CB_MCP_TLS_KEY_PASSWORD",
+            default=None,
+            help="Password for --tls-key-path, if the private key is encrypted.",
+        ),
         # Deliberately hidden and undocumented: an internal tuning knob, not
         # yet part of the supported surface. See cb_mcp.core.serving.
         click.option(

@@ -117,6 +117,8 @@ The most common variables are below. Every option — including logging rotation
 | `CB_MCP_HOST` | Bind address for HTTP — set `0.0.0.0` in containers | `127.0.0.1` |
 | `CB_MCP_PORT` | Port for HTTP | `8000` / `8001` |
 | `CB_MCP_WORKERS` | Worker processes for `http` (`operational` only) | `1` |
+| `CB_MCP_TLS_CERT_PATH` / `CB_MCP_TLS_KEY_PATH` | PEM certificate and private key: serve HTTPS instead of HTTP (see [HTTPS](#https)) | |
+| `CB_MCP_TLS_KEY_PASSWORD` | Password for an encrypted `CB_MCP_TLS_KEY_PATH` | |
 | `CB_MCP_DISABLED_TOOLS` | Tools to hide — comma-separated list or a file path | |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | Tools that ask the user to confirm first — comma-separated list or a file path | |
 | `CB_MCP_LOG_LEVEL` | `off`, `error`, `warning`, `info`, `debug` | `info` |
@@ -188,6 +190,26 @@ healthcheck:
 ```
 
 Use port `8001` for `operational-insights`, or whatever `CB_MCP_PORT` is set to.
+
+## HTTPS
+
+To serve HTTPS, mount a PEM certificate and private key into the container and point `CB_MCP_TLS_CERT_PATH` and `CB_MCP_TLS_KEY_PATH` at them. Set `CB_MCP_TLS_KEY_PASSWORD` too if the key is encrypted.
+
+```bash
+docker run -d --name couchbase-mcp \
+  -e CB_CONNECTION_STRING='couchbases://connection-string' \
+  -e CB_USERNAME='username' \
+  -e CB_PASSWORD='password' \
+  -e CB_MCP_TRANSPORT=http \
+  -e CB_MCP_HOST=0.0.0.0 \
+  -e CB_MCP_TLS_CERT_PATH=/certs/server.crt \
+  -e CB_MCP_TLS_KEY_PATH=/certs/server.key \
+  -v /path/to/certs:/certs:ro \
+  -p 8000:8000 \
+  couchbase/mcp-server:latest operational
+```
+
+The server refuses to start if the files are missing, do not match, or the password is wrong. With HTTPS on, health checks must use `https://` (for the Compose check above, pass an `ssl` context that trusts your certificate).
 
 ## OAuth 2.1
 

@@ -21,15 +21,19 @@ Two consequences shape this module:
   rejected, not degraded.
 
 Everything here is pure: no environment, no Click, no process spawning. The
-host (``src/mcp_server.py``) resolves flags into arguments, converts
-:class:`ServingConfigError` into a usage error, and owns the worker handoff.
+one exception is :func:`resolve_tls`, which reads the certificate and key
+once so that a bad file is a startup error instead of a failure in every
+worker. The host (``src/mcp_server.py``) resolves flags into arguments,
+converts :class:`ServingConfigError` into a usage error, and owns the worker
+handoff.
 """
 
 import logging
 import os
 import re
+import ssl
 from collections.abc import Collection
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from anyio.to_thread import current_default_thread_limiter
 
@@ -179,6 +183,106 @@ def resolve_serving(
         stateless_http=resolved_stateless,
         thread_pool_size=thread_pool_size,
     )
+
+
+class TlsConfig(NamedTuple):
+    """The certificate and key this server presents to MCP clients over HTTPS.
+
+    Applies to the MCP transport only. The connection to the Couchbase
+    cluster has its own, unrelated TLS settings (``ca_cert_path`` and the
+    client certificate).
+    """
+
+    cert_path: str
+    key_path: str
+    key_password: str | None = None
+
+    def __repr__(self) -> str:
+        # The default NamedTuple repr would print the key password.
+        return (
+            f"TlsConfig(cert_path={self.cert_path!r}, key_path={self.key_path!r}, "
+            f"key_password={'***' if self.key_password else None})"
+        )
+
+    def uvicorn_kwargs(self) -> dict[str, Any]:
+        """The Uvicorn ``Config`` arguments that serve HTTPS with this material."""
+        kwargs: dict[str, Any] = {
+            "ssl_certfile": self.cert_path,
+            "ssl_keyfile": self.key_path,
+        }
+        if self.key_password:
+            kwargs["ssl_keyfile_password"] = self.key_password
+        return kwargs
+
+
+def resolve_tls(
+    *,
+    transport: str,
+    cert_path: str | None,
+    key_path: str | None,
+    key_password: str | None,
+) -> TlsConfig | None:
+    """Resolve the HTTPS options, or raise :class:`ServingConfigError`.
+
+    Returns ``None`` when no certificate is configured, so the server keeps
+    serving plain HTTP. The certificate and key are required together, and
+    are loaded once here: a missing file, a key that does not match the
+    certificate, or a wrong password is a startup error. Without this check,
+    each ``--workers`` process would fail on its own, and the supervisor
+    would restart it in a loop.
+
+    On stdio there is no listener to secure, so the options are ignored with
+    a warning, as ``--stateless-http`` and the OAuth options are. That check
+    comes first: a stdio client that inherits partial TLS settings from its
+    environment must still start, so none of them is validated there.
+    """
+    if transport not in NETWORK_TRANSPORTS:
+        if cert_path or key_path or key_password:
+            logger.warning(
+                "TLS certificate settings are only honored for network "
+                "transports (%s); ignoring them for transport=%s.",
+                ", ".join(NETWORK_TRANSPORTS),
+                transport,
+            )
+        return None
+
+    if not cert_path and not key_path:
+        if key_password:
+            raise ServingConfigError(
+                "--tls-key-password requires --tls-cert-path and --tls-key-path."
+            )
+        return None
+
+    if not (cert_path and key_path):
+        missing = "--tls-key-path" if cert_path else "--tls-cert-path"
+        raise ServingConfigError(
+            "HTTPS requires both --tls-cert-path and --tls-key-path; "
+            f"{missing} is not set."
+        )
+
+    for flag, path in (("--tls-cert-path", cert_path), ("--tls-key-path", key_path)):
+        if not os.path.isfile(path):
+            raise ServingConfigError(f"{flag} file not found: {os.path.basename(path)}")
+
+    try:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        # A callable, not None, when no password is given: with None, OpenSSL
+        # prompts on the terminal for an encrypted key and startup hangs.
+        context.load_cert_chain(
+            cert_path,
+            key_path,
+            password=key_password if key_password else lambda: b"",
+        )
+    except (ssl.SSLError, OSError) as e:
+        raise ServingConfigError(
+            f"Could not load the TLS certificate and key ({e}). Check that both "
+            "files are PEM, that --tls-key-path is the key for "
+            "--tls-cert-path, and that --tls-key-password is set correctly if "
+            "the key is encrypted."
+        ) from e
+
+    logger.info("TLS enabled: serving HTTPS on transport=%s.", transport)
+    return TlsConfig(cert_path, key_path, key_password or None)
 
 
 def worker_log_file(log_file: str, *, host: str, pid: int) -> str:

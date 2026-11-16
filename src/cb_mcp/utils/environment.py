@@ -55,6 +55,9 @@ _SAFE_SETTINGS_KEYS = (
     "workers",
     "stateless_http",
     "thread_pool_size",
+    # Whether the MCP listener serves HTTPS. Only the resolved boolean: the
+    # certificate paths and key password never enter settings.
+    "tls_enabled",
     "disabled_tools",
     "confirmation_required_tools",
     # The effective query result budget in bytes, already clamped. A plain
