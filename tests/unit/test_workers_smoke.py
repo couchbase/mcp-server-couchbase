@@ -60,6 +60,32 @@ def _wait_for_port(port: int, proc: subprocess.Popen) -> None:
     raise AssertionError(f"server did not listen on {port} in {STARTUP_TIMEOUT_S}s")
 
 
+def _stop(proc: subprocess.Popen) -> None:
+    """Stop the server and everything it started.
+
+    POSIX: SIGINT lets the supervisor shut its workers down cleanly. Windows
+    Python does not accept SIGINT for a child process (``send_signal`` raises
+    ValueError), and the console script there is a launcher that starts the real
+    Python process, so killing only ``proc`` would leave the supervisor and its
+    workers running. ``taskkill /T`` ends the whole tree.
+    """
+    if proc.poll() is not None:
+        return
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            capture_output=True,
+            check=False,
+        )
+    else:
+        proc.send_signal(signal.SIGINT)
+    try:
+        proc.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
 async def _list_tools_once(url: str) -> list[str]:
     async with (
         streamable_http_client(url) as (read, write, _session_id),
@@ -103,12 +129,7 @@ def workers_server(tmp_path):
         _wait_for_port(port, proc)
         yield f"http://127.0.0.1:{port}/mcp", tmp_path, proc.pid
     finally:
-        proc.send_signal(signal.SIGINT)
-        try:
-            proc.wait(timeout=20)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+        _stop(proc)
 
 
 def test_workers_serve_fresh_connections_and_log_per_process(workers_server):
@@ -147,5 +168,10 @@ def test_workers_serve_fresh_connections_and_log_per_process(workers_server):
         time.sleep(0.2)
     names = sorted(p.name for p in log_dir.iterdir())
     assert len(pids) == WORKERS + 1, names
-    assert str(supervisor_pid) in pids, names
+    if sys.platform != "win32":
+        # On Windows the console script is a launcher that starts the real
+        # Python process, so the pid this test holds is the launcher's and the
+        # logs carry the Python process's. The count above still proves one
+        # supervisor and one process per worker each wrote their own files.
+        assert str(supervisor_pid) in pids, names
     assert "mcp_server.info.log" not in names, names

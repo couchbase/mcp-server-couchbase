@@ -611,10 +611,13 @@ class AuditSink(_QueuedSink):
         # at the end of each batch, not from the open mode. Opened eagerly so a
         # misconfigured path fails at startup, where it can be reported, rather
         # than on the first audited operation.
+        # newline="" writes each record exactly as emitted. Without it Windows
+        # turns every "\n" into "\r\n", so the bytes on disk exceed the bytes
+        # counted for rotation and the file differs from the other platforms.
         # Deliberately not a context manager: the stream is owned for the
         # lifetime of the sink and written by the background thread. Closing it
         # per record would defeat both the batching and the append semantics.
-        self._stream = open(self.path, "a", encoding="utf-8")  # noqa: SIM115
+        self._stream = open(self.path, "a", encoding="utf-8", newline="")  # noqa: SIM115
         self._size = self.path.stat().st_size
         self._rotate_at = self._next_rotation_deadline(from_existing_file=True)
 
@@ -699,7 +702,7 @@ class AuditSink(_QueuedSink):
             # nobody will close again, and append records dated after "server
             # stopped". Refuse, and let the caller count the record as dropped.
             raise ValueError("audit sink is closed")
-        self._stream = open(self.path, "a", encoding="utf-8")  # noqa: SIM115
+        self._stream = open(self.path, "a", encoding="utf-8", newline="")  # noqa: SIM115
         self._size = self.path.stat().st_size
 
     def _write_batch(self, lines: list[str]) -> None:
@@ -793,7 +796,7 @@ class AuditSink(_QueuedSink):
             # truncated, which is the PRD's "limited space, single file" case —
             # at the cap, writing starts again from zero and what was there is
             # gone.
-            self._stream = open(self.path, "w", encoding="utf-8")  # noqa: SIM115
+            self._stream = open(self.path, "w", encoding="utf-8", newline="")  # noqa: SIM115
             self._size = 0
             self._rotate_at = self._next_rotation_deadline()
             return
@@ -803,7 +806,7 @@ class AuditSink(_QueuedSink):
         self._size = 0
         self._rotate_at = self._next_rotation_deadline()
         try:
-            self._stream = open(self.path, "a", encoding="utf-8")  # noqa: SIM115
+            self._stream = open(self.path, "a", encoding="utf-8", newline="")  # noqa: SIM115
         finally:
             # Compress and prune in a ``finally`` so a failed reopen — a disk
             # that filled at exactly the wrong moment — still leaves the
