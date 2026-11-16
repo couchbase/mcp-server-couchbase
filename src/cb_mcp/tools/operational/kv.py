@@ -15,9 +15,11 @@ from typing import Any
 
 import couchbase.subdocument as subdoc
 from couchbase.exceptions import CouchbaseException
+from couchbase.options import RemoveOptions, ReplaceOptions
 from fastmcp import Context
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
+from ...utils.operational.cas_utils import cas_options
 from ...utils.operational.connection import connect_to_bucket, format_keyspace
 from ...utils.operational.context import get_cluster_connection
 from ...utils.responses import tool_error, tool_success
@@ -31,9 +33,18 @@ def get_document_by_id(
     scope_name: str,
     collection_name: str,
     document_id: str,
+    with_cas: bool = False,
 ) -> dict[str, Any]:
     """Get a document by its ID from the specified scope and collection.
-    If the document is not found, it will raise an exception."""
+    If the document is not found, it will raise an exception.
+
+    with_cas: leave False (the default) for a plain read, which returns the
+    document itself. Set it to True when you intend to write this document
+    back afterwards: the return value becomes
+    {"content": <document>, "cas": "<revision>"}, and passing that "cas" to
+    replace_document_by_id or delete_document_by_id makes
+    the write fail if anything changed in between, instead of silently
+    discarding the other change."""
 
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
@@ -43,7 +54,12 @@ def get_document_by_id(
         collection = bucket.scope(scope_name).collection(collection_name)
         result = collection.get(document_id)
         logger.info(f"Retrieved document from {keyspace}")
-        return result.content_as[dict]
+        content = result.content_as[dict]
+        if not with_cas:
+            return content
+        # Decimal string: CAS is unsigned 64-bit and would not survive a JSON
+        # number round-trip intact above 2**53.
+        return {"content": content, "cas": str(result.cas)}
     except Exception as e:
         logger.error(f"Error getting document from {keyspace}: {e}", exc_info=True)
         raise
@@ -86,18 +102,38 @@ def delete_document_by_id(
     scope_name: str,
     collection_name: str,
     document_id: str,
+    cas: str | None = None,
 ) -> dict[str, Any]:
     """Delete a document by its ID.
 
+    cas: the exact document revision this operation is allowed to act on, as
+    the decimal string returned by get_document_by_id(with_cas=True). If the
+    document has changed since that read, the operation FAILS instead of
+    overwriting the newer revision. Use this for any read-modify-write: read
+    with with_cas=True, decide what to change, then write back with the cas
+    you were given. Omit it to act unconditionally.
+    Use it whenever the decision to delete was based on document content you
+    read earlier.
+
     Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document not found, permission denied, network error)."""
+    failure with the reason (e.g. document not found, the document changed since the
+    cas you supplied, permission denied, network error)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    try:
+        options = cas_options(RemoveOptions, cas)
+    except ValueError as e:
+        logger.warning(f"Invalid delete options for {keyspace}: {e}")
+        return tool_error(e)
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Deleting document from {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.remove(document_id)
+        if options is None:
+            collection.remove(document_id)
+        else:
+            collection.remove(document_id, options)
         logger.info(f"Successfully deleted document from {keyspace}")
         return tool_success()
     except Exception as e:
@@ -141,21 +177,39 @@ def replace_document_by_id(
     collection_name: str,
     document_id: str,
     document_content: dict[str, Any],
+    cas: str | None = None,
 ) -> dict[str, Any]:
     """Replace an existing document by its ID. This operation will FAIL if the document does not exist.
 
     IMPORTANT: If this operation fails, DO NOT automatically try insert or upsert.
     Report the failure to the user. They can choose to 'insert' or 'upsert' if desired.
 
+    cas: the exact document revision this operation is allowed to act on, as
+    the decimal string returned by get_document_by_id(with_cas=True). If the
+    document has changed since that read, the operation FAILS instead of
+    overwriting the newer revision. Use this for any read-modify-write: read
+    with with_cas=True, decide what to change, then write back with the cas
+    you were given. Omit it to act unconditionally.
+
     Returns {"success": True} on success, or {"success": False, "error": "..."} on
-    failure with the reason (e.g. document does not exist, permission denied, network error)."""
+    failure with the reason (e.g. document does not exist, the document changed since
+    the cas you supplied, permission denied, network error)."""
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    try:
+        options = cas_options(ReplaceOptions, cas)
+    except ValueError as e:
+        logger.warning(f"Invalid replace options for {keyspace}: {e}")
+        return tool_error(e)
+
     cluster = get_cluster_connection(ctx)
     bucket = connect_to_bucket(cluster, bucket_name)
     try:
         logger.debug(f"Replacing document in {keyspace}")
         collection = bucket.scope(scope_name).collection(collection_name)
-        collection.replace(document_id, document_content)
+        if options is None:
+            collection.replace(document_id, document_content)
+        else:
+            collection.replace(document_id, document_content, options)
         logger.info(f"Successfully replaced document in {keyspace}")
         return tool_success()
     except Exception as e:
