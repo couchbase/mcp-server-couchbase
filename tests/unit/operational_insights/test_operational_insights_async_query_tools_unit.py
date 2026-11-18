@@ -38,7 +38,7 @@ from cb_mcp.tools.operational_insights.query import (
     operational_insights_get_async_query_results,
     operational_insights_run_query_async,
 )
-from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
+from cb_mcp.utils.constants import MAX_ERROR_MESSAGE_LENGTH, SCOPE_READ, SCOPE_WRITE
 from cb_mcp.utils.operational_insights.handle_registry import (
     QueryResultsRegistry,
     UnknownHandleError,
@@ -378,17 +378,15 @@ class TestAsyncQueryTimeouts:
         )
         status.result_handle.return_value.fetch_results.return_value = result
 
-        out = operational_insights_get_async_query_results(ctx, token)
+        with pytest.raises(TimeoutError) as exc:
+            operational_insights_get_async_query_results(ctx, token)
 
-        assert out["success"] is False
-        assert out["ready"] is True
-        assert out["timed_out"] is True
-        assert out["query_handle"] == token
-        assert "query finished successfully" in out["error"]
-        assert "45-second" in out["error"]
-        assert "Request timed out" not in out["error"]
-        assert TIMEOUT_ENV_VAR in out["suggestion"]
-        assert "currently 45 seconds" in out["suggestion"]
+        message = str(exc.value)
+        assert "query finished successfully" in message
+        assert "45 seconds" in message
+        assert "Request timed out" not in message
+        assert TIMEOUT_ENV_VAR in message
+        assert "currently 45 seconds" in message
         # The results are still on the server, so the token must survive.
         registry.get(token)
 
@@ -401,12 +399,11 @@ class TestAsyncQueryTimeouts:
             OperationalInsightsTimeoutError(message="Request timed out.")
         )
 
-        out = operational_insights_get_async_query_results(ctx, token)
+        with pytest.raises(TimeoutError) as exc:
+            operational_insights_get_async_query_results(ctx, token)
 
-        assert out["ready"] is True
-        assert out["timed_out"] is True
         # No settings configured: the default is reported.
-        assert f"{DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT}-second" in out["error"]
+        assert f"{DEFAULT_ASYNC_QUERY_RESULT_TIMEOUT} seconds" in str(exc.value)
 
     def test_download_timeout_at_maximum_does_not_suggest_raising(self) -> None:
         ctx, cluster, _ = _make_ctx()
@@ -422,10 +419,11 @@ class TestAsyncQueryTimeouts:
             OperationalInsightsTimeoutError(message="Request timed out.")
         )
 
-        out = operational_insights_get_async_query_results(ctx, token)
+        with pytest.raises(TimeoutError) as exc:
+            operational_insights_get_async_query_results(ctx, token)
 
-        assert "already at its maximum" in out["suggestion"]
-        assert "can raise" not in out["suggestion"]
+        assert "already at its maximum" in str(exc.value)
+        assert "can raise" not in str(exc.value)
 
     def test_error_fits_under_the_length_cap(self) -> None:
         ctx, cluster, _ = _make_ctx()
@@ -436,9 +434,10 @@ class TestAsyncQueryTimeouts:
             OperationalInsightsTimeoutError(message="Request timed out.")
         )
 
-        out = operational_insights_get_async_query_results(ctx, token)
+        with pytest.raises(TimeoutError) as exc:
+            operational_insights_get_async_query_results(ctx, token)
 
-        assert not out["error"].endswith("[truncated]")
+        assert len(str(exc.value)) <= MAX_ERROR_MESSAGE_LENGTH
 
     def test_status_timeout_is_not_reported_as_a_finished_query(self) -> None:
         ctx, cluster, _ = _make_ctx()
@@ -447,13 +446,12 @@ class TestAsyncQueryTimeouts:
             message="Request timed out."
         )
 
-        out = operational_insights_get_async_query_results(ctx, token)
+        with pytest.raises(TimeoutError) as exc:
+            operational_insights_get_async_query_results(ctx, token)
 
-        assert out["success"] is False
-        assert out["timed_out"] is True
-        assert "ready" not in out
-        assert "check the query status" in out["error"]
-        assert TIMEOUT_ENV_VAR in out["suggestion"]
+        assert "check the query status" in str(exc.value)
+        assert "finished successfully" not in str(exc.value)
+        assert TIMEOUT_ENV_VAR in str(exc.value)
 
     @pytest.mark.parametrize(
         ("tool", "action"),
@@ -469,26 +467,22 @@ class TestAsyncQueryTimeouts:
             message="Request timed out."
         )
 
-        out = tool(ctx, token)
-
-        assert out["timed_out"] is True
-        assert action in out["error"]
-        assert out["query_handle"] == token
+        with pytest.raises(TimeoutError, match=action):
+            tool(ctx, token)
 
     def test_start_timeout(self) -> None:
         ctx, cluster, _ = _make_ctx()
         cluster.start_query.side_effect = OperationalInsightsTimeoutError(
             message="Request timed out."
         )
-        with patch(
-            "cb_mcp.tools.operational_insights.query.get_access_token",
-            return_value=None,
+        with (
+            patch(
+                "cb_mcp.tools.operational_insights.query.get_access_token",
+                return_value=None,
+            ),
+            pytest.raises(TimeoutError, match="start the query"),
         ):
-            out = operational_insights_run_query_async(ctx, "SELECT 1")
-
-        assert out["timed_out"] is True
-        assert "start the query" in out["error"]
-        assert out["statement"] == "SELECT 1"
+            operational_insights_run_query_async(ctx, "SELECT 1")
 
 
 class TestDiscardAsyncQueryResults:

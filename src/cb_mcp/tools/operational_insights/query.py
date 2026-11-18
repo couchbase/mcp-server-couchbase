@@ -481,34 +481,28 @@ def _timeout_hint(seconds: int) -> str:
 
 
 def _handle_request_timeout_error(
-    ctx: Context, action: str, error: Exception, **fields: Any
-) -> dict[str, Any]:
-    """Failure envelope for a handle request that hit the SDK deadline.
+    ctx: Context, action: str, error: Exception
+) -> TimeoutError:
+    """Exception for a handle request that hit the SDK deadline.
 
     The raw SDK text ("Request timed out.") reads the same as any other
     failure, so the agent cannot tell a slow server from a broken query. Say
-    which request ran out of time and name the setting that bounds it.
-    ``timed_out`` lets a caller branch on it without parsing the message; the
-    remedy goes in ``suggestion`` so ``error`` stays under the length cap.
+    which request ran out of time and name the setting that bounds it. The
+    caller raises it; the whole message must fit the error length cap.
     """
     seconds = _async_query_timeout_seconds(ctx)
     logger.warning(f"Async query {action} timed out after {seconds}s: {error}")
-    return tool_error(
+    return TimeoutError(
         f"Timed out: the request to {action} did not complete within "
-        f"{seconds} seconds.",
-        timed_out=True,
-        suggestion=(
-            f"The server may be busy or not responding; try again later. "
-            f"{_timeout_hint(seconds)}"
-        ),
-        **fields,
+        f"{seconds} seconds. The server may be busy or not responding; try "
+        f"again later. {_timeout_hint(seconds)}"
     )
 
 
 def _download_timeout_error(
     ctx: Context, error: Exception, query_handle: str
-) -> dict[str, Any]:
-    """Failure envelope for a finished query whose rows took too long to read.
+) -> TimeoutError:
+    """Exception for a finished query whose rows took too long to read.
 
     The SDK's deadline covers the whole of ``fetch_results()``, row stream
     included (see ``utils/operational_insights/connection.py``), so a large
@@ -520,21 +514,11 @@ def _download_timeout_error(
         f"Download of async query results timed out after {seconds}s "
         f"(token={query_handle}): {error}"
     )
-    return tool_error(
+    return TimeoutError(
         f"The query finished successfully, but downloading its results took "
-        f"longer than the {seconds}-second timeout, so no rows were returned. "
-        f"The results are still on the server and this query_handle is still "
-        f"valid.",
-        query_handle=query_handle,
-        ready=True,
-        timed_out=True,
-        suggestion=(
-            f"Do not treat this as a failed query. Calling this tool again "
-            f"will likely time out again for the same result size. To get a "
-            f"smaller result, re-run the query with a LIMIT or fewer columns, "
-            f"or export it with copy_to_* on "
-            f"operational_insights_run_query_async. {_timeout_hint(seconds)}"
-        ),
+        f"longer than {seconds} seconds, so no rows were returned. The "
+        f"query_handle is still valid. Retrying will likely time out again; "
+        f"re-run with a LIMIT or fewer columns. {_timeout_hint(seconds)}"
     )
 
 
@@ -655,9 +639,7 @@ def operational_insights_run_query_async(
             ),
         )
     except OperationalInsightsTimeoutError as e:
-        return _handle_request_timeout_error(
-            ctx, "start the query", e, statement=statement
-        )
+        raise _handle_request_timeout_error(ctx, "start the query", e) from e
     except Exception as e:
         logger.error(f"Error starting async query: {e}", exc_info=True)
         raise
@@ -698,9 +680,8 @@ def operational_insights_get_async_query_results(
         otherwise. When truncated is true the rows are
         incomplete and metadata may be empty, since the server reports it
         only once every row has been read. If the query finished but its
-        rows took too long to download, the failure also has "ready": true,
-        "timed_out": true and a "suggestion"; the query did not fail and
-        the query_handle is still valid.
+        rows took too long to download, the error says so; the query did not
+        fail and the query_handle is still valid.
     """
     registry = get_operational_insights_handle_registry(ctx)
     # Set once the query is known to have finished, so a timeout after that
@@ -775,10 +756,8 @@ def operational_insights_get_async_query_results(
         )
     except OperationalInsightsTimeoutError as e:
         if downloading:
-            return _download_timeout_error(ctx, e, query_handle)
-        return _handle_request_timeout_error(
-            ctx, "check the query status", e, query_handle=query_handle
-        )
+            raise _download_timeout_error(ctx, e, query_handle) from e
+        raise _handle_request_timeout_error(ctx, "check the query status", e) from e
     except Exception as e:
         logger.error(f"Error fetching async query results: {e}", exc_info=True)
         raise
@@ -826,9 +805,7 @@ def operational_insights_discard_async_query_results(
         logger.info(f"Discarded results for async query (token={query_handle})")
         return tool_success(query_handle=query_handle, discarded=True)
     except OperationalInsightsTimeoutError as e:
-        return _handle_request_timeout_error(
-            ctx, "discard the results", e, query_handle=query_handle
-        )
+        raise _handle_request_timeout_error(ctx, "discard the results", e) from e
     except Exception as e:
         logger.error(f"Error discarding async query results: {e}", exc_info=True)
         raise
@@ -883,9 +860,7 @@ def operational_insights_cancel_async_query(
         logger.info(f"Cancelled async query (token={query_handle})")
         return tool_success(query_handle=query_handle, cancelled=True)
     except OperationalInsightsTimeoutError as e:
-        return _handle_request_timeout_error(
-            ctx, "cancel the query", e, query_handle=query_handle
-        )
+        raise _handle_request_timeout_error(ctx, "cancel the query", e) from e
     except Exception as e:
         logger.error(f"Error cancelling async query: {e}", exc_info=True)
         raise
