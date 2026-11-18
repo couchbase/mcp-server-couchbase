@@ -17,6 +17,7 @@ from ...tools.operational import (
     TOOL_DEPLOYMENT_REQUIREMENTS,
     TOOL_SCOPE_HINTS,
     TOOL_SET,
+    TOOL_SETS,
 )
 from ...utils.constants import SCOPE_READ, SCOPE_WRITE
 from ...utils.operational.connection_string import resolve_deployment
@@ -55,6 +56,7 @@ SPEC = ServerSpec(
     scopes=ScopeSpec(read=SCOPE_READ, write=SCOPE_WRITE),
     annotations=TOOL_ANNOTATIONS,
     scope_hints=TOOL_SCOPE_HINTS,
+    tool_sets=TOOL_SETS,
     # Capella does not expose the REST endpoints a few of these tools call, so
     # those tools are not registered when the connection string names a Capella
     # cluster. The resolver lives beside the connection-string helpers it uses;

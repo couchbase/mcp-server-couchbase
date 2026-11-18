@@ -216,3 +216,16 @@ class ServerSpec:
     #: the positional index of every field after it for any consumer
     #: constructing it positionally. Add future fields after this one.
     supports_multiple_workers: bool = True
+
+    #: Appended last, as the note on ``supports_multiple_workers`` asks.
+    #:
+    #: Named job-shaped groupings of this server's tools. A name maps to the
+    #: tool names it contains, and every name must exist in
+    #: ``tools.all_tool_names`` — checked across every server by
+    #: ``tests/unit/test_server_specs.py``, by reading the spec.
+    #:
+    #: Per server rather than global, for the same reason ``scope_hints`` is:
+    #: a set naming another server's tools would be a fact in the wrong place,
+    #: and nothing would report it. A server that declares none behaves
+    #: exactly as it does today.
+    tool_sets: Mapping[str, frozenset[str]] = field(default_factory=dict)

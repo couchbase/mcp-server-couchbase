@@ -34,6 +34,7 @@ from ..audit import (
     warn_on_unauthenticated_http,
 )
 from ..audit.record import OUTCOME_ERROR, OUTCOME_SUCCESS
+from ..tools.selection import AgentSelectedToolSets
 from ..utils.constants import (
     HEALTH_CHECK_PATH,
     LOGGER_NAMESPACE,
@@ -128,6 +129,7 @@ def build_app(
     audit_config: ResolvedAuditConfig | None = None,
     thread_pool_size: int | None = None,
     send_startup_ping: bool = True,
+    enable_tool_set_selection: bool = False,
 ) -> FastMCP:
     """Build the ``FastMCP`` application for ``spec``, ready to ``run()``.
 
@@ -316,6 +318,15 @@ def build_app(
         mcp.add_tool(tool_obj)
 
     logger.info(f"Registered {len(tools)} tool(s) for server '{spec.id}'")
+
+    if enable_tool_set_selection and spec.tool_sets:
+        # One rule for anything else that narrows the listed tools later: this
+        # middleware must be registered last, so it can only subtract beneath
+        # whatever ceiling the earlier ones set. It filters the list it is
+        # handed and never adds to it, which is what keeps an agent's own
+        # selection from widening its reach.
+        mcp.add_middleware(AgentSelectedToolSets(spec=spec))
+        logger.info("Agent tool set selection enabled for server '%s'.", spec.id)
 
     return mcp
 
