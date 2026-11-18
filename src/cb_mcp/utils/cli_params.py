@@ -57,7 +57,7 @@ from ..core.cli.options import (
     tool_gating_options,
     transport_options,
 )
-from ..core.origin_guard import parse_allowed_origins
+from ..core.origin_guard import parse_allowed_hosts, parse_allowed_origins
 from ..core.serving import ServingConfig
 from ..core.spec import Deployment, ServerSpec
 from ..servers.operational_insights.cli import (
@@ -179,6 +179,8 @@ class TransportParams:
     thread_pool_size: int | None
     #: Normalized origin allow-list; empty means every origin is admitted.
     allowed_origins: tuple[str, ...] = ()
+    #: Normalized Host allow-list; empty means no host restriction is added.
+    allowed_hosts: tuple[str, ...] = ()
 
     @classmethod
     def from_click(cls, params: Mapping[str, Any]) -> "TransportParams":
@@ -191,6 +193,7 @@ class TransportParams:
             thread_pool_size=params["thread_pool_size"],
             # Already validated by the Click callback, so this cannot raise.
             allowed_origins=parse_allowed_origins(params["allowed_origins"]),
+            allowed_hosts=parse_allowed_hosts(params["allowed_hosts"]),
         )
 
 
@@ -614,6 +617,7 @@ def build_settings(
             "stateless_http": serving.stateless_http,
             "thread_pool_size": serving.thread_pool_size,
             "allowed_origins": list(cli.transport.allowed_origins),
+            "allowed_hosts": list(cli.transport.allowed_hosts),
             **cli.oauth.as_settings(enabled=oauth_enabled),
             **cli.embedding.as_settings(),
             "disabled_tools": gated.disabled,

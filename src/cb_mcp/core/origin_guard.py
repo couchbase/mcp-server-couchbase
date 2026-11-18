@@ -1,4 +1,4 @@
-"""Origin allow-list for the network transports, enforced by FastMCP.
+"""Origin and Host allow-lists for the network transports, enforced by FastMCP.
 
 Browsers stamp every cross-origin request with an ``Origin`` header that page
 JavaScript cannot change, so an allow-list on it stops a malicious web page
@@ -6,13 +6,18 @@ from using a visitor's browser to reach this server. Non-browser clients send
 any ``Origin`` they like, or none, so this is a guard against browsers, not a
 client authentication mechanism; use OAuth for that.
 
+The ``Host`` header is the other half of DNS-rebinding protection: a rebound
+page reaches the server under the attacker's hostname, so listing the names the
+server is meant to be reached by rejects it whether or not the browser sends
+an ``Origin``.
+
 The check itself is FastMCP's own Host/Origin guard
 (``fastmcp.server.http.HostOriginGuardMiddleware``); this module validates the
-operator's list and hands it over (:func:`origin_guard_kwargs`). Validation is
-ours because FastMCP does none: a malformed entry would simply never match. An
-allow-list is a security setting, so a typo must never quietly turn into "allow
-everything": a malformed list is an error that names every bad entry and says
-why.
+operator's lists and hands them over (:func:`origin_guard_kwargs`). Validation
+is ours because FastMCP does none: a malformed entry would simply never match.
+An allow-list is a security setting, so a typo must never quietly turn into
+"allow everything": a malformed list is an error that names every bad entry and
+says why.
 
 What FastMCP's guard does with the list (``host_origin_protection="auto"``):
 
@@ -23,6 +28,13 @@ What FastMCP's guard does with the list (``host_origin_protection="auto"``):
   for a foreign host), and an ``Origin`` that is itself a loopback address is
   admitted whatever the list says. Bound to anything else (``0.0.0.0`` in a
   container), ``Host`` is not checked, so proxies and Docker names just work.
+
+With a **host** list, ``Host`` is checked on every request whatever the bind
+address: a name that is not listed gets ``421``. ``127.0.0.1``, ``localhost``,
+``::1`` and the address the server is bound to are always admitted, and the port
+in ``Host`` is ignored. Unlike an ``Origin``, a ``Host`` is always present, so
+this also covers clients that send no ``Origin``. It also turns the ``Origin``
+check on, even with no origin list.
 """
 
 import logging
@@ -49,6 +61,14 @@ ORIGIN_FORMAT_HINT = (
 )
 
 
+#: The host-list counterpart of :data:`ORIGIN_FORMAT_HINT`.
+HOST_FORMAT_HINT = (
+    "Each entry must be a host name as it appears in the Host header, without "
+    "scheme, port or path, for example mcp.example.com or 10.0.0.5. A '*' "
+    "matches any text (*.example.com). Use '*' on its own to allow every host."
+)
+
+
 class OriginListError(ValueError):
     """The origin list has at least one unusable entry.
 
@@ -57,12 +77,22 @@ class OriginListError(ValueError):
     operator can fix the whole list in one go.
     """
 
+    kind = "origin"
+    hint = ORIGIN_FORMAT_HINT
+
     def __init__(self, problems: Iterable[tuple[str, str]]) -> None:
         self.problems = list(problems)
         lines = [f"  - {entry!r}: {reason}" for entry, reason in self.problems]
         super().__init__(
-            "invalid origin list:\n" + "\n".join(lines) + "\n" + ORIGIN_FORMAT_HINT
+            f"invalid {self.kind} list:\n" + "\n".join(lines) + "\n" + self.hint
         )
+
+
+class HostListError(OriginListError):
+    """The host list has at least one unusable entry; see :class:`OriginListError`."""
+
+    kind = "host"
+    hint = HOST_FORMAT_HINT
 
 
 def parse_allowed_origins(raw: str | None) -> tuple[str, ...]:
@@ -109,6 +139,79 @@ def parse_allowed_origins(raw: str | None) -> tuple[str, ...]:
     if problems:
         raise OriginListError(problems)
     return tuple(origins)
+
+
+def parse_allowed_hosts(raw: str | None) -> tuple[str, ...]:
+    """Parse the comma-separated host list into normalized entries.
+
+    Returns ``()`` when there is nothing to enforce: ``None``, a blank value,
+    only commas, or a bare ``*`` (every host allowed, which is the same as no
+    list). Otherwise each entry is lowercased; duplicates collapse and the first
+    occurrence keeps its place. Entries may contain ``*`` as a wildcard.
+
+    Raises:
+        HostListError: listing every unusable entry, not just the first.
+    """
+    if raw is None:
+        return ()
+    entries = [entry.strip() for entry in raw.split(",")]
+    entries = [entry for entry in entries if entry]
+
+    if "*" in entries:
+        if len(entries) > 1:
+            raise HostListError(
+                [
+                    (
+                        "*",
+                        "'*' allows every host, so it cannot be combined with "
+                        "other entries; remove either the '*' or the others",
+                    )
+                ]
+            )
+        return ()
+
+    hosts: list[str] = []
+    problems: list[tuple[str, str]] = []
+    for entry in entries:
+        try:
+            host = _normalize_host_entry(entry)
+        except _BadEntryError as e:
+            problems.append((entry, str(e)))
+            continue
+        if host not in hosts:
+            hosts.append(host)
+    if problems:
+        raise HostListError(problems)
+    return tuple(hosts)
+
+
+def _normalize_host_entry(entry: str) -> str:
+    """Return the normalized host for ``entry``, or raise ``_BadEntryError``."""
+    if any(char.isspace() for char in entry):
+        raise _BadEntryError("contains whitespace; separate entries with commas")
+    if "://" in entry:
+        raise _BadEntryError(
+            "contains a scheme; list only the host name (use --allowed-origins "
+            "for origins)"
+        )
+    if "@" in entry:
+        raise _BadEntryError("contains credentials (user@); a host has none")
+    for char, what in (("/", "a path"), ("?", "a query string"), ("#", "a fragment")):
+        if char in entry:
+            raise _BadEntryError(f"contains {what} ({char}...); list only the host")
+    # FastMCP drops a trailing ':port' before comparing, so an entry with one
+    # would be read as something other than what the operator wrote; an IPv6
+    # literal's colons and brackets are unmatchable for the same reason as in
+    # an origin.
+    if ":" in entry or "[" in entry or "]" in entry:
+        raise _BadEntryError(
+            "contains ':' or brackets; list the host without a port (the port in "
+            "Host is ignored), and name an IPv6 address by a hostname that "
+            "resolves to it"
+        )
+    host = entry.lower()
+    _check_ascii_host(host)
+    return host
 
 
 class _BadEntryError(Exception):
@@ -266,24 +369,37 @@ def _port(parts: SplitResult) -> int | None:
     return port
 
 
-def origin_guard_kwargs(allowed_origins: Iterable[str]) -> dict[str, Any]:
-    """The FastMCP arguments that enforce ``allowed_origins``; empty when there is no list.
+def origin_guard_kwargs(
+    allowed_origins: Iterable[str], allowed_hosts: Iterable[str] = ()
+) -> dict[str, Any]:
+    """The FastMCP arguments that enforce the allow-lists; empty when there are none.
 
     Splat into ``FastMCP.run`` / ``FastMCP.http_app``. ``"auto"`` rather than
     ``True`` on purpose: ``True`` validates ``Host`` on every request against
     loopback names only, which answers ``421`` to any container, proxy or
     public hostname. ``"auto"`` leaves ``Host`` alone unless the server is
-    bound to loopback. It has to be passed with the list: FastMCP's default
-    (``host_origin_protection=False``) installs no guard at all, so
-    ``allowed_origins`` on its own would do nothing. With no list we pass
-    nothing and FastMCP's default applies.
+    bound to loopback or a host list is given. It has to be passed with the
+    lists: FastMCP's default (``host_origin_protection=False``) installs no
+    guard at all, so ``allowed_origins`` or ``allowed_hosts`` on their own would
+    do nothing. With neither list we pass nothing and FastMCP's default applies.
     """
     origins = tuple(allowed_origins)
-    if not origins:
+    hosts = tuple(allowed_hosts)
+    if not origins and not hosts:
         return {}
-    logger.info(
-        "Origin allow-list active; requests with an Origin header not matching "
-        "one of these are rejected: %s",
-        ", ".join(origins),
-    )
-    return {"host_origin_protection": "auto", "allowed_origins": list(origins)}
+    kwargs: dict[str, Any] = {"host_origin_protection": "auto"}
+    if origins:
+        logger.info(
+            "Origin allow-list active; requests with an Origin header not matching "
+            "one of these are rejected: %s",
+            ", ".join(origins),
+        )
+        kwargs["allowed_origins"] = list(origins)
+    if hosts:
+        logger.info(
+            "Host allow-list active; requests whose Host header matches none of "
+            "these (or a loopback name or the bound address) are rejected: %s",
+            ", ".join(hosts),
+        )
+        kwargs["allowed_hosts"] = list(hosts)
+    return kwargs

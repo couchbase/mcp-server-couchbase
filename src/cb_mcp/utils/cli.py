@@ -103,6 +103,24 @@ def validate_allowed_origins(
     return value
 
 
+def validate_allowed_hosts(
+    ctx: click.Context, param: click.Parameter, value: str | None
+) -> str | None:
+    """Click callback for ``--allowed-hosts``; see :func:`validate_allowed_origins`."""
+    from ..core.origin_guard import (  # noqa: PLC0415 - circular at top level
+        OriginListError,
+        parse_allowed_hosts,
+    )
+
+    try:
+        parse_allowed_hosts(value)
+    except OriginListError as e:
+        raise click.BadParameter(
+            f"{e}\n(set by --allowed-hosts or CB_MCP_ALLOWED_HOSTS)"
+        ) from None
+    return value
+
+
 def validate_log_path(ctx: click.Context, param: click.Parameter, value: str) -> str:
     """Click callback for ``--log-file`` (the base path for per-level files).
 

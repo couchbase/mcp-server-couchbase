@@ -63,6 +63,7 @@ def test_secret_paths_redacted_to_presence_booleans():
         "stateless_http": None,
         "thread_pool_size": None,
         "allowed_origins": None,
+        "allowed_hosts": None,
         "connection_string": None,
         "username": None,
         "disabled_tools": None,

@@ -281,6 +281,7 @@ def _start_server(server_id: str, params: Mapping[str, Any]) -> None:
         port=transport.port,
         stateless_http=built.serving.stateless_http,
         allowed_origins=transport.allowed_origins,
+        allowed_hosts=transport.allowed_hosts,
     )
 
 
@@ -335,7 +336,9 @@ def create_app() -> StarletteWithLifespan:
     # The supervisor already resolved this configuration as stateless.
     return built.mcp.http_app(
         stateless_http=built.serving.stateless_http,
-        **origin_guard_kwargs(built.cli.transport.allowed_origins),
+        **origin_guard_kwargs(
+            built.cli.transport.allowed_origins, built.cli.transport.allowed_hosts
+        ),
     )
 
 

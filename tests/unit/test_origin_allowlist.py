@@ -67,6 +67,7 @@ def _isolate(monkeypatch):
     """One-shot SDK logging, worker env handoff and startup pings stay out of the way."""
     monkeypatch.delenv(mcp_server.WORKER_CONFIG_ENV_VAR, raising=False)
     monkeypatch.delenv("CB_MCP_ALLOWED_ORIGINS", raising=False)
+    monkeypatch.delenv("CB_MCP_ALLOWED_HOSTS", raising=False)
     with (
         patch.object(couchbase, "configure_logging"),
         patch("cb_mcp.core.app.send_install_ping"),
@@ -718,3 +719,133 @@ class TestSseTransport:
             _send(app, "GET", "/sse", origin="https://evil.com"), timeout=5
         )
         assert evil.status_code == 403
+
+
+# --- Host allow-list (--allowed-hosts / CB_MCP_ALLOWED_HOSTS) --------------------
+
+
+@pytest.fixture(params=["single-process", "worker"])
+def make_host_app(request):
+    """Like ``make_app``, but takes the host list (and optional origin list)."""
+    builder = _single_process_app if request.param == "single-process" else _worker_app
+
+    def build(hosts: str | None, *extra: str, env: dict[str, str] | None = None):
+        args = ["--transport", "http", *extra]
+        if "--host" not in extra:
+            args += ["--host", EXPOSE_ALL]
+        if hosts is not None:
+            args += ["--allowed-hosts", hosts]
+        return builder(args, env)
+
+    return build
+
+
+@pytest.mark.asyncio
+class TestHostAllowlist:
+    HOSTS = "mcp.mycompany.com,*.internal.example.com"
+
+    @pytest.mark.parametrize("hosts", [None, "", " , ", "*"])
+    async def test_no_list_means_no_host_check(self, make_host_app, hosts):
+        app = make_host_app(hosts)
+        assert _admitted(await _send(app, host="anything.evil.com"))
+
+    @pytest.mark.parametrize(
+        "host",
+        [
+            "mcp.mycompany.com",
+            "MCP.MyCompany.com:8000",
+            "a.internal.example.com",
+            "localhost:8000",
+            "127.0.0.1",
+        ],
+    )
+    async def test_listed_loopback_and_wildcard_hosts_are_admitted(
+        self, make_host_app, host
+    ):
+        assert _admitted(await _send(make_host_app(self.HOSTS), host=host))
+
+    @pytest.mark.parametrize("host", ["evil.com", "mcp.mycompany.com.evil.com"])
+    async def test_unlisted_host_is_misdirected_even_when_exposed(
+        self, make_host_app, host
+    ):
+        """On a 0.0.0.0 bind the guard checks Host only because a list is set."""
+        response = await _send(make_host_app(self.HOSTS), host=host)
+        assert response.status_code == 421
+
+    async def test_list_from_env_var(self, make_host_app):
+        app = make_host_app(None, env={"CB_MCP_ALLOWED_HOSTS": self.HOSTS})
+        assert _admitted(await _send(app, host="mcp.mycompany.com"))
+        assert (await _send(app, host="evil.com")).status_code == 421
+
+    async def test_hosts_alone_also_turn_on_the_origin_check(self, make_host_app):
+        app = make_host_app(self.HOSTS)
+        response = await _send(app, host="mcp.mycompany.com", origin="https://evil.com")
+        assert response.status_code == 403
+
+    async def test_combined_with_origins(self, make_host_app):
+        app = make_host_app(self.HOSTS, "--allowed-origins", ALLOWED)
+        good = await _send(
+            app, host="mcp.mycompany.com", origin="https://app.example.com"
+        )
+        assert _admitted(good)
+        assert (
+            await _send(app, host="evil.com", origin="https://app.example.com")
+        ).status_code == 421
+        assert (
+            await _send(app, host="mcp.mycompany.com", origin="https://evil.com")
+        ).status_code == 403
+
+
+class TestHostAllowlistCli:
+    def test_ignored_on_stdio_without_failing(self):
+        result, run_app, _ = _invoke(
+            ["--transport", "stdio", "--allowed-hosts", "mcp.mycompany.com"]
+        )
+        assert result.exit_code == 0, result.output
+        run_app.assert_called_once()
+
+    def test_reaches_run_app_normalized(self):
+        result, run_app, _ = _invoke(
+            [
+                "--transport",
+                "http",
+                "--allowed-hosts",
+                " MCP.MyCompany.com ,a.com,A.com",
+            ]
+        )
+        assert result.exit_code == 0, result.output
+        assert run_app.call_args.kwargs["allowed_hosts"] == (
+            "mcp.mycompany.com",
+            "a.com",
+        )
+
+    def test_reaches_every_worker_through_the_handoff(self):
+        result, _, _ = _invoke(
+            ["--transport", "http", "--workers", "2", "--allowed-hosts", "a.com"]
+        )
+        assert result.exit_code == 0, result.output
+        _, params = decode_worker_config(os.environ[mcp_server.WORKER_CONFIG_ENV_VAR])
+        assert params["allowed_hosts"] == "a.com"
+
+    def test_bad_entry_fails_startup_naming_it(self):
+        result, run_app, _ = _invoke(
+            ["--transport", "http", "--allowed-hosts", "https://a.com,ok.com"]
+        )
+        assert result.exit_code == 2, result.output
+        assert "https://a.com" in result.output
+        assert "--allowed-hosts" in result.output
+        assert "CB_MCP_ALLOWED_HOSTS" in result.output
+        run_app.assert_not_called()
+
+    def test_bad_env_var_fails_startup(self):
+        result, run_app, _ = _invoke(
+            ["--transport", "http"], env={"CB_MCP_ALLOWED_HOSTS": "a.com:8000"}
+        )
+        assert result.exit_code == 2, result.output
+        assert "CB_MCP_ALLOWED_HOSTS" in result.output
+        run_app.assert_not_called()
+
+    def test_help_documents_the_option(self):
+        output = CliRunner().invoke(mcp_server.main, ["--help"]).output
+        assert "--allowed-hosts" in output
+        assert "CB_MCP_ALLOWED_HOSTS" in output

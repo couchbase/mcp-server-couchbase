@@ -345,6 +345,7 @@ The [Operational Insights server](#operational-insights-server) accepts the same
 | `CB_MCP_WORKERS` | `--workers` | Number of server worker processes for the `http` transport. Values above 1 run in stateless HTTP mode (see [Multiple Workers](#multiple-workers)) | `1` |
 | `CB_MCP_STATELESS_HTTP` | `--stateless-http` | Handle each HTTP request without per-session state. Only honored with `http`; cannot be combined with confirmation-required tools (see [Multiple Workers](#multiple-workers)) | `true` when workers > 1, otherwise `false` |
 | `CB_MCP_ALLOWED_ORIGINS` | `--allowed-origins` | Comma-separated origins (`scheme://host[:port]`) allowed to call the `http`/`sse` endpoint; see [Restricting browser origins](#restricting-browser-origins). Unset, empty or `*` allows every origin | unset |
+| `CB_MCP_ALLOWED_HOSTS` | `--allowed-hosts` | Comma-separated host names (no scheme or port) the `http`/`sse` endpoint may be reached by; see [Restricting hosts](#restricting-hosts). Unset, empty or `*` adds no restriction | unset |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Requiring confirmation](#requiring-confirmation-elicitation)) | None |
 | `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
@@ -613,6 +614,23 @@ uvx couchbase-mcp-server operational --transport=http \
 - No CORS headers are added. A browser page on a listed origin is let through by this check but still cannot read the replies unless CORS is added in front of the server, for example by a reverse proxy.
 
 This protects against web pages, not against other clients: any non-browser program can send any `Origin`, or none. It is not authentication; use [OAuth](#oauth-21-authorization) for that.
+
+#### Restricting hosts
+
+`Host` is the other half of DNS-rebinding protection: a rebound page reaches your server under the attacker's hostname. `--allowed-hosts` (`CB_MCP_ALLOWED_HOSTS`) lists the names the server is meant to be reached by. Unlike `Origin`, a `Host` header is on every HTTP request, so this also covers clients that send no `Origin`.
+
+```bash
+uvx couchbase-mcp-server operational --transport=http --host=0.0.0.0 \
+  --allowed-hosts='mcp.example.com,*.internal.example.com'
+```
+
+- Each entry is a bare host name or IPv4 address, as it appears in the `Host` header: no scheme, port or path. A `*` matches any text (`*.example.com`). Matching is case-insensitive and ignores the port.
+- With a list set, a request whose `Host` is not listed is rejected with `421`, **whatever address the server is bound to**. Without one, `Host` is only checked on a loopback bind (loopback names only).
+- `127.0.0.1`, `localhost`, `::1` and the address the server is bound to are always admitted, so health checks on loopback keep working.
+- **Setting a host list also turns on the `Origin` check**, even with no `--allowed-origins`: a request with an `Origin` that is not loopback or the server's own is rejected with `403`. Add `--allowed-origins` for any browser app that should get through.
+- **Behind a reverse proxy or load balancer, list the public name clients use** (and any internal name the proxy or probes send, such as a Kubernetes service name), or every request fails with `421`.
+- Unset, empty, or a lone `*` adds no restriction. Ports and IPv6 literals are rejected at startup (list a hostname that resolves to the address); a malformed entry stops the server with an error naming it, and a lone `*` cannot be combined with others.
+- Ignored with the `stdio` transport. Like `--allowed-origins`, this is not authentication; use [OAuth](#oauth-21-authorization) for that.
 
 #### Multiple workers
 

@@ -17,6 +17,7 @@ from collections.abc import Callable
 import click
 
 from ...utils.cli import (
+    validate_allowed_hosts,
     validate_allowed_origins,
     validate_log_level,
     validate_log_path,
@@ -190,6 +191,24 @@ def transport_options(*, default_port: int) -> Callable:
             "origin. Ignored with --transport=stdio. This guards against "
             "malicious web pages, not other clients; it is not "
             "authentication.",
+        ),
+        click.option(
+            "--allowed-hosts",
+            "allowed_hosts",
+            envvar="CB_MCP_ALLOWED_HOSTS",
+            show_envvar=True,
+            default=None,
+            callback=validate_allowed_hosts,
+            help="Comma-separated host names (no scheme or port, for example "
+            "mcp.example.com) the server may be reached by over http or sse; a "
+            "'*' matches any text. Enforced by FastMCP's Host guard: a request "
+            "whose Host header is not listed gets 421, whatever the bind "
+            "address. 127.0.0.1, localhost, ::1 and the bound address are "
+            "always allowed, and the port is ignored. Setting it also turns on "
+            "the Origin check. Unset, empty or a lone '*' adds no restriction "
+            "(on a loopback bind, Host is still limited to loopback names). "
+            "Ignored with --transport=stdio. This is DNS-rebinding "
+            "protection, not authentication.",
         ),
         # Deliberately hidden and undocumented: an internal tuning knob, not
         # yet part of the supported surface. See cb_mcp.core.serving.
