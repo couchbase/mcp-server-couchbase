@@ -109,6 +109,13 @@
           "isSecret": false
         },
         {
+          "name": "CB_MCP_ALLOWED_HOSTS",
+          "description": "Comma-separated host names (no scheme or port, '*' wildcard allowed) the http endpoint may be reached by. When set, requests whose Host header is not listed are rejected (421); loopback names and the bound address are always allowed, and the Origin check is turned on too. List the public name your proxy forwards. Unset, empty or '*' adds no restriction. Ignored with stdio.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
           "name": "CB_MCP_DISABLED_TOOLS",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
           "isRequired": false,
@@ -893,6 +900,13 @@
           "isSecret": false
         },
         {
+          "name": "CB_MCP_ALLOWED_HOSTS",
+          "description": "Comma-separated host names (no scheme or port, '*' wildcard allowed) the http endpoint may be reached by. When set, requests whose Host header is not listed are rejected (421); loopback names and the bound address are always allowed, and the Origin check is turned on too. List the public name your proxy forwards. Unset, empty or '*' adds no restriction. Ignored with stdio.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
           "name": "CB_MCP_DISABLED_TOOLS",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
           "isRequired": false,
@@ -1572,6 +1586,13 @@
           "isSecret": false
         },
         {
+          "name": "CB_MCP_ALLOWED_HOSTS",
+          "description": "Comma-separated host names (no scheme or port, '*' wildcard allowed) the http endpoint may be reached by. When set, requests whose Host header is not listed are rejected (421); loopback names and the bound address are always allowed, and the Origin check is turned on too. List the public name your proxy forwards. Unset, empty or '*' adds no restriction. Ignored with stdio.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
           "name": "CB_MCP_DISABLED_TOOLS",
           "description": "Tools to disable. Accepts comma-separated tool names (e.g., 'tool_1,tool_2') or a file path containing one tool name per line.",
           "isRequired": false,
@@ -1950,6 +1971,13 @@
         {
           "name": "CB_MCP_ALLOWED_ORIGINS",
           "description": "Comma-separated web origins (scheme://host[:port], '*' allowed in the host) permitted to call the http endpoint. When set, requests with an unlisted Origin header are rejected (403); requests with no Origin header are admitted. Unset, empty or '*' allows every origin. Ignored with stdio.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        },
+        {
+          "name": "CB_MCP_ALLOWED_HOSTS",
+          "description": "Comma-separated host names (no scheme or port, '*' wildcard allowed) the http endpoint may be reached by. When set, requests whose Host header is not listed are rejected (421); loopback names and the bound address are always allowed, and the Origin check is turned on too. List the public name your proxy forwards. Unset, empty or '*' adds no restriction. Ignored with stdio.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
