@@ -627,7 +627,7 @@ uvx couchbase-mcp-server operational --transport=http --host=0.0.0.0 \
 - Each entry is a bare host name or IPv4 address, as it appears in the `Host` header: no scheme, port or path. A `*` matches any text (`*.example.com`). Matching is case-insensitive and ignores the port.
 - With a list set, a request whose `Host` is not listed is rejected with `421`, **whatever address the server is bound to**. Without one, `Host` is only checked on a loopback bind (loopback names only).
 - `127.0.0.1`, `localhost`, `::1` and the address the server is bound to are always admitted, so health checks on loopback keep working.
-- **Setting a host list also turns on the `Origin` check**, even with no `--allowed-origins`: a request with an `Origin` that is not loopback or the server's own is rejected with `403`. Add `--allowed-origins` for any browser app that should get through.
+- A host list does not restrict `Origin`: with no `--allowed-origins`, every origin is admitted (and no CORS headers are added). Add `--allowed-origins` to restrict which web pages may call the server.
 - **Behind a reverse proxy or load balancer, list the public name clients use** (and any internal name the proxy or probes send, such as a Kubernetes service name), or every request fails with `421`.
 - Unset, empty, or a lone `*` adds no restriction. Ports and IPv6 literals are rejected at startup (list a hostname that resolves to the address); a malformed entry stops the server with an error naming it, and a lone `*` cannot be combined with others.
 - Ignored with the `stdio` transport. Like `--allowed-origins`, this is not authentication; use [OAuth](#oauth-21-authorization) for that.

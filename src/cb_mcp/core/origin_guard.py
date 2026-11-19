@@ -33,8 +33,9 @@ With a **host** list, ``Host`` is checked on every request whatever the bind
 address: a name that is not listed gets ``421``. ``127.0.0.1``, ``localhost``,
 ``::1`` and the address the server is bound to are always admitted, and the port
 in ``Host`` is ignored. Unlike an ``Origin``, a ``Host`` is always present, so
-this also covers clients that send no ``Origin``. It also turns the ``Origin``
-check on, even with no origin list.
+this also covers clients that send no ``Origin``. FastMCP turns the ``Origin``
+check on with a host list, so with no origin list we pass ``*`` to keep it
+open: no origin list means no origin check.
 
 The guard only decides whether a request is accepted. A browser also needs CORS
 headers on the reply before it lets the page read it, and FastMCP adds none, so
@@ -427,6 +428,10 @@ def origin_guard_kwargs(
     do nothing. With neither list we pass nothing and FastMCP's default applies.
     An origin list also adds CORS headers for those origins (``middleware``).
 
+    A host list with no origin list passes ``allowed_origins=["*"]``: FastMCP
+    would otherwise check ``Origin`` against an empty list and refuse every
+    non-loopback origin, which the operator never asked for.
+
     A lone ``*`` means the operator wants every origin: no origin is refused and
     every origin gets CORS headers, so any web page can read the replies. That
     is a real exposure, so it is logged as a warning. Alone it installs no guard
@@ -458,6 +463,11 @@ def origin_guard_kwargs(
         )
         kwargs["allowed_origins"] = list(origins)
         kwargs["middleware"] = [_cors_middleware(origins)]
+    else:
+        # A host list alone: FastMCP would otherwise turn the Origin check on
+        # with an empty list and refuse every non-loopback origin. No origin
+        # list means no origin check, so admit them all (and add no CORS).
+        kwargs["allowed_origins"] = [ALL_ORIGINS]
     if hosts:
         logger.info(
             "Host allow-list active; requests whose Host header matches none of "

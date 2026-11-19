@@ -74,6 +74,7 @@ class TestGuardKwargs:
     def test_hosts_only(self):
         assert origin_guard_kwargs((), ("a.com",)) == {
             "host_origin_protection": "auto",
+            "allowed_origins": ["*"],
             "allowed_hosts": ["a.com"],
         }
 

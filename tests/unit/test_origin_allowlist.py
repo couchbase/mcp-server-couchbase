@@ -218,6 +218,31 @@ class TestAllowAllOrigins:
         app = make_app("*", "--host", "127.0.0.1")
         assert _admitted(await _send(app, host="evil.com:8000", base=LOOPBACK))
 
+    @pytest.mark.parametrize("origin", [None, "https://evil.com", "null"])
+    async def test_with_a_host_list_the_host_is_checked_and_any_origin_passes(
+        self, make_app, origin
+    ):
+        app = make_app("*", "--allowed-hosts", "mcp.example.com")
+        listed = await _send(
+            app, "GET", HEALTH_CHECK_PATH, origin=origin, host="mcp.example.com:8000"
+        )
+        assert _admitted(listed)
+        other = await _send(
+            app, "GET", HEALTH_CHECK_PATH, origin=origin, host="evil.com:8000"
+        )
+        assert other.status_code == 421
+
+    async def test_with_a_host_list_cors_is_still_open(self, make_app):
+        app = make_app("*", "--allowed-hosts", "mcp.example.com")
+        response = await _send(
+            app,
+            "GET",
+            HEALTH_CHECK_PATH,
+            origin="https://evil.com",
+            host="mcp.example.com:8000",
+        )
+        assert response.headers["access-control-allow-origin"] == "*"
+
     async def test_the_risk_is_warned_about(self, make_app):
         with patch("cb_mcp.core.origin_guard.logger") as logger:
             make_app("*")
@@ -900,10 +925,17 @@ class TestHostAllowlist:
         assert _admitted(await _send(app, host="mcp.mycompany.com"))
         assert (await _send(app, host="evil.com")).status_code == 421
 
-    async def test_hosts_alone_also_turn_on_the_origin_check(self, make_host_app):
+    @pytest.mark.parametrize("origin", [None, "https://evil.com", "null"])
+    async def test_hosts_alone_do_not_restrict_origins(self, make_host_app, origin):
         app = make_host_app(self.HOSTS)
-        response = await _send(app, host="mcp.mycompany.com", origin="https://evil.com")
-        assert response.status_code == 403
+        response = await _send(app, host="mcp.mycompany.com", origin=origin)
+        assert _admitted(response)
+        assert "access-control-allow-origin" not in response.headers
+
+    async def test_hosts_alone_still_refuse_a_foreign_host(self, make_host_app):
+        app = make_host_app(self.HOSTS)
+        response = await _send(app, host="evil.com", origin="https://evil.com")
+        assert response.status_code == 421
 
     async def test_combined_with_origins(self, make_host_app):
         app = make_host_app(self.HOSTS, "--allowed-origins", ALLOWED)
