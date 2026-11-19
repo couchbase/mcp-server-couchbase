@@ -187,8 +187,9 @@ def transport_options(*, default_port: int) -> Callable:
             "sse; a '*' in the host matches any text. Enforced by FastMCP's "
             "origin guard: a request whose Origin header is not listed is "
             "rejected, but one with no Origin header (most non-browser MCP "
-            "clients) is admitted. Unset, empty or a lone '*' allows every "
-            "origin. Ignored with --transport=stdio. This guards against "
+            "clients) is admitted. Unset or empty adds no check. A lone '*' "
+            "allows every origin and lets any web page read replies (CORS), "
+            "which is risky. Ignored with --transport=stdio. This guards against "
             "malicious web pages, not other clients; it is not "
             "authentication.",
         ),

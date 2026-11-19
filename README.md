@@ -604,14 +604,14 @@ uvx couchbase-mcp-server operational --transport=http \
 ```
 
 - Each entry is `scheme://host[:port]`. Any scheme is accepted (`chrome-extension://<id>`, `vscode-webview://<id>`), default ports (80 for `http`, 443 for `https`) are optional, and a `*` in the host matches any text. `*` is not allowed in the scheme or port.
-- Unset, empty, or a lone `*` means no check: every request is admitted.
+- Unset or empty means no check and no CORS: every request is admitted. **A lone `*` allows every origin and also sends CORS headers to all of them**, so any web page can call the server and read its replies. That is risky, especially on a server reachable from a browser, and a warning is logged at startup. Prefer listing the origins that need access.
 - Once a list is set, a request whose `Origin` header is **not** listed is rejected with `403`, and so is `Origin: null`. **A request with no `Origin` header is admitted**: FastMCP only judges an `Origin` that is present, so desktop apps and CLI agents, which send none, keep working.
 - The guard wraps every route, so `/health` also answers `403` to a request that carries an unlisted `Origin`. Probes send none.
 - On a server bound to a loopback address (the default `127.0.0.1`), `Host` is validated as well (`421` for a foreign host, which is what stops DNS rebinding), and an `Origin` that is itself a loopback address is admitted even if it is not listed. Bound to anything else, such as `0.0.0.0` in a container, `Host` is not checked.
 - **Internationalized hostnames and IPv6 addresses are rejected at startup**, not converted. Browsers send internationalized names in punycode (`https://xn--bcher-kva.example` for `bücher.example`), so an entry written with the original letters could never match; list the `xn--` form, which the startup error shows. The origin check reads the brackets of an IPv6 address as a pattern, so such an entry could never match either; list a hostname that resolves to it.
 - A malformed entry stops the server at startup with an error naming each bad entry and why. A lone `*` cannot be combined with other entries.
 - Ignored with the `stdio` transport.
-- No CORS headers are added. A browser page on a listed origin is let through by this check but still cannot read the replies unless CORS is added in front of the server, for example by a reverse proxy.
+- Listed origins also get CORS headers (the preflight is answered, and `Mcp-Session-Id` and `WWW-Authenticate` are exposed), so a browser page on a listed origin can read the replies. FastMCP's check only admits or refuses a request and adds no CORS headers itself. Unlisted origins get none, and neither do requests without an `Origin`. A `*` in an entry matches the same origins for CORS as for the check.
 
 This protects against web pages, not against other clients: any non-browser program can send any `Origin`, or none. It is not authentication; use [OAuth](#oauth-21-authorization) for that.
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from starlette.middleware.cors import CORSMiddleware
 
 from cb_mcp.core.origin_guard import (
     HostListError,
@@ -76,14 +77,35 @@ class TestGuardKwargs:
             "allowed_hosts": ["a.com"],
         }
 
-    def test_origins_only_is_unchanged(self):
-        assert origin_guard_kwargs(("https://a.com",)) == {
+    def test_origins_add_the_guard_and_cors(self):
+        kwargs = origin_guard_kwargs(("https://a.com",))
+        assert kwargs.pop("middleware")[0].cls is CORSMiddleware
+        assert kwargs == {
             "host_origin_protection": "auto",
             "allowed_origins": ["https://a.com"],
         }
 
+    def test_a_lone_star_opens_cors_without_a_guard(self):
+        kwargs = origin_guard_kwargs(("*",))
+        assert kwargs.pop("middleware")[0].cls is CORSMiddleware
+        assert kwargs == {}
+
+    def test_a_lone_star_with_hosts_keeps_the_host_guard_and_admits_every_origin(self):
+        kwargs = origin_guard_kwargs(("*",), ("a.com",))
+        assert len(kwargs.pop("middleware")) == 1
+        assert kwargs == {
+            "host_origin_protection": "auto",
+            "allowed_origins": ["*"],
+            "allowed_hosts": ["a.com"],
+        }
+
+    def test_hosts_alone_add_no_cors(self):
+        assert "middleware" not in origin_guard_kwargs((), ("a.com",))
+
     def test_both(self):
-        assert origin_guard_kwargs(("https://a.com",), ("a.com",)) == {
+        kwargs = origin_guard_kwargs(("https://a.com",), ("a.com",))
+        assert len(kwargs.pop("middleware")) == 1
+        assert kwargs == {
             "host_origin_protection": "auto",
             "allowed_origins": ["https://a.com"],
             "allowed_hosts": ["a.com"],

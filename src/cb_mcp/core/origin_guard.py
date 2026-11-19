@@ -35,12 +35,21 @@ address: a name that is not listed gets ``421``. ``127.0.0.1``, ``localhost``,
 in ``Host`` is ignored. Unlike an ``Origin``, a ``Host`` is always present, so
 this also covers clients that send no ``Origin``. It also turns the ``Origin``
 check on, even with no origin list.
+
+The guard only decides whether a request is accepted. A browser also needs CORS
+headers on the reply before it lets the page read it, and FastMCP adds none, so
+with an origin list we also install Starlette's ``CORSMiddleware`` for exactly
+those origins (:func:`_cors_middleware`). Unlisted origins get no CORS headers.
 """
 
 import logging
 from collections.abc import Iterable
+from fnmatch import translate
 from typing import Any
 from urllib.parse import SplitResult, urlsplit
+
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 
 from ..utils.constants import LOGGER_NAMESPACE
 
@@ -50,6 +59,9 @@ logger = logging.getLogger(f"{LOGGER_NAMESPACE}.core.origin_guard")
 #: (``chrome-extension://``, ``vscode-webview://``, ...) have none, so a port on
 #: them is always kept.
 _DEFAULT_PORTS = {"http": 80, "https": 443}
+
+#: A lone ``*`` in the origin list: every origin is allowed, CORS included.
+ALL_ORIGINS = "*"
 
 #: What the operator should write, shown whenever a list is rejected.
 ORIGIN_FORMAT_HINT = (
@@ -98,9 +110,10 @@ class HostListError(OriginListError):
 def parse_allowed_origins(raw: str | None) -> tuple[str, ...]:
     """Parse the comma-separated origin list into normalized entries.
 
-    Returns ``()`` when there is nothing to enforce: ``None``, a blank value,
-    only commas, or a bare ``*`` (every origin allowed, which is the same as
-    no list). Otherwise each entry is lowercased and stripped of a default
+    Returns ``()`` when there is nothing to enforce: ``None``, a blank value or
+    only commas. A bare ``*`` returns ``("*",)``: the operator asked for every
+    origin, which is not the same as no list (see :func:`origin_guard_kwargs`).
+    Otherwise each entry is lowercased and stripped of a default
     port, matching how browsers write ``Origin``; duplicates collapse and the
     first occurrence keeps its place. Entries may contain ``*`` in the host as
     a wildcard.
@@ -124,7 +137,7 @@ def parse_allowed_origins(raw: str | None) -> tuple[str, ...]:
                     )
                 ]
             )
-        return ()
+        return (ALL_ORIGINS,)
 
     origins: list[str] = []
     problems: list[tuple[str, str]] = []
@@ -369,6 +382,36 @@ def _port(parts: SplitResult) -> int | None:
     return port
 
 
+def _cors_middleware(origins: tuple[str, ...]) -> Middleware:
+    """CORS headers for the listed origins only, so a page on one can read replies.
+
+    An entry with ``*`` becomes a regular expression with the same meaning as in
+    FastMCP's guard (``*`` matches any text), so both agree on which origins are
+    listed. The guard runs first, so an unlisted origin is already refused and
+    never reaches this. ``Mcp-Session-Id`` and ``WWW-Authenticate`` are exposed
+    because browsers hide response headers that are not listed, and MCP clients
+    need the session id and the OAuth discovery challenge.
+    """
+    if origins == (ALL_ORIGINS,):
+        return Middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=["*"],
+            expose_headers=["Mcp-Session-Id", "WWW-Authenticate"],
+        )
+    exact = [origin for origin in origins if "*" not in origin]
+    patterns = [translate(origin) for origin in origins if "*" in origin]
+    return Middleware(
+        CORSMiddleware,
+        allow_origins=exact,
+        allow_origin_regex="|".join(patterns) or None,
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["Mcp-Session-Id", "WWW-Authenticate"],
+    )
+
+
 def origin_guard_kwargs(
     allowed_origins: Iterable[str], allowed_hosts: Iterable[str] = ()
 ) -> dict[str, Any]:
@@ -382,19 +425,39 @@ def origin_guard_kwargs(
     lists: FastMCP's default (``host_origin_protection=False``) installs no
     guard at all, so ``allowed_origins`` or ``allowed_hosts`` on their own would
     do nothing. With neither list we pass nothing and FastMCP's default applies.
+    An origin list also adds CORS headers for those origins (``middleware``).
+
+    A lone ``*`` means the operator wants every origin: no origin is refused and
+    every origin gets CORS headers, so any web page can read the replies. That
+    is a real exposure, so it is logged as a warning. Alone it installs no guard
+    (as with no list); with a host list the guard is on and ``*`` admits every
+    origin through it.
     """
     origins = tuple(allowed_origins)
     hosts = tuple(allowed_hosts)
     if not origins and not hosts:
         return {}
-    kwargs: dict[str, Any] = {"host_origin_protection": "auto"}
-    if origins:
+    allow_all = origins == (ALL_ORIGINS,)
+    kwargs: dict[str, Any] = {}
+    if not allow_all or hosts:
+        kwargs["host_origin_protection"] = "auto"
+    if allow_all:
+        logger.warning(
+            "Origin allow-list is '*': every origin is allowed and receives CORS "
+            "headers, so any web page can call this server and read its replies. "
+            "List the origins that need access instead."
+        )
+        kwargs["middleware"] = [_cors_middleware(origins)]
+        if hosts:
+            kwargs["allowed_origins"] = list(origins)
+    elif origins:
         logger.info(
             "Origin allow-list active; requests with an Origin header not matching "
             "one of these are rejected: %s",
             ", ".join(origins),
         )
         kwargs["allowed_origins"] = list(origins)
+        kwargs["middleware"] = [_cors_middleware(origins)]
     if hosts:
         logger.info(
             "Host allow-list active; requests whose Host header matches none of "
