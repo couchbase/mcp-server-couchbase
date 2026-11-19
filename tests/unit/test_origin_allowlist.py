@@ -565,6 +565,93 @@ class TestCors:
         assert "access-control-allow-origin" not in response.headers
 
 
+@pytest.mark.asyncio
+class TestCorsOverARealExchange:
+    """CORS on a whole MCP exchange, not just ``/health``.
+
+    The lifespan runs, so ``initialize`` really succeeds and a follow-up
+    request is served, as in a browser MCP client. Stateful mode hands out an
+    ``Mcp-Session-Id`` that the browser can only read if it is exposed;
+    stateless mode has none.
+    """
+
+    ORIGIN = "http://localhost:3000"
+
+    async def _exchange(self, app):
+        transport = httpx.ASGITransport(app=app)
+        headers = {**MCP_HEADERS, "Origin": self.ORIGIN}
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=transport, base_url=EXPOSED) as client,
+        ):
+            first = await client.post("/mcp", json=INITIALIZE, headers=headers)
+            follow_headers = dict(headers)
+            if "mcp-session-id" in first.headers:
+                follow_headers["Mcp-Session-Id"] = first.headers["mcp-session-id"]
+                follow_headers["Mcp-Protocol-Version"] = "2025-06-18"
+                await client.post(
+                    "/mcp",
+                    json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                    headers=follow_headers,
+                )
+            second = await client.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                headers=follow_headers,
+            )
+        return first, second
+
+    def _args(self, *extra: str) -> list[str]:
+        return [
+            "--transport",
+            "http",
+            "--host",
+            EXPOSE_ALL,
+            "--allowed-origins",
+            self.ORIGIN,
+            *extra,
+        ]
+
+    async def test_stateful_exchange_is_readable_and_exposes_the_session_id(self):
+        first, second = await self._exchange(_single_process_app(self._args()))
+        assert first.status_code == 200
+        assert second.status_code == 200
+        for response in (first, second):
+            assert response.headers["access-control-allow-origin"] == self.ORIGIN
+        assert first.headers["mcp-session-id"]
+        exposed = first.headers["access-control-expose-headers"].lower()
+        assert "mcp-session-id" in exposed
+
+    @pytest.mark.parametrize("serving", ["flag", "workers"])
+    async def test_stateless_exchange_is_readable(self, serving):
+        """Stateless by ``--stateless-http`` and, always, under ``--workers``."""
+        if serving == "flag":
+            app = _single_process_app(self._args("--stateless-http", "true"))
+        else:
+            app = _worker_app(self._args())
+        first, second = await self._exchange(app)
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert "mcp-session-id" not in first.headers
+        for response in (first, second):
+            assert response.headers["access-control-allow-origin"] == self.ORIGIN
+
+    async def test_an_unlisted_origin_gets_nothing_back_to_read(self, make_app):
+        app = make_app(self.ORIGIN)
+        transport = httpx.ASGITransport(app=app)
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=transport, base_url=EXPOSED) as client,
+        ):
+            response = await client.post(
+                "/mcp",
+                json=INITIALIZE,
+                headers={**MCP_HEADERS, "Origin": "https://evil.com"},
+            )
+        assert response.status_code == 403
+        assert "access-control-allow-origin" not in response.headers
+
+
 # --- CLI wiring and startup validation ------------------------------------------
 
 

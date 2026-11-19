@@ -80,7 +80,8 @@ class TestGuardKwargs:
 
     def test_origins_add_the_guard_and_cors(self):
         kwargs = origin_guard_kwargs(("https://a.com",))
-        assert kwargs.pop("middleware")[0].cls is CORSMiddleware
+        middleware = kwargs.pop("middleware")
+        assert middleware[0].cls is CORSMiddleware
         assert kwargs == {
             "host_origin_protection": "auto",
             "allowed_origins": ["https://a.com"],
@@ -88,12 +89,14 @@ class TestGuardKwargs:
 
     def test_a_lone_star_opens_cors_without_a_guard(self):
         kwargs = origin_guard_kwargs(("*",))
-        assert kwargs.pop("middleware")[0].cls is CORSMiddleware
+        middleware = kwargs.pop("middleware")
+        assert middleware[0].cls is CORSMiddleware
         assert kwargs == {}
 
     def test_a_lone_star_with_hosts_keeps_the_host_guard_and_admits_every_origin(self):
         kwargs = origin_guard_kwargs(("*",), ("a.com",))
-        assert len(kwargs.pop("middleware")) == 1
+        middleware = kwargs.pop("middleware")
+        assert len(middleware) == 1
         assert kwargs == {
             "host_origin_protection": "auto",
             "allowed_origins": ["*"],
@@ -105,7 +108,8 @@ class TestGuardKwargs:
 
     def test_both(self):
         kwargs = origin_guard_kwargs(("https://a.com",), ("a.com",))
-        assert len(kwargs.pop("middleware")) == 1
+        middleware = kwargs.pop("middleware")
+        assert len(middleware) == 1
         assert kwargs == {
             "host_origin_protection": "auto",
             "allowed_origins": ["https://a.com"],
