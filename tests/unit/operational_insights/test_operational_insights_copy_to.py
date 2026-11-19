@@ -12,17 +12,21 @@ What these pin down, in order of what it would cost to get wrong:
 """
 
 import re
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from _operational_insights_fakes import make_operational_insights_ctx
 
+from cb_mcp.audit import state as audit_state
+from cb_mcp.audit.exceptions import ReadOnlyWriteBlockedError, StatementScopeDeniedError
 from cb_mcp.tools.operational_insights.query import (
     build_copy_to_statement,
     operational_insights_get_async_query_results,
     operational_insights_run_query_async,
     operational_insights_run_query_sync,
 )
+from cb_mcp.utils.constants import SCOPE_READ
 
 STATEMENT = "SELECT a.name, a.country FROM `travel-sample`.inventory.airline a LIMIT 10"
 DESTINATION = {
@@ -266,6 +270,63 @@ class TestExportUnderReadOnlyMode:
             pytest.raises(ValueError, match=re.escape("blocked under read-only mode")),
         ):
             operational_insights_run_query_async(ctx, STATEMENT, **DESTINATION)
+        cluster.start_query.assert_not_called()
+
+
+class TestExportRefusalIsAudited:
+    """A blocked export is a refusal, recorded as such, not a failed execution."""
+
+    @pytest.mark.parametrize(
+        "tool",
+        [operational_insights_run_query_sync, operational_insights_run_query_async],
+    )
+    def test_read_only_mode_records_a_blocked_refusal(self, tool) -> None:
+        ctx, _cluster = make_operational_insights_ctx(read_only_mode=True)
+        state_token = audit_state.install()
+        try:
+            with (
+                patch(
+                    "cb_mcp.tools.operational_insights.query.get_access_token",
+                    return_value=None,
+                ),
+                pytest.raises(ReadOnlyWriteBlockedError),
+            ):
+                tool(ctx, STATEMENT, **DESTINATION)
+            refusal = audit_state.get_refusal()
+        finally:
+            audit_state.reset(state_token)
+
+        assert refusal is not None
+        assert refusal["outcome"] == "blocked"
+        assert refusal["reason"] == "read_only_mode"
+        assert refusal["statement_kind"] == "copy_to"
+
+    @pytest.mark.parametrize(
+        "tool",
+        [operational_insights_run_query_sync, operational_insights_run_query_async],
+    )
+    def test_token_without_write_scope_records_a_scope_denial(self, tool) -> None:
+        ctx, cluster = make_operational_insights_ctx(read_only_mode=False)
+        read_only_token = SimpleNamespace(scopes=[SCOPE_READ])
+        state_token = audit_state.install()
+        try:
+            with (
+                patch(
+                    "cb_mcp.tools.operational_insights.query.get_access_token",
+                    return_value=read_only_token,
+                ),
+                pytest.raises(StatementScopeDeniedError, match="requires the"),
+            ):
+                tool(ctx, STATEMENT, **DESTINATION)
+            refusal = audit_state.get_refusal()
+        finally:
+            audit_state.reset(state_token)
+
+        assert refusal is not None
+        assert refusal["outcome"] == "denied"
+        assert refusal["reason"] == "missing_scope"
+        assert refusal["required_scope"] == "write"
+        cluster.execute_query.assert_not_called()
         cluster.start_query.assert_not_called()
 
 

@@ -20,6 +20,7 @@ from unittest.mock import patch
 import pytest
 from _operational_insights_fakes import make_operational_insights_ctx
 
+from cb_mcp.audit.exceptions import StatementScopeDeniedError
 from cb_mcp.tools.operational_insights.query import (
     _is_copy_to_statement,
     operational_insights_explain_query,
@@ -190,7 +191,7 @@ class TestRunQuerySyncBlocksCopyToUnderReadOnly:
                 "cb_mcp.tools.operational_insights.query.get_access_token",
                 return_value=token,
             ),
-            pytest.raises(ValueError),
+            pytest.raises(StatementScopeDeniedError),
         ):
             operational_insights_run_query_sync(ctx, "COPY ds TO 's3://bucket/path'")
         cluster.execute_query.assert_not_called()

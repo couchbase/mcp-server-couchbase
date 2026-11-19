@@ -29,7 +29,7 @@ tool descriptions and are deliberately short):
 
 import logging
 import re
-from typing import Any
+from typing import Any, NoReturn
 
 from couchbase_operational_insights.errors import (
     TimeoutError as OperationalInsightsTimeoutError,
@@ -38,6 +38,8 @@ from couchbase_operational_insights.options import QueryOptions
 from fastmcp import Context
 from fastmcp.server.dependencies import get_access_token
 
+from ...audit import state as audit_state
+from ...audit.exceptions import ReadOnlyWriteBlockedError, StatementScopeDeniedError
 from ...servers.operational_insights.cli import (
     OPERATIONAL_INSIGHTS_ASYNC_QUERY_RESULT_TIMEOUT_KEY,
 )
@@ -95,6 +97,48 @@ def _is_copy_to_statement(statement: str) -> bool:
     """
     normalized = _strip_leading_comments(statement).upper()
     return re.match(r"^COPY\s", normalized) is not None
+
+
+def _refuse_copy_to(read_only_mode: bool, token: Any) -> NoReturn:
+    """Refuse a ``COPY ... TO`` under read-only enforcement, as an audited refusal.
+
+    Same two outcomes as ``run_sql_plus_plus_query``: a token without the
+    write scope is a scope denial, and read-only mode is a blocked write. Both
+    record the refusal before raising, so the audit log shows "we blocked
+    this" rather than a failed execution. ``token`` is set whenever
+    ``read_only_mode`` is false here, because enforcement then comes from the
+    token lacking the write scope.
+    """
+    if not read_only_mode:
+        held_scopes = sorted(set(token.scopes or []))
+        msg = (
+            f"COPY ... TO requires the '{SCOPE_WRITE}' scope; "
+            f"token scopes are {held_scopes}."
+        )
+        logger.warning(msg)
+        audit_state.record_refusal(
+            event_id=StatementScopeDeniedError.audit_event.id,
+            event_name=StatementScopeDeniedError.audit_event.event_name,
+            outcome=StatementScopeDeniedError.audit_outcome,
+            reason=StatementScopeDeniedError.audit_reason,
+            required_scope="write",
+            statement_kind="copy_to",
+        )
+        raise StatementScopeDeniedError(msg)
+    msg = (
+        "COPY ... TO is blocked under read-only mode: the server itself "
+        "classifies it as read-only, but it writes its result to "
+        "external storage or a KV collection."
+    )
+    logger.error(msg)
+    audit_state.record_refusal(
+        event_id=ReadOnlyWriteBlockedError.audit_event.id,
+        event_name=ReadOnlyWriteBlockedError.audit_event.event_name,
+        outcome=ReadOnlyWriteBlockedError.audit_outcome,
+        reason=ReadOnlyWriteBlockedError.audit_reason,
+        statement_kind="copy_to",
+    )
+    raise ReadOnlyWriteBlockedError(msg)
 
 
 #: Output formats the EA server accepts in ``COPY ... TO ... WITH {"format": ...}``.
@@ -313,12 +357,7 @@ def operational_insights_run_query_sync(
     # Checks the statement actually being sent, so an export built from the
     # copy_to_* arguments is gated exactly like one the caller wrote by hand.
     if enforce_readonly and _is_copy_to_statement(statement_to_run):
-        logger.debug("Blocking COPY ... TO statement under read-only mode")
-        raise ValueError(
-            "COPY ... TO is blocked under read-only mode: the server itself "
-            "classifies it as read-only, but it writes its result to "
-            "external storage or a KV collection."
-        )
+        _refuse_copy_to(read_only_mode, token)
 
     try:
         logger.debug(
@@ -592,12 +631,7 @@ def operational_insights_run_query_async(
     # Checks the statement actually being sent, so an export built from the
     # copy_to_* arguments is gated exactly like one the caller wrote by hand.
     if enforce_readonly and _is_copy_to_statement(statement_to_run):
-        logger.debug("Blocking COPY ... TO statement under read-only mode")
-        raise ValueError(
-            "COPY ... TO is blocked under read-only mode: the server itself "
-            "classifies it as read-only, but it writes its result to "
-            "external storage or a KV collection."
-        )
+        _refuse_copy_to(read_only_mode, token)
 
     try:
         logger.debug(
