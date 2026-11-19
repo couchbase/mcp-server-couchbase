@@ -337,7 +337,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.2.1,<9.0.0" },
     { name = "couchbase", specifier = ">=4.4.0,<5.0.0" },
     { name = "couchbase-operational-insights", specifier = ">=1.0.0,<2.0.0" },
-    { name = "fastmcp", specifier = ">=3.2.0,<4.0.0" },
+    { name = "fastmcp", specifier = ">=3.4.3,<4.0.0" },
     { name = "httptools", specifier = ">=0.8.0,<1.0.0" },
     { name = "lark-sqlpp", specifier = ">=0.2.1" },
     { name = "openai", specifier = ">=3.0.0,<4.0.0" },
