@@ -664,7 +664,7 @@ With `--transport=http`, either server can act as an **OAuth 2.1 resource server
 
 - OAuth turns on only when all three of `CB_MCP_OAUTH_JWT_JWKS_URI`, `CB_MCP_OAUTH_JWT_ISSUER` and `CB_MCP_OAUTH_JWT_AUDIENCE` are set; setting only some fails at startup.
 - `CB_MCP_OAUTH_MCP_BASE_URL` additionally publishes RFC 9728 Protected Resource Metadata so clients can discover the authorization server.
-- Access is gated by two scopes in the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools) and `couchbase-mcp:write` (write tools). Full access needs both. Rename them with `CB_MCP_OAUTH_SCOPE_READ_LABEL` / `CB_MCP_OAUTH_SCOPE_WRITE_LABEL` if your IdP can't emit these labels. Both servers use the same labels, so one IdP configuration covers both.
+- Access is gated by two scopes in the token's `scope`/`scp` claim: `couchbase-mcp:read` (read tools) and `couchbase-mcp:write` (write tools). Full access needs both. Rename them with `CB_MCP_OAUTH_SCOPE_READ_LABEL` / `CB_MCP_OAUTH_SCOPE_WRITE_LABEL` if your IdP can't emit these labels. Both servers use the same labels, so one IdP configuration covers both. The tool list is filtered by the same rule: a token with only the read scope is shown only the read tools, so an agent is not offered tools it would be refused one call later. Without OAuth, every registered tool is listed as before.
 
 ```bash
 uvx couchbase-mcp-server operational \

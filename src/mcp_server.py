@@ -234,6 +234,10 @@ def _build_server(
         audit_config=cli.audit,
         thread_pool_size=serving.thread_pool_size,
         send_startup_ping=send_startup_ping,
+        # One decision, same source as the call-path enforcement above, so
+        # the advertised list and the permitted list cannot be switched on
+        # independently of each other.
+        enforce_scopes=auth is not None,
     )
     return _BuiltServer(mcp, cli, spec, serving)
 
