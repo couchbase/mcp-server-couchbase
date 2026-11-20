@@ -121,6 +121,7 @@ The most common variables are below. Every option — including logging rotation
 | `CB_MCP_ALLOWED_HOSTS` | Comma-separated host names (no scheme or port, e.g. `mcp.example.com`) the HTTP endpoint may be reached by. When set, requests whose `Host` header is not listed are rejected with 421 (loopback names and the bound address are always allowed), and the `Origin` check is turned on too. List the public name your proxy or load balancer forwards, or all requests fail. Unset or `*` adds no restriction | |
 | `CB_MCP_DISABLED_TOOLS` | Tools to hide — comma-separated list or a file path | |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | Tools that ask the user to confirm first — comma-separated list or a file path | |
+| `CB_MCP_SESSION_POSTURE` | `workstation` (stdio, a person present) or `enterprise` (network transport, OAuth, no confirmation prompts); startup fails on a contradiction | |
 | `CB_MCP_LOG_LEVEL` | `off`, `error`, `warning`, `info`, `debug` | `info` |
 | `CB_MCP_LOG_SINKS` | `stderr`, `file`, or both | `stderr` |
 | `CB_MCP_LOG_FILE` | Base path for log files when the `file` sink is on | `mcp_server.log` |
