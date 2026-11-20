@@ -68,6 +68,10 @@ def get_server_configuration_status(ctx: Context) -> dict[str, Any]:
         "oauth_mcp_base_url": settings.get("oauth_mcp_base_url"),
         "oauth_scope_read_label": settings.get("oauth_scope_read_label"),
         "oauth_scope_write_label": settings.get("oauth_scope_write_label"),
+        # Empty means every origin is admitted.
+        "allowed_origins": settings.get("allowed_origins", []),
+        # Empty means no host restriction beyond FastMCP's default.
+        "allowed_hosts": settings.get("allowed_hosts", []),
     }
 
     connection_status = {
