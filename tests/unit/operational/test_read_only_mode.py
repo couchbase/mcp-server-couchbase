@@ -24,6 +24,8 @@ WRITE_TOOL_NAMES = {
     "replace_document_by_id",
     "delete_document_by_id",
     "mutate_subdocument",
+    "touch_document_by_id",
+    "get_and_touch_document_by_id",
     # Scope/collection management write tools
     "create_scope",
     "create_collection",
@@ -59,8 +61,9 @@ READ_ONLY_TOOL_NAMES = {
     "get_cluster_system_events",
     "get_cluster_query_vitals",
     "get_active_queries",
-    # KV read tools (2)
+    # KV read tools (3)
     "get_document_by_id",
+    "document_exists_by_id",
     "lookup_subdocument",
     # Query tools (3)
     "get_schema_for_collection",
@@ -101,7 +104,7 @@ class TestToolCategories:
 
     def test_write_tools_defined(self):
         """Verify WRITE_TOOLS list is properly defined."""
-        assert len(WRITE_TOOLS) == 16
+        assert len(WRITE_TOOLS) == 18
         tool_names = {tool.__name__ for tool in WRITE_TOOLS}
         assert tool_names == WRITE_TOOL_NAMES
 
@@ -192,18 +195,18 @@ class TestToolCounts:
         """Verify correct number of tools in read-only mode."""
         tools = get_tools(read_only_mode=True)
         assert len(tools) == len(READ_ONLY_TOOLS)
-        assert len(tools) == 36  # Expected count of read-only tools
+        assert len(tools) == 37  # Expected count of read-only tools
 
     def test_all_tools_mode_tool_count(self):
         """Verify correct number of tools when all write tools are enabled."""
         tools = get_tools(read_only_mode=False)
         assert len(tools) == len(ALL_TOOLS)
-        # Expected total count (36 read-only + 16 write)
-        assert len(tools) == 52
+        # Expected total count (37 read-only + 18 write)
+        assert len(tools) == 55
 
     def test_write_tools_count(self):
-        """Verify exactly 16 write tools exist."""
-        assert len(WRITE_TOOLS) == 16
+        """Verify exactly 18 write tools exist."""
+        assert len(WRITE_TOOLS) == 18
 
 
 class TestReadOnlyModeToolFiltering:

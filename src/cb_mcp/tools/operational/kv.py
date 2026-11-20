@@ -7,14 +7,17 @@ This module contains tools for document operations by ID:
 - insert: Create a document only if it does NOT exist (fails if exists)
 - replace: Update a document only if it exists (fails if missing)
 - delete: Remove a document
+- exists: Check whether a document is present without fetching it
+- touch / get and touch: Set a document's expiry, optionally reading it too
 """
 
 import json
 import logging
+from datetime import timedelta
 from typing import Any
 
 import couchbase.subdocument as subdoc
-from couchbase.exceptions import CouchbaseException
+from couchbase.exceptions import CouchbaseException, DocumentNotFoundException
 from fastmcp import Context
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
@@ -102,6 +105,153 @@ def delete_document_by_id(
         return tool_success()
     except Exception as e:
         logger.error(f"Error deleting document from {keyspace}: {e}", exc_info=True)
+        return tool_error(e)
+
+
+def _expiry_timedelta(expiry_seconds: int) -> timedelta:
+    """Validate an expiry and convert it to the timedelta the SDK expects.
+
+    Raises ValueError for a negative value so the calling tool can report an
+    actionable message rather than handing an invalid expiry to the SDK.
+    """
+    if expiry_seconds < 0:
+        raise ValueError(
+            f"expiry_seconds must be zero or positive; got {expiry_seconds}"
+        )
+    # Couchbase treats an expiry of 0 as "no expiry", which is also how the SDK
+    # interprets a zero timedelta, so 0 clears an existing TTL.
+    return timedelta(seconds=expiry_seconds)
+
+
+def document_exists_by_id(
+    ctx: Context,
+    bucket_name: str,
+    scope_name: str,
+    collection_name: str,
+    document_id: str,
+) -> dict[str, Any]:
+    """Check whether a document exists, without fetching its content.
+
+    Use this instead of get_document_by_id when you only need to know whether a
+    key is present. It does not transfer the document body, and a missing
+    document is a normal answer rather than an error, so it is the right tool
+    for "does this record already exist" checks before an insert.
+
+    Returns {"exists": true} or {"exists": false}. On a connection or server
+    failure, returns {"success": false, "error": "..."} instead: a false
+    "exists" always means the server answered and the document is absent, never
+    that the call failed.
+    """
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+    cluster = get_cluster_connection(ctx)
+    bucket = connect_to_bucket(cluster, bucket_name)
+    try:
+        logger.debug(f"Checking existence of document in {keyspace}")
+        collection = bucket.scope(scope_name).collection(collection_name)
+        result = collection.exists(document_id)
+        logger.info(f"Checked existence of document in {keyspace}")
+        return {"exists": bool(result.exists)}
+    except Exception as e:
+        logger.error(
+            f"Error checking document existence in {keyspace}: {e}", exc_info=True
+        )
+        return tool_error(e)
+
+
+def touch_document_by_id(
+    ctx: Context,
+    bucket_name: str,
+    scope_name: str,
+    collection_name: str,
+    document_id: str,
+    expiry_seconds: int,
+) -> dict[str, Any]:
+    """Set or clear a document's expiry (TTL) without rewriting its content.
+
+    expiry_seconds: seconds from now until the document expires and is removed
+    by the server. Must be zero or positive. 0 clears an existing expiry so the
+    document is kept indefinitely.
+
+    Use this to extend the life of a document an agent is still working with, or
+    to schedule cleanup of working state without having to write the document
+    again. A full-document write is the alternative, and it costs a round trip
+    carrying the whole body.
+
+    Expiry is applied lazily: an expired document may still occupy storage until
+    the server reclaims it, but it stops being readable.
+
+    Returns {"success": True} on success, or {"success": False, "error": "..."}
+    on failure with the reason (e.g. document not found, permission denied).
+    """
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+
+    try:
+        expiry = _expiry_timedelta(expiry_seconds)
+    except ValueError as e:
+        logger.warning(f"Error touching document in {keyspace}: {e}")
+        return tool_error(e)
+
+    cluster = get_cluster_connection(ctx)
+    bucket = connect_to_bucket(cluster, bucket_name)
+    try:
+        logger.debug(f"Touching document in {keyspace}")
+        collection = bucket.scope(scope_name).collection(collection_name)
+        collection.touch(document_id, expiry)
+        logger.info(f"Successfully touched document in {keyspace}")
+        return tool_success()
+    except DocumentNotFoundException as e:
+        logger.warning(f"Document not found in {keyspace}: {e}")
+        return tool_error(e)
+    except Exception as e:
+        logger.error(f"Error touching document in {keyspace}: {e}", exc_info=True)
+        return tool_error(e)
+
+
+def get_and_touch_document_by_id(
+    ctx: Context,
+    bucket_name: str,
+    scope_name: str,
+    collection_name: str,
+    document_id: str,
+    expiry_seconds: int,
+) -> dict[str, Any]:
+    """Get a document and set its expiry (TTL) in a single round trip.
+
+    expiry_seconds: seconds from now until the document expires and is removed
+    by the server. Must be zero or positive. 0 clears an existing expiry.
+
+    This is get_document_by_id and touch_document_by_id combined. Prefer it when
+    reading a document is itself the reason to keep it alive a while longer, for
+    example a cached result or a lease an agent is still using, because doing the
+    two separately leaves a window in which the document can expire between them.
+
+    Returns the document content, the same shape get_document_by_id returns. On
+    failure returns {"success": false, "error": "..."} with the reason (e.g.
+    document not found, permission denied).
+    """
+    keyspace = format_keyspace(bucket_name, scope_name, collection_name)
+
+    try:
+        expiry = _expiry_timedelta(expiry_seconds)
+    except ValueError as e:
+        logger.warning(f"Error getting and touching document in {keyspace}: {e}")
+        return tool_error(e)
+
+    cluster = get_cluster_connection(ctx)
+    bucket = connect_to_bucket(cluster, bucket_name)
+    try:
+        logger.debug(f"Getting and touching document in {keyspace}")
+        collection = bucket.scope(scope_name).collection(collection_name)
+        result = collection.get_and_touch(document_id, expiry)
+        logger.info(f"Retrieved and touched document in {keyspace}")
+        return result.content_as[dict]
+    except DocumentNotFoundException as e:
+        logger.warning(f"Document not found in {keyspace}: {e}")
+        return tool_error(e)
+    except Exception as e:
+        logger.error(
+            f"Error getting and touching document in {keyspace}: {e}", exc_info=True
+        )
         return tool_error(e)
 
 

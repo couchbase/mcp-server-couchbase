@@ -101,11 +101,21 @@ TOOL_CLASSIFICATION: dict[str, dict[str, tuple[str, str]]] = {
         # -- kv (document) --------------------------------------------------
         "get_document_by_id": ("kv", "read"),
         "lookup_subdocument": ("kv", "read"),
+        # Answers a boolean from the key alone and transfers no document body,
+        # so it is a kv read like its neighbours above.
+        "document_exists_by_id": ("kv", "read"),
         "upsert_document_by_id": ("kv", "write"),
         "insert_document_by_id": ("kv", "write"),
         "replace_document_by_id": ("kv", "write"),
         "delete_document_by_id": ("kv", "write"),
         "mutate_subdocument": ("kv", "write"),
+        # Both change a document's expiry, which schedules the server to
+        # remove it, so both are writes. get_and_touch reads as well, and the
+        # stricter of the two classes is the one that has to win: a record
+        # filed as a read would be filterable, and a call that can cause a
+        # deletion must never be.
+        "touch_document_by_id": ("kv", "write"),
+        "get_and_touch_document_by_id": ("kv", "write"),
         # -- query (SQL++) ---------------------------------------------------
         # `query` is an unsplit category: one event per call, whatever the
         # statement does. The class below no longer reaches the id, the
