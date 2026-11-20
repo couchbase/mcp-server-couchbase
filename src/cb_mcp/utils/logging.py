@@ -308,6 +308,39 @@ class BoundedRotatingFileHandler(RotatingFileHandler):
             self.stream = self._open()
 
 
+class TracebackSuppressingFormatter(logging.Formatter):
+    """Formatter that renders tracebacks only when DEBUG logging is enabled.
+
+    ``include_tracebacks`` is resolved once per :func:`configure_logging` call from
+    the configured level, not from the level of an individual record: at
+    ``--log-level=debug`` an ERROR line keeps its traceback, which is the whole
+    point of re-running at debug.
+
+    The record is restored after formatting because handlers share it; suppressing
+    the traceback must not depend on which handler formats first.
+    """
+
+    def __init__(
+        self,
+        fmt: str | None = None,
+        datefmt: str | None = None,
+        *,
+        include_tracebacks: bool,
+    ) -> None:
+        super().__init__(fmt, datefmt=datefmt)
+        self.include_tracebacks = include_tracebacks
+
+    def format(self, record: logging.LogRecord) -> str:
+        if self.include_tracebacks or not (record.exc_info or record.exc_text):
+            return super().format(record)
+        exc_info, exc_text = record.exc_info, record.exc_text
+        record.exc_info, record.exc_text = None, None
+        try:
+            return super().format(record)
+        finally:
+            record.exc_info, record.exc_text = exc_info, exc_text
+
+
 def _attach_per_level_file_handlers(
     root_logger: logging.Logger,
     formatter: logging.Formatter,
@@ -497,6 +530,10 @@ def configure_logging(
     not own the SDK must pass ``NO_SDK_LOG_HOOK`` rather than repeat the call.
 
     Setting ``level="OFF"`` suppresses output regardless of sinks.
+
+    Exception tracebacks attached with ``exc_info=True`` are rendered only when
+    ``level`` is DEBUG or TRACE; at every other level the record's message is
+    emitted on its own (see :class:`TracebackSuppressingFormatter`).
     """
     sdk_hook = sdk_log_hook if sdk_log_hook is not None else NO_SDK_LOG_HOOK
     # Both code paths below rebind the module-level snapshot.
@@ -537,7 +574,13 @@ def configure_logging(
 
     root_logger.setLevel(level_name)
 
-    formatter = logging.Formatter(DEFAULT_LOG_FORMAT, datefmt=DEFAULT_LOG_DATEFMT)
+    # Tracebacks are attached to records unconditionally by the tool error
+    # handlers; the formatter is what keeps them out of non-debug output.
+    formatter = TracebackSuppressingFormatter(
+        DEFAULT_LOG_FORMAT,
+        datefmt=DEFAULT_LOG_DATEFMT,
+        include_tracebacks=root_logger.level <= logging.DEBUG,
+    )
 
     effective_sinks = set(sinks)
     file_sink_active = "file" in effective_sinks

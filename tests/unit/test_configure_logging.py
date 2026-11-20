@@ -772,6 +772,85 @@ class TestPerLevelBackupCounts:
         assert max_seen <= 2000 + 200
 
 
+class TestTracebackSuppression:
+    """DA-2450: exc_info tracebacks are rendered only at DEBUG/TRACE."""
+
+    @staticmethod
+    def _log_error_with_exception():
+        log = logging.getLogger(f"{LOGGER_ROOT}.tracebacks")
+        try:
+            raise ValueError("boom-marker")
+        except ValueError as e:
+            log.error(f"Error doing a thing: {e}", exc_info=True)
+
+    def test_default_level_emits_one_liner_on_stderr(self, capsys):
+        _call(level="INFO", sinks={"stderr"})
+        self._log_error_with_exception()
+        err = capsys.readouterr().err
+        assert "Error doing a thing: boom-marker" in err
+        assert "Traceback (most recent call last)" not in err
+
+    def test_default_level_emits_one_liner_in_error_file(self, tmp_path):
+        _call(level="INFO", sinks={"file"}, log_file=str(tmp_path / "m.log"))
+        self._log_error_with_exception()
+        for h in logging.getLogger(LOGGER_ROOT).handlers:
+            h.flush()
+        text = (tmp_path / "m.error.log").read_text()
+        assert "Error doing a thing: boom-marker" in text
+        assert "Traceback (most recent call last)" not in text
+
+    def test_warning_level_also_suppresses(self, capsys):
+        _call(level="WARNING", sinks={"stderr"})
+        self._log_error_with_exception()
+        assert "Traceback (most recent call last)" not in capsys.readouterr().err
+
+    def test_debug_level_keeps_traceback(self, capsys):
+        _call(level="DEBUG", sinks={"stderr"})
+        self._log_error_with_exception()
+        err = capsys.readouterr().err
+        assert "Traceback (most recent call last)" in err
+        assert "ValueError: boom-marker" in err
+
+    def test_trace_level_keeps_traceback(self, capsys):
+        _call(level="TRACE", sinks={"stderr"})
+        self._log_error_with_exception()
+        assert "Traceback (most recent call last)" in capsys.readouterr().err
+
+    def test_debug_level_traceback_reaches_both_sinks(self, tmp_path, capsys):
+        _call(
+            level="DEBUG",
+            sinks={"stderr", "file"},
+            log_file=str(tmp_path / "m.log"),
+        )
+        self._log_error_with_exception()
+        for h in logging.getLogger(LOGGER_ROOT).handlers:
+            h.flush()
+        assert "Traceback (most recent call last)" in capsys.readouterr().err
+        assert (
+            "Traceback (most recent call last)"
+            in (tmp_path / "m.error.log").read_text()
+        )
+
+    def test_record_keeps_exc_info_after_formatting(self, tmp_path, capsys):
+        _call(level="INFO", sinks={"stderr", "file"}, log_file=str(tmp_path / "m.log"))
+        captured: list[logging.LogRecord] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record):
+                captured.append(record)
+
+        root = logging.getLogger(LOGGER_ROOT)
+        root.addHandler(_Capture())
+        self._log_error_with_exception()
+        assert captured and captured[0].exc_info is not None
+        assert captured[0].exc_text is None
+
+    def test_records_without_exception_are_unaffected(self, capsys):
+        _call(level="INFO", sinks={"stderr"})
+        logging.getLogger(f"{LOGGER_ROOT}.plain").error("plain-marker")
+        assert "plain-marker" in capsys.readouterr().err
+
+
 class TestEnvFile:
     """The dedicated environment-file path is derived and reported correctly."""
 
