@@ -110,7 +110,7 @@
         },
         {
           "name": "CB_MCP_ALLOWED_HOSTS",
-          "description": "Comma-separated host names (no scheme or port, '*' wildcard allowed) the http endpoint may be reached by. When set, requests whose Host header is not listed are rejected (421); loopback names and the bound address are always allowed, and the Origin check is turned on too. List the public name your proxy forwards. Unset, empty or '*' adds no restriction. Ignored with stdio.",
+          "description": "Comma-separated host names (no scheme or port, '*' wildcard allowed) the http endpoint may be reached by. When set, requests whose Host header is not listed are rejected (421); loopback names and the bound address are always allowed, but Origin is not restricted: set the allowed origins as well to restrict which web pages may call the server. List the public name your proxy forwards. Unset, empty or '*' adds no restriction. Ignored with stdio.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -901,7 +901,7 @@
         },
         {
           "name": "CB_MCP_ALLOWED_HOSTS",
-          "description": "Comma-separated host names (no scheme or port, '*' wildcard allowed) the http endpoint may be reached by. When set, requests whose Host header is not listed are rejected (421); loopback names and the bound address are always allowed, and the Origin check is turned on too. List the public name your proxy forwards. Unset, empty or '*' adds no restriction. Ignored with stdio.",
+          "description": "Comma-separated host names (no scheme or port, '*' wildcard allowed) the http endpoint may be reached by. When set, requests whose Host header is not listed are rejected (421); loopback names and the bound address are always allowed, but Origin is not restricted: set the allowed origins as well to restrict which web pages may call the server. List the public name your proxy forwards. Unset, empty or '*' adds no restriction. Ignored with stdio.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -1587,7 +1587,7 @@
         },
         {
           "name": "CB_MCP_ALLOWED_HOSTS",
-          "description": "Comma-separated host names (no scheme or port, '*' wildcard allowed) the http endpoint may be reached by. When set, requests whose Host header is not listed are rejected (421); loopback names and the bound address are always allowed, and the Origin check is turned on too. List the public name your proxy forwards. Unset, empty or '*' adds no restriction. Ignored with stdio.",
+          "description": "Comma-separated host names (no scheme or port, '*' wildcard allowed) the http endpoint may be reached by. When set, requests whose Host header is not listed are rejected (421); loopback names and the bound address are always allowed, but Origin is not restricted: set the allowed origins as well to restrict which web pages may call the server. List the public name your proxy forwards. Unset, empty or '*' adds no restriction. Ignored with stdio.",
           "isRequired": false,
           "format": "string",
           "isSecret": false
@@ -1977,7 +1977,7 @@
         },
         {
           "name": "CB_MCP_ALLOWED_HOSTS",
-          "description": "Comma-separated host names (no scheme or port, '*' wildcard allowed) the http endpoint may be reached by. When set, requests whose Host header is not listed are rejected (421); loopback names and the bound address are always allowed, and the Origin check is turned on too. List the public name your proxy forwards. Unset, empty or '*' adds no restriction. Ignored with stdio.",
+          "description": "Comma-separated host names (no scheme or port, '*' wildcard allowed) the http endpoint may be reached by. When set, requests whose Host header is not listed are rejected (421); loopback names and the bound address are always allowed, but Origin is not restricted: set the allowed origins as well to restrict which web pages may call the server. List the public name your proxy forwards. Unset, empty or '*' adds no restriction. Ignored with stdio.",
           "isRequired": false,
           "format": "string",
           "isSecret": false

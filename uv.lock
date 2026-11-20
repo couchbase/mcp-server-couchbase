@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11, <3.15"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'emscripten'",
@@ -346,7 +346,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = "==1.4.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "rapidfuzz", specifier = ">=3.13.0,<4.0.0" },
-    { name = "reo-census", specifier = ">=0.1.3,<0.2.0" },
+    { name = "reo-census", specifier = "==0.2.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.16.0" },
     { name = "uvicorn", specifier = ">=0.31.1,<1.0.0" },
     { name = "uvloop", marker = "platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'", specifier = ">=0.21.0,<1.0.0" },
@@ -707,8 +707,8 @@ name = "httpcore2"
 version = "2.16.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11" },
-    { name = "truststore" },
+    { name = "h11", marker = "python_full_version < '3.12' or sys_platform != 'emscripten'" },
+    { name = "truststore", marker = "python_full_version < '3.12' or sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c0/61/afa9d6b7452f9eca73f73d45324eb0bb52f098fd5e6049bf6b8263be9b4e/httpcore2-2.16.0.tar.gz", hash = "sha256:c72cd0413563b17e1cd8354677dff887466f8ec2551679759e93126534428643", size = 69886, upload-time = "2026-10-21T07:09:45.31Z" }
 wheels = [
@@ -935,7 +935,7 @@ name = "importlib-metadata"
 version = "10.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "zipp" },
+    { name = "zipp", marker = "(python_full_version < '3.14' and sys_platform != 'emscripten') or (python_full_version < '3.12' and sys_platform == 'emscripten')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/98/f6/4eda8458eb00ec03e715c376c6b23b3def69687924c68d36d1c4003d3bc4/importlib_metadata-10.1.0.tar.gz", hash = "sha256:82b04047fa09792c1a8cfeddfe08bec79e4b13c29c8469b0d3949860f61017e8", size = 67761, upload-time = "2026-10-24T00:01:44.856Z" }
 wheels = [
@@ -1826,11 +1826,11 @@ wheels = [
 
 [[package]]
 name = "reo-census"
-version = "0.1.3"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/79/4d/a86d93d9c634f088cd4e88fd686630a96ee45a2686ee029d59882b0cc345/reo_census-0.1.3.tar.gz", hash = "sha256:07b2aa01aa0a7734c01cc43ec3393afabfaa3746772126e1e7b761c40603044d", size = 8420, upload-time = "2026-06-12T12:05:59.006Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/71/49/a29366bdeea22834db74cec5864bf3f4ff8f0b2002a47e298a034df31c0b/reo_census-0.2.0.tar.gz", hash = "sha256:c0eba35ef9ffb095b3c18f4775cdca4cc9221ad109c3646dd1e5c0bad25d534b", size = 15291, upload-time = "2026-10-12T06:03:10.646Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/16/0f/00d8bad9e8543fc7ed133c5507318336a3620951ffd6c15a2cac76b80019/reo_census-0.1.3-py3-none-any.whl", hash = "sha256:d4a32e383c4019b6d8d40b899c3040971e4e2507c14e23632a9cab551dce4c79", size = 6786, upload-time = "2026-06-12T12:05:57.455Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/17/196d4e260a3bacabe08f42cbbdb298ee9a9ad31a4515595eac1806d8c8d3/reo_census-0.2.0-py3-none-any.whl", hash = "sha256:616ec1b5bf448d7d7e0cf04dcbec5dec9c2eeeecc8190142c25ada72ff969e9f", size = 9836, upload-time = "2026-10-12T06:03:09.455Z" },
 ]
 
 [[package]]
@@ -2007,8 +2007,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography" },
-    { name = "jeepney" },
+    { name = "cryptography", marker = "(python_full_version < '3.12' and sys_platform == 'emscripten') or (sys_platform != 'emscripten' and sys_platform != 'win32')" },
+    { name = "jeepney", marker = "(python_full_version < '3.12' and sys_platform == 'emscripten') or (sys_platform != 'emscripten' and sys_platform != 'win32')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [
