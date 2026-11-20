@@ -26,7 +26,11 @@ from cb_mcp.tools.operational.query import (
     _blocked_write_kind,
     _run_query_tool_with_empty_message,
     explain_sql_plus_plus_query,
+    get_longest_running_queries,
+    get_most_frequent_queries,
     get_queries_not_selective,
+    get_queries_with_large_result_count,
+    get_queries_with_largest_response_sizes,
     get_schema_for_collection,
     run_cluster_query,
     run_sql_plus_plus_query,
@@ -563,3 +567,241 @@ class TestGetSchemaForCollectionNumSampleValues:
             )
 
         scope.query.assert_not_called()
+
+
+class TestQueryParameterForwarding:
+    """Named values must reach the SDK unchanged, and only when the caller
+    supplied them: the SDK does not accept a ``None`` binding.
+    """
+
+    def test_no_parameters_are_forwarded_when_none_given(self) -> None:
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+
+        run_sql_plus_plus_query(ctx, "b", "s", "SELECT 1")
+
+        _, kwargs = scope.query.call_args
+        assert "named_parameters" not in kwargs
+
+    def test_named_parameters_are_forwarded(self) -> None:
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+
+        run_sql_plus_plus_query(
+            ctx,
+            "b",
+            "s",
+            "SELECT * FROM t WHERE country = $country",
+            named_parameters={"country": "France"},
+        )
+
+        _, kwargs = scope.query.call_args
+        assert kwargs["named_parameters"] == {"country": "France"}
+
+    def test_explain_with_a_positional_placeholder_skips_the_parse(self) -> None:
+        """EXPLAIN bypasses the write check, so a statement the SQL++ parser
+        cannot parse still reaches the cluster in read-only mode."""
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+        scope.query.return_value = iter([{"plan": {"#operator": "Sequence"}}])
+
+        explain_sql_plus_plus_query(ctx, "b", "s", "SELECT * FROM t WHERE country = ?")
+
+        args, kwargs = scope.query.call_args
+        assert args[0] == "EXPLAIN SELECT * FROM t WHERE country = ?"
+        assert "positional_parameters" not in kwargs
+
+    def test_empty_mappings_are_still_forwarded(self) -> None:
+        """An explicit empty binding is a caller decision, not an absence."""
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+
+        run_sql_plus_plus_query(ctx, "b", "s", "SELECT 1", named_parameters={})
+
+        _, kwargs = scope.query.call_args
+        assert kwargs["named_parameters"] == {}
+
+
+PRIMARY_SCAN_ROW = {
+    "plan": {
+        "#operator": "Sequence",
+        "~children": [
+            {
+                "#operator": "PrimaryScan3",
+                "index": "def_primary",
+                "keyspace": "hotel",
+            },
+            {"#operator": "Fetch", "keyspace": "hotel"},
+        ],
+    }
+}
+
+
+STATEMENT_AGGREGATING_TOOLS = [
+    get_longest_running_queries,
+    get_most_frequent_queries,
+    get_queries_with_largest_response_sizes,
+    get_queries_with_large_result_count,
+    get_queries_not_selective,
+]
+
+
+def _capture_tool_query(tool, monkeypatch) -> str:
+    """Run a completed_requests tool and return the SQL++ it would execute."""
+    captured: dict = {}
+
+    def fake_run(ctx, query, **kwargs):
+        captured["query"] = query
+        return []
+
+    monkeypatch.setattr(
+        "cb_mcp.tools.operational.query._run_query_tool_with_empty_message",
+        fake_run,
+    )
+    tool(MagicMock(), limit=5)
+    return captured["query"]
+
+
+class TestExplainSqlPlusPlusQueryParameters:
+    """EXPLAIN must plan with the caller's values.
+
+    Without them the optimizer has no selectivity to estimate from and can
+    report a primary scan for a query that uses a secondary index at runtime.
+    """
+
+    def test_named_parameters_reach_the_sdk(self) -> None:
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
+
+        explain_sql_plus_plus_query(
+            ctx,
+            "b",
+            "s",
+            "SELECT * FROM hotel WHERE country = $country",
+            named_parameters={"country": "France"},
+        )
+
+        args, kwargs = scope.query.call_args
+        assert args[0] == "EXPLAIN SELECT * FROM hotel WHERE country = $country"
+        assert kwargs["named_parameters"] == {"country": "France"}
+
+    def test_values_are_passed_through_untouched(self) -> None:
+        """The tool binds what it is given; it does not rewrite keys or values."""
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
+        supplied = {"$country": "France", "limit": 10, "flag": None}
+
+        explain_sql_plus_plus_query(
+            ctx,
+            "b",
+            "s",
+            "SELECT * FROM hotel WHERE country = $country",
+            named_parameters=supplied,
+        )
+
+        _, kwargs = scope.query.call_args
+        assert kwargs["named_parameters"] == supplied
+
+    def test_no_parameters_are_forwarded_when_none_given(self) -> None:
+        """The pre-existing contract for an unparameterized call is unchanged."""
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
+
+        result = explain_sql_plus_plus_query(ctx, "b", "s", "SELECT * FROM hotel")
+
+        _, kwargs = scope.query.call_args
+        assert "named_parameters" not in kwargs
+        assert set(result) == {
+            "query",
+            "explain_statement",
+            "query_context",
+            "plan",
+            "plan_evaluation",
+        }
+
+    def test_explain_prefixed_query_still_binds(self) -> None:
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
+
+        result = explain_sql_plus_plus_query(
+            ctx,
+            "b",
+            "s",
+            "EXPLAIN SELECT * FROM hotel WHERE country = $country",
+            named_parameters={"country": "France"},
+        )
+
+        _, kwargs = scope.query.call_args
+        assert kwargs["named_parameters"] == {"country": "France"}
+        assert result["explain_statement"] == (
+            "EXPLAIN SELECT * FROM hotel WHERE country = $country"
+        )
+
+    def test_parameters_are_exposed_as_an_mcp_tool_schema(self) -> None:
+        """The new argument must be callable over MCP, not just in Python."""
+        mcp = FastMCP("test")
+        mcp.tool(explain_sql_plus_plus_query)
+        tool = asyncio.run(mcp.get_tool("explain_sql_plus_plus_query"))
+
+        assert "named_parameters" in tool.parameters["properties"]
+        assert set(tool.parameters.get("required", [])) == {
+            "bucket_name",
+            "scope_name",
+            "query",
+        }
+
+
+class TestNamedArgsSampling:
+    """The statement-aggregating tools group by statement, which drops the
+    per-execution parameter values. Each projects the args of one real
+    execution so a parameterized statement can be re-explained with real
+    values.
+    """
+
+    @pytest.mark.parametrize(
+        "tool", STATEMENT_AGGREGATING_TOOLS, ids=lambda t: t.__name__
+    )
+    def test_named_args_are_projected(self, tool, monkeypatch) -> None:
+        query = _capture_tool_query(tool, monkeypatch)
+
+        projection = " ".join(query.split("FROM system:completed_requests")[0].split())
+        assert "MAX([" in projection
+        assert "namedArgs])[1] AS namedArgs" in projection
+
+    @pytest.mark.parametrize(
+        "tool", STATEMENT_AGGREGATING_TOOLS, ids=lambda t: t.__name__
+    )
+    def test_positional_args_are_projected(self, tool, monkeypatch) -> None:
+        """Reported for the same reason as namedArgs: the agent cannot bind
+        them through these tools, but it can read them and rewrite the
+        statement, and without them a positional statement looks unparameterized.
+        """
+        projection = " ".join(
+            _capture_tool_query(tool, monkeypatch)
+            .split("FROM system:completed_requests")[0]
+            .split()
+        )
+        assert "positionalArgs])[1] AS positionalArgs" in projection
+
+    @pytest.mark.parametrize(
+        "tool", STATEMENT_AGGREGATING_TOOLS, ids=lambda t: t.__name__
+    )
+    def test_args_are_ranked_by_the_same_key_as_the_tool(
+        self, tool, monkeypatch
+    ) -> None:
+        """Both samples come from the execution the tool itself ranks on, so
+        they describe the row the agent is looking at."""
+        projection = " ".join(
+            _capture_tool_query(tool, monkeypatch)
+            .split("FROM system:completed_requests")[0]
+            .split()
+        )
+        named = projection.split("MAX([")[1].split(", namedArgs])")[0]
+        positional = projection.split("namedArgs])[1] AS namedArgs,")[1]
+        assert named in " ".join(positional.split())
+
+    @pytest.mark.parametrize(
+        "tool", STATEMENT_AGGREGATING_TOOLS, ids=lambda t: t.__name__
+    )
+    def test_grouping_and_limit_are_unchanged(self, tool, monkeypatch) -> None:
+        """The sample is an extra projection, not a change to what is ranked."""
+        query = _capture_tool_query(tool, monkeypatch)
+
+        assert "GROUP BY statement" in query
+        assert "LIMIT $limit" in query
