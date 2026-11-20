@@ -21,6 +21,7 @@ from conftest import (
     extract_payload,
     get_test_collection,
     get_test_scope,
+    is_error_response,
     require_test_bucket,
 )
 
@@ -701,9 +702,7 @@ async def test_create_index_ignore_if_exists() -> None:
                     "keys": ["email"],
                 },
             )
-            duplicate_payload = extract_payload(duplicate)
-            assert duplicate_payload["success"] is False
-            assert "error" in duplicate_payload
+            assert is_error_response(duplicate)
 
             ignored = await session.call_tool(
                 "create_index",
@@ -866,9 +865,7 @@ async def test_drop_index_ignore_if_not_exists() -> None:
                 "index_name": index_name,
             },
         )
-        without_flag_payload = extract_payload(without_flag)
-        assert without_flag_payload["success"] is False
-        assert "error" in without_flag_payload
+        assert is_error_response(without_flag)
 
         with_flag = await session.call_tool(
             "drop_index",

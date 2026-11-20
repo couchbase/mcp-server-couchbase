@@ -2,13 +2,15 @@
 
 Covers create_scope, create_collection, delete_scope, delete_collection —
 happy paths (SDK collection-manager call forwarding + success envelope) and
-log-and-return error handling.
+errors propagate on failure.
 """
 
 from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from cb_mcp.tools.operational.collection_management import (
     create_collection,
@@ -47,14 +49,14 @@ class TestCreateScope:
         assert result["bucket_name"] == "b"
         assert result["scope_name"] == "s"
 
-    def test_sdk_error_returns_error_envelope_not_raised(self) -> None:
+    def test_sdk_error_propagates(self) -> None:
         ctx, cluster, cm = _make_ctx()
         cm.create_scope.side_effect = Exception("scope already exists")
-        with patch(_GET_CLUSTER, return_value=cluster):
-            result = create_scope(ctx, "b", "s")
-
-        assert result["success"] is False
-        assert result["error"] == "scope already exists"
+        with (
+            patch(_GET_CLUSTER, return_value=cluster),
+            pytest.raises(Exception, match="scope already exists"),
+        ):
+            create_scope(ctx, "b", "s")
 
 
 class TestCreateCollection:
@@ -67,14 +69,14 @@ class TestCreateCollection:
         assert result["success"] is True
         assert result["collection_name"] == "c"
 
-    def test_sdk_error_returns_error_envelope_not_raised(self) -> None:
+    def test_sdk_error_propagates(self) -> None:
         ctx, cluster, cm = _make_ctx()
         cm.create_collection.side_effect = Exception("collection already exists")
-        with patch(_GET_CLUSTER, return_value=cluster):
-            result = create_collection(ctx, "b", "s", "c")
-
-        assert result["success"] is False
-        assert result["error"] == "collection already exists"
+        with (
+            patch(_GET_CLUSTER, return_value=cluster),
+            pytest.raises(Exception, match="collection already exists"),
+        ):
+            create_collection(ctx, "b", "s", "c")
 
 
 class TestDeleteScope:
@@ -87,14 +89,14 @@ class TestDeleteScope:
         assert result["success"] is True
         assert result["scope_name"] == "s"
 
-    def test_sdk_error_returns_error_envelope_not_raised(self) -> None:
+    def test_sdk_error_propagates(self) -> None:
         ctx, cluster, cm = _make_ctx()
         cm.drop_scope.side_effect = Exception("scope not found")
-        with patch(_GET_CLUSTER, return_value=cluster):
-            result = delete_scope(ctx, "b", "s")
-
-        assert result["success"] is False
-        assert result["error"] == "scope not found"
+        with (
+            patch(_GET_CLUSTER, return_value=cluster),
+            pytest.raises(Exception, match="scope not found"),
+        ):
+            delete_scope(ctx, "b", "s")
 
 
 class TestDeleteCollection:
@@ -107,11 +109,11 @@ class TestDeleteCollection:
         assert result["success"] is True
         assert result["collection_name"] == "c"
 
-    def test_sdk_error_returns_error_envelope_not_raised(self) -> None:
+    def test_sdk_error_propagates(self) -> None:
         ctx, cluster, cm = _make_ctx()
         cm.drop_collection.side_effect = Exception("collection not found")
-        with patch(_GET_CLUSTER, return_value=cluster):
-            result = delete_collection(ctx, "b", "s", "c")
-
-        assert result["success"] is False
-        assert result["error"] == "collection not found"
+        with (
+            patch(_GET_CLUSTER, return_value=cluster),
+            pytest.raises(Exception, match="collection not found"),
+        ):
+            delete_collection(ctx, "b", "s", "c")

@@ -1,11 +1,7 @@
 """Query execution tools for Operational Insights.
 
-``operational_insights_run_query_sync`` can carry DDL/DML, so — unlike the metadata tools in
-this package — it follows the operational server's write-tool convention:
-catch Exception, log, and return a ``{"success": False, "error": ...}``
-envelope instead of raising.
-
-``operational_insights_explain_query`` follows the same envelope convention.
+Failures are raised, after logging where useful. The registration wrapper
+(utils/error_handling.py) turns them into a bounded error message.
 
 The Server Async Request API tools (``operational_insights_run_query_async``,
 ``operational_insights_get_async_query_results``, ``operational_insights_discard_async_query_results``,
@@ -33,7 +29,7 @@ tool descriptions and are deliberately short):
 
 import logging
 import re
-from typing import Any
+from typing import Any, NoReturn
 
 from couchbase_operational_insights.errors import (
     TimeoutError as OperationalInsightsTimeoutError,
@@ -42,6 +38,8 @@ from couchbase_operational_insights.options import QueryOptions
 from fastmcp import Context
 from fastmcp.server.dependencies import get_access_token
 
+from ...audit import state as audit_state
+from ...audit.exceptions import ReadOnlyWriteBlockedError, StatementScopeDeniedError
 from ...servers.operational_insights.cli import (
     OPERATIONAL_INSIGHTS_ASYNC_QUERY_RESULT_TIMEOUT_KEY,
 )
@@ -59,7 +57,7 @@ from ...utils.query_limits import (
     collect_rows_within_budget,
     max_query_result_size_for,
 )
-from ...utils.responses import tool_error, tool_success
+from ...utils.responses import tool_success
 from ...utils.sqlpp import quote_literal, safe_ident
 
 logger = logging.getLogger(f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.tools.query")
@@ -101,6 +99,48 @@ def _is_copy_to_statement(statement: str) -> bool:
     return re.match(r"^COPY\s", normalized) is not None
 
 
+def _refuse_copy_to(read_only_mode: bool, token: Any) -> NoReturn:
+    """Refuse a ``COPY ... TO`` under read-only enforcement, as an audited refusal.
+
+    Same two outcomes as ``run_sql_plus_plus_query``: a token without the
+    write scope is a scope denial, and read-only mode is a blocked write. Both
+    record the refusal before raising, so the audit log shows "we blocked
+    this" rather than a failed execution. ``token`` is set whenever
+    ``read_only_mode`` is false here, because enforcement then comes from the
+    token lacking the write scope.
+    """
+    if not read_only_mode:
+        held_scopes = sorted(set(token.scopes or []))
+        msg = (
+            f"COPY ... TO requires the '{SCOPE_WRITE}' scope; "
+            f"token scopes are {held_scopes}."
+        )
+        logger.warning(msg)
+        audit_state.record_refusal(
+            event_id=StatementScopeDeniedError.audit_event.id,
+            event_name=StatementScopeDeniedError.audit_event.event_name,
+            outcome=StatementScopeDeniedError.audit_outcome,
+            reason=StatementScopeDeniedError.audit_reason,
+            required_scope="write",
+            statement_kind="copy_to",
+        )
+        raise StatementScopeDeniedError(msg)
+    msg = (
+        "COPY ... TO is blocked under read-only mode: the server itself "
+        "classifies it as read-only, but it writes its result to "
+        "external storage or a KV collection."
+    )
+    logger.error(msg)
+    audit_state.record_refusal(
+        event_id=ReadOnlyWriteBlockedError.audit_event.id,
+        event_name=ReadOnlyWriteBlockedError.audit_event.event_name,
+        outcome=ReadOnlyWriteBlockedError.audit_outcome,
+        reason=ReadOnlyWriteBlockedError.audit_reason,
+        statement_kind="copy_to",
+    )
+    raise ReadOnlyWriteBlockedError(msg)
+
+
 #: Output formats the EA server accepts in ``COPY ... TO ... WITH {"format": ...}``.
 #: Validated client-side so a typo is a clear tool error naming the valid set,
 #: rather than a server error the model has to decode.
@@ -115,15 +155,6 @@ def _is_copy_to_statement(statement: str) -> bool:
 #: statement.
 COPY_TO_FORMATS = ("json", "parquet")
 DEFAULT_COPY_TO_FORMAT = "json"
-
-
-class CopyToError(ValueError):
-    """An export was requested with an incomplete or invalid destination.
-
-    Its own type so the callers can turn it into a ``tool_error`` envelope
-    without catching — and swallowing — genuine SDK failures from the same
-    ``try`` block.
-    """
 
 
 def build_copy_to_statement(
@@ -154,24 +185,24 @@ def build_copy_to_statement(
       interpolated into a statement is an injection point.
     """
     if not link or not link.strip():
-        raise CopyToError("copy_to_link is required to export results.")
+        raise ValueError("copy_to_link is required to export results.")
     if not bucket or not bucket.strip():
-        raise CopyToError("copy_to_bucket is required to export results.")
+        raise ValueError("copy_to_bucket is required to export results.")
     if not path or not path.strip():
-        raise CopyToError("copy_to_path is required to export results.")
+        raise ValueError("copy_to_path is required to export results.")
 
     link = link.strip()
     # The link name is interpolated unquoted (the grammar accepts no quoting
     # after AT), so restrict it to characters that cannot terminate the token.
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_\-]*", link):
-        raise CopyToError(
+        raise ValueError(
             f"copy_to_link {link!r} is not a valid link name: expected letters, "
             f"digits, underscore or hyphen, starting with a letter or underscore."
         )
 
     fmt = (output_format or DEFAULT_COPY_TO_FORMAT).strip().lower()
     if fmt not in COPY_TO_FORMATS:
-        raise CopyToError(
+        raise ValueError(
             f"copy_to_format {output_format!r} is not supported; "
             f"expected one of {', '.join(COPY_TO_FORMATS)}."
         )
@@ -214,7 +245,7 @@ def _resolve_copy_to(
     requested = [p for p in (link, bucket, path) if p is not None]
     if not requested:
         if output_format:
-            raise CopyToError(
+            raise ValueError(
                 "copy_to_format was given without a destination; "
                 "copy_to_link, copy_to_bucket and copy_to_path are all "
                 "required to export."
@@ -292,8 +323,8 @@ def operational_insights_run_query_sync(
         copy_to_format: Output format — json (default) or parquet.
 
     Returns {"success": True, "rows": [...], "row_count": N,
-    "truncated": bool} on success, or {"success": False, "error": "..."} on
-    failure. When truncated is true the remaining rows were not read and
+    "truncated": bool} on success; the call fails with an
+    error otherwise. When truncated is true the remaining rows were not read and
     cannot be retrieved by calling again — narrow the statement, or export it
     with the copy_to_* arguments.
 
@@ -315,28 +346,18 @@ def operational_insights_run_query_sync(
     lacks_write_scope = token is not None and SCOPE_WRITE not in (token.scopes or [])
     enforce_readonly = read_only_mode or lacks_write_scope
 
-    try:
-        statement_to_run, destination = _resolve_copy_to(
-            statement,
-            link=copy_to_link,
-            bucket=copy_to_bucket,
-            path=copy_to_path,
-            output_format=copy_to_format,
-        )
-    except CopyToError as e:
-        logger.debug(f"Rejecting export request: {e}")
-        return tool_error(e, statement=statement)
+    statement_to_run, destination = _resolve_copy_to(
+        statement,
+        link=copy_to_link,
+        bucket=copy_to_bucket,
+        path=copy_to_path,
+        output_format=copy_to_format,
+    )
 
     # Checks the statement actually being sent, so an export built from the
     # copy_to_* arguments is gated exactly like one the caller wrote by hand.
     if enforce_readonly and _is_copy_to_statement(statement_to_run):
-        logger.debug("Blocking COPY ... TO statement under read-only mode")
-        return tool_error(
-            "COPY ... TO is blocked under read-only mode: the server itself "
-            "classifies it as read-only, but it writes its result to "
-            "external storage or a KV collection.",
-            statement=statement,
-        )
+        _refuse_copy_to(read_only_mode, token)
 
     try:
         logger.debug(
@@ -385,7 +406,7 @@ def operational_insights_run_query_sync(
         )
     except Exception as e:
         logger.error(f"Error running query: {e}", exc_info=True)
-        return tool_error(e, statement=statement)
+        raise
 
 
 def operational_insights_explain_query(ctx: Context, statement: str) -> dict[str, Any]:
@@ -401,8 +422,8 @@ def operational_insights_explain_query(ctx: Context, statement: str) -> dict[str
     execute the statement it plans, and a readonly session may refuse to
     even plan a DDL/DML statement.
 
-    Returns {"success": True, "plan": [...]} on success, or
-    {"success": False, "error": "..."} on failure.
+    Returns {"success": True, "plan": [...]} on success; the call fails with
+    an error otherwise.
     """
     cluster = get_operational_insights_cluster(ctx)
     try:
@@ -413,7 +434,7 @@ def operational_insights_explain_query(ctx: Context, statement: str) -> dict[str
         return tool_success(plan=rows)
     except Exception as e:
         logger.error(f"Error running EXPLAIN: {e}", exc_info=True)
-        return tool_error(e, statement=statement)
+        raise
 
 
 def _extract_metadata(result: Any, query_handle: str) -> dict[str, Any]:
@@ -499,34 +520,28 @@ def _timeout_hint(seconds: int) -> str:
 
 
 def _handle_request_timeout_error(
-    ctx: Context, action: str, error: Exception, **fields: Any
-) -> dict[str, Any]:
-    """Failure envelope for a handle request that hit the SDK deadline.
+    ctx: Context, action: str, error: Exception
+) -> TimeoutError:
+    """Exception for a handle request that hit the SDK deadline.
 
     The raw SDK text ("Request timed out.") reads the same as any other
     failure, so the agent cannot tell a slow server from a broken query. Say
-    which request ran out of time and name the setting that bounds it.
-    ``timed_out`` lets a caller branch on it without parsing the message; the
-    remedy goes in ``suggestion`` so ``error`` stays under the length cap.
+    which request ran out of time and name the setting that bounds it. The
+    caller raises it; the whole message must fit the error length cap.
     """
     seconds = _async_query_timeout_seconds(ctx)
     logger.warning(f"Async query {action} timed out after {seconds}s: {error}")
-    return tool_error(
+    return TimeoutError(
         f"Timed out: the request to {action} did not complete within "
-        f"{seconds} seconds.",
-        timed_out=True,
-        suggestion=(
-            f"The server may be busy or not responding; try again later. "
-            f"{_timeout_hint(seconds)}"
-        ),
-        **fields,
+        f"{seconds} seconds. The server may be busy or not responding; try "
+        f"again later. {_timeout_hint(seconds)}"
     )
 
 
 def _download_timeout_error(
     ctx: Context, error: Exception, query_handle: str
-) -> dict[str, Any]:
-    """Failure envelope for a finished query whose rows took too long to read.
+) -> TimeoutError:
+    """Exception for a finished query whose rows took too long to read.
 
     The SDK's deadline covers the whole of ``fetch_results()``, row stream
     included (see ``utils/operational_insights/connection.py``), so a large
@@ -538,21 +553,11 @@ def _download_timeout_error(
         f"Download of async query results timed out after {seconds}s "
         f"(token={query_handle}): {error}"
     )
-    return tool_error(
+    return TimeoutError(
         f"The query finished successfully, but downloading its results took "
-        f"longer than the {seconds}-second timeout, so no rows were returned. "
-        f"The results are still on the server and this query_handle is still "
-        f"valid.",
-        query_handle=query_handle,
-        ready=True,
-        timed_out=True,
-        suggestion=(
-            f"Do not treat this as a failed query. Calling this tool again "
-            f"will likely time out again for the same result size. To get a "
-            f"smaller result, re-run the query with a LIMIT or fewer columns, "
-            f"or export it with copy_to_* on "
-            f"operational_insights_run_query_async. {_timeout_hint(seconds)}"
-        ),
+        f"longer than {seconds} seconds, so no rows were returned. The "
+        f"query_handle is still valid. Retrying will likely time out again; "
+        f"re-run with a LIMIT or fewer columns. {_timeout_hint(seconds)}"
     )
 
 
@@ -600,8 +605,8 @@ def operational_insights_run_query_async(
         copy_to_format: Output format — json (default) or parquet.
 
     Returns:
-        {"success": True, "query_handle": "..."}, or
-        {"success": False, "error": "..."} on failure. When exporting, the
+        {"success": True, "query_handle": "..."}; the call fails with an error
+        otherwise. When exporting, the
         response also carries "exported": True and "destination": {...}, and
         the eventual results will be empty — the rows go to object storage.
     """
@@ -615,28 +620,18 @@ def operational_insights_run_query_async(
     lacks_write_scope = token is not None and SCOPE_WRITE not in (token.scopes or [])
     enforce_readonly = read_only_mode or lacks_write_scope
 
-    try:
-        statement_to_run, destination = _resolve_copy_to(
-            statement,
-            link=copy_to_link,
-            bucket=copy_to_bucket,
-            path=copy_to_path,
-            output_format=copy_to_format,
-        )
-    except CopyToError as e:
-        logger.debug(f"Rejecting export request: {e}")
-        return tool_error(e, statement=statement)
+    statement_to_run, destination = _resolve_copy_to(
+        statement,
+        link=copy_to_link,
+        bucket=copy_to_bucket,
+        path=copy_to_path,
+        output_format=copy_to_format,
+    )
 
     # Checks the statement actually being sent, so an export built from the
     # copy_to_* arguments is gated exactly like one the caller wrote by hand.
     if enforce_readonly and _is_copy_to_statement(statement_to_run):
-        logger.debug("Blocking COPY ... TO statement under read-only mode")
-        return tool_error(
-            "COPY ... TO is blocked under read-only mode: the server itself "
-            "classifies it as read-only, but it writes its result to "
-            "external storage or a KV collection.",
-            statement=statement,
-        )
+        _refuse_copy_to(read_only_mode, token)
 
     try:
         logger.debug(
@@ -678,12 +673,10 @@ def operational_insights_run_query_async(
             ),
         )
     except OperationalInsightsTimeoutError as e:
-        return _handle_request_timeout_error(
-            ctx, "start the query", e, statement=statement
-        )
+        raise _handle_request_timeout_error(ctx, "start the query", e) from e
     except Exception as e:
         logger.error(f"Error starting async query: {e}", exc_info=True)
-        return tool_error(e, statement=statement)
+        raise
 
 
 def operational_insights_get_async_query_results(
@@ -717,13 +710,12 @@ def operational_insights_get_async_query_results(
         "truncated": bool, "metadata": {"warnings": [...], "metrics":
         {"elapsed_time_ms", "execution_time_ms", "result_count",
         "result_size", "processed_objects"}}}; or {"success": True,
-        "ready": false} if not finished; or {"success": False,
-        "error": "..."} on failure. When truncated is true the rows are
+        "ready": false} if not finished; the call fails with an error
+        otherwise. When truncated is true the rows are
         incomplete and metadata may be empty, since the server reports it
         only once every row has been read. If the query finished but its
-        rows took too long to download, the failure also has "ready": true,
-        "timed_out": true and a "suggestion"; the query did not fail and
-        the query_handle is still valid.
+        rows took too long to download, the error says so; the query did not
+        fail and the query_handle is still valid.
     """
     registry = get_operational_insights_handle_registry(ctx)
     # Set once the query is known to have finished, so a timeout after that
@@ -798,13 +790,11 @@ def operational_insights_get_async_query_results(
         )
     except OperationalInsightsTimeoutError as e:
         if downloading:
-            return _download_timeout_error(ctx, e, query_handle)
-        return _handle_request_timeout_error(
-            ctx, "check the query status", e, query_handle=query_handle
-        )
+            raise _download_timeout_error(ctx, e, query_handle) from e
+        raise _handle_request_timeout_error(ctx, "check the query status", e) from e
     except Exception as e:
         logger.error(f"Error fetching async query results: {e}", exc_info=True)
-        return tool_error(e, query_handle=query_handle)
+        raise
 
 
 def operational_insights_discard_async_query_results(
@@ -827,7 +817,7 @@ def operational_insights_discard_async_query_results(
     Returns:
         {"success": True, "query_handle": "...", "discarded": true}; or
         {"success": True, "discarded": false, "ready": false} if the query has
-        not finished; or {"success": False, "error": "..."} on failure.
+        not finished; the call fails with an error otherwise.
     """
     registry = get_operational_insights_handle_registry(ctx)
     try:
@@ -849,12 +839,10 @@ def operational_insights_discard_async_query_results(
         logger.info(f"Discarded results for async query (token={query_handle})")
         return tool_success(query_handle=query_handle, discarded=True)
     except OperationalInsightsTimeoutError as e:
-        return _handle_request_timeout_error(
-            ctx, "discard the results", e, query_handle=query_handle
-        )
+        raise _handle_request_timeout_error(ctx, "discard the results", e) from e
     except Exception as e:
         logger.error(f"Error discarding async query results: {e}", exc_info=True)
-        return tool_error(e, query_handle=query_handle)
+        raise
 
 
 def operational_insights_cancel_async_query(
@@ -873,8 +861,8 @@ def operational_insights_cancel_async_query(
         query_handle: The query_handle returned by operational_insights_run_query_async.
 
     Returns:
-        {"success": True, "query_handle": "...", "cancelled": true}, or
-        {"success": False, "error": "..."} on failure.
+        {"success": True, "query_handle": "...", "cancelled": true}; the call fails with an error
+        otherwise.
     """
     registry = get_operational_insights_handle_registry(ctx)
     try:
@@ -906,9 +894,7 @@ def operational_insights_cancel_async_query(
         logger.info(f"Cancelled async query (token={query_handle})")
         return tool_success(query_handle=query_handle, cancelled=True)
     except OperationalInsightsTimeoutError as e:
-        return _handle_request_timeout_error(
-            ctx, "cancel the query", e, query_handle=query_handle
-        )
+        raise _handle_request_timeout_error(ctx, "cancel the query", e) from e
     except Exception as e:
         logger.error(f"Error cancelling async query: {e}", exc_info=True)
-        return tool_error(e, query_handle=query_handle)
+        raise

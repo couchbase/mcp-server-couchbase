@@ -12,7 +12,7 @@ Two assertions below check a substring of the server's own error message
 ("EXCLUDE UNKNOWN KEY", "B-Tree"). Asserting on vendor error text in the only
 PR gate would turn the suite red on an unrelated server upgrade, so those are
 soft checks (a warning, not a failure) rather than hard assertions — the
-success/error envelope shape itself is still asserted normally.
+error result itself (isError) is still asserted normally.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import uuid
 import warnings
 
 import pytest
-from conftest import extract_payload
+from conftest import extract_payload, is_error_response
 
 from .conftest import create_operational_insights_mcp_session
 
@@ -144,7 +144,7 @@ async def test_create_index_composite_and_if_not_exists() -> None:
             second = await session.call_tool(
                 "operational_insights_create_index", arguments=arguments
             )
-            assert extract_payload(second)["success"] is False
+            assert is_error_response(second)
 
             # ...and is a no-op with it.
             third = await session.call_tool(
@@ -235,11 +235,10 @@ async def test_array_index_requires_exclude_unknown_key() -> None:
                     "fields": [{"unnest": "likes", "type": "string"}],
                 },
             )
-            payload = extract_payload(response)
 
-            assert payload["success"] is False
+            assert is_error_response(response)
             _soft_assert_substring(
-                payload["error"],
+                extract_payload(response),
                 "EXCLUDE UNKNOWN KEY",
                 "Array-index-without-clause rejection message may have changed",
             )
@@ -313,11 +312,10 @@ async def test_cast_is_rejected_on_an_array_index() -> None:
                     "cast_default_null": True,
                 },
             )
-            payload = extract_payload(response)
 
-            assert payload["success"] is False
+            assert is_error_response(response)
             _soft_assert_substring(
-                payload["error"],
+                extract_payload(response),
                 "B-Tree",
                 "CAST-on-array-index rejection message may have changed",
             )
@@ -367,7 +365,7 @@ async def test_backticks_in_names_cannot_break_out() -> None:
                     "fields": [{"name": "name", "type": "string"}],
                 },
             )
-            assert extract_payload(attack)["success"] is False
+            assert is_error_response(attack)
 
             verify = await session.call_tool(
                 "operational_insights_run_query_sync",
@@ -386,7 +384,7 @@ async def test_backticks_in_names_cannot_break_out() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_index_on_missing_collection_returns_error_envelope() -> None:
+async def test_create_index_on_missing_collection_is_an_error() -> None:
     async with create_operational_insights_mcp_session() as session:
         response = await session.call_tool(
             "operational_insights_create_index",
@@ -398,10 +396,8 @@ async def test_create_index_on_missing_collection_returns_error_envelope() -> No
                 "fields": [{"name": "name", "type": "string"}],
             },
         )
-        payload = extract_payload(response)
 
-        assert payload["success"] is False
-        assert "error" in payload
+        assert is_error_response(response)
 
 
 @pytest.mark.asyncio

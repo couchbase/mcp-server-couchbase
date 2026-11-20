@@ -4,7 +4,7 @@ Integration tests for the scope/collection management tools.
 Tests for:
 - create_scope / delete_scope
 - create_collection / delete_collection
-- error envelopes for already-exists / not-found conditions
+- tool errors for already-exists / not-found conditions
 
 Verification uses get_scopes_and_collections_in_bucket (SDK collection manager,
 immediately consistent) rather than the query-service-backed
@@ -19,6 +19,7 @@ import pytest
 from conftest import (
     create_mcp_session,
     extract_payload,
+    is_error_response,
     require_test_bucket,
 )
 
@@ -34,8 +35,8 @@ async def _scopes_and_collections(session, bucket: str) -> dict:
 
 
 async def _delete_scope_quietly(session, bucket: str, scope: str) -> None:
-    """Best-effort teardown. delete_scope returns an error envelope (never
-    raises) when the scope is already gone, so this is safe to always call."""
+    """Best-effort teardown. delete_scope reports a tool error (the MCP call
+    does not raise) when the scope is already gone, so this is safe to always call."""
     await session.call_tool(
         "delete_scope",
         arguments={"bucket_name": bucket, "scope_name": scope},
@@ -125,7 +126,7 @@ async def test_create_and_delete_collection() -> None:
 
 @pytest.mark.asyncio
 async def test_create_scope_already_exists_returns_error() -> None:
-    """Recreating an existing scope returns a log-and-return error envelope."""
+    """Recreating an existing scope is reported as a tool error."""
     bucket = require_test_bucket()
     scope = f"test_scope_{uuid.uuid4().hex[:8]}"
 
@@ -139,52 +140,43 @@ async def test_create_scope_already_exists_returns_error() -> None:
             )
             assert first["success"] is True
 
-            duplicate = extract_payload(
-                await session.call_tool(
-                    "create_scope",
-                    arguments={"bucket_name": bucket, "scope_name": scope},
-                )
+            duplicate = await session.call_tool(
+                "create_scope",
+                arguments={"bucket_name": bucket, "scope_name": scope},
             )
-            assert duplicate["success"] is False
-            assert "error" in duplicate
+            assert is_error_response(duplicate)
         finally:
             await _delete_scope_quietly(session, bucket, scope)
 
 
 @pytest.mark.asyncio
 async def test_delete_nonexistent_scope_returns_error() -> None:
-    """Deleting a scope that does not exist returns an error envelope, not a raise."""
+    """Deleting a scope that does not exist is reported as a tool error."""
     bucket = require_test_bucket()
     scope = f"missing_scope_{uuid.uuid4().hex[:8]}"
 
     async with create_mcp_session() as session:
-        result = extract_payload(
-            await session.call_tool(
-                "delete_scope",
-                arguments={"bucket_name": bucket, "scope_name": scope},
-            )
+        response = await session.call_tool(
+            "delete_scope",
+            arguments={"bucket_name": bucket, "scope_name": scope},
         )
-        assert result["success"] is False
-        assert "error" in result
+        assert is_error_response(response)
 
 
 @pytest.mark.asyncio
 async def test_create_collection_in_missing_scope_returns_error() -> None:
-    """Creating a collection in a nonexistent scope returns an error envelope."""
+    """Creating a collection in a nonexistent scope is reported as a tool error."""
     bucket = require_test_bucket()
     scope = f"missing_scope_{uuid.uuid4().hex[:8]}"
     collection = f"test_col_{uuid.uuid4().hex[:8]}"
 
     async with create_mcp_session() as session:
-        result = extract_payload(
-            await session.call_tool(
-                "create_collection",
-                arguments={
-                    "bucket_name": bucket,
-                    "scope_name": scope,
-                    "collection_name": collection,
-                },
-            )
+        response = await session.call_tool(
+            "create_collection",
+            arguments={
+                "bucket_name": bucket,
+                "scope_name": scope,
+                "collection_name": collection,
+            },
         )
-        assert result["success"] is False
-        assert "error" in result
+        assert is_error_response(response)

@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from conftest import extract_payload
+from conftest import extract_payload, is_error_response
 
 from .conftest import create_operational_insights_mcp_session
 
@@ -119,14 +119,12 @@ async def test_discard_after_fetch_ends_the_lifecycle() -> None:
         assert discarded["discarded"] is True
 
         # Only now is the token gone.
-        after = extract_payload(
-            await session.call_tool(
-                "operational_insights_get_async_query_results",
-                arguments={"query_handle": handle},
-            )
+        after = await session.call_tool(
+            "operational_insights_get_async_query_results",
+            arguments={"query_handle": handle},
         )
-        assert after["success"] is False
-        assert handle in after["error"]
+        assert is_error_response(after)
+        assert handle in extract_payload(after)
 
 
 @pytest.mark.asyncio
@@ -150,7 +148,7 @@ async def test_discard_async_query_results() -> None:
             "operational_insights_get_async_query_results",
             arguments={"query_handle": handle},
         )
-        assert extract_payload(response)["success"] is False
+        assert is_error_response(response)
 
 
 @pytest.mark.asyncio
@@ -208,13 +206,11 @@ async def test_cancel_running_query() -> None:
 
         if payload["cancelled"]:
             # Cancelled: the token is evicted, so a second cancel fails.
-            second = extract_payload(
-                await session.call_tool(
-                    "operational_insights_cancel_async_query",
-                    arguments={"query_handle": handle},
-                )
+            second = await session.call_tool(
+                "operational_insights_cancel_async_query",
+                arguments={"query_handle": handle},
             )
-            assert second["success"] is False
+            assert is_error_response(second)
         else:
             # It finished before the cancel landed; clean up its buffers.
             await session.call_tool(
@@ -224,7 +220,7 @@ async def test_cancel_running_query() -> None:
 
 
 @pytest.mark.asyncio
-async def test_unknown_handle_returns_error_envelope() -> None:
+async def test_unknown_handle_is_an_error() -> None:
     async with create_operational_insights_mcp_session() as session:
         for tool in (
             "operational_insights_get_async_query_results",
@@ -234,20 +230,17 @@ async def test_unknown_handle_returns_error_envelope() -> None:
             response = await session.call_tool(
                 tool, arguments={"query_handle": "not-a-real-handle"}
             )
-            payload = extract_payload(response)
 
-            assert payload["success"] is False, tool
-            assert "not-a-real-handle" in payload["error"], tool
+            assert is_error_response(response), tool
+            assert "not-a-real-handle" in extract_payload(response), tool
 
 
 @pytest.mark.asyncio
-async def test_invalid_statement_returns_error_envelope() -> None:
+async def test_invalid_statement_is_an_error() -> None:
     async with create_operational_insights_mcp_session() as session:
         response = await session.call_tool(
             "operational_insights_run_query_async",
             arguments={"statement": "SELECT bad("},
         )
-        payload = extract_payload(response)
 
-        assert payload["success"] is False
-        assert "error" in payload
+        assert is_error_response(response)

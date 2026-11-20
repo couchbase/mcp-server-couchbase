@@ -33,6 +33,7 @@ from conftest import (
     extract_payload,
     get_test_collection,
     get_test_scope,
+    is_error_response,
     require_test_bucket,
 )
 
@@ -235,7 +236,7 @@ async def test_create_query_index_composite_vector_key_position() -> None:
     # Unlike the Hyperscale/dimension-mismatch tests, this one has no other
     # reason to open a direct SDK connection -- but it still needs one for
     # the version check, since a pre-8.0 cluster's SQL++ parser doesn't even
-    # recognize VECTOR as a keyword (a syntax error, not a clean tool_error
+    # recognize VECTOR as a keyword (a syntax error, not a clean tool error
     # from a version-aware check) -- confirmed by this test failing exactly
     # that way in CI before this guard was added.
     cluster = _direct_cluster()
@@ -293,7 +294,7 @@ async def test_create_query_index_composite_vector_key_position() -> None:
 @pytest.mark.asyncio
 async def test_create_query_index_rejects_dot_product_similarity() -> None:
     """ "DOT_PRODUCT" is the Search (FTS) service's spelling, not GSI's -- it
-    must be rejected with a tool_error, and no index actually created."""
+    must be rejected with a tool error, and no index actually created."""
     bucket = require_test_bucket()
     scope = get_test_scope()
     collection = get_test_collection()
@@ -314,9 +315,8 @@ async def test_create_query_index_rejects_dot_product_similarity() -> None:
                     "similarity": "DOT_PRODUCT",
                 },
             )
-            payload = extract_payload(response)
-            assert payload["success"] is False
-            assert "DOT_PRODUCT" in payload["error"]
+            assert is_error_response(response)
+            assert "DOT_PRODUCT" in response.content[0].text
 
             list_response = await session.call_tool(
                 "list_indexes",

@@ -44,10 +44,10 @@ class EmbeddingResult:
 class EmbeddingConfigError(ValueError):
     """Config is missing or invalid for the selected provider.
 
-    A ``ValueError`` subclass, not a bare ``Exception``, so the same
-    ``except Exception`` already used in every tool body catches it and turns
-    it into ``tool_error()`` without a provider-specific except clause, while
-    still being distinguishable by type in tests.
+    A ``ValueError`` subclass, not a bare ``Exception``, so a tool
+    can let it propagate like any other input rejection, without a
+    provider-specific except clause, while still being distinguishable by
+    type in tests.
     """
 
 

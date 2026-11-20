@@ -23,7 +23,7 @@ from ...utils.operational.connection_string import (
 )
 from ...utils.operational.context import get_cluster_connection
 from ...utils.operational.index_utils import resolve_query_endpoints
-from ...utils.responses import tool_error, tool_success
+from ...utils.responses import tool_success
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.query_admin")
 
@@ -49,8 +49,8 @@ def get_cluster_query_vitals(ctx: Context, timeout: int = 30) -> dict[str, Any]:
 
     Returns {"status": "success", "vitals": {"<host:port>": {...}, ...},
     "unreachable_nodes": [{"node", "error"}]} (the last key omitted when every
-    node answered), or {"status": "error", "error": ...} if no query node
-    could be reached at all, or the cluster is Capella.
+    node answered), or fails if no query node could be reached at all, or the
+    cluster is Capella.
     """
     try:
         settings = get_settings(ctx)
@@ -107,18 +107,10 @@ def get_cluster_query_vitals(ctx: Context, timeout: int = 30) -> dict[str, Any]:
         # Up-front, documented rejections (Capella, no endpoints) — not a
         # system fault, so no traceback noise in the logs.
         logger.warning(f"Rejected get_cluster_query_vitals request: {e}")
-        return {
-            "status": "error",
-            "error": str(e),
-            "message": "Failed to get cluster query vitals",
-        }
+        raise
     except Exception as e:
         logger.error(f"Error getting cluster query vitals: {e}", exc_info=True)
-        return {
-            "status": "error",
-            "error": str(e),
-            "message": "Failed to get cluster query vitals",
-        }
+        raise
 
 
 def get_active_queries(ctx: Context, timeout: int = 30) -> dict[str, Any]:
@@ -142,8 +134,8 @@ def get_active_queries(ctx: Context, timeout: int = 30) -> dict[str, Any]:
 
     Returns {"status": "success", "active_requests": [...merged...],
     "unreachable_nodes": [{"node", "error"}]} (the last key omitted when every
-    node answered), or {"status": "error", "error": ...} if no query node
-    could be reached at all, or the cluster is Capella.
+    node answered), or fails if no query node could be reached at all, or the
+    cluster is Capella.
     """
     try:
         settings = get_settings(ctx)
@@ -210,18 +202,10 @@ def get_active_queries(ctx: Context, timeout: int = 30) -> dict[str, Any]:
         return result
     except ValueError as e:
         logger.warning(f"Rejected get_active_queries request: {e}")
-        return {
-            "status": "error",
-            "error": str(e),
-            "message": "Failed to get active queries",
-        }
+        raise
     except Exception as e:
         logger.error(f"Error getting active queries: {e}", exc_info=True)
-        return {
-            "status": "error",
-            "error": str(e),
-            "message": "Failed to get active queries",
-        }
+        raise
 
 
 def delete_active_query(
@@ -240,8 +224,8 @@ def delete_active_query(
     Returns {"success": True, "request_id": ..., "nodes": [{"node",
     "http_status", "body"}, ...], "unreachable_nodes": [{"node", "error"}]}
     (last key omitted if every node was reached) once delivered to at least
-    one node. Returns {"success": False, "error": ...} if request_id is
-    empty, the cluster is Capella, or no query node could be reached.
+    one node. Fails if request_id is empty, the cluster is
+    Capella, or no query node could be reached.
     """
     try:
         if not isinstance(request_id, str) or not request_id.strip():
@@ -310,7 +294,7 @@ def delete_active_query(
         return result
     except ValueError as e:
         logger.warning(f"Rejected delete_active_query request: {e}")
-        return tool_error(e, request_id=request_id)
+        raise
     except Exception as e:
         logger.error(f"Error cancelling query {request_id!r}: {e}", exc_info=True)
-        return tool_error(e, request_id=request_id)
+        raise

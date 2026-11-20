@@ -29,6 +29,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
 
 from cb_mcp.tools.operational.query_admin import (
     delete_active_query,
@@ -127,25 +128,24 @@ def _delete_response(status_code: int, body: str = "") -> MagicMock:
 class TestGetClusterQueryVitals:
     """get_cluster_query_vitals: Capella rejection, per-node fan-out, merge."""
 
-    def test_returns_error_envelope_on_missing_settings(self) -> None:
+    def test_raises_on_missing_settings(self) -> None:
         ctx = _make_ctx_with_settings({})
 
-        result = get_cluster_query_vitals(ctx)
-
-        assert result["status"] == "error"
-        assert "Failed to get cluster query vitals" in result["message"]
+        with pytest.raises(ValueError):
+            get_cluster_query_vitals(ctx)
 
     def test_rejects_capella_connection_without_rest_call(self) -> None:
         ctx = _make_ctx_with_settings(_CAPELLA_SETTINGS)
 
-        with patch(
-            "cb_mcp.tools.operational.query_admin.httpx.Client"
-        ) as mock_client_cls:
-            result = get_cluster_query_vitals(ctx)
+        with (
+            patch(
+                "cb_mcp.tools.operational.query_admin.httpx.Client"
+            ) as mock_client_cls,
+            pytest.raises(ValueError, match="Capella"),
+        ):
+            get_cluster_query_vitals(ctx)
 
         mock_client_cls.assert_not_called()
-        assert result["status"] == "error"
-        assert "Capella" in result["error"]
 
     def test_rejects_no_resolvable_endpoints_without_rest_call(self) -> None:
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
@@ -155,12 +155,11 @@ class TestGetClusterQueryVitals:
             patch(
                 "cb_mcp.tools.operational.query_admin.httpx.Client"
             ) as mock_client_cls,
+            pytest.raises(ValueError, match="No query-service endpoints"),
         ):
-            result = get_cluster_query_vitals(ctx)
+            get_cluster_query_vitals(ctx)
 
         mock_client_cls.assert_not_called()
-        assert result["status"] == "error"
-        assert "No query-service endpoints" in result["error"]
 
     def test_single_node_success(self) -> None:
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
@@ -213,16 +212,17 @@ class TestGetClusterQueryVitals:
         assert len(result["unreachable_nodes"]) == 1
         assert result["unreachable_nodes"][0]["node"] == "node1:8093"
 
-    def test_returns_error_envelope_when_every_node_fails(self) -> None:
+    def test_raises_when_every_node_fails(self) -> None:
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         error = httpx.ConnectError("refused")
         client_patch, _ = _patch_httpx_client("get", [error, error])
 
-        with _patch_endpoints(["node1:8093", "node2:8093"]), client_patch:
-            result = get_cluster_query_vitals(ctx)
-
-        assert result["status"] == "error"
-        assert "node1:8093" in result["error"] and "node2:8093" in result["error"]
+        with (
+            _patch_endpoints(["node1:8093", "node2:8093"]),
+            client_patch,
+            pytest.raises(RuntimeError, match=r"node1:8093.*node2:8093"),
+        ):
+            get_cluster_query_vitals(ctx)
 
 
 class TestGetActiveQueries:
@@ -231,14 +231,15 @@ class TestGetActiveQueries:
     def test_rejects_capella_connection_without_rest_call(self) -> None:
         ctx = _make_ctx_with_settings(_CAPELLA_SETTINGS)
 
-        with patch(
-            "cb_mcp.tools.operational.query_admin.httpx.Client"
-        ) as mock_client_cls:
-            result = get_active_queries(ctx)
+        with (
+            patch(
+                "cb_mcp.tools.operational.query_admin.httpx.Client"
+            ) as mock_client_cls,
+            pytest.raises(ValueError, match="Capella"),
+        ):
+            get_active_queries(ctx)
 
         mock_client_cls.assert_not_called()
-        assert result["status"] == "error"
-        assert "Capella" in result["error"]
 
     def test_merges_active_requests_across_nodes(self) -> None:
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
@@ -284,15 +285,17 @@ class TestGetActiveQueries:
             {"node": "node2:8093", "error": "refused"}
         ]
 
-    def test_returns_error_envelope_when_every_node_fails(self) -> None:
+    def test_raises_when_every_node_fails(self) -> None:
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         error = httpx.ConnectError("refused")
         client_patch, _ = _patch_httpx_client("get", [error, error])
 
-        with _patch_endpoints(["node1:8093", "node2:8093"]), client_patch:
-            result = get_active_queries(ctx)
-
-        assert result["status"] == "error"
+        with (
+            _patch_endpoints(["node1:8093", "node2:8093"]),
+            client_patch,
+            pytest.raises(RuntimeError, match="Failed to reach any query node"),
+        ):
+            get_active_queries(ctx)
 
     def test_non_list_response_is_treated_as_node_failure_not_success(self) -> None:
         """A 200 with an unexpected shape (e.g. a proxy/API envelope) must not
@@ -320,10 +323,12 @@ class TestGetActiveQueries:
             [_ok_response({"unexpected": "envelope"}), _ok_response({"also": "bad"})],
         )
 
-        with _patch_endpoints(["node1:8093", "node2:8093"]), client_patch:
-            result = get_active_queries(ctx)
-
-        assert result["status"] == "error"
+        with (
+            _patch_endpoints(["node1:8093", "node2:8093"]),
+            client_patch,
+            pytest.raises(RuntimeError, match="Failed to reach any query node"),
+        ):
+            get_active_queries(ctx)
 
 
 class TestDeleteActiveQuery:
@@ -339,29 +344,28 @@ class TestDeleteActiveQuery:
     def test_rejects_empty_request_id_without_rest_call(self) -> None:
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
 
-        with patch(
-            "cb_mcp.tools.operational.query_admin.httpx.Client"
-        ) as mock_client_cls:
-            result = delete_active_query(ctx, request_id="   ")
+        with (
+            patch(
+                "cb_mcp.tools.operational.query_admin.httpx.Client"
+            ) as mock_client_cls,
+            pytest.raises(ValueError, match="request_id must be a non-empty string"),
+        ):
+            delete_active_query(ctx, request_id="   ")
 
         mock_client_cls.assert_not_called()
-        assert result == {
-            "success": False,
-            "error": "request_id must be a non-empty string, got '   '",
-            "request_id": "   ",
-        }
 
     def test_rejects_capella_connection_without_rest_call(self) -> None:
         ctx = _make_ctx_with_settings(_CAPELLA_SETTINGS)
 
-        with patch(
-            "cb_mcp.tools.operational.query_admin.httpx.Client"
-        ) as mock_client_cls:
-            result = delete_active_query(ctx, request_id="abc-123")
+        with (
+            patch(
+                "cb_mcp.tools.operational.query_admin.httpx.Client"
+            ) as mock_client_cls,
+            pytest.raises(ValueError, match="Capella"),
+        ):
+            delete_active_query(ctx, request_id="abc-123")
 
         mock_client_cls.assert_not_called()
-        assert result["success"] is False
-        assert "Capella" in result["error"]
 
     def test_reports_success_once_delivered_to_a_single_node(self) -> None:
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
@@ -423,11 +427,12 @@ class TestDeleteActiveQuery:
         error = httpx.ConnectError("refused")
         client_patch, _ = _patch_httpx_client("delete", [error, error])
 
-        with _patch_endpoints(["node1:8093", "node2:8093"]), client_patch:
-            result = delete_active_query(ctx, request_id="abc-123")
-
-        assert result["success"] is False
-        assert result["request_id"] == "abc-123"
+        with (
+            _patch_endpoints(["node1:8093", "node2:8093"]),
+            client_patch,
+            pytest.raises(RuntimeError, match="Failed to reach any query node"),
+        ):
+            delete_active_query(ctx, request_id="abc-123")
 
     def test_partial_reachability_still_reports_success_with_unreachable_listed(
         self,

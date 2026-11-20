@@ -56,8 +56,8 @@ class UnknownHandleError(KeyError):
         """Return the bare message.
 
         ``KeyError.__str__`` is ``repr(args[0])``, so the default would wrap
-        the message in a stray pair of quotes once the tools pass it through
-        ``tool_error`` to the client.
+        the message in a stray pair of quotes once a tool raises it on failure
+        and the message reaches the client.
         """
         return str(self.args[0]) if self.args else ""
 

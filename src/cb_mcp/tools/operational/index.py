@@ -37,7 +37,7 @@ from ...utils.operational.index_utils import (
     process_index_data_from_rest_api,
     validate_filter_params,
 )
-from ...utils.responses import tool_error, tool_success
+from ...utils.responses import tool_success
 from .query import run_cluster_query, run_sql_plus_plus_query
 
 logger = logging.getLogger(f"{OPERATIONAL_LOGGER_NAMESPACE}.tools.index")
@@ -426,8 +426,8 @@ def create_index(
 
     Returns {"success": True, "index_name": ..., "deferred": ..., "keyspace": ...} on
     success; when deferred is True the result also includes a "next_step" hint noting the
-    index must be built (via build_index) before it is usable. On failure returns
-    {"success": False, "error": ...} — e.g. the index already exists (without
+    index must be built (via build_index) before it is usable. On failure the call
+    fails with the reason — e.g. the index already exists (without
     ignore_if_exists=True) or the keys/condition are invalid.
     """
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
@@ -459,7 +459,7 @@ def create_index(
         logger.error(
             f"Error creating index {index_name!r} on {keyspace}: {e}", exc_info=True
         )
-        return tool_error(e, index_name=index_name, keyspace=keyspace)
+        raise
 
 
 def build_index(
@@ -479,8 +479,8 @@ def build_index(
     The build runs asynchronously: success means the build was triggered, not that it has
     finished. Use list_indexes to check when the index(es) reach the 'online' state.
 
-    Returns {"success": True, "keyspace": ...} on success, or
-    {"success": False, "error": ...} on failure.
+    Returns {"success": True, "keyspace": ...} on success. On failure the
+    call fails with the reason.
     """
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
     cluster = get_cluster_connection(ctx)
@@ -496,7 +496,7 @@ def build_index(
         logger.error(
             f"Error building deferred indexes on {keyspace}: {e}", exc_info=True
         )
-        return tool_error(e, keyspace=keyspace)
+        raise
 
 
 def drop_index(
@@ -515,8 +515,8 @@ def drop_index(
 
     Pass ignore_if_not_exists=True to avoid an error when the named index doesn't exist.
 
-    Returns {"success": True, "index_name": ..., "keyspace": ...} on success, or
-    {"success": False, "error": ...} on failure — e.g. the index does not exist
+    Returns {"success": True, "index_name": ..., "keyspace": ...} on success. On failure the
+    call fails with the reason — e.g. the index does not exist
     (without ignore_if_not_exists=True).
     """
     keyspace = format_keyspace(bucket_name, scope_name, collection_name)
@@ -536,4 +536,4 @@ def drop_index(
         logger.error(
             f"Error dropping index {index_name!r} on {keyspace}: {e}", exc_info=True
         )
-        return tool_error(e, index_name=index_name, keyspace=keyspace)
+        raise
