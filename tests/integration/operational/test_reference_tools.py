@@ -19,12 +19,15 @@ from conftest import (
     extract_payload,
 )
 
+from ._deployment import skip_if_capella
+
 METRICS_TOOL = "get_cluster_metrics"
 
 
 @pytest.mark.asyncio
 async def test_default_call_reports_record_count_and_a_sample() -> None:
     """Passing tool_name alone reports the dataset's true size plus a sample, not a full list."""
+    skip_if_capella("discover_tool_input_values")
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "discover_tool_input_values", arguments={"tool_name": METRICS_TOOL}
@@ -47,6 +50,7 @@ async def test_default_call_reports_record_count_and_a_sample() -> None:
 @pytest.mark.asyncio
 async def test_search_finds_a_known_metric() -> None:
     """A concept-level keyword search surfaces the real metric name."""
+    skip_if_capella("discover_tool_input_values")
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "discover_tool_input_values",
@@ -72,6 +76,7 @@ async def test_search_finds_a_known_metric() -> None:
 
 @pytest.mark.asyncio
 async def test_chapter_filter_restricts_results_to_that_chapter() -> None:
+    skip_if_capella("discover_tool_input_values")
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "discover_tool_input_values",
@@ -91,6 +96,7 @@ async def test_chapter_filter_restricts_results_to_that_chapter() -> None:
 
 @pytest.mark.asyncio
 async def test_unknown_tool_name_reports_what_is_registered() -> None:
+    skip_if_capella("discover_tool_input_values")
     async with create_mcp_session() as session:
         response = await session.call_tool(
             "discover_tool_input_values", arguments={"tool_name": "not_a_real_tool"}
