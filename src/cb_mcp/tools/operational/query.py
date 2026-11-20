@@ -19,7 +19,6 @@ from ...utils.constants import SCOPE_WRITE
 from ...utils.operational.connection import connect_to_bucket, format_keyspace
 from ...utils.operational.context import get_cluster_connection
 from ...utils.operational.query_utils import (
-    analyze_parameter_binding,
     evaluate_query_plan,
     extract_plan_from_explain_results,
 )
@@ -261,11 +260,14 @@ def run_sql_plus_plus_query(
 
         results = []
         # Reached only for read-only queries (or when writes are allowed).
-        # Forwarded only when supplied: the SDK does not accept a None binding.
-        options: dict[str, Any] = dict(_query_correlation_options())
-        if named_parameters is not None:
-            options["named_parameters"] = named_parameters
-        result = scope.query(query, **options)
+        # Forward named parameters only when provided so existing callers that
+        # pass none keep the exact previous behaviour.
+        options = _query_correlation_options()
+        result = (
+            scope.query(query, named_parameters=named_parameters, **options)
+            if named_parameters is not None
+            else scope.query(query, **options)
+        )
         for row in result:
             results.append(row)
         logger.info(
@@ -276,66 +278,6 @@ def run_sql_plus_plus_query(
         logger.error(f"Error running query: {e!s}", exc_info=True)
         # The full SDK dump stays in the log; the client gets the short message.
         raise RuntimeError(error_message(e)) from e
-
-
-def _parameter_warnings(parameters: dict[str, Any]) -> list[dict[str, str]]:
-    """Caveats about how far the plan of a just-run EXPLAIN can be trusted."""
-    warnings: list[dict[str, str]] = []
-    unbound = parameters["unbound"]
-
-    if unbound["named"] or unbound["positional"]:
-        missing = []
-        if unbound["named"]:
-            missing.append(
-                "named (" + ", ".join(f"${name}" for name in unbound["named"]) + ")"
-            )
-        if unbound["positional"]:
-            missing.append(f"positional ({unbound['positional']} value(s))")
-
-        message = (
-            "The query is parameterized but no value was supplied for "
-            + " and ".join(missing)
-            + ". The optimizer planned without those values, so the index it "
-            "chose here may not be the index used at runtime: an unbound "
-            "parameterized query commonly plans a primary scan even when a "
-            "secondary index serves it in production."
-        )
-        if unbound["named"]:
-            message += (
-                " Re-run with named_parameters set to representative values "
-                "for a plan that matches runtime."
-            )
-        if unbound["positional"]:
-            message += (
-                " Positional placeholders ($1, ?) cannot be bound by this "
-                "tool; rewrite them as named placeholders to supply values."
-            )
-
-        warnings.append(
-            {
-                "severity": "warning",
-                "issue": "unbound_parameters",
-                "message": message,
-            }
-        )
-
-    if parameters["unused_named"]:
-        warnings.append(
-            {
-                "severity": "info",
-                "issue": "unused_parameters",
-                "message": (
-                    "Values were supplied for "
-                    + ", ".join(f"${name}" for name in parameters["unused_named"])
-                    + ", which this statement never references. Check the "
-                    "parameter names for a typo: the server ignores values it "
-                    "has no placeholder for, which leaves the real placeholder "
-                    "unbound."
-                ),
-            }
-        )
-
-    return warnings
 
 
 def explain_sql_plus_plus_query(
@@ -354,15 +296,12 @@ def explain_sql_plus_plus_query(
     ``$name`` placeholders. The optimizer uses those values to estimate
     selectivity, so an EXPLAIN run without them can report a primary index
     scan for a query that uses a secondary index at runtime, and acting on
-    that plan leads to recommending an index that already exists. When
-    placeholders are left unbound the response says so in ``warnings`` and
-    marks every plan finding ``confidence: "possible"`` rather than
-    ``"definite"``.
+    that plan leads to recommending an index that already exists.
 
     A plan is only as accurate as the values it was planned for, so prefer
-    values from a real execution over invented ones. The
-    system:completed_requests tools return a ``namedArgs`` sample alongside
-    each statement for this purpose.
+    values from a real execution over invented ones: the
+    system:completed_requests tools return the ``namedArgs`` of a real
+    execution alongside each statement.
     """
     normalized_query = query.strip()
     if not normalized_query:
@@ -374,8 +313,6 @@ def explain_sql_plus_plus_query(
         else f"EXPLAIN {normalized_query}"
     )
 
-    parameters = analyze_parameter_binding(normalized_query, named_parameters)
-
     explain_results = run_sql_plus_plus_query(
         ctx,
         bucket_name,
@@ -385,16 +322,12 @@ def explain_sql_plus_plus_query(
     )
 
     plan = extract_plan_from_explain_results(explain_results)
-    plan_evaluation = evaluate_query_plan(
-        plan, parameters_unbound=not parameters["fully_bound"]
-    )
+    plan_evaluation = evaluate_query_plan(plan)
 
     return {
         "query": query,
         "explain_statement": explain_statement,
         "query_context": {"bucket_name": bucket_name, "scope_name": scope_name},
-        "parameters": parameters,
-        "warnings": _parameter_warnings(parameters),
         "plan": plan,
         "plan_evaluation": plan_evaluation,
     }
@@ -452,13 +385,19 @@ def get_longest_running_queries(ctx: Context, limit: int = 10) -> list[dict[str,
 
     Returns:
         List of queries with their average service time, count, and the
-        namedArgs of the slowest execution of each statement
+        namedArgs/positionalArgs of the slowest execution of each statement
     """
+    # MAX([ranking key, args])[1] returns the args of the highest-ranked
+    # execution, which GROUP BY statement would otherwise drop. namedArgs and
+    # positionalArgs are aggregated separately: SQL++ drops a MISSING element
+    # from an array literal, which in a 3-element array would shift
+    # positionalArgs into the namedArgs slot.
     query = """
     SELECT statement,
         DURATION_TO_STR(avgServiceTime) AS avgServiceTime,
         COUNT(1) AS queries,
-        MAX([STR_TO_DURATION(serviceTime), namedArgs])[1] AS namedArgs
+        MAX([STR_TO_DURATION(serviceTime), namedArgs])[1] AS namedArgs,
+        MAX([STR_TO_DURATION(serviceTime), positionalArgs])[1] AS positionalArgs
     FROM system:completed_requests
     WHERE UPPER(statement) NOT LIKE 'INFER %'
         AND UPPER(statement) NOT LIKE 'CREATE INDEX%'
@@ -489,13 +428,19 @@ def get_most_frequent_queries(ctx: Context, limit: int = 10) -> list[dict[str, A
         limit: Number of queries to return (default: 10)
 
     Returns:
-        List of queries with their frequency count and the namedArgs of the
+        List of queries with their frequency count and the namedArgs/positionalArgs of the
         slowest execution of each statement
     """
+    # MAX([ranking key, args])[1] returns the args of the highest-ranked
+    # execution, which GROUP BY statement would otherwise drop. namedArgs and
+    # positionalArgs are aggregated separately: SQL++ drops a MISSING element
+    # from an array literal, which in a 3-element array would shift
+    # positionalArgs into the namedArgs slot.
     query = """
     SELECT statement,
         COUNT(1) AS queries,
-        MAX([STR_TO_DURATION(serviceTime), namedArgs])[1] AS namedArgs
+        MAX([STR_TO_DURATION(serviceTime), namedArgs])[1] AS namedArgs,
+        MAX([STR_TO_DURATION(serviceTime), positionalArgs])[1] AS positionalArgs
     FROM system:completed_requests
     WHERE UPPER(statement) NOT LIKE 'INFER %'
         AND UPPER(statement) NOT LIKE 'CREATE INDEX%'
@@ -531,15 +476,21 @@ def get_queries_with_largest_response_sizes(
 
     Returns:
         List of queries with their average result size in bytes, KB, and MB,
-        and the namedArgs of the largest execution of each statement
+        and the namedArgs/positionalArgs of the largest execution of each statement
     """
+    # MAX([ranking key, args])[1] returns the args of the highest-ranked
+    # execution, which GROUP BY statement would otherwise drop. namedArgs and
+    # positionalArgs are aggregated separately: SQL++ drops a MISSING element
+    # from an array literal, which in a 3-element array would shift
+    # positionalArgs into the namedArgs slot.
     query = """
     SELECT statement,
         avgResultSize AS avgResultSizeBytes,
         (avgResultSize / 1000) AS avgResultSizeKB,
         (avgResultSize / 1000000) AS avgResultSizeMB,
         COUNT(1) AS queries,
-        MAX([resultSize, namedArgs])[1] AS namedArgs
+        MAX([resultSize, namedArgs])[1] AS namedArgs,
+        MAX([resultSize, positionalArgs])[1] AS positionalArgs
     FROM system:completed_requests
     WHERE UPPER(statement) NOT LIKE 'INFER %'
         AND UPPER(statement) NOT LIKE 'CREATE INDEX%'
@@ -572,14 +523,20 @@ def get_queries_with_large_result_count(
         limit: Number of queries to return (default: 10)
 
     Returns:
-        List of queries with their average result count and the namedArgs of
+        List of queries with their average result count and the namedArgs/positionalArgs of
         the execution that returned the most rows for each statement
     """
+    # MAX([ranking key, args])[1] returns the args of the highest-ranked
+    # execution, which GROUP BY statement would otherwise drop. namedArgs and
+    # positionalArgs are aggregated separately: SQL++ drops a MISSING element
+    # from an array literal, which in a 3-element array would shift
+    # positionalArgs into the namedArgs slot.
     query = """
     SELECT statement,
         avgResultCount,
         COUNT(1) AS queries,
-        MAX([resultCount, namedArgs])[1] AS namedArgs
+        MAX([resultCount, namedArgs])[1] AS namedArgs,
+        MAX([resultCount, positionalArgs])[1] AS positionalArgs
     FROM system:completed_requests
     WHERE UPPER(statement) NOT LIKE 'INFER %' AND
         UPPER(statement) NOT LIKE 'CREATE INDEX%' AND
@@ -678,17 +635,25 @@ def get_queries_not_selective(ctx: Context, limit: int = 10) -> list[dict[str, A
     Returns:
         List of queries where scans (secondary index, primary index, or sequential)
         return significantly more documents than the final result, with the
-        namedArgs of the least selective execution of each statement
+        namedArgs/positionalArgs of the least selective execution of each statement
     """
     # Scans are logged under `indexScan` (secondary index) or `primaryScan`
     # (primary index or sequential scan); a query only has the one its plan used.
+    # MAX([ranking key, args])[1] returns the args of the highest-ranked
+    # execution, which GROUP BY statement would otherwise drop. namedArgs and
+    # positionalArgs are aggregated separately: SQL++ drops a MISSING element
+    # from an array literal, which in a 3-element array would shift
+    # positionalArgs into the namedArgs slot.
     query = """
     SELECT statement,
        AVG(IFMISSINGORNULL(phaseCounts.`indexScan`, 0)
          + IFMISSINGORNULL(phaseCounts.`primaryScan`, 0) - resultCount) AS diff,
        MAX([IFMISSINGORNULL(phaseCounts.`indexScan`, 0)
          + IFMISSINGORNULL(phaseCounts.`primaryScan`, 0) - resultCount,
-         namedArgs])[1] AS namedArgs
+         namedArgs])[1] AS namedArgs,
+       MAX([IFMISSINGORNULL(phaseCounts.`indexScan`, 0)
+         + IFMISSINGORNULL(phaseCounts.`primaryScan`, 0) - resultCount,
+         positionalArgs])[1] AS positionalArgs
     FROM system:completed_requests
     WHERE IFMISSINGORNULL(phaseCounts.`indexScan`, 0)
         + IFMISSINGORNULL(phaseCounts.`primaryScan`, 0) > resultCount

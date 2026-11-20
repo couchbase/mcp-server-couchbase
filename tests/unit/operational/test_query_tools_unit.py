@@ -633,155 +633,6 @@ PRIMARY_SCAN_ROW = {
 }
 
 
-class TestExplainSqlPlusPlusQueryParameters:
-    """EXPLAIN plans with the caller's values, and says so when it cannot."""
-
-    def test_named_parameters_reach_the_sdk(self) -> None:
-        ctx, _, scope = _make_ctx(read_only_mode=True)
-        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
-
-        explain_sql_plus_plus_query(
-            ctx,
-            "b",
-            "s",
-            "SELECT * FROM hotel WHERE country = $country",
-            named_parameters={"country": "France"},
-        )
-
-        args, kwargs = scope.query.call_args
-        assert args[0] == "EXPLAIN SELECT * FROM hotel WHERE country = $country"
-        assert kwargs["named_parameters"] == {"country": "France"}
-
-    def test_non_parameterized_query_is_unchanged(self) -> None:
-        """The pre-existing contract: no parameters, no warnings, no caveats."""
-        ctx, _, scope = _make_ctx(read_only_mode=True)
-        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
-
-        result = explain_sql_plus_plus_query(ctx, "b", "s", "SELECT * FROM hotel")
-
-        _, kwargs = scope.query.call_args
-        assert "named_parameters" not in kwargs
-        assert result["warnings"] == []
-        assert result["parameters"]["parameterized"] is False
-        assert (
-            result["plan_evaluation"]["summary"]
-            == "Plan has optimization opportunities."
-        )
-        issues = {f["issue"] for f in result["plan_evaluation"]["findings"]}
-        assert "primary_index_scan" in issues
-
-    def test_unbound_named_parameter_warns_and_downgrades(self) -> None:
-        ctx, _, scope = _make_ctx(read_only_mode=True)
-        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
-
-        result = explain_sql_plus_plus_query(
-            ctx, "b", "s", "SELECT * FROM hotel WHERE country = $country"
-        )
-
-        (warning,) = result["warnings"]
-        assert warning["issue"] == "unbound_parameters"
-        assert warning["severity"] == "warning"
-        assert "$country" in warning["message"]
-
-        (finding,) = [
-            f
-            for f in result["plan_evaluation"]["findings"]
-            if f["issue"] == "primary_index_scan"
-        ]
-        assert finding["confidence"] == "possible"
-        assert "may not match runtime" in result["plan_evaluation"]["summary"]
-
-    def test_unbound_positional_parameter_warns(self) -> None:
-        ctx, _, scope = _make_ctx(read_only_mode=True)
-        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
-
-        result = explain_sql_plus_plus_query(
-            ctx, "b", "s", "SELECT * FROM hotel WHERE country = ? AND city = ?"
-        )
-
-        (warning,) = result["warnings"]
-        assert warning["issue"] == "unbound_parameters"
-        assert "2 value(s)" in warning["message"]
-        assert "cannot be bound by this tool" in warning["message"]
-
-    def test_bound_parameters_produce_no_warning_and_definite_findings(self) -> None:
-        ctx, _, scope = _make_ctx(read_only_mode=True)
-        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
-
-        result = explain_sql_plus_plus_query(
-            ctx,
-            "b",
-            "s",
-            "SELECT * FROM hotel WHERE country = $country",
-            named_parameters={"country": "France"},
-        )
-
-        assert result["warnings"] == []
-        assert result["parameters"]["fully_bound"] is True
-        (finding,) = [
-            f
-            for f in result["plan_evaluation"]["findings"]
-            if f["issue"] == "primary_index_scan"
-        ]
-        assert finding["confidence"] == "definite"
-
-    def test_misspelled_parameter_name_is_flagged(self) -> None:
-        """Both warnings fire: the typo'd value is unused and the real
-        placeholder is unbound, which is what makes the plan wrong."""
-        ctx, _, scope = _make_ctx(read_only_mode=True)
-        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
-
-        result = explain_sql_plus_plus_query(
-            ctx,
-            "b",
-            "s",
-            "SELECT * FROM hotel WHERE country = $country",
-            named_parameters={"contry": "France"},
-        )
-
-        issues = {w["issue"] for w in result["warnings"]}
-        assert issues == {"unbound_parameters", "unused_parameters"}
-
-    def test_dollar_inside_a_string_literal_is_not_a_placeholder(self) -> None:
-        ctx, _, scope = _make_ctx(read_only_mode=True)
-        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
-
-        result = explain_sql_plus_plus_query(
-            ctx, "b", "s", "SELECT * FROM hotel WHERE name = 'costs $5'"
-        )
-
-        assert result["warnings"] == []
-        assert result["parameters"]["parameterized"] is False
-
-    def test_explain_prefixed_query_still_detects_parameters(self) -> None:
-        ctx, _, scope = _make_ctx(read_only_mode=True)
-        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
-
-        result = explain_sql_plus_plus_query(
-            ctx, "b", "s", "EXPLAIN SELECT * FROM hotel WHERE country = $country"
-        )
-
-        assert result["explain_statement"] == (
-            "EXPLAIN SELECT * FROM hotel WHERE country = $country"
-        )
-        assert result["parameters"]["detected"]["named"] == ["country"]
-
-    def test_parameters_are_exposed_as_an_mcp_tool_schema(self) -> None:
-        """named_parameters must be callable over MCP, not just in Python."""
-        mcp = FastMCP("test")
-        mcp.tool(explain_sql_plus_plus_query)
-        tool = asyncio.run(mcp.get_tool("explain_sql_plus_plus_query"))
-
-        properties = tool.parameters["properties"]
-        assert "named_parameters" in properties
-        assert "positional_parameters" not in properties
-        assert set(tool.parameters.get("required", [])) == {
-            "bucket_name",
-            "scope_name",
-            "query",
-        }
-
-
 STATEMENT_AGGREGATING_TOOLS = [
     get_longest_running_queries,
     get_most_frequent_queries,
@@ -807,10 +658,100 @@ def _capture_tool_query(tool, monkeypatch) -> str:
     return captured["query"]
 
 
+class TestExplainSqlPlusPlusQueryParameters:
+    """EXPLAIN must plan with the caller's values.
+
+    Without them the optimizer has no selectivity to estimate from and can
+    report a primary scan for a query that uses a secondary index at runtime.
+    """
+
+    def test_named_parameters_reach_the_sdk(self) -> None:
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
+
+        explain_sql_plus_plus_query(
+            ctx,
+            "b",
+            "s",
+            "SELECT * FROM hotel WHERE country = $country",
+            named_parameters={"country": "France"},
+        )
+
+        args, kwargs = scope.query.call_args
+        assert args[0] == "EXPLAIN SELECT * FROM hotel WHERE country = $country"
+        assert kwargs["named_parameters"] == {"country": "France"}
+
+    def test_values_are_passed_through_untouched(self) -> None:
+        """The tool binds what it is given; it does not rewrite keys or values."""
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
+        supplied = {"$country": "France", "limit": 10, "flag": None}
+
+        explain_sql_plus_plus_query(
+            ctx,
+            "b",
+            "s",
+            "SELECT * FROM hotel WHERE country = $country",
+            named_parameters=supplied,
+        )
+
+        _, kwargs = scope.query.call_args
+        assert kwargs["named_parameters"] == supplied
+
+    def test_no_parameters_are_forwarded_when_none_given(self) -> None:
+        """The pre-existing contract for an unparameterized call is unchanged."""
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
+
+        result = explain_sql_plus_plus_query(ctx, "b", "s", "SELECT * FROM hotel")
+
+        _, kwargs = scope.query.call_args
+        assert "named_parameters" not in kwargs
+        assert set(result) == {
+            "query",
+            "explain_statement",
+            "query_context",
+            "plan",
+            "plan_evaluation",
+        }
+
+    def test_explain_prefixed_query_still_binds(self) -> None:
+        ctx, _, scope = _make_ctx(read_only_mode=True)
+        scope.query.return_value = iter([PRIMARY_SCAN_ROW])
+
+        result = explain_sql_plus_plus_query(
+            ctx,
+            "b",
+            "s",
+            "EXPLAIN SELECT * FROM hotel WHERE country = $country",
+            named_parameters={"country": "France"},
+        )
+
+        _, kwargs = scope.query.call_args
+        assert kwargs["named_parameters"] == {"country": "France"}
+        assert result["explain_statement"] == (
+            "EXPLAIN SELECT * FROM hotel WHERE country = $country"
+        )
+
+    def test_parameters_are_exposed_as_an_mcp_tool_schema(self) -> None:
+        """The new argument must be callable over MCP, not just in Python."""
+        mcp = FastMCP("test")
+        mcp.tool(explain_sql_plus_plus_query)
+        tool = asyncio.run(mcp.get_tool("explain_sql_plus_plus_query"))
+
+        assert "named_parameters" in tool.parameters["properties"]
+        assert set(tool.parameters.get("required", [])) == {
+            "bucket_name",
+            "scope_name",
+            "query",
+        }
+
+
 class TestNamedArgsSampling:
     """The statement-aggregating tools group by statement, which drops the
-    per-execution parameter values. Each projects a namedArgs sample so a
-    parameterized statement can be re-explained with real values.
+    per-execution parameter values. Each projects the args of one real
+    execution so a parameterized statement can be re-explained with real
+    values.
     """
 
     @pytest.mark.parametrize(
@@ -826,9 +767,34 @@ class TestNamedArgsSampling:
     @pytest.mark.parametrize(
         "tool", STATEMENT_AGGREGATING_TOOLS, ids=lambda t: t.__name__
     )
-    def test_positional_args_are_not_projected(self, tool, monkeypatch) -> None:
-        """Positional values are out of scope: nothing can bind them back."""
-        assert "positionalArgs" not in _capture_tool_query(tool, monkeypatch)
+    def test_positional_args_are_projected(self, tool, monkeypatch) -> None:
+        """Reported for the same reason as namedArgs: the agent cannot bind
+        them through these tools, but it can read them and rewrite the
+        statement, and without them a positional statement looks unparameterized.
+        """
+        projection = " ".join(
+            _capture_tool_query(tool, monkeypatch)
+            .split("FROM system:completed_requests")[0]
+            .split()
+        )
+        assert "positionalArgs])[1] AS positionalArgs" in projection
+
+    @pytest.mark.parametrize(
+        "tool", STATEMENT_AGGREGATING_TOOLS, ids=lambda t: t.__name__
+    )
+    def test_args_are_ranked_by_the_same_key_as_the_tool(
+        self, tool, monkeypatch
+    ) -> None:
+        """Both samples come from the execution the tool itself ranks on, so
+        they describe the row the agent is looking at."""
+        projection = " ".join(
+            _capture_tool_query(tool, monkeypatch)
+            .split("FROM system:completed_requests")[0]
+            .split()
+        )
+        named = projection.split("MAX([")[1].split(", namedArgs])")[0]
+        positional = projection.split("namedArgs])[1] AS namedArgs,")[1]
+        assert named in " ".join(positional.split())
 
     @pytest.mark.parametrize(
         "tool", STATEMENT_AGGREGATING_TOOLS, ids=lambda t: t.__name__
