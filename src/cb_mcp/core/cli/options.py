@@ -187,8 +187,9 @@ def transport_options(*, default_port: int) -> Callable:
             "sse; a '*' in the host matches any text. Enforced by FastMCP's "
             "origin guard: a request whose Origin header is not listed is "
             "rejected, but one with no Origin header (most non-browser MCP "
-            "clients) is admitted. Unset, empty or a lone '*' allows every "
-            "origin. Ignored with --transport=stdio. This guards against "
+            "clients) is admitted. Unset or empty adds no check. A lone '*' "
+            "allows every origin and lets any web page read replies (CORS), "
+            "which is risky. Ignored with --transport=stdio. This guards against "
             "malicious web pages, not other clients; it is not "
             "authentication.",
         ),
@@ -204,8 +205,8 @@ def transport_options(*, default_port: int) -> Callable:
             "'*' matches any text. Enforced by FastMCP's Host guard: a request "
             "whose Host header is not listed gets 421, whatever the bind "
             "address. 127.0.0.1, localhost, ::1 and the bound address are "
-            "always allowed, and the port is ignored. Setting it also turns on "
-            "the Origin check. Unset, empty or a lone '*' adds no restriction "
+            "always allowed, and the port is ignored. It does not "
+            "restrict Origin; use --allowed-origins for that. Unset, empty or a lone '*' adds no restriction "
             "(on a loopback bind, Host is still limited to loopback names). "
             "Ignored with --transport=stdio. This is DNS-rebinding "
             "protection, not authentication.",

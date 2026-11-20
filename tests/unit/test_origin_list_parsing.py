@@ -15,8 +15,9 @@ class TestNothingToEnforce:
         assert parse_allowed_origins(raw) == ()
 
     @pytest.mark.parametrize("raw", ["*", " * ", "*,", ",*"])
-    def test_bare_star_allows_everything_so_there_is_nothing_to_enforce(self, raw):
-        assert parse_allowed_origins(raw) == ()
+    def test_bare_star_is_kept_because_it_asks_for_every_origin(self, raw):
+        """Not the same as no list: it also opens CORS, so it must be told apart."""
+        assert parse_allowed_origins(raw) == ("*",)
 
 
 class TestNormalization:

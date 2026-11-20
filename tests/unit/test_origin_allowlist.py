@@ -5,7 +5,7 @@ app the server would serve, once per serving path (single process, and the
 ``--workers`` factory). The check is FastMCP's own Host/Origin guard, so these
 pin what an operator actually gets from it:
 
-* No list (unset, empty, blank, only commas, a lone ``*``): no check, everything
+* No list (unset, empty, blank, only commas): no check, everything
   is admitted, exactly as before.
 * List set: a request whose ``Origin`` is not listed gets ``403`` (``null``
   included). A request with **no** ``Origin`` is admitted: FastMCP's guard only
@@ -162,16 +162,8 @@ def _admitted(response: httpx.Response) -> bool:
 class TestNoAllowlist:
     @pytest.mark.parametrize(
         "allowed",
-        [None, "", "   ", ",", " , , ", "*", " * "],
-        ids=[
-            "unset",
-            "empty",
-            "blank",
-            "comma",
-            "commas-and-blanks",
-            "bare-star",
-            "bare-star-padded",
-        ],
+        [None, "", "   ", ",", " , , "],
+        ids=["unset", "empty", "blank", "comma", "commas-and-blanks"],
     )
     async def test_everything_is_admitted(self, make_app, allowed):
         app = make_app(allowed)
@@ -188,6 +180,74 @@ class TestNoAllowlist:
         app = make_app(None, "--host", "127.0.0.1")
         response = await _send(app, host="evil.com:8000", base=LOOPBACK)
         assert _admitted(response)
+
+
+@pytest.mark.asyncio
+class TestAllowAllOrigins:
+    """A lone ``*``: the operator asked for every origin, CORS included."""
+
+    @pytest.mark.parametrize("origin", [None, "https://evil.com", "null"])
+    async def test_everything_is_admitted(self, make_app, origin):
+        assert _admitted(await _send(make_app("*"), origin=origin))
+
+    async def test_any_origin_can_read_replies(self, make_app):
+        response = await _send(
+            make_app("*"), "GET", HEALTH_CHECK_PATH, origin="https://evil.com"
+        )
+        assert response.headers["access-control-allow-origin"] == "*"
+        assert (
+            "mcp-session-id"
+            in response.headers["access-control-expose-headers"].lower()
+        )
+
+    async def test_preflight_from_any_origin_is_answered(self, make_app):
+        transport = httpx.ASGITransport(app=make_app("*"), raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url=EXPOSED) as client:
+            response = await client.options(
+                "/mcp",
+                headers={
+                    "Origin": "https://evil.com",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type",
+                },
+            )
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "*"
+
+    async def test_no_host_check_on_loopback_either(self, make_app):
+        app = make_app("*", "--host", "127.0.0.1")
+        assert _admitted(await _send(app, host="evil.com:8000", base=LOOPBACK))
+
+    @pytest.mark.parametrize("origin", [None, "https://evil.com", "null"])
+    async def test_with_a_host_list_the_host_is_checked_and_any_origin_passes(
+        self, make_app, origin
+    ):
+        app = make_app("*", "--allowed-hosts", "mcp.example.com")
+        listed = await _send(
+            app, "GET", HEALTH_CHECK_PATH, origin=origin, host="mcp.example.com:8000"
+        )
+        assert _admitted(listed)
+        other = await _send(
+            app, "GET", HEALTH_CHECK_PATH, origin=origin, host="evil.com:8000"
+        )
+        assert other.status_code == 421
+
+    async def test_with_a_host_list_cors_is_still_open(self, make_app):
+        app = make_app("*", "--allowed-hosts", "mcp.example.com")
+        response = await _send(
+            app,
+            "GET",
+            HEALTH_CHECK_PATH,
+            origin="https://evil.com",
+            host="mcp.example.com:8000",
+        )
+        assert response.headers["access-control-allow-origin"] == "*"
+
+    async def test_the_risk_is_warned_about(self, make_app):
+        with patch("cb_mcp.core.origin_guard.logger") as logger:
+            make_app("*")
+        logger.warning.assert_called_once()
+        assert "every origin is allowed" in logger.warning.call_args.args[0]
 
 
 # --- List configured: who gets in ---------------------------------------------
@@ -425,6 +485,173 @@ class TestHealthEndpoint:
         assert (await _send(app, origin="https://evil.com")).status_code == 403
 
 
+@pytest.mark.asyncio
+class TestCors:
+    """A listed origin also gets CORS headers, so its page can read the replies.
+
+    FastMCP's guard only admits or refuses; browsers hide a reply that lacks
+    ``Access-Control-Allow-Origin``. The headers go to listed origins only.
+    """
+
+    async def _preflight(self, app, origin):
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url=EXPOSED) as client:
+            return await client.options(
+                "/mcp",
+                headers={
+                    "Origin": origin,
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type,mcp-session-id",
+                },
+            )
+
+    async def test_listed_origin_is_granted_on_a_reply(self, make_app):
+        response = await _send(
+            make_app(ALLOWED), "GET", HEALTH_CHECK_PATH, origin="http://localhost:3000"
+        )
+        assert (
+            response.headers["access-control-allow-origin"] == "http://localhost:3000"
+        )
+        exposed = response.headers["access-control-expose-headers"].lower()
+        assert "mcp-session-id" in exposed
+        assert "www-authenticate" in exposed
+
+    async def test_preflight_from_a_listed_origin_is_answered(self, make_app):
+        response = await self._preflight(make_app(ALLOWED), "https://app.example.com")
+        assert response.status_code == 200
+        assert (
+            response.headers["access-control-allow-origin"] == "https://app.example.com"
+        )
+        assert "POST" in response.headers["access-control-allow-methods"]
+        assert (
+            "mcp-session-id" in response.headers["access-control-allow-headers"].lower()
+        )
+
+    async def test_unlisted_origin_gets_no_cors_headers(self, make_app):
+        response = await _send(
+            make_app(ALLOWED), "GET", HEALTH_CHECK_PATH, origin="https://evil.com"
+        )
+        assert response.status_code == 403
+        assert "access-control-allow-origin" not in response.headers
+
+    async def test_unlisted_origin_preflight_is_refused(self, make_app):
+        response = await self._preflight(make_app(ALLOWED), "https://evil.com")
+        assert response.status_code == 403
+        assert "access-control-allow-origin" not in response.headers
+
+    async def test_a_wildcard_entry_is_granted_like_the_guard_admits(self, make_app):
+        app = make_app("https://*.example.org")
+        granted = await self._preflight(app, "https://app.example.org")
+        assert (
+            granted.headers["access-control-allow-origin"] == "https://app.example.org"
+        )
+        assert (await self._preflight(app, "https://example.com")).status_code == 403
+
+    async def test_a_wildcard_does_not_reach_into_the_port(self, make_app):
+        response = await self._preflight(
+            make_app("https://app.example.*"), "https://app.example.com:8443"
+        )
+        assert response.status_code == 403
+        assert "access-control-allow-origin" not in response.headers
+
+    async def test_no_list_adds_no_cors_headers(self, make_app):
+        response = await _send(
+            make_app(None), "GET", HEALTH_CHECK_PATH, origin="https://anything.com"
+        )
+        assert "access-control-allow-origin" not in response.headers
+
+    async def test_a_request_without_an_origin_gets_none(self, make_app):
+        response = await _send(make_app(ALLOWED), "GET", HEALTH_CHECK_PATH)
+        assert "access-control-allow-origin" not in response.headers
+
+
+@pytest.mark.asyncio
+class TestCorsOverARealExchange:
+    """CORS on a whole MCP exchange, not just ``/health``.
+
+    The lifespan runs, so ``initialize`` really succeeds and a follow-up
+    request is served, as in a browser MCP client. Stateful mode hands out an
+    ``Mcp-Session-Id`` that the browser can only read if it is exposed;
+    stateless mode has none.
+    """
+
+    ORIGIN = "http://localhost:3000"
+
+    async def _exchange(self, app):
+        transport = httpx.ASGITransport(app=app)
+        headers = {**MCP_HEADERS, "Origin": self.ORIGIN}
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=transport, base_url=EXPOSED) as client,
+        ):
+            first = await client.post("/mcp", json=INITIALIZE, headers=headers)
+            follow_headers = dict(headers)
+            if "mcp-session-id" in first.headers:
+                follow_headers["Mcp-Session-Id"] = first.headers["mcp-session-id"]
+                follow_headers["Mcp-Protocol-Version"] = "2025-06-18"
+                await client.post(
+                    "/mcp",
+                    json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                    headers=follow_headers,
+                )
+            second = await client.post(
+                "/mcp",
+                json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                headers=follow_headers,
+            )
+        return first, second
+
+    def _args(self, *extra: str) -> list[str]:
+        return [
+            "--transport",
+            "http",
+            "--host",
+            EXPOSE_ALL,
+            "--allowed-origins",
+            self.ORIGIN,
+            *extra,
+        ]
+
+    async def test_stateful_exchange_is_readable_and_exposes_the_session_id(self):
+        first, second = await self._exchange(_single_process_app(self._args()))
+        assert first.status_code == 200
+        assert second.status_code == 200
+        for response in (first, second):
+            assert response.headers["access-control-allow-origin"] == self.ORIGIN
+        assert first.headers["mcp-session-id"]
+        exposed = first.headers["access-control-expose-headers"].lower()
+        assert "mcp-session-id" in exposed
+
+    @pytest.mark.parametrize("serving", ["flag", "workers"])
+    async def test_stateless_exchange_is_readable(self, serving):
+        """Stateless by ``--stateless-http`` and, always, under ``--workers``."""
+        if serving == "flag":
+            app = _single_process_app(self._args("--stateless-http", "true"))
+        else:
+            app = _worker_app(self._args())
+        first, second = await self._exchange(app)
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert "mcp-session-id" not in first.headers
+        for response in (first, second):
+            assert response.headers["access-control-allow-origin"] == self.ORIGIN
+
+    async def test_an_unlisted_origin_gets_nothing_back_to_read(self, make_app):
+        app = make_app(self.ORIGIN)
+        transport = httpx.ASGITransport(app=app)
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(transport=transport, base_url=EXPOSED) as client,
+        ):
+            response = await client.post(
+                "/mcp",
+                json=INITIALIZE,
+                headers={**MCP_HEADERS, "Origin": "https://evil.com"},
+            )
+        assert response.status_code == 403
+        assert "access-control-allow-origin" not in response.headers
+
+
 # --- CLI wiring and startup validation ------------------------------------------
 
 
@@ -476,7 +703,7 @@ class TestCli:
             "http://localhost:3000",
         )
 
-    @pytest.mark.parametrize("value", [None, "", "*"])
+    @pytest.mark.parametrize("value", [None, ""])
     def test_no_list_reaches_the_server_as_empty(self, value):
         args = ["--transport", "http"]
         if value is not None:
@@ -484,6 +711,14 @@ class TestCli:
         result, run_app, _ = _invoke(args)
         assert result.exit_code == 0, result.output
         assert run_app.call_args.kwargs["allowed_origins"] == ()
+
+    @pytest.mark.parametrize("value", ["*", " * "])
+    def test_a_lone_star_reaches_the_server_as_allow_all(self, value):
+        result, run_app, _ = _invoke(
+            ["--transport", "http", "--allowed-origins", value]
+        )
+        assert result.exit_code == 0, result.output
+        assert run_app.call_args.kwargs["allowed_origins"] == ("*",)
 
     @pytest.mark.parametrize(
         "value",
@@ -777,10 +1012,17 @@ class TestHostAllowlist:
         assert _admitted(await _send(app, host="mcp.mycompany.com"))
         assert (await _send(app, host="evil.com")).status_code == 421
 
-    async def test_hosts_alone_also_turn_on_the_origin_check(self, make_host_app):
+    @pytest.mark.parametrize("origin", [None, "https://evil.com", "null"])
+    async def test_hosts_alone_do_not_restrict_origins(self, make_host_app, origin):
         app = make_host_app(self.HOSTS)
-        response = await _send(app, host="mcp.mycompany.com", origin="https://evil.com")
-        assert response.status_code == 403
+        response = await _send(app, host="mcp.mycompany.com", origin=origin)
+        assert _admitted(response)
+        assert "access-control-allow-origin" not in response.headers
+
+    async def test_hosts_alone_still_refuse_a_foreign_host(self, make_host_app):
+        app = make_host_app(self.HOSTS)
+        response = await _send(app, host="evil.com", origin="https://evil.com")
+        assert response.status_code == 421
 
     async def test_combined_with_origins(self, make_host_app):
         app = make_host_app(self.HOSTS, "--allowed-origins", ALLOWED)
