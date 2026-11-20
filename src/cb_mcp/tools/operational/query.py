@@ -293,14 +293,8 @@ def explain_sql_plus_plus_query(
     It returns query metadata along with an extracted plan and plan evaluation.
 
     If the query is parameterized, supply ``named_parameters`` for its
-    ``$name`` placeholders. The optimizer uses those values to estimate
-    selectivity, so an EXPLAIN run without them can report a primary index
-    scan for a query that uses a secondary index at runtime, and acting on
-    that plan leads to recommending an index that already exists.
-
-    A plan is only as accurate as the values it was planned for, so prefer
-    values from a real execution over invented ones: the
-    system:completed_requests tools return the ``namedArgs`` of a real
+    ``$name`` placeholders: without values the plan may not match runtime.
+    The system:completed_requests tools return the ``namedArgs`` of a real
     execution alongside each statement.
     """
     normalized_query = query.strip()
