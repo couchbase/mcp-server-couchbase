@@ -1,9 +1,14 @@
-"""Tests for Reo.dev telemetry: the startup ping is the only event.
+"""Tests for Reo.dev telemetry: the startup ping and per-tool-call events.
 
 Coverage map:
 - send_install_ping fires one event with the transport mode, never raises.
-- tool calls emit nothing: there is no per-call wrapper to install.
+- wrap_with_telemetry emits one event per tool call (success or failure)
+  carrying only the tool name, never arguments or error text.
 """
+
+import inspect
+
+import pytest
 
 from cb_mcp.utils import telemetry
 
@@ -45,7 +50,75 @@ class TestSendInstallPing:
         telemetry.send_install_ping("stdio", server_id="operational")
 
 
-def test_tool_calls_are_not_reported():
-    """Registered tools are the plain functions: no telemetry wrapper, no event."""
-    assert not hasattr(telemetry, "wrap_with_telemetry")
-    assert not hasattr(telemetry, "_send_tool_call_event")
+class TestWrapWithTelemetry:
+    @staticmethod
+    def _wrap(**kw):
+        def tool(q: str, limit: int = 5):
+            """Docstring."""
+            return f"ran {q}"
+
+        return tool, telemetry.wrap_with_telemetry(
+            tool, server_id="operational", transport="stdio", **kw
+        )
+
+    def test_preserves_metadata_and_signature(self):
+        tool, wrapped = self._wrap()
+        assert wrapped.__name__ == "tool"
+        assert wrapped.__doc__ == "Docstring."
+        assert inspect.signature(wrapped) == inspect.signature(tool)
+
+    def test_reports_successful_call(self, monkeypatch):
+        fake_logger = _RecordingLogger()
+        monkeypatch.setattr(telemetry, "telemetry_logger", fake_logger)
+        _, wrapped = self._wrap()
+
+        assert wrapped("secret") == "ran secret"
+
+        (event,) = fake_logger.events
+        assert event["activity_type"] == "mcp_tool_call"
+        assert event["tool"] == "tool"
+        assert event["server"] == "operational"
+        assert event["transport"] == "stdio"
+        assert event["success"] is True
+        assert "secret" not in str(event)
+
+    def test_reports_failed_call_and_reraises(self, monkeypatch):
+        fake_logger = _RecordingLogger()
+        monkeypatch.setattr(telemetry, "telemetry_logger", fake_logger)
+
+        def failing():
+            raise ValueError("secret failure detail")
+
+        wrapped = telemetry.wrap_with_telemetry(
+            failing, server_id="operational", transport="http"
+        )
+        with pytest.raises(ValueError, match="secret failure detail"):
+            wrapped()
+
+        (event,) = fake_logger.events
+        assert event["tool"] == "failing"
+        assert event["success"] is False
+        assert "secret" not in str(event)
+
+    @pytest.mark.asyncio
+    async def test_async_tools_are_awaited_and_reported(self, monkeypatch):
+        fake_logger = _RecordingLogger()
+        monkeypatch.setattr(telemetry, "telemetry_logger", fake_logger)
+
+        async def atool():
+            return "ok"
+
+        wrapped = telemetry.wrap_with_telemetry(
+            atool, server_id="operational", transport="stdio"
+        )
+        assert await wrapped() == "ok"
+        assert fake_logger.events[0]["success"] is True
+
+    def test_telemetry_failure_does_not_break_call(self, monkeypatch):
+        class BrokenLogger:
+            def log_event(self, *args, **kwargs):
+                raise RuntimeError("boom")
+
+        monkeypatch.setattr(telemetry, "telemetry_logger", BrokenLogger())
+        _, wrapped = self._wrap()
+        assert wrapped("x") == "ran x"

@@ -13,7 +13,7 @@ without reimplementing any of it.
 """
 
 import logging
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -43,9 +43,10 @@ from ..utils.constants import (
 )
 from ..utils.context import AppContext
 from ..utils.environment import log_environment_info
-from ..utils.telemetry import send_install_ping
+from ..utils.telemetry import send_install_ping, wrap_with_telemetry
 from ..version import server_version
 from .contracts import ProviderLifecycle
+from .origin_guard import origin_guard_kwargs
 from .serving import apply_thread_pool_limit
 from .spec import ServerSpec
 
@@ -312,7 +313,12 @@ def build_app(
     # Register tools; FastMCP 3.x add_tool has no annotations kwarg, so wrap first.
     for tool in tools:
         annotations = spec.annotations.get(tool.__name__)
-        tool_obj = FunctionTool.from_function(tool, annotations=annotations)
+        tool_obj = FunctionTool.from_function(
+            wrap_with_telemetry(
+                tool, server_id=spec.id, transport=str(settings.get("transport"))
+            ),
+            annotations=annotations,
+        )
         mcp.add_tool(tool_obj)
 
     logger.info(f"Registered {len(tools)} tool(s) for server '{spec.id}'")
@@ -347,6 +353,8 @@ def run_app(
     host: str | None = None,
     port: int | None = None,
     stateless_http: bool | None = None,
+    allowed_origins: Iterable[str] = (),
+    allowed_hosts: Iterable[str] = (),
 ) -> None:
     """Run ``mcp`` on ``transport``, translating our transport names to the SDK's.
 
@@ -362,6 +370,11 @@ def run_app(
     forwarded and FastMCP decides as it always has, so an embedding host
     written before this parameter existed keeps its behaviour. SSE has no
     stateless mode, so it only ever receives ``False``.
+
+    ``allowed_origins`` and ``allowed_hosts`` (see ``cb_mcp.core.origin_guard``)
+    are handed to FastMCP's Host/Origin guard on network transports; stdio has
+    no HTTP requests to check, so a list given with it is ignored with a
+    warning.
     """
     sdk_transport = NETWORK_TRANSPORTS_SDK_MAPPING.get(transport, transport)
     run_kwargs: dict[str, Any] = {}
@@ -371,4 +384,10 @@ def run_app(
             run_kwargs["stateless_http"] = (
                 stateless_http and transport == STREAMABLE_HTTP_TRANSPORT
             )
+        run_kwargs.update(origin_guard_kwargs(allowed_origins, allowed_hosts))
+    elif tuple(allowed_origins) or tuple(allowed_hosts):
+        logger.warning(
+            "Allowed origins and hosts are ignored with the stdio transport: it "
+            "has no HTTP requests to check."
+        )
     mcp.run(transport=sdk_transport, show_banner=False, **run_kwargs)  # type: ignore[arg-type]

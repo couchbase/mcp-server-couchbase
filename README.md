@@ -344,6 +344,8 @@ The [Operational Insights server](#operational-insights-server) accepts the same
 | `CB_MCP_PORT` | `--port` | Port for the HTTP transport mode | `8000` |
 | `CB_MCP_WORKERS` | `--workers` | Number of server worker processes for the `http` transport. Values above 1 run in stateless HTTP mode (see [Multiple Workers](#multiple-workers)) | `1` |
 | `CB_MCP_STATELESS_HTTP` | `--stateless-http` | Handle each HTTP request without per-session state. Only honored with `http`; cannot be combined with confirmation-required tools (see [Multiple Workers](#multiple-workers)) | `true` when workers > 1, otherwise `false` |
+| `CB_MCP_ALLOWED_ORIGINS` | `--allowed-origins` | Comma-separated origins (`scheme://host[:port]`) allowed to call the `http`/`sse` endpoint; see [Restricting browser origins](#restricting-browser-origins). Unset, empty or `*` allows every origin | unset |
+| `CB_MCP_ALLOWED_HOSTS` | `--allowed-hosts` | Comma-separated host names (no scheme or port) the `http`/`sse` endpoint may be reached by; see [Restricting hosts](#restricting-hosts). Unset, empty or `*` adds no restriction | unset |
 | `CB_MCP_DISABLED_TOOLS` | `--disabled-tools` | Tools to disable (see [Disabling Tools](#disabling-tools)) | None |
 | `CB_MCP_CONFIRMATION_REQUIRED_TOOLS` | `--confirmation-required-tools` | Tools that require explicit user confirmation before execution via MCP elicitation (see [Requiring confirmation](#requiring-confirmation-elicitation)) | None |
 | `CB_MCP_LOG_LEVEL` | `--log-level` | Logging level for the MCP server: `off`, `debug`, `info`, `warning`, `error` (see [Logging](#logging)) | `info` |
@@ -591,6 +593,44 @@ Then point your client at the URL:
   }
 }
 ```
+
+#### Restricting browser origins
+
+A malicious web page can make your browser send requests to a server on your machine or network (for example through DNS rebinding). Browsers label every such request with an `Origin` header that page JavaScript cannot change, so `--allowed-origins` (`CB_MCP_ALLOWED_ORIGINS`) lets you name the origins that may call the server. The check is FastMCP's own Host/Origin guard; the server validates your list at startup and hands it over.
+
+```bash
+uvx couchbase-mcp-server operational --transport=http \
+  --allowed-origins='https://app.example.com,http://localhost:3000,https://*.example.org'
+```
+
+- Each entry is `scheme://host[:port]`. Any scheme is accepted (`chrome-extension://<id>`, `vscode-webview://<id>`), default ports (80 for `http`, 443 for `https`) are optional, and a `*` in the host matches any text. `*` is not allowed in the scheme or port.
+- Unset or empty means no check and no CORS: every request is admitted. **A lone `*` allows every origin and also sends CORS headers to all of them**, so any web page can call the server and read its replies. That is risky, especially on a server reachable from a browser, and a warning is logged at startup. Prefer listing the origins that need access.
+- Once a list is set, a request whose `Origin` header is **not** listed is rejected with `403`, and so is `Origin: null`. **A request with no `Origin` header is admitted**: FastMCP only judges an `Origin` that is present, so desktop apps and CLI agents, which send none, keep working.
+- The guard wraps every route, so `/health` also answers `403` to a request that carries an unlisted `Origin`. Probes send none.
+- On a server bound to a loopback address (the default `127.0.0.1`), `Host` is validated as well (`421` for a foreign host, which is what stops DNS rebinding), and an `Origin` that is itself a loopback address is admitted even if it is not listed. Bound to anything else, such as `0.0.0.0` in a container, `Host` is not checked.
+- **Internationalized hostnames and IPv6 addresses are rejected at startup**, not converted. Browsers send internationalized names in punycode (`https://xn--bcher-kva.example` for `bücher.example`), so an entry written with the original letters could never match; list the `xn--` form, which the startup error shows. The origin check reads the brackets of an IPv6 address as a pattern, so such an entry could never match either; list a hostname that resolves to it.
+- A malformed entry stops the server at startup with an error naming each bad entry and why. A lone `*` cannot be combined with other entries.
+- Ignored with the `stdio` transport.
+- Listed origins also get CORS headers (the preflight is answered, and `Mcp-Session-Id` and `WWW-Authenticate` are exposed), so a browser page on a listed origin can read the replies. FastMCP's check only admits or refuses a request and adds no CORS headers itself. Unlisted origins get none, and neither do requests without an `Origin`. A `*` in an entry matches the same origins for CORS as for the check.
+
+This protects against web pages, not against other clients: any non-browser program can send any `Origin`, or none. It is not authentication; use [OAuth](#oauth-21-authorization) for that.
+
+#### Restricting hosts
+
+`Host` is the other half of DNS-rebinding protection: a rebound page reaches your server under the attacker's hostname. `--allowed-hosts` (`CB_MCP_ALLOWED_HOSTS`) lists the names the server is meant to be reached by. Unlike `Origin`, a `Host` header is on every HTTP request, so this also covers clients that send no `Origin`.
+
+```bash
+uvx couchbase-mcp-server operational --transport=http --host=0.0.0.0 \
+  --allowed-hosts='mcp.example.com,*.internal.example.com'
+```
+
+- Each entry is a bare host name or IPv4 address, as it appears in the `Host` header: no scheme, port or path. A `*` matches any text (`*.example.com`). Matching is case-insensitive and ignores the port.
+- With a list set, a request whose `Host` is not listed is rejected with `421`, **whatever address the server is bound to**. Without one, `Host` is only checked on a loopback bind (loopback names only).
+- `127.0.0.1`, `localhost`, `::1` and the address the server is bound to are always admitted, so health checks on loopback keep working.
+- A host list does not restrict `Origin`: with no `--allowed-origins`, every origin is admitted (and no CORS headers are added). Add `--allowed-origins` to restrict which web pages may call the server.
+- **Behind a reverse proxy or load balancer, list the public name clients use** (and any internal name the proxy or probes send, such as a Kubernetes service name), or every request fails with `421`.
+- Unset, empty, or a lone `*` adds no restriction. Ports and IPv6 literals are rejected at startup (list a hostname that resolves to the address); a malformed entry stops the server with an error naming it, and a lone `*` cannot be combined with others.
+- Ignored with the `stdio` transport. Like `--allowed-origins`, this is not authentication; use [OAuth](#oauth-21-authorization) for that.
 
 #### Multiple workers
 
