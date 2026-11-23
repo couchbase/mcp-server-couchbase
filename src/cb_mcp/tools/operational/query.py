@@ -285,11 +285,17 @@ def explain_sql_plus_plus_query(
     bucket_name: str,
     scope_name: str,
     query: str,
+    named_parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Generate and evaluate an EXPLAIN plan for a SQL++ query. It provides information about the execution plan for the query.
 
     The EXPLAIN statement is run in the specified scope in the specified bucket.
     It returns query metadata along with an extracted plan and plan evaluation.
+
+    If the query is parameterized, supply ``named_parameters`` for its
+    ``$name`` placeholders: without values the plan may not match runtime.
+    The system:completed_requests tools return the ``namedArgs`` of a real
+    execution alongside each statement.
     """
     normalized_query = query.strip()
     if not normalized_query:
@@ -306,6 +312,7 @@ def explain_sql_plus_plus_query(
         bucket_name,
         scope_name,
         explain_statement,
+        named_parameters=named_parameters,
     )
 
     plan = extract_plan_from_explain_results(explain_results)
@@ -371,12 +378,20 @@ def get_longest_running_queries(ctx: Context, limit: int = 10) -> list[dict[str,
         limit: Number of queries to return (default: 10)
 
     Returns:
-        List of queries with their average service time and count
+        List of queries with their average service time, count, and the
+        namedArgs/positionalArgs of the slowest execution of each statement
     """
+    # MAX([ranking key, args])[1] returns the args of the highest-ranked
+    # execution, which GROUP BY statement would otherwise drop. namedArgs and
+    # positionalArgs are aggregated separately: SQL++ drops a MISSING element
+    # from an array literal, which in a 3-element array would shift
+    # positionalArgs into the namedArgs slot.
     query = """
     SELECT statement,
         DURATION_TO_STR(avgServiceTime) AS avgServiceTime,
-        COUNT(1) AS queries
+        COUNT(1) AS queries,
+        MAX([STR_TO_DURATION(serviceTime), namedArgs])[1] AS namedArgs,
+        MAX([STR_TO_DURATION(serviceTime), positionalArgs])[1] AS positionalArgs
     FROM system:completed_requests
     WHERE UPPER(statement) NOT LIKE 'INFER %'
         AND UPPER(statement) NOT LIKE 'CREATE INDEX%'
@@ -407,11 +422,19 @@ def get_most_frequent_queries(ctx: Context, limit: int = 10) -> list[dict[str, A
         limit: Number of queries to return (default: 10)
 
     Returns:
-        List of queries with their frequency count
+        List of queries with their frequency count and the namedArgs/positionalArgs of the
+        slowest execution of each statement
     """
+    # MAX([ranking key, args])[1] returns the args of the highest-ranked
+    # execution, which GROUP BY statement would otherwise drop. namedArgs and
+    # positionalArgs are aggregated separately: SQL++ drops a MISSING element
+    # from an array literal, which in a 3-element array would shift
+    # positionalArgs into the namedArgs slot.
     query = """
     SELECT statement,
-        COUNT(1) AS queries
+        COUNT(1) AS queries,
+        MAX([STR_TO_DURATION(serviceTime), namedArgs])[1] AS namedArgs,
+        MAX([STR_TO_DURATION(serviceTime), positionalArgs])[1] AS positionalArgs
     FROM system:completed_requests
     WHERE UPPER(statement) NOT LIKE 'INFER %'
         AND UPPER(statement) NOT LIKE 'CREATE INDEX%'
@@ -446,14 +469,22 @@ def get_queries_with_largest_response_sizes(
         limit: Number of queries to return (default: 10)
 
     Returns:
-        List of queries with their average result size in bytes, KB, and MB
+        List of queries with their average result size in bytes, KB, and MB,
+        and the namedArgs/positionalArgs of the largest execution of each statement
     """
+    # MAX([ranking key, args])[1] returns the args of the highest-ranked
+    # execution, which GROUP BY statement would otherwise drop. namedArgs and
+    # positionalArgs are aggregated separately: SQL++ drops a MISSING element
+    # from an array literal, which in a 3-element array would shift
+    # positionalArgs into the namedArgs slot.
     query = """
     SELECT statement,
         avgResultSize AS avgResultSizeBytes,
         (avgResultSize / 1000) AS avgResultSizeKB,
         (avgResultSize / 1000000) AS avgResultSizeMB,
-        COUNT(1) AS queries
+        COUNT(1) AS queries,
+        MAX([resultSize, namedArgs])[1] AS namedArgs,
+        MAX([resultSize, positionalArgs])[1] AS positionalArgs
     FROM system:completed_requests
     WHERE UPPER(statement) NOT LIKE 'INFER %'
         AND UPPER(statement) NOT LIKE 'CREATE INDEX%'
@@ -486,12 +517,20 @@ def get_queries_with_large_result_count(
         limit: Number of queries to return (default: 10)
 
     Returns:
-        List of queries with their average result count
+        List of queries with their average result count and the namedArgs/positionalArgs of
+        the execution that returned the most rows for each statement
     """
+    # MAX([ranking key, args])[1] returns the args of the highest-ranked
+    # execution, which GROUP BY statement would otherwise drop. namedArgs and
+    # positionalArgs are aggregated separately: SQL++ drops a MISSING element
+    # from an array literal, which in a 3-element array would shift
+    # positionalArgs into the namedArgs slot.
     query = """
     SELECT statement,
         avgResultCount,
-        COUNT(1) AS queries
+        COUNT(1) AS queries,
+        MAX([resultCount, namedArgs])[1] AS namedArgs,
+        MAX([resultCount, positionalArgs])[1] AS positionalArgs
     FROM system:completed_requests
     WHERE UPPER(statement) NOT LIKE 'INFER %' AND
         UPPER(statement) NOT LIKE 'CREATE INDEX%' AND
@@ -589,14 +628,26 @@ def get_queries_not_selective(ctx: Context, limit: int = 10) -> list[dict[str, A
 
     Returns:
         List of queries where scans (secondary index, primary index, or sequential)
-        return significantly more documents than the final result
+        return significantly more documents than the final result, with the
+        namedArgs/positionalArgs of the least selective execution of each statement
     """
     # Scans are logged under `indexScan` (secondary index) or `primaryScan`
     # (primary index or sequential scan); a query only has the one its plan used.
+    # MAX([ranking key, args])[1] returns the args of the highest-ranked
+    # execution, which GROUP BY statement would otherwise drop. namedArgs and
+    # positionalArgs are aggregated separately: SQL++ drops a MISSING element
+    # from an array literal, which in a 3-element array would shift
+    # positionalArgs into the namedArgs slot.
     query = """
     SELECT statement,
        AVG(IFMISSINGORNULL(phaseCounts.`indexScan`, 0)
-         + IFMISSINGORNULL(phaseCounts.`primaryScan`, 0) - resultCount) AS diff
+         + IFMISSINGORNULL(phaseCounts.`primaryScan`, 0) - resultCount) AS diff,
+       MAX([IFMISSINGORNULL(phaseCounts.`indexScan`, 0)
+         + IFMISSINGORNULL(phaseCounts.`primaryScan`, 0) - resultCount,
+         namedArgs])[1] AS namedArgs,
+       MAX([IFMISSINGORNULL(phaseCounts.`indexScan`, 0)
+         + IFMISSINGORNULL(phaseCounts.`primaryScan`, 0) - resultCount,
+         positionalArgs])[1] AS positionalArgs
     FROM system:completed_requests
     WHERE IFMISSINGORNULL(phaseCounts.`indexScan`, 0)
         + IFMISSINGORNULL(phaseCounts.`primaryScan`, 0) > resultCount
