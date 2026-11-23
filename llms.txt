@@ -6,7 +6,7 @@ Couchbase is a distributed NoSQL/multi-model database. This server implements th
 
 ## Docs
 
-- [Full documentation](https://docs.couchbase.com/mcp-server/1.1/reference/common-overview.html): configuration reference, transports, OAuth, logging, and per-client setup guides
+- [Full documentation](https://docs.couchbase.com/mcp-server/current/reference/common-overview.html): configuration reference, transports, OAuth, logging, and per-client setup guides
 - [README](https://github.com/couchbase/mcp-server-couchbase/blob/main/README.md): tool catalog, installation, configuration, FAQ
 - [CONTRIBUTING.md](https://github.com/couchbase/mcp-server-couchbase/blob/main/CONTRIBUTING.md): development setup, linting, testing, project structure and workflow
 - [PyPI package](https://pypi.org/project/couchbase-mcp-server/)

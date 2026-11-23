@@ -7,7 +7,7 @@ Couchbase MCP Server is a self-hosted [Model Context Protocol](https://modelcont
 Enterprise support is available by licensing [Couchbase AI Data Plane](https://www.couchbase.com/downloads/?family=ai-data-plane), which also entitles use and enterprise support of Couchbase Agent Memory and Couchbase Agent Catalog.
 
 - **GitHub:** <https://github.com/couchbase/mcp-server-couchbase> — full configuration reference and tool list
-- **Documentation:** <https://docs.couchbase.com/mcp-server/1.1/reference/common-overview.html>
+- **Documentation:** <https://docs.couchbase.com/mcp-server/current/reference/common-overview.html>
 - **Dockerfile:** <https://github.com/couchbase/mcp-server-couchbase/blob/main/Dockerfile>
 
 ## Quick Start
@@ -193,7 +193,7 @@ Use port `8001` for `operational-insights`, or whatever `CB_MCP_PORT` is set to.
 
 ## OAuth 2.1
 
-In HTTP mode the server can validate bearer JWTs from any OAuth 2.1/OIDC provider that publishes a JWKS (Auth0, Okta, Keycloak, Cognito, Entra, …). Set `CB_MCP_OAUTH_JWT_JWKS_URI`, `CB_MCP_OAUTH_JWT_ISSUER` and `CB_MCP_OAUTH_JWT_AUDIENCE` (all three are required), and optionally `CB_MCP_OAUTH_MCP_BASE_URL` to publish Protected Resource Metadata. Tokens need the `couchbase-mcp:read` scope for read tools and `couchbase-mcp:write` for write tools. See the OAuth documentation for the [operational server](https://docs.couchbase.com/mcp-server/1.1/configuration/oauth-overview.html) and the [Operational Insights server](https://docs.couchbase.com/mcp-server/1.1/configuration-oi/oauth-overview-oi.html).
+In HTTP mode the server can validate bearer JWTs from any OAuth 2.1/OIDC provider that publishes a JWKS (Auth0, Okta, Keycloak, Cognito, Entra, …). Set `CB_MCP_OAUTH_JWT_JWKS_URI`, `CB_MCP_OAUTH_JWT_ISSUER` and `CB_MCP_OAUTH_JWT_AUDIENCE` (all three are required), and optionally `CB_MCP_OAUTH_MCP_BASE_URL` to publish Protected Resource Metadata. Tokens need the `couchbase-mcp:read` scope for read tools and `couchbase-mcp:write` for write tools. See the OAuth documentation for the [operational server](https://docs.couchbase.com/mcp-server/current/configuration/oauth-overview.html) and the [Operational Insights server](https://docs.couchbase.com/mcp-server/current/configuration-oi/oauth-overview-oi.html).
 
 ## Tools
 

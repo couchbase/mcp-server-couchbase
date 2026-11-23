@@ -396,7 +396,7 @@ PRs without testing evidence will be sent back for it before review.
 
    Call the `get_server_configuration_status` tool from your client to see what the server actually resolved.
 
-6. **Update documentation** if you changed user-facing behavior: `README.md` (the right server's tool table and configuration section), `DOCKER.md`, and `server.json` for new environment variables. Note in the PR if the [product docs](https://docs.couchbase.com/mcp-server/get-started/overview.html) need a matching update.
+6. **Update documentation** if you changed user-facing behavior: `README.md` (the right server's tool table and configuration section), `DOCKER.md`, and `server.json` for new environment variables. Note in the PR if the [product docs](https://docs.couchbase.com/mcp-server/current/reference/common-overview.html) need a matching update.
 7. **Commit** using descriptive messages. PRs are squash-merged, so the PR title becomes the commit message on `main`: start it with the JIRA key when there is one, e.g. `DA-2029: Add query health tools`, otherwise a short imperative summary such as `Add: get bucket config tool` or `Fix: handle missing scope in kv get`. Pre-commit hooks will auto-fix formatting.
 
 ## 🤝 Submitting Changes
