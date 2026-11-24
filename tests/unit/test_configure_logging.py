@@ -17,16 +17,19 @@ import sys
 from logging.handlers import RotatingFileHandler
 from unittest.mock import patch
 
+import fastmcp  # noqa: F401  (import configures the fastmcp logger under test)
 import pytest
 
 import cb_mcp.utils.logging as logmod
 from cb_mcp.utils.constants import (
     BYTES_PER_MB,
     DEFAULT_LOG_MAX_BYTES,
+    FASTMCP_LOGGER_ROOT,
     LOGGER_ROOT,
 )
 from cb_mcp.utils.logging import (
     LEVEL_OFF,
+    FastMCPTracebackFilter,
     ResolvedLoggingConfig,
     configure_logging,
     get_resolved_logging_config,
@@ -849,6 +852,93 @@ class TestTracebackSuppression:
         _call(level="INFO", sinks={"stderr"})
         logging.getLogger(f"{LOGGER_ROOT}.plain").error("plain-marker")
         assert "plain-marker" in capsys.readouterr().err
+
+
+class TestFastMCPTracebackPolicy:
+    """DA-2450: FastMCP's own handlers follow the same traceback rule.
+
+    FastMCP owns a separate logger tree (``propagate=False``, its own
+    ``RichHandler``s), so these tests drive the real ``fastmcp`` logger rather
+    than a stand-in — a FastMCP upgrade that changes that layout should fail
+    here rather than quietly reintroduce the second traceback.
+    """
+
+    @pytest.fixture(autouse=True)
+    def restore_fastmcp_handler_filters(self):
+        """Put each FastMCP handler's filter list back as it was found."""
+        fastmcp_logger = logging.getLogger(FASTMCP_LOGGER_ROOT)
+        saved = [(h, list(h.filters)) for h in fastmcp_logger.handlers]
+        yield
+        for handler, filters in saved:
+            handler.filters = filters
+
+    @staticmethod
+    def _log_fastmcp_error():
+        log = logging.getLogger(f"{FASTMCP_LOGGER_ROOT}.tools.base")
+        try:
+            raise ValueError("fastmcp-boom")
+        except ValueError:
+            log.exception("Error calling tool 'get_cluster_health_and_services'")
+
+    def test_fastmcp_logger_has_handlers_of_its_own(self):
+        """Guards the assumption the policy relies on."""
+        fastmcp_logger = logging.getLogger(FASTMCP_LOGGER_ROOT)
+        assert fastmcp_logger.handlers
+        assert fastmcp_logger.propagate is False
+
+    def test_default_level_strips_fastmcp_traceback(self, capsys):
+        _call(level="INFO", sinks={"stderr"})
+        self._log_fastmcp_error()
+        err = capsys.readouterr().err
+        assert "Error calling tool" in err
+        assert "Traceback" not in err
+
+    def test_debug_level_keeps_fastmcp_traceback(self, capsys):
+        _call(level="DEBUG", sinks={"stderr"})
+        self._log_fastmcp_error()
+        err = capsys.readouterr().err
+        assert "Traceback" in err
+
+    def test_off_level_strips_fastmcp_traceback(self, capsys):
+        _call(level="OFF", sinks={"stderr"})
+        self._log_fastmcp_error()
+        assert "Traceback" not in capsys.readouterr().err
+
+    def test_filter_not_duplicated_across_reconfiguration(self):
+        for _ in range(3):
+            _call(level="INFO", sinks={"stderr"})
+        for handler in logging.getLogger(FASTMCP_LOGGER_ROOT).handlers:
+            installed = [
+                f for f in handler.filters if isinstance(f, FastMCPTracebackFilter)
+            ]
+            assert len(installed) == 1
+
+    def test_reconfiguring_at_debug_removes_the_filter(self):
+        _call(level="INFO", sinks={"stderr"})
+        _call(level="DEBUG", sinks={"stderr"})
+        for handler in logging.getLogger(FASTMCP_LOGGER_ROOT).handlers:
+            assert not [
+                f for f in handler.filters if isinstance(f, FastMCPTracebackFilter)
+            ]
+
+    def test_no_handlers_is_a_no_op(self, monkeypatch):
+        """FastMCP unimported, or FASTMCP_LOG_ENABLED=false."""
+        monkeypatch.setattr(
+            logging.getLogger(FASTMCP_LOGGER_ROOT), "handlers", [], raising=False
+        )
+        _call(level="INFO", sinks={"stderr"})
+
+    def test_couchbase_records_unaffected_by_the_policy(self, capsys):
+        """The two trees stay independent: ours still logs its own one-liner."""
+        _call(level="INFO", sinks={"stderr"})
+        log = logging.getLogger(f"{LOGGER_ROOT}.sibling")
+        try:
+            raise ValueError("couchbase-boom")
+        except ValueError as e:
+            log.error(f"Error doing a thing: {e}", exc_info=True)
+        err = capsys.readouterr().err
+        assert "Error doing a thing: couchbase-boom" in err
+        assert "Traceback" not in err
 
 
 class TestEnvFile:
