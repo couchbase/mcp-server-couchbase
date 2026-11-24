@@ -20,6 +20,7 @@ provider.
 """
 
 import logging
+import math
 import time
 import uuid
 from typing import ClassVar
@@ -127,7 +128,9 @@ class CouchbaseJWTVerifier(JWTVerifier):
 
         ``exp`` is mandatory per RFC 9068 section 2.2. ``nbf`` and ``iat`` are
         validated when present, with leeway for clock skew between this host
-        and the issuer.
+        and the issuer. A NumericDate that is absent from the JSON number
+        space — ``NaN``, an infinity, or a magnitude that overflows a float —
+        is treated as malformed and rejected rather than compared.
 
         Args:
             claims: Decoded JWT claims of a token that has already passed
@@ -147,9 +150,16 @@ class CouchbaseJWTVerifier(JWTVerifier):
                 continue
             try:
                 numeric = float(value)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 logger.warning(
                     "Bearer token rejected: %s claim is not numeric (%r)",
+                    name,
+                    value,
+                )
+                return False
+            if not math.isfinite(numeric):
+                logger.warning(
+                    "Bearer token rejected: %s claim is not a finite timestamp (%r)",
                     name,
                     value,
                 )

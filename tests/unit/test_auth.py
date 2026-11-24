@@ -565,6 +565,32 @@ class TestTemporalClaims:
         claims = {"exp": time.time() + 3600, "nbf": "not-a-timestamp"}
         assert verifier._temporal_claims_valid(claims) is False
 
+    @pytest.mark.parametrize("name", ["nbf", "iat"])
+    @pytest.mark.parametrize("value", ["NaN", float("nan"), float("inf"), 10**400])
+    def test_malformed_numeric_date_is_rejected(self, name, value):
+        """A NumericDate outside the JSON number space must be refused rather
+        than compared: ``NaN`` fails every ordering test and so would slip
+        past the future check, and a magnitude that overflows a float would
+        raise out of ``verify_token`` and skip the rejection audit."""
+        verifier = self._verifier()
+        claims = {"exp": time.time() + 3600, name: value}
+        assert verifier._temporal_claims_valid(claims) is False
+
+    @pytest.mark.parametrize("value", ["NaN", 10**400])
+    def test_malformed_numeric_date_returns_none_not_raises(self, value):
+        """The rejection must travel the normal ``None`` path so the audit
+        record is still emitted."""
+        verifier = self._verifier()
+        accepted = AccessToken(
+            token="t",
+            client_id="c",
+            scopes=[SCOPE_READ],
+            expires_at=int(time.time()) + 3600,
+            claims={"exp": int(time.time()) + 3600, "nbf": value},
+        )
+        with patch.object(JWTVerifier, "verify_token", return_value=accepted):
+            assert asyncio.run(verifier.verify_token("t")) is None
+
     def test_verify_token_rejects_token_upstream_accepted(self):
         """End of the path: upstream returns a token with no ``exp``, the
         override must turn it into a ``None`` (401)."""
