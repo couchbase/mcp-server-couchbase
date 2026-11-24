@@ -193,3 +193,9 @@ ALLOWED_OAUTH_ALGORITHMS = [
     "PS512",
 ]
 DEFAULT_OAUTH_ALGORITHM = "RS256"
+
+# Clock-skew tolerance applied to the nbf and iat checks in
+# CouchbaseJWTVerifier. Matches FastMCP 4.x's own nbf tolerance. Not operator-
+# configurable: a knob here would let a deployment widen the window in which a
+# not-yet-valid token is accepted. Host clocks are an NTP problem.
+OAUTH_CLOCK_SKEW_LEEWAY_SECONDS = 30
