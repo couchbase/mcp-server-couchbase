@@ -17,7 +17,6 @@ import sys
 from logging.handlers import RotatingFileHandler
 from unittest.mock import patch
 
-import fastmcp  # noqa: F401  (import configures the fastmcp logger under test)
 import pytest
 
 import cb_mcp.utils.logging as logmod
