@@ -17,6 +17,12 @@ LOGGER_ROOT = "couchbase"
 # ServerSpec.logger_namespace).
 LOGGER_NAMESPACE = f"{LOGGER_ROOT}.mcp"
 
+# Root of FastMCP's own logger tree. FastMCP configures it at import time with
+# its own handlers and propagate=False, so records there never reach the
+# handlers attached under LOGGER_ROOT; logging.py reaches it by name to hold it
+# to the same traceback rule.
+FASTMCP_LOGGER_ROOT = "fastmcp"
+
 # Default Configuration Values shared by every server. Anything that differs
 # per server — the default port and log file — belongs in that server's own
 # constants module (see ServerSpec.default_port / default_log_file), not here:
