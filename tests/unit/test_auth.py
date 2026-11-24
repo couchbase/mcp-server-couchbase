@@ -21,6 +21,8 @@ from fastmcp import Client, FastMCP
 from fastmcp.server.auth import AccessToken, RemoteAuthProvider
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
+from cb_mcp.audit.catalog import AuditEvent
+from cb_mcp.audit.record import OUTCOME_DENIED, REASON_TOKEN_INVALID
 from cb_mcp.auth import CouchbaseJWTVerifier, build_oauth
 from cb_mcp.core.spec import ScopeSpec
 from cb_mcp.tools.operational.query import run_sql_plus_plus_query
@@ -566,7 +568,9 @@ class TestTemporalClaims:
         assert verifier._temporal_claims_valid(claims) is False
 
     @pytest.mark.parametrize("name", ["nbf", "iat"])
-    @pytest.mark.parametrize("value", ["NaN", float("nan"), float("inf"), 10**400])
+    @pytest.mark.parametrize(
+        "value", ["NaN", float("nan"), float("inf"), 10**400, True]
+    )
     def test_malformed_numeric_date_is_rejected(self, name, value):
         """A NumericDate outside the JSON number space must be refused rather
         than compared: ``NaN`` fails every ordering test and so would slip
@@ -575,6 +579,41 @@ class TestTemporalClaims:
         verifier = self._verifier()
         claims = {"exp": time.time() + 3600, name: value}
         assert verifier._temporal_claims_valid(claims) is False
+
+    @pytest.mark.parametrize(
+        "value", ["NaN", float("nan"), float("inf"), 10**400, True]
+    )
+    def test_malformed_exp_is_rejected(self, value):
+        """``exp`` needs the same well-formedness check as the other two: a
+        ``NaN`` compares false against FastMCP's ``exp < time.time()``, so a
+        token carrying one reads as never expiring."""
+        verifier = self._verifier()
+        assert verifier._temporal_claims_valid({"exp": value}) is False
+
+    def test_rejection_is_audited(self):
+        """A temporal rejection must travel the same audit path as every other
+        token rejection, not just return ``None``."""
+        verifier = self._verifier()
+        accepted = AccessToken(
+            token="t",
+            client_id="c",
+            scopes=[SCOPE_READ],
+            expires_at=None,
+            claims={"sub": "u"},
+        )
+        audit = MagicMock()
+        audit.active = True
+        with (
+            patch.object(JWTVerifier, "verify_token", return_value=accepted),
+            patch("cb_mcp.auth.get_audit_logger", return_value=audit),
+        ):
+            assert asyncio.run(verifier.verify_token("t")) is None
+
+        audit.emit_event.assert_called_once()
+        call = audit.emit_event.call_args
+        assert call.args[0] is AuditEvent.TOKEN_REJECTED
+        assert call.kwargs["outcome"] == OUTCOME_DENIED
+        assert call.kwargs["reason"] == REASON_TOKEN_INVALID
 
     @pytest.mark.parametrize("value", ["NaN", 10**400])
     def test_malformed_numeric_date_returns_none_not_raises(self, value):
@@ -602,12 +641,25 @@ class TestTemporalClaims:
             expires_at=None,
             claims={"sub": "u", "iss": ISSUER, "aud": AUDIENCE},
         )
-        with patch.object(
-            JWTVerifier, "verify_token", return_value=accepted
-        ) as upstream:
-            upstream.return_value = accepted
+        with patch.object(JWTVerifier, "verify_token", return_value=accepted):
             result = asyncio.run(verifier.verify_token("t"))
         assert result is None
+
+    def test_upstream_overflow_becomes_a_rejection(self):
+        """FastMCP builds its ``AccessToken`` with ``int(exp)``, which raises
+        ``OverflowError`` on an infinite ``exp`` and is not in the ``except``
+        tuple upstream uses to return ``None``. It must not escape as a 500."""
+        verifier = self._verifier()
+        audit = MagicMock()
+        audit.active = True
+        with (
+            patch.object(JWTVerifier, "verify_token", side_effect=OverflowError),
+            patch("cb_mcp.auth.get_audit_logger", return_value=audit),
+        ):
+            assert asyncio.run(verifier.verify_token("t")) is None
+
+        audit.emit_event.assert_called_once()
+        assert audit.emit_event.call_args.args[0] is AuditEvent.TOKEN_REJECTED
 
     def test_verify_token_passes_valid_token_through(self):
         verifier = self._verifier()

@@ -50,6 +50,25 @@ logger = logging.getLogger(f"{LOGGER_NAMESPACE}.auth")
 DEFAULT_RESOURCE_NAME = "Couchbase MCP Server"
 
 
+def _numeric_date(value: object) -> float | None:
+    """Return a JWT NumericDate as a float, or ``None`` when it is malformed.
+
+    RFC 7519 section 2 defines a NumericDate as a JSON number of seconds since
+    the epoch. ``NaN`` and the infinities are outside that definition but
+    survive JSON parsing (Python's decoder accepts the ``NaN`` and ``Infinity``
+    literals), and ``NaN`` in particular compares false against every bound, so
+    it must be refused rather than compared. A magnitude that overflows a float
+    and a boolean are rejected on the same grounds.
+    """
+    if isinstance(value, bool):
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return numeric if math.isfinite(numeric) else None
+
+
 class OAuthConfigError(Exception):
     """Invalid or incomplete CLI/env OAuth settings.
 
@@ -121,16 +140,16 @@ class CouchbaseJWTVerifier(JWTVerifier):
 
         FastMCP decodes with joserfc's ``jwt.decode`` and supplies only a JWS
         registry, so joserfc performs no claim validation. The verifier then
-        checks ``exp`` only when it is present, and does not look at ``nbf`` or
-        ``iat`` at all (FastMCP 4.x adds an ``nbf`` check; the 3.x line this
-        server pins does not). A token with no ``exp`` therefore never expires
-        and a token with a future ``nbf`` is accepted before it is valid.
+        checks ``exp`` only when it is present and finite, and does not look at
+        ``nbf`` or ``iat`` at all (FastMCP 4.x adds an ``nbf`` check; the 3.x
+        line this server pins does not). A token with no ``exp`` therefore
+        never expires and a token with a future ``nbf`` is accepted before it
+        is valid.
 
-        ``exp`` is mandatory per RFC 9068 section 2.2. ``nbf`` and ``iat`` are
-        validated when present, with leeway for clock skew between this host
-        and the issuer. A NumericDate that is absent from the JSON number
-        space — ``NaN``, an infinity, or a magnitude that overflows a float —
-        is treated as malformed and rejected rather than compared.
+        ``exp`` is mandatory per RFC 9068 section 2.2. It is checked here for
+        presence and well-formedness only — a finite ``exp`` in the past has
+        already been rejected upstream. ``nbf`` and ``iat`` are validated when
+        present, with leeway for clock skew between this host and the issuer.
 
         Args:
             claims: Decoded JWT claims of a token that has already passed
@@ -139,8 +158,15 @@ class CouchbaseJWTVerifier(JWTVerifier):
         Returns:
             ``True`` when the temporal claims permit the token to be used now.
         """
-        if claims.get("exp") is None:
+        exp = claims.get("exp")
+        if exp is None:
             logger.warning("Bearer token rejected: no exp claim")
+            return False
+        if _numeric_date(exp) is None:
+            logger.warning(
+                "Bearer token rejected: exp claim is not a finite timestamp (%r)",
+                exp,
+            )
             return False
 
         limit = time.time() + OAUTH_CLOCK_SKEW_LEEWAY_SECONDS
@@ -148,16 +174,8 @@ class CouchbaseJWTVerifier(JWTVerifier):
             value = claims.get(name)
             if value is None:
                 continue
-            try:
-                numeric = float(value)
-            except (TypeError, ValueError, OverflowError):
-                logger.warning(
-                    "Bearer token rejected: %s claim is not numeric (%r)",
-                    name,
-                    value,
-                )
-                return False
-            if not math.isfinite(numeric):
+            numeric = _numeric_date(value)
+            if numeric is None:
                 logger.warning(
                     "Bearer token rejected: %s claim is not a finite timestamp (%r)",
                     name,
@@ -202,8 +220,19 @@ class CouchbaseJWTVerifier(JWTVerifier):
         no sibling record can exist. Nothing is read from the request scope
         here on purpose: correlation is minted in middleware precisely so that
         a host with a different authentication layer inherits it unchanged.
+
+        ``OverflowError`` is caught around the upstream call because FastMCP
+        builds its ``AccessToken`` with ``int(exp)``: an infinite ``exp``
+        raises there, and ``OverflowError`` is absent from the ``except``
+        tuple that converts upstream failures into ``None``. Uncaught it would
+        surface as a 500 and skip this audit record, so it is folded into the
+        normal rejection path.
         """
-        result = await super().verify_token(token)
+        try:
+            result = await super().verify_token(token)
+        except OverflowError:
+            logger.warning("Bearer token rejected: exp claim is not a finite timestamp")
+            result = None
         if result is not None and not self._temporal_claims_valid(result.claims):
             result = None
         if result is None:
