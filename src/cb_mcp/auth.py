@@ -20,6 +20,7 @@ provider.
 """
 
 import logging
+import time
 import uuid
 from typing import ClassVar
 
@@ -34,6 +35,7 @@ from .audit.record import OUTCOME_DENIED, REASON_TOKEN_INVALID
 from .utils.constants import (
     DEFAULT_OAUTH_ALGORITHM,
     LOGGER_NAMESPACE,
+    OAUTH_CLOCK_SKEW_LEEWAY_SECONDS,
     SCOPE_READ,
     SCOPE_WRITE,
     STREAMABLE_HTTP_TRANSPORT,
@@ -113,6 +115,55 @@ class CouchbaseJWTVerifier(JWTVerifier):
         raw = super()._extract_scopes(claims)
         return [self._scope_aliases.get(s, s) for s in raw]
 
+    def _temporal_claims_valid(self, claims: dict) -> bool:
+        """Validate the ``exp``, ``nbf`` and ``iat`` claims.
+
+        FastMCP decodes with joserfc's ``jwt.decode`` and supplies only a JWS
+        registry, so joserfc performs no claim validation. The verifier then
+        checks ``exp`` only when it is present, and does not look at ``nbf`` or
+        ``iat`` at all (FastMCP 4.x adds an ``nbf`` check; the 3.x line this
+        server pins does not). A token with no ``exp`` therefore never expires
+        and a token with a future ``nbf`` is accepted before it is valid.
+
+        ``exp`` is mandatory per RFC 9068 section 2.2. ``nbf`` and ``iat`` are
+        validated when present, with leeway for clock skew between this host
+        and the issuer.
+
+        Args:
+            claims: Decoded JWT claims of a token that has already passed
+                signature, issuer, audience and scope validation upstream.
+
+        Returns:
+            ``True`` when the temporal claims permit the token to be used now.
+        """
+        if claims.get("exp") is None:
+            logger.warning("Bearer token rejected: no exp claim")
+            return False
+
+        limit = time.time() + OAUTH_CLOCK_SKEW_LEEWAY_SECONDS
+        for name in ("nbf", "iat"):
+            value = claims.get(name)
+            if value is None:
+                continue
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Bearer token rejected: %s claim is not numeric (%r)",
+                    name,
+                    value,
+                )
+                return False
+            if numeric > limit:
+                logger.warning(
+                    "Bearer token rejected: %s claim is in the future (%r)",
+                    name,
+                    value,
+                )
+                return False
+
+        return True
+
     async def verify_token(self, token: str) -> AccessToken | None:
         """Validate a bearer token, auditing a rejection.
 
@@ -125,7 +176,8 @@ class CouchbaseJWTVerifier(JWTVerifier):
         issuer into a single ``None`` return, keeping the discriminating detail
         in a debug log line only; re-deriving it would mean decoding the token a
         second time and duplicating upstream validation logic. A single
-        ``token_invalid`` reason is the honest record. ``real_userid`` is
+        ``token_invalid`` reason is the honest record, and the temporal-claim
+        rejection added here shares it. ``real_userid`` is
         ``anonymous`` because a rejected token establishes no identity.
 
         A token that is *missing* entirely is refused by the ASGI auth layer
@@ -142,6 +194,8 @@ class CouchbaseJWTVerifier(JWTVerifier):
         a host with a different authentication layer inherits it unchanged.
         """
         result = await super().verify_token(token)
+        if result is not None and not self._temporal_claims_valid(result.claims):
+            result = None
         if result is None:
             audit = get_audit_logger()
             if audit.active:

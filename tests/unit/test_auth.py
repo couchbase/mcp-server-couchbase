@@ -11,19 +11,24 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import Client, FastMCP
-from fastmcp.server.auth import RemoteAuthProvider
+from fastmcp.server.auth import AccessToken, RemoteAuthProvider
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 from cb_mcp.auth import CouchbaseJWTVerifier, build_oauth
 from cb_mcp.core.spec import ScopeSpec
 from cb_mcp.tools.operational.query import run_sql_plus_plus_query
-from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
+from cb_mcp.utils.constants import (
+    OAUTH_CLOCK_SKEW_LEEWAY_SECONDS,
+    SCOPE_READ,
+    SCOPE_WRITE,
+)
 from cb_mcp.utils.scope_enforcement import (
     required_scopes_for_tool,
     wrap_with_scope_check,
@@ -509,3 +514,85 @@ class TestSqlPlusPlusScopeGate:
                 "s",
                 "INSERT INTO c (KEY, VALUE) VALUES ('k', {'a': 1})",
             )
+
+
+class TestTemporalClaims:
+    """``exp`` / ``nbf`` / ``iat`` enforcement.
+
+    FastMCP's verifier checks ``exp`` only when present and ignores ``nbf``
+    and ``iat`` on the 3.x line this server pins, so a token with no ``exp``
+    never expires and a token with a future ``nbf`` is accepted before it is
+    valid. ``CouchbaseJWTVerifier`` closes both.
+    """
+
+    @staticmethod
+    def _verifier() -> CouchbaseJWTVerifier:
+        return build_oauth(jwks_uri=JWKS, issuer=ISSUER, audience=AUDIENCE)
+
+    def test_missing_exp_is_rejected(self):
+        """RFC 9068 makes ``exp`` mandatory on a JWT access token."""
+        assert self._verifier()._temporal_claims_valid({"sub": "u"}) is False
+
+    def test_future_nbf_is_rejected(self):
+        verifier = self._verifier()
+        claims = {"exp": time.time() + 3600, "nbf": time.time() + 3600}
+        assert verifier._temporal_claims_valid(claims) is False
+
+    def test_future_iat_is_rejected(self):
+        verifier = self._verifier()
+        claims = {"exp": time.time() + 3600, "iat": time.time() + 3600}
+        assert verifier._temporal_claims_valid(claims) is False
+
+    def test_nbf_within_leeway_is_accepted(self):
+        """Issuer clocks run slightly ahead; the leeway must absorb that."""
+        verifier = self._verifier()
+        skew = OAUTH_CLOCK_SKEW_LEEWAY_SECONDS / 2
+        claims = {
+            "exp": time.time() + 3600,
+            "nbf": time.time() + skew,
+            "iat": time.time() + skew,
+        }
+        assert verifier._temporal_claims_valid(claims) is True
+
+    def test_valid_claims_are_accepted(self):
+        verifier = self._verifier()
+        now = time.time()
+        claims = {"exp": now + 3600, "nbf": now - 10, "iat": now - 10}
+        assert verifier._temporal_claims_valid(claims) is True
+
+    def test_non_numeric_claim_is_rejected(self):
+        verifier = self._verifier()
+        claims = {"exp": time.time() + 3600, "nbf": "not-a-timestamp"}
+        assert verifier._temporal_claims_valid(claims) is False
+
+    def test_verify_token_rejects_token_upstream_accepted(self):
+        """End of the path: upstream returns a token with no ``exp``, the
+        override must turn it into a ``None`` (401)."""
+        verifier = self._verifier()
+        accepted = AccessToken(
+            token="t",
+            client_id="c",
+            scopes=[SCOPE_READ],
+            expires_at=None,
+            claims={"sub": "u", "iss": ISSUER, "aud": AUDIENCE},
+        )
+        with patch.object(
+            JWTVerifier, "verify_token", return_value=accepted
+        ) as upstream:
+            upstream.return_value = accepted
+            result = asyncio.run(verifier.verify_token("t"))
+        assert result is None
+
+    def test_verify_token_passes_valid_token_through(self):
+        verifier = self._verifier()
+        now = int(time.time())
+        accepted = AccessToken(
+            token="t",
+            client_id="c",
+            scopes=[SCOPE_READ],
+            expires_at=now + 3600,
+            claims={"exp": now + 3600, "iat": now - 10, "nbf": now - 10},
+        )
+        with patch.object(JWTVerifier, "verify_token", return_value=accepted):
+            result = asyncio.run(verifier.verify_token("t"))
+        assert result is accepted

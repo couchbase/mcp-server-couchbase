@@ -187,3 +187,7 @@ ALLOWED_OAUTH_ALGORITHMS = [
     "PS512",
 ]
 DEFAULT_OAUTH_ALGORITHM = "RS256"
+
+# Clock-skew tolerance applied to the nbf and iat checks in
+# CouchbaseJWTVerifier. Matches FastMCP 4.x's own nbf tolerance.
+OAUTH_CLOCK_SKEW_LEEWAY_SECONDS = 30
