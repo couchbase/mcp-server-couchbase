@@ -11,16 +11,17 @@ before sending anything:
 The server here gets a client certificate and *no* username or password.
 
 They need a cluster set up by ``scripts/setup_mtls_cluster.sh`` and are skipped
-unless these variables point at its output (the ``mtls-integration-tests`` CI
-job sets them):
+unless the server's own certificate settings are in the environment (the
+``mtls-integration-tests`` CI job sets them):
 
-    CB_MCP_TEST_MTLS_CERT   client certificate (PEM)
-    CB_MCP_TEST_MTLS_KEY    its private key
-    CB_MCP_TEST_MTLS_CA     the CA that signed the cluster's node certificate
+    CB_CLIENT_CERT_PATH   client certificate (PEM)
+    CB_CLIENT_KEY_PATH    its private key
+    CB_CA_CERT_PATH       the CA that signed the cluster's node certificate
 
-``CB_MCP_TEST_MTLS_CONNECTION_STRING`` defaults to ``couchbases://127.0.0.1``: an
-IPv4 literal, because where ``localhost`` resolves to ``::1`` first the SDK
-reports the node as ``[::1]``, which not every Couchbase service listens on.
+``CB_CONNECTION_STRING`` is used as is when set, otherwise it is
+``couchbases://127.0.0.1``: an IPv4 literal, because where ``localhost``
+resolves to ``::1`` first the SDK reports the node as ``[::1]``, which not
+every Couchbase service listens on.
 """
 
 from __future__ import annotations
@@ -35,15 +36,15 @@ from conftest import (
     is_error_response,
 )
 
-_CERT = os.environ.get("CB_MCP_TEST_MTLS_CERT")
-_KEY = os.environ.get("CB_MCP_TEST_MTLS_KEY")
-_CA = os.environ.get("CB_MCP_TEST_MTLS_CA")
+_CERT = os.environ.get("CB_CLIENT_CERT_PATH")
+_KEY = os.environ.get("CB_CLIENT_KEY_PATH")
+_CA = os.environ.get("CB_CA_CERT_PATH")
 
 pytestmark = pytest.mark.skipif(
     not (_CERT and _KEY and _CA),
     reason=(
-        "mTLS tests need CB_MCP_TEST_MTLS_CERT, CB_MCP_TEST_MTLS_KEY and "
-        "CB_MCP_TEST_MTLS_CA (see scripts/setup_mtls_cluster.sh)"
+        "mTLS tests need CB_CLIENT_CERT_PATH, CB_CLIENT_KEY_PATH and "
+        "CB_CA_CERT_PATH (see scripts/setup_mtls_cluster.sh)"
     ),
 )
 
@@ -78,23 +79,17 @@ TOOL_CALLS: list[tuple[str, dict[str, Any]]] = [
 
 
 def _server_env(*, with_certificate: bool = True) -> dict[str, str]:
-    """Server environment: a client certificate, and no username/password."""
+    """Server environment: the client certificate from the environment, and no
+    username/password (nor, with ``with_certificate=False``, the certificate)."""
     env = os.environ.copy()
-    for var in ("CB_USERNAME", "CB_PASSWORD"):
+    env.setdefault("CB_CONNECTION_STRING", "couchbases://127.0.0.1")
+    env["CB_MCP_TRANSPORT"] = "stdio"
+    env["CB_MCP_READ_ONLY_MODE"] = "false"
+    dropped = ["CB_USERNAME", "CB_PASSWORD"]
+    if not with_certificate:
+        dropped += ["CB_CLIENT_CERT_PATH", "CB_CLIENT_KEY_PATH"]
+    for var in dropped:
         env.pop(var, None)
-    env.update(
-        {
-            "CB_CONNECTION_STRING": os.environ.get(
-                "CB_MCP_TEST_MTLS_CONNECTION_STRING", "couchbases://127.0.0.1"
-            ),
-            "CB_CA_CERT_PATH": _CA or "",
-            "CB_MCP_TRANSPORT": "stdio",
-            "CB_MCP_READ_ONLY_MODE": "false",
-        }
-    )
-    if with_certificate:
-        env["CB_CLIENT_CERT_PATH"] = _CERT or ""
-        env["CB_CLIENT_KEY_PATH"] = _KEY or ""
     return env
 
 

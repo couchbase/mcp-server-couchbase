@@ -393,9 +393,10 @@ jobs:
   # Clusters that accept only client certificates have no username/password,
   # and the REST-backed tools once required one (DA-2504 / CBSE-24146). The
   # password-based jobs above cannot catch that regression, so this job runs
-  # the REST-backed tools against a cluster in mTLS-only mode, with the
-  # username and password removed from the server's environment. One node is
-  # enough: the failure was in how requests authenticate, not in the topology.
+  # the unit tests and the whole operational integration suite against a
+  # cluster in mTLS-only mode, with the username and password removed from the
+  # environment. One node is enough: the failure was in how requests
+  # authenticate, not in the topology.
   # scripts/setup_mtls_cluster.sh starts Couchbase itself (it needs `docker exec`
   # and `docker cp` on the container, which `services:` doesn't allow).
   mtls-integration-tests:
@@ -422,13 +423,33 @@ jobs:
       - name: Start Couchbase that only accepts client certificates
         run: ./scripts/setup_mtls_cluster.sh "$MTLS_DIR" "$CB_CONTAINER"
 
-      - name: Run mTLS integration tests
+      # Seeding uses the admin password over the plain port, which the cluster
+      # still allows; it is only password logins over TLS that are refused.
+      - name: Setup test data (indexes and queries)
         env:
-          CB_MCP_TEST_MTLS_CERT: ${{ env.MTLS_DIR }}/mcp-mtls.pem
-          CB_MCP_TEST_MTLS_KEY: ${{ env.MTLS_DIR }}/mcp-mtls.key
-          CB_MCP_TEST_MTLS_CA: ${{ env.MTLS_DIR }}/ca.pem
+          CB_CONNECTION_STRING: couchbase://localhost
           PYTHONPATH: src
-        run: uv run pytest tests/integration/operational/test_mtls_rest_tools.py -v --tb=short
+        run: uv run python scripts/setup_test_data.py
+
+      - name: Run unit tests
+        env:
+          PYTHONPATH: src
+        run: uv run pytest tests/unit -v --tb=short
+
+      # The whole operational integration suite, with the server and the tests
+      # authenticating by client certificate only: username/password are removed
+      # from the environment, so a test that still needs one fails here.
+      - name: Run all integration tests (client certificate only)
+        env:
+          CB_CONNECTION_STRING: couchbases://127.0.0.1
+          CB_CA_CERT_PATH: ${{ env.MTLS_DIR }}/ca.pem
+          CB_CLIENT_CERT_PATH: ${{ env.MTLS_DIR }}/mcp-mtls.pem
+          CB_CLIENT_KEY_PATH: ${{ env.MTLS_DIR }}/mcp-mtls.key
+          CB_MCP_TRANSPORT: stdio
+          CB_MCP_TEST_SCOPE: inventory
+          CB_MCP_TEST_COLLECTION: airline
+          PYTHONPATH: src
+        run: env -u CB_USERNAME -u CB_PASSWORD uv run pytest tests/integration/operational -v --tb=short
 
       - name: Show Couchbase logs on failure
         if: failure()

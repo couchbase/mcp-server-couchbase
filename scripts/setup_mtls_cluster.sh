@@ -178,6 +178,6 @@ admin_curl -X POST "$ADMIN_URL/settings/clientCertAuth" \
     > /dev/null
 
 echo "Done: client certificates are now required. Files are in $(pwd)"
-echo "  CB_MCP_TEST_MTLS_CERT=$(pwd)/$CLIENT_CN.pem"
-echo "  CB_MCP_TEST_MTLS_KEY=$(pwd)/$CLIENT_CN.key"
-echo "  CB_MCP_TEST_MTLS_CA=$(pwd)/ca.pem"
+echo "  CB_CLIENT_CERT_PATH=$(pwd)/$CLIENT_CN.pem"
+echo "  CB_CLIENT_KEY_PATH=$(pwd)/$CLIENT_CN.key"
+echo "  CB_CA_CERT_PATH=$(pwd)/ca.pem"

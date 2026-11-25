@@ -9,10 +9,28 @@ nested conftest to load the parent via ``importlib``.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 
 import pytest
 
 REQUIRED_ENV_VARS = ("CB_CONNECTION_STRING", "CB_USERNAME", "CB_PASSWORD")
+
+#: A client certificate and key (mTLS) stand in for CB_USERNAME/CB_PASSWORD,
+#: as they do for the server itself.
+CLIENT_CERT_ENV_VARS = ("CB_CLIENT_CERT_PATH", "CB_CLIENT_KEY_PATH")
+
+
+def missing_cluster_credentials(env: Mapping[str, str]) -> list[str]:
+    """Names of the env vars still needed to reach the cluster, empty if none.
+
+    A connection string is always needed, plus either a username and password
+    or a client certificate and key.
+    """
+    missing = [] if env.get("CB_CONNECTION_STRING") else ["CB_CONNECTION_STRING"]
+    if all(env.get(var) for var in CLIENT_CERT_ENV_VARS):
+        return missing
+    return missing + [var for var in ("CB_USERNAME", "CB_PASSWORD") if not env.get(var)]
+
 
 #: Operational Insights equivalents. Kept as a separate tuple, not folded
 #: into REQUIRED_ENV_VARS: a developer with only a Couchbase Server cluster
@@ -28,7 +46,7 @@ OPERATIONAL_INSIGHTS_REQUIRED_ENV_VARS = (
 def _build_env() -> dict[str, str]:
     """Build the environment passed to the test server process."""
     env = os.environ.copy()
-    missing = [var for var in REQUIRED_ENV_VARS if not env.get(var)]
+    missing = missing_cluster_credentials(env)
     if missing:
         pytest.skip(
             "Integration tests require demo cluster credentials. "

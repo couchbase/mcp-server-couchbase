@@ -30,6 +30,7 @@ from _test_env import (
     get_test_bucket,
     get_test_collection,
     get_test_scope,
+    missing_cluster_credentials,
     require_test_bucket,
 )
 from mcp import ClientSession, StdioServerParameters, stdio_client
@@ -69,7 +70,7 @@ def _build_stdio_subprocess_env() -> dict[str, str]:
     at startup — the test runner doesn't get to override it per-test.
     """
     env = os.environ.copy()
-    missing = [var for var in REQUIRED_ENV_VARS if not env.get(var)]
+    missing = missing_cluster_credentials(env)
     if missing:
         pytest.skip(
             "Integration tests require demo cluster credentials. "
