@@ -29,6 +29,7 @@ import uuid
 import pytest
 from conftest import (
     create_mcp_session,
+    direct_cluster,
     ensure_list,
     extract_payload,
     get_test_collection,
@@ -36,21 +37,10 @@ from conftest import (
     require_test_bucket,
 )
 
-from cb_mcp.utils.operational.connection import (
-    connect_to_couchbase_cluster,
-    resolve_cluster_major_version,
-)
+from cb_mcp.utils.operational.connection import resolve_cluster_major_version
 
 INDEX_READY_TIMEOUT = int(os.getenv("CB_MCP_VECTOR_READY_TIMEOUT", "60"))
 INDEX_READY_POLL_INTERVAL = 2
-
-
-def _direct_cluster():
-    """Open a direct (non-MCP) SDK connection, for seeding/cleanup only."""
-    connection_string = os.environ["CB_CONNECTION_STRING"]
-    username = os.environ["CB_USERNAME"]
-    password = os.environ["CB_PASSWORD"]
-    return connect_to_couchbase_cluster(connection_string, username, password)
 
 
 def _skip_if_cluster_below(cluster, min_major: int, *, feature: str) -> None:
@@ -165,7 +155,7 @@ async def test_create_query_index_hyperscale_with_explicit_dimension() -> None:
     vector_field = "test_cqi_embedding"
     tag = uuid.uuid4().hex[:8]
 
-    cluster = _direct_cluster()
+    cluster = direct_cluster()
     doc_ids: list[str] = []
     try:
         _skip_if_cluster_below(cluster, 8, feature="Hyperscale Vector Indexes")
@@ -238,7 +228,7 @@ async def test_create_query_index_composite_vector_key_position() -> None:
     # recognize VECTOR as a keyword (a syntax error, not a clean tool_error
     # from a version-aware check) -- confirmed by this test failing exactly
     # that way in CI before this guard was added.
-    cluster = _direct_cluster()
+    cluster = direct_cluster()
     try:
         _skip_if_cluster_below(cluster, 8, feature="Composite Vector Indexes")
     finally:
@@ -349,7 +339,7 @@ async def test_create_query_index_dimension_mismatch_silently_excluded() -> None
     vector_field = "test_cqi_embedding"
     tag = uuid.uuid4().hex[:8]
 
-    cluster = _direct_cluster()
+    cluster = direct_cluster()
     doc_ids: list[str] = []
     try:
         _skip_if_cluster_below(cluster, 8, feature="Hyperscale Vector Indexes")

@@ -37,6 +37,8 @@ from mcp import ClientSession, StdioServerParameters, stdio_client
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
 
+from cb_mcp.utils.operational.connection import connect_to_couchbase_cluster
+
 if TYPE_CHECKING:
     from typing import TextIO
 
@@ -45,6 +47,7 @@ __all__ = [
     "create_logging_test_session",
     "create_mcp_session",
     "create_session_for_subcommand",
+    "direct_cluster",
     "ensure_list",
     "extract_payload",
     "get_test_bucket",
@@ -60,6 +63,25 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # Default timeout (seconds) to guard against hangs when the Couchbase cluster
 # is unreachable or slow. Override with CB_MCP_TEST_TIMEOUT if needed.
 DEFAULT_TIMEOUT = int(os.getenv("CB_MCP_TEST_TIMEOUT", "120"))
+
+
+def direct_cluster() -> Any:
+    """Open a direct (non-MCP) SDK connection, for seeding/cleanup only.
+
+    Authenticates the way the server under test does: by client certificate when
+    ``CB_CLIENT_CERT_PATH`` and ``CB_CLIENT_KEY_PATH`` are set, otherwise by
+    ``CB_USERNAME``/``CB_PASSWORD``. Tests must not read the password variables
+    themselves, or they cannot run against a cluster that only accepts
+    certificates.
+    """
+    return connect_to_couchbase_cluster(
+        os.environ["CB_CONNECTION_STRING"],
+        os.environ.get("CB_USERNAME"),
+        os.environ.get("CB_PASSWORD"),
+        ca_cert_path=os.environ.get("CB_CA_CERT_PATH"),
+        client_cert_path=os.environ.get("CB_CLIENT_CERT_PATH"),
+        client_key_path=os.environ.get("CB_CLIENT_KEY_PATH"),
+    )
 
 
 def _build_stdio_subprocess_env() -> dict[str, str]:

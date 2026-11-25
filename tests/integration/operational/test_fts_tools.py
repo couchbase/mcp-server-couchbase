@@ -31,6 +31,7 @@ from typing import Any
 import pytest
 from conftest import (
     create_mcp_session,
+    direct_cluster,
     extract_payload,
     get_test_collection,
     get_test_scope,
@@ -39,8 +40,6 @@ from conftest import (
 from couchbase.mutation_state import MutationState
 from couchbase.options import SearchOptions
 from couchbase.search import RawQuery, SearchRequest
-
-from cb_mcp.utils.operational.connection import connect_to_couchbase_cluster
 
 try:
     from couchbase.management.search import SearchIndex
@@ -58,15 +57,6 @@ FTS_READY_POLL_INTERVAL = 5
 # (via consistent_with) until it has indexed our mutation, so an attempt that
 # hits this is "still catching up", not a hard failure — the outer loop retries.
 FTS_READY_ATTEMPT_TIMEOUT = 30
-
-
-def _direct_cluster():
-    """Open a direct (non-MCP) SDK connection using the same env vars the
-    MCP server subprocess uses, for seeding/cleanup only."""
-    connection_string = os.environ["CB_CONNECTION_STRING"]
-    username = os.environ["CB_USERNAME"]
-    password = os.environ["CB_PASSWORD"]
-    return connect_to_couchbase_cluster(connection_string, username, password)
 
 
 def _wait_for_seeded_document(
@@ -147,7 +137,7 @@ def seeded_fts_index() -> Iterator[dict[str, Any]]:
     # pre-existing document in the collection.
     marker = uuid.uuid4().hex[:8]
 
-    cluster = _direct_cluster()
+    cluster = direct_cluster()
     try:
         bucket = cluster.bucket(bucket_name)
         scope_index_manager = bucket.scope(scope_name).search_indexes()
@@ -252,7 +242,7 @@ def seeded_sort_facet_index() -> Iterator[dict[str, Any]]:
             ],
         }
 
-    cluster = _direct_cluster()
+    cluster = direct_cluster()
     try:
         bucket = cluster.bucket(bucket_name)
         scope = bucket.scope(scope_name)
@@ -341,7 +331,7 @@ def seeded_cluster_level_fts_index() -> Iterator[dict[str, str]]:
     bucket_name = require_test_bucket()
     index_name = f"test_fts_cluster_idx_{uuid.uuid4().hex[:8]}"
 
-    cluster = _direct_cluster()
+    cluster = direct_cluster()
     try:
         index_manager = cluster.search_indexes()
 
@@ -875,7 +865,7 @@ async def test_upsert_and_drop_search_index_cluster_level_round_trip() -> None:
             confirm_payload = extract_payload(confirm_response)
             assert "error" in confirm_payload
     finally:
-        cluster = _direct_cluster()
+        cluster = direct_cluster()
         try:
             with contextlib.suppress(Exception):
                 cluster.search_indexes().drop_index(index_name)
@@ -934,7 +924,7 @@ async def test_upsert_and_drop_search_index_scope_level_round_trip() -> None:
             drop_payload = extract_payload(drop_response)
             assert drop_payload["success"] is True, drop_payload.get("error")
     finally:
-        cluster = _direct_cluster()
+        cluster = direct_cluster()
         try:
             bucket = cluster.bucket(bucket_name)
             with contextlib.suppress(Exception):
@@ -1043,7 +1033,7 @@ async def test_upsert_search_index_with_vector_field_round_trip() -> None:
             drop_payload = extract_payload(drop_response)
             assert drop_payload["success"] is True, drop_payload.get("error")
     finally:
-        cluster = _direct_cluster()
+        cluster = direct_cluster()
         try:
             bucket = cluster.bucket(bucket_name)
             with contextlib.suppress(Exception):
@@ -1091,7 +1081,7 @@ async def test_upsert_search_index_updates_existing_index() -> None:
             second_payload = extract_payload(second)
             assert second_payload["success"] is True, second_payload.get("error")
     finally:
-        cluster = _direct_cluster()
+        cluster = direct_cluster()
         try:
             with contextlib.suppress(Exception):
                 cluster.search_indexes().drop_index(index_name)

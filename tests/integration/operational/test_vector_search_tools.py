@@ -19,7 +19,7 @@ existing pattern, extended with a `vector` field mapping).
 
 The fixtures compute the seeded document's embedding vector directly via
 this project's own embedding-provider abstraction (bypassing MCP, same
-spirit as _direct_cluster() bypassing MCP for seeding), both to learn the
+spirit as direct_cluster() bypassing MCP for seeding), both to learn the
 real vector dimension for the index DDL/mapping (deploy-time dimension is
 provider/model-dependent, so it can't be hardcoded) and to guarantee the
 seeded document's vector is IDENTICAL to what run_vector_query /
@@ -47,6 +47,7 @@ from typing import Any
 import pytest
 from conftest import (
     create_mcp_session,
+    direct_cluster,
     extract_payload,
     get_test_collection,
     get_test_scope,
@@ -56,10 +57,7 @@ from couchbase.options import SearchOptions
 from couchbase.search import SearchRequest
 from couchbase.vector_search import VectorQuery, VectorSearch
 
-from cb_mcp.utils.operational.connection import (
-    connect_to_couchbase_cluster,
-    resolve_cluster_major_version,
-)
+from cb_mcp.utils.operational.connection import resolve_cluster_major_version
 from cb_mcp.utils.operational.embeddings import (
     EmbeddingRequest,
     resolve_embedding_provider,
@@ -75,14 +73,6 @@ except ImportError:  # pragma: no cover - SDK always provides this in practice
 # is a much shorter budget than test_fts_tools.py's FTS_READY_TIMEOUT.
 INDEX_READY_TIMEOUT = int(os.getenv("CB_MCP_VECTOR_READY_TIMEOUT", "60"))
 INDEX_READY_POLL_INTERVAL = 2
-
-
-def _direct_cluster():
-    """Open a direct (non-MCP) SDK connection, for seeding/cleanup only."""
-    connection_string = os.environ["CB_CONNECTION_STRING"]
-    username = os.environ["CB_USERNAME"]
-    password = os.environ["CB_PASSWORD"]
-    return connect_to_couchbase_cluster(connection_string, username, password)
 
 
 def _embedding_settings_from_env() -> dict[str, Any]:
@@ -173,7 +163,7 @@ def seeded_gsi_vector_index() -> Iterator[dict[str, Any]]:
         EmbeddingRequest(text=marker, model=settings.get("embedding_model") or "")
     )
 
-    cluster = _direct_cluster()
+    cluster = direct_cluster()
     try:
         _skip_if_cluster_below(cluster, 8, feature="GSI vector indexes")
 
@@ -262,7 +252,7 @@ def seeded_search_vector_index() -> Iterator[dict[str, Any]]:
         EmbeddingRequest(text=marker, model=settings.get("embedding_model") or "")
     )
 
-    cluster = _direct_cluster()
+    cluster = direct_cluster()
     try:
         # Floor is the best this can confirm: major-version granularity can't
         # distinguish 7.0-7.5 from the real 7.6+ requirement, but major < 7 is
