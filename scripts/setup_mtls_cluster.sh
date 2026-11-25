@@ -108,6 +108,9 @@ init_post "$ADMIN_URL/settings/web" \
     -d "username=$ADMIN_USER" -d "password=$ADMIN_PASSWORD" -d port=SAME
 
 sleep 5
+# Without a storage mode, every CREATE INDEX fails with "Please Set Indexer
+# Storage Mode Before Create Index". The password-based CI job sets it the same way.
+admin_curl -X POST "$ADMIN_URL/settings/indexes" -d storageMode=plasma > /dev/null
 admin_curl -X POST "$ADMIN_URL/sampleBuckets/install" \
     -H 'Content-Type: application/json' -d '["travel-sample"]' > /dev/null
 wait_for "travel-sample to load" \
