@@ -19,7 +19,15 @@
 # and openssl. COUCHBASE_IMAGE overrides the image (default 8.0.0).
 # =============================================================================
 
-set -euo pipefail
+set -Eeuo pipefail
+
+# Name the step in progress, so a failure says what the script was doing.
+CURRENT_STEP="starting"
+step() {
+    CURRENT_STEP="$1"
+    echo "==> $1"
+}
+trap 'echo "ERROR: setup failed while: $CURRENT_STEP (script line $LINENO)" >&2' ERR
 
 OUT_DIR="${1:?usage: $0 <out_dir> [container_name]}"
 CONTAINER="${2:-cb-mtls}"
@@ -38,7 +46,18 @@ cd "$OUT_DIR"
 
 # --- helpers -----------------------------------------------------------------
 
-admin_curl() { curl -sS -u "$ADMIN_USER:$ADMIN_PASSWORD" "$@"; }
+# An HTTP error status fails the script. Couchbase's own explanation (the
+# response body) goes to stderr, so it shows even when a caller sends the normal
+# output to /dev/null.
+admin_curl() {
+    local out
+    if ! out="$(curl -sS --fail-with-body -u "$ADMIN_USER:$ADMIN_PASSWORD" "$@" 2>&1)"; then
+        echo "Couchbase request failed: curl $*" >&2
+        echo "$out" >&2
+        return 1
+    fi
+    printf '%s' "$out"
+}
 
 # Run inside the container. Installing a certificate or changing security
 # settings restarts the node's listeners for a moment, so a command right after
@@ -70,22 +89,23 @@ wait_for() { # wait_for <description> <command...>
 
 # --- 1. Couchbase: start, initialize, load travel-sample ----------------------
 
-echo "Starting $CONTAINER ($IMAGE)..."
+step "1/5 Starting $CONTAINER ($IMAGE), initializing it and loading travel-sample"
 docker rm -f "$CONTAINER" > /dev/null 2>&1 || true
 docker run -d --name "$CONTAINER" \
     -p 8091-8096:8091-8096 -p 9102:9102 -p 11207:11207 -p 11210:11210 \
     -p 18091-18096:18091-18096 -p 19102:19102 "$IMAGE" > /dev/null
 wait_for "Couchbase to start" curl -sf "$ADMIN_URL/pools"
 
-curl -s -X POST "$ADMIN_URL/nodes/self/controller/settings" \
+# Before the admin login exists there is nothing to authenticate with.
+init_post() { curl -sS --fail-with-body -X POST "$@" > /dev/null; }
+init_post "$ADMIN_URL/nodes/self/controller/settings" \
     -d 'path=/opt/couchbase/var/lib/couchbase/data' \
-    -d 'index_path=/opt/couchbase/var/lib/couchbase/data' > /dev/null
-curl -s -X POST "$ADMIN_URL/node/controller/setupServices" \
-    -d 'services=kv,n1ql,index,fts' > /dev/null
-curl -s -X POST "$ADMIN_URL/pools/default" \
-    -d memoryQuota=512 -d indexMemoryQuota=256 -d ftsMemoryQuota=256 > /dev/null
-curl -s -X POST "$ADMIN_URL/settings/web" \
-    -d "username=$ADMIN_USER" -d "password=$ADMIN_PASSWORD" -d port=SAME > /dev/null
+    -d 'index_path=/opt/couchbase/var/lib/couchbase/data'
+init_post "$ADMIN_URL/node/controller/setupServices" -d 'services=kv,n1ql,index,fts'
+init_post "$ADMIN_URL/pools/default" \
+    -d memoryQuota=512 -d indexMemoryQuota=256 -d ftsMemoryQuota=256
+init_post "$ADMIN_URL/settings/web" \
+    -d "username=$ADMIN_USER" -d "password=$ADMIN_PASSWORD" -d port=SAME
 
 sleep 5
 admin_curl -X POST "$ADMIN_URL/sampleBuckets/install" \
@@ -96,7 +116,7 @@ sleep 30 # the sample's indexes keep building after the bucket is healthy
 
 # --- 2. PKI: a CA, and a certificate for the node -----------------------------
 
-echo "Creating the CA and the node certificate..."
+step "2/5 Creating the CA and the node certificate"
 cat > ca.cnf <<EOF
 [req]
 distinguished_name = dn
@@ -129,6 +149,7 @@ openssl x509 -req -in node.csr -CA ca.pem -CAkey ca.key -CAcreateserial \
 # Couchbase picks files up from its inbox directory, by these exact names:
 #   chain.pem (the node cert), pkey.key (its key), CA/ca.pem (who to trust).
 
+step "3/5 Installing the node certificate in Couchbase's inbox"
 docker exec -u root "$CONTAINER" mkdir -p "$INBOX/CA"
 docker cp node.pem "$CONTAINER:$INBOX/chain.pem"
 docker cp node.key "$CONTAINER:$INBOX/pkey.key"
@@ -137,8 +158,8 @@ docker exec -u root "$CONTAINER" chown -R couchbase "$INBOX"
 docker exec -u root "$CONTAINER" chmod -R 0700 "$INBOX"
 
 # Trust the CA first, then switch to the node certificate that chains to it.
-admin_curl -f -X POST "$ADMIN_URL/node/controller/loadTrustedCAs" > /dev/null
-admin_curl -f -X POST "$ADMIN_URL/node/controller/reloadCertificate" > /dev/null
+admin_curl -X POST "$ADMIN_URL/node/controller/loadTrustedCAs" > /dev/null
+admin_curl -X POST "$ADMIN_URL/node/controller/reloadCertificate" > /dev/null
 wait_for "the node after loading its certificate" \
     curl -sf -u "$ADMIN_USER:$ADMIN_PASSWORD" "$ADMIN_URL/pools/default"
 
@@ -146,7 +167,7 @@ wait_for "the node after loading its certificate" \
 # The certificate only proves who the caller is; the user's roles decide what
 # it may do. Couchbase takes the user name from the certificate's CN.
 
-echo "Creating the client certificate..."
+step "4/5 Creating the client certificate and its Couchbase user"
 cat > client.ext <<EOF
 basicConstraints = CA:FALSE
 extendedKeyUsage = clientAuth
@@ -161,23 +182,49 @@ cb_cli user-manage --set --rbac-username "$CLIENT_CN" \
     --rbac-password "Passw0rd!$RANDOM" --roles admin --auth-domain local
 
 # --- 5. Require client certificates ---------------------------------------------
-# "mandatory" also needs node-to-node encryption on, and Couchbase refuses to
-# change that while auto-failover is enabled: turn it off, then restore it.
+# From 8.0, "mandatory" also needs node-to-node encryption on, and Couchbase
+# refuses to change that while auto-failover is enabled: turn it off, then
+# restore it. Before 8.0 it is the other way round: Couchbase rejects
+# "mandatory" once the cluster encryption level is "all", so leave it alone.
 
-failover_timeout="$(admin_curl "$ADMIN_URL/settings/autoFailover" \
-    | sed -n 's/.*"timeout":\([0-9]*\).*/\1/p')"
-cb_cli setting-autofailover --enable-auto-failover 0
-cb_cli node-to-node-encryption --enable
-cb_cli setting-security --set --cluster-encryption-level all
-cb_cli setting-autofailover --enable-auto-failover 1 \
-    --auto-failover-timeout "${failover_timeout:-120}"
+step "5/5 Requiring client certificates (mandatory mode)"
+major="$(admin_curl "$ADMIN_URL/pools" \
+    | sed -n 's/.*"implementationVersion":"\([0-9]*\)\..*/\1/p')"
+if [[ "${major:-0}" -ge 8 ]]; then
+    failover_timeout="$(admin_curl "$ADMIN_URL/settings/autoFailover" \
+        | sed -n 's/.*"timeout":\([0-9]*\).*/\1/p')"
+    cb_cli setting-autofailover --enable-auto-failover 0
+    cb_cli node-to-node-encryption --enable
+    cb_cli setting-security --set --cluster-encryption-level all
+    cb_cli setting-autofailover --enable-auto-failover 1 \
+        --auto-failover-timeout "${failover_timeout:-120}"
+fi
 
 admin_curl -X POST "$ADMIN_URL/settings/clientCertAuth" \
     -H 'Content-Type: application/json' \
     -d '{"state":"mandatory","prefixes":[{"path":"subject.cn","prefix":"","delimiter":""}]}' \
     > /dev/null
 
-echo "Done: client certificates are now required. Files are in $(pwd)"
+# --- Verify, so tests can't pass against a cluster that isn't really mTLS-only
+
+step "Checking that the cluster really requires client certificates"
+die() {
+    echo "ERROR: $*" >&2
+    exit 1
+}
+state="$(admin_curl "$ADMIN_URL/settings/clientCertAuth")"
+[[ "$state" == *'"state":"mandatory"'* ]] \
+    || die "client certificate state is not 'mandatory'; Couchbase reports: $state"
+
+TLS_URL=https://127.0.0.1:18091/pools/default
+wait_for "the client certificate to be accepted over TLS (port 18091)" \
+    curl -sf --cacert ca.pem --cert "$CLIENT_CN.pem" --key "$CLIENT_CN.key" "$TLS_URL"
+if curl -sf -u "$ADMIN_USER:$ADMIN_PASSWORD" --cacert ca.pem "$TLS_URL" > /dev/null 2>&1; then
+    die "a username/password login still works over TLS, so client certificates are" \
+        "not mandatory and certificate-only tests could pass without proving anything"
+fi
+
+echo "Done: client certificates are required. Files are in $(pwd)"
 echo "  CB_CLIENT_CERT_PATH=$(pwd)/$CLIENT_CN.pem"
 echo "  CB_CLIENT_KEY_PATH=$(pwd)/$CLIENT_CN.key"
 echo "  CB_CA_CERT_PATH=$(pwd)/ca.pem"

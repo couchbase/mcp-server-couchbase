@@ -400,8 +400,14 @@ jobs:
   # scripts/setup_mtls_cluster.sh starts Couchbase itself (it needs `docker exec`
   # and `docker cp` on the container, which `services:` doesn't allow).
   mtls-integration-tests:
-    name: "Integration: operational (mTLS only / cb-8.0.0)"
+    name: "Integration: operational (mTLS only / cb-${{ matrix.cb_version }})"
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 7.6.x as well as 8.0: before 8.0, list_indexes uses the Index Service
+        # REST endpoint rather than the SDK, so only there is that path covered.
+        cb_version: ["8.0.0", "7.6.11"]
     env:
       CB_CONTAINER: cb-mtls
       MTLS_DIR: ${{ github.workspace }}/mtls-pki
@@ -421,6 +427,8 @@ jobs:
         run: uv sync --extra dev
 
       - name: Start Couchbase that only accepts client certificates
+        env:
+          COUCHBASE_IMAGE: couchbase:enterprise-${{ matrix.cb_version }}
         run: ./scripts/setup_mtls_cluster.sh "$MTLS_DIR" "$CB_CONTAINER"
 
       # Seeding uses the admin password over the plain port, which the cluster
@@ -431,7 +439,9 @@ jobs:
           PYTHONPATH: src
         run: uv run python scripts/setup_test_data.py
 
+      # Unit tests don't touch the cluster, so once is enough, not per version.
       - name: Run unit tests
+        if: matrix.cb_version == '8.0.0'
         env:
           PYTHONPATH: src
         run: uv run pytest tests/unit -v --tb=short
