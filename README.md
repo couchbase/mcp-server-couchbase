@@ -151,7 +151,7 @@ git clone https://github.com/couchbase/mcp-server-couchbase.git
 
 ### Operational Connection and Authentication
 
-Use **either** a username and password **or** a client certificate (mTLS). If both are set, the certificate is used.
+Use **either** a username and password **or** a client certificate (mTLS). If both are set, the certificate is used. This applies to every tool, including those that call Couchbase's REST endpoints directly; mTLS needs a `couchbases://` connection string. The certificate must map to a Couchbase user with the roles the tool needs.
 
 | Environment Variable | CLI Argument | Description |
 | --- | --- | --- |

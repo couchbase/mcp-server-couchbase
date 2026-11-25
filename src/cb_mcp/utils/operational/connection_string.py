@@ -2,10 +2,13 @@
 
 import logging
 import os
+import ssl
 from collections.abc import Mapping
 from importlib.resources import files
 from typing import Any
 from urllib.parse import urlparse
+
+import httpx
 
 from ...core.spec import Deployment
 from ..constants import LOGGER_NAMESPACE
@@ -13,12 +16,46 @@ from ..constants import LOGGER_NAMESPACE
 logger = logging.getLogger(f"{LOGGER_NAMESPACE}.utils.connection_string")
 
 
+def uses_client_cert(settings: Mapping[str, Any]) -> bool:
+    """Whether *settings* select client-certificate (mTLS) authentication.
+
+    Mirrors ``connect_to_couchbase_cluster``: the certificate wins over a
+    username/password when both are configured.
+    """
+    return bool(settings.get("client_cert_path") and settings.get("client_key_path"))
+
+
 def validate_connection_settings(settings: Mapping[str, Any]) -> None:
-    """Validate that required connection settings are present."""
-    required = ["connection_string", "username", "password"]
-    missing = [key for key in required if not settings.get(key)]
+    """Validate that required connection settings are present.
+
+    Either a client certificate and key (mTLS) or a username and password must
+    be configured, as for the SDK connection.
+    """
+    if not settings.get("connection_string"):
+        raise ValueError("Missing required connection settings: connection_string")
+
+    if bool(settings.get("client_cert_path")) != bool(settings.get("client_key_path")):
+        raise ValueError(
+            "Both client_cert_path and client_key_path must be provided together "
+            "for certificate authentication; only one was set."
+        )
+
+    if uses_client_cert(settings):
+        # The certificate is presented in the TLS handshake, so there is nothing
+        # to authenticate with over a cleartext connection.
+        if not str(settings["connection_string"]).lower().startswith("couchbases://"):
+            raise ValueError(
+                "Client certificate (mTLS) authentication requires a couchbases:// "
+                "connection string."
+            )
+        return
+
+    missing = [key for key in ("username", "password") if not settings.get(key)]
     if missing:
-        raise ValueError(f"Missing required connection settings: {', '.join(missing)}")
+        raise ValueError(
+            f"Missing required connection settings: {', '.join(missing)} "
+            "(or set client_cert_path and client_key_path for certificate authentication)"
+        )
 
 
 def extract_hosts_from_connection_string(connection_string: str) -> list[str]:
@@ -169,3 +206,40 @@ def determine_ssl_verification(
     # Priority 3: Non-TLS connections (HTTP), disable SSL verification
     logger.info("Non-TLS connection, SSL verification disabled")
     return False
+
+
+def rest_client_auth(
+    settings: Mapping[str, Any],
+) -> tuple[bool | str | ssl.SSLContext, tuple[str, str] | None]:
+    """The ``verify`` and ``auth`` values for an ``httpx.Client`` calling Couchbase REST.
+
+    Authenticates the same way the SDK connection does. With a client
+    certificate and key configured, the certificate is loaded into the TLS
+    context (so it is presented in the handshake) and no basic-auth pair is
+    returned; the cluster maps the certificate to a user. Otherwise the
+    username/password pair is returned and ``verify`` is exactly what
+    ``determine_ssl_verification`` says.
+
+    Raises ``ValueError`` on settings ``validate_connection_settings`` rejects.
+    """
+    validate_connection_settings(settings)
+    verify = determine_ssl_verification(
+        settings["connection_string"], settings.get("ca_cert_path")
+    )
+    if not uses_client_cert(settings):
+        return verify, (settings["username"], settings["password"])
+
+    cert_path, key_path = settings["client_cert_path"], settings["client_key_path"]
+    if not os.path.exists(cert_path) or not os.path.exists(key_path):
+        raise ValueError(
+            f"Client certificate files not found at {os.path.basename(cert_path)} "
+            f"or {os.path.basename(key_path)}."
+        )
+    # httpx's own ``cert=`` argument and ``verify=<path>`` are deprecated; the
+    # supported way to present a client certificate is a ready-made SSLContext.
+    if isinstance(verify, str):
+        context = ssl.create_default_context(cafile=verify)
+    else:
+        context = httpx.create_ssl_context(verify=verify)
+    context.load_cert_chain(cert_path, key_path)
+    return context, None

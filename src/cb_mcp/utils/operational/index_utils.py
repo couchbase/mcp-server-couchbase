@@ -16,8 +16,8 @@ from couchbase.options import PingOptions
 
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from .connection_string import (
-    determine_ssl_verification,
     extract_hosts_from_connection_string,
+    rest_client_auth,
 )
 from .constants import (
     ENDPOINT_PING_TIMEOUT_SECONDS,
@@ -289,14 +289,16 @@ def _build_query_params(
 
 def fetch_indexes_from_rest_api(
     connection_string: str,
-    username: str,
-    password: str,
+    username: str | None,
+    password: str | None,
     bucket_name: str | None = None,
     scope_name: str | None = None,
     collection_name: str | None = None,
     index_name: str | None = None,
     ca_cert_path: str | None = None,
     timeout: int = 30,
+    client_cert_path: str | None = None,
+    client_key_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Fetch indexes from Couchbase Index Service REST API.
 
@@ -305,8 +307,8 @@ def fetch_indexes_from_rest_api(
 
     Args:
         connection_string: Couchbase connection string (may contain multiple hosts)
-        username: Username for authentication
-        password: Password for authentication
+        username: Username for authentication (unused with a client certificate)
+        password: Password for authentication (unused with a client certificate)
         bucket_name: Optional bucket name to filter indexes
         scope_name: Optional scope name to filter indexes
         collection_name: Optional collection name to filter indexes
@@ -314,6 +316,9 @@ def fetch_indexes_from_rest_api(
         ca_cert_path: Optional path to CA certificate for SSL verification.
                      If not provided and using Capella, will use Capella root CA.
         timeout: Request timeout in seconds (default: 30)
+        client_cert_path: Optional client certificate (mTLS); with
+                     client_key_path it is used instead of username/password.
+        client_key_path: Optional private key for the client certificate.
 
     Returns:
         List of index status dictionaries containing name, definition, and other metadata
@@ -336,7 +341,16 @@ def fetch_indexes_from_rest_api(
 
     # Build query parameters and determine SSL verification
     params = _build_query_params(bucket_name, scope_name, collection_name, index_name)
-    verify_ssl = determine_ssl_verification(connection_string, ca_cert_path)
+    verify_ssl, auth = rest_client_auth(
+        {
+            "connection_string": connection_string,
+            "username": username,
+            "password": password,
+            "ca_cert_path": ca_cert_path,
+            "client_cert_path": client_cert_path,
+            "client_key_path": client_key_path,
+        }
+    )
 
     # Try each host one by one until we get a successful response
     last_error = None
@@ -351,7 +365,7 @@ def fetch_indexes_from_rest_api(
                 response = client.get(
                     url,
                     params=params,
-                    auth=(username, password),
+                    auth=auth,
                 )
 
                 response.raise_for_status()
@@ -628,10 +642,12 @@ def _parse_index_nodes(
 def discover_index_nodes(
     cluster: Any,
     connection_string: str,
-    username: str,
-    password: str,
+    username: str | None,
+    password: str | None,
     ca_cert_path: str | None = None,
     timeout: int = 30,
+    client_cert_path: str | None = None,
+    client_key_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """List the cluster's index-service nodes via ``/pools/default/nodeServices``.
 
@@ -654,7 +670,16 @@ def discover_index_nodes(
     is_tls = connection_string.lower().startswith("couchbases://")
     scheme = "https" if is_tls else "http"
     index_key = "indexHttps" if is_tls else "indexHttp"
-    verify_ssl = determine_ssl_verification(connection_string, ca_cert_path)
+    verify_ssl, auth = rest_client_auth(
+        {
+            "connection_string": connection_string,
+            "username": username,
+            "password": password,
+            "ca_cert_path": ca_cert_path,
+            "client_cert_path": client_cert_path,
+            "client_key_path": client_key_path,
+        }
+    )
 
     last_error: Exception | None = None
     with httpx.Client(verify=verify_ssl, timeout=timeout) as client:
@@ -662,7 +687,7 @@ def discover_index_nodes(
             url = f"{scheme}://{endpoint}/pools/default/nodeServices"
             try:
                 logger.info(f"Discovering index nodes from: {url}")
-                response = client.get(url, auth=(username, password))
+                response = client.get(url, auth=auth)
                 response.raise_for_status()
                 # Whichever address answered tells us which network this client
                 # is on, and so which of each node's addresses to try first.
@@ -685,8 +710,8 @@ def discover_index_nodes(
 def fetch_index_stats_from_rest_api(
     cluster: Any,
     connection_string: str,
-    username: str,
-    password: str,
+    username: str | None,
+    password: str | None,
     bucket_name: str | None = None,
     scope_name: str | None = None,
     collection_name: str | None = None,
@@ -694,6 +719,8 @@ def fetch_index_stats_from_rest_api(
     skip_empty: bool = False,
     ca_cert_path: str | None = None,
     timeout: int = 30,
+    client_cert_path: str | None = None,
+    client_key_path: str | None = None,
 ) -> tuple[dict[str, dict[str, Any]], list[str], list[dict[str, str]]]:
     """Fetch per-index statistics from every index node in the cluster.
 
@@ -716,7 +743,14 @@ def fetch_index_stats_from_rest_api(
             if every node reported the keyspace or index as absent.
     """
     nodes = discover_index_nodes(
-        cluster, connection_string, username, password, ca_cert_path, timeout
+        cluster,
+        connection_string,
+        username,
+        password,
+        ca_cert_path,
+        timeout,
+        client_cert_path=client_cert_path,
+        client_key_path=client_key_path,
     )
     if not nodes:
         raise RuntimeError(
@@ -727,7 +761,16 @@ def fetch_index_stats_from_rest_api(
     path = build_stats_path(bucket_name, scope_name, collection_name, index_name)
     # Booleans must be rendered lowercase for the Go-based index service.
     params = {"skipEmpty": "true"} if skip_empty else {}
-    verify_ssl = determine_ssl_verification(connection_string, ca_cert_path)
+    verify_ssl, auth = rest_client_auth(
+        {
+            "connection_string": connection_string,
+            "username": username,
+            "password": password,
+            "ca_cert_path": ca_cert_path,
+            "client_cert_path": client_cert_path,
+            "client_key_path": client_key_path,
+        }
+    )
 
     per_node: dict[str, dict[str, Any]] = {}
     not_hosted: list[str] = []
@@ -740,7 +783,7 @@ def fetch_index_stats_from_rest_api(
                 url = f"{base_url}{path}"
                 try:
                     logger.info(f"Fetching index stats from: {url}")
-                    response = client.get(url, params=params, auth=(username, password))
+                    response = client.get(url, params=params, auth=auth)
                     if response.status_code == httpx.codes.NOT_FOUND:
                         # The server answered: it does not hold this keyspace or
                         # index. That is a definitive reply, not a transport

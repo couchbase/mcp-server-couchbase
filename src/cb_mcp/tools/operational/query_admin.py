@@ -17,8 +17,8 @@ from fastmcp import Context
 from ...servers.operational.constants import OPERATIONAL_LOGGER_NAMESPACE
 from ...utils.config import get_settings
 from ...utils.operational.connection_string import (
-    determine_ssl_verification,
     is_capella_connection,
+    rest_client_auth,
     validate_connection_settings,
 )
 from ...utils.operational.context import get_cluster_connection
@@ -64,9 +64,7 @@ def get_cluster_query_vitals(ctx: Context, timeout: int = 30) -> dict[str, Any]:
         protocol = (
             "https" if connection_string.lower().startswith("couchbases://") else "http"
         )
-        verify_ssl = determine_ssl_verification(
-            connection_string, settings.get("ca_cert_path")
-        )
+        verify_ssl, auth = rest_client_auth(settings)
         endpoints = resolve_query_endpoints(
             get_cluster_connection(ctx), connection_string
         )
@@ -83,7 +81,7 @@ def get_cluster_query_vitals(ctx: Context, timeout: int = 30) -> dict[str, Any]:
                 try:
                     response = client.get(
                         f"{protocol}://{endpoint}/admin/vitals",
-                        auth=(settings["username"], settings["password"]),
+                        auth=auth,
                     )
                     response.raise_for_status()
                     vitals[endpoint] = response.json()
@@ -155,9 +153,7 @@ def get_active_queries(ctx: Context, timeout: int = 30) -> dict[str, Any]:
         protocol = (
             "https" if connection_string.lower().startswith("couchbases://") else "http"
         )
-        verify_ssl = determine_ssl_verification(
-            connection_string, settings.get("ca_cert_path")
-        )
+        verify_ssl, auth = rest_client_auth(settings)
         endpoints = resolve_query_endpoints(
             get_cluster_connection(ctx), connection_string
         )
@@ -175,7 +171,7 @@ def get_active_queries(ctx: Context, timeout: int = 30) -> dict[str, Any]:
                 try:
                     response = client.get(
                         f"{protocol}://{endpoint}/admin/active_requests",
-                        auth=(settings["username"], settings["password"]),
+                        auth=auth,
                     )
                     response.raise_for_status()
                     items = response.json()
@@ -258,9 +254,7 @@ def delete_active_query(
         protocol = (
             "https" if connection_string.lower().startswith("couchbases://") else "http"
         )
-        verify_ssl = determine_ssl_verification(
-            connection_string, settings.get("ca_cert_path")
-        )
+        verify_ssl, auth = rest_client_auth(settings)
         endpoints = resolve_query_endpoints(
             get_cluster_connection(ctx), connection_string
         )
@@ -278,7 +272,7 @@ def delete_active_query(
                 try:
                     response = client.delete(
                         f"{protocol}://{endpoint}/admin/active_requests/{encoded_id}",
-                        auth=(settings["username"], settings["password"]),
+                        auth=auth,
                     )
                     nodes.append(
                         {
