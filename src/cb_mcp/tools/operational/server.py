@@ -475,7 +475,8 @@ def get_cluster_metrics(
 
     To find metric names, call discover_tool_input_values(tool_name="get_cluster_metrics") — it
     lists or searches the full Couchbase metrics reference bundled with this server, offline.
-    Don't guess a metric name: an unknown name comes back as a per-spec error with no data.
+    Don't guess a metric name: the cluster does not reject unknown names or label values. A
+    spec that matches nothing returns empty "data" and no "errors".
 
     Not bounded: any number of specs, window, step, or node count is passed straight through to
     the REST call, so a broad request (long window, fine step, many nodes/specs) can return a
