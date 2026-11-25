@@ -11,19 +11,26 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastmcp import Client, FastMCP
-from fastmcp.server.auth import RemoteAuthProvider
+from fastmcp.server.auth import AccessToken, RemoteAuthProvider
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
+from cb_mcp.audit.catalog import AuditEvent
+from cb_mcp.audit.record import OUTCOME_DENIED, REASON_TOKEN_INVALID
 from cb_mcp.auth import CouchbaseJWTVerifier, build_oauth
 from cb_mcp.core.spec import ScopeSpec
 from cb_mcp.tools.operational.query import run_sql_plus_plus_query
-from cb_mcp.utils.constants import SCOPE_READ, SCOPE_WRITE
+from cb_mcp.utils.constants import (
+    OAUTH_CLOCK_SKEW_LEEWAY_SECONDS,
+    SCOPE_READ,
+    SCOPE_WRITE,
+)
 from cb_mcp.utils.scope_enforcement import (
     required_scopes_for_tool,
     wrap_with_scope_check,
@@ -509,3 +516,161 @@ class TestSqlPlusPlusScopeGate:
                 "s",
                 "INSERT INTO c (KEY, VALUE) VALUES ('k', {'a': 1})",
             )
+
+
+class TestTemporalClaims:
+    """``exp`` / ``nbf`` / ``iat`` enforcement.
+
+    FastMCP's verifier checks ``exp`` only when present and ignores ``nbf``
+    and ``iat`` on the 3.x line this server pins, so a token with no ``exp``
+    never expires and a token with a future ``nbf`` is accepted before it is
+    valid. ``CouchbaseJWTVerifier`` closes both.
+    """
+
+    @staticmethod
+    def _verifier() -> CouchbaseJWTVerifier:
+        return build_oauth(jwks_uri=JWKS, issuer=ISSUER, audience=AUDIENCE)
+
+    def test_missing_exp_is_rejected(self):
+        """RFC 9068 makes ``exp`` mandatory on a JWT access token."""
+        assert self._verifier()._temporal_claims_valid({"sub": "u"}) is False
+
+    def test_future_nbf_is_rejected(self):
+        verifier = self._verifier()
+        claims = {"exp": time.time() + 3600, "nbf": time.time() + 3600}
+        assert verifier._temporal_claims_valid(claims) is False
+
+    def test_future_iat_is_rejected(self):
+        verifier = self._verifier()
+        claims = {"exp": time.time() + 3600, "iat": time.time() + 3600}
+        assert verifier._temporal_claims_valid(claims) is False
+
+    def test_nbf_within_leeway_is_accepted(self):
+        """Issuer clocks run slightly ahead; the leeway must absorb that."""
+        verifier = self._verifier()
+        skew = OAUTH_CLOCK_SKEW_LEEWAY_SECONDS / 2
+        claims = {
+            "exp": time.time() + 3600,
+            "nbf": time.time() + skew,
+            "iat": time.time() + skew,
+        }
+        assert verifier._temporal_claims_valid(claims) is True
+
+    def test_valid_claims_are_accepted(self):
+        verifier = self._verifier()
+        now = time.time()
+        claims = {"exp": now + 3600, "nbf": now - 10, "iat": now - 10}
+        assert verifier._temporal_claims_valid(claims) is True
+
+    def test_non_numeric_claim_is_rejected(self):
+        verifier = self._verifier()
+        claims = {"exp": time.time() + 3600, "nbf": "not-a-timestamp"}
+        assert verifier._temporal_claims_valid(claims) is False
+
+    @pytest.mark.parametrize("name", ["nbf", "iat"])
+    @pytest.mark.parametrize(
+        "value", ["NaN", float("nan"), float("inf"), 10**400, True]
+    )
+    def test_malformed_numeric_date_is_rejected(self, name, value):
+        """A NumericDate outside the JSON number space must be refused rather
+        than compared: ``NaN`` fails every ordering test and so would slip
+        past the future check, and a magnitude that overflows a float would
+        raise out of ``verify_token`` and skip the rejection audit."""
+        verifier = self._verifier()
+        claims = {"exp": time.time() + 3600, name: value}
+        assert verifier._temporal_claims_valid(claims) is False
+
+    @pytest.mark.parametrize(
+        "value", ["NaN", float("nan"), float("inf"), 10**400, True]
+    )
+    def test_malformed_exp_is_rejected(self, value):
+        """``exp`` needs the same well-formedness check as the other two: a
+        ``NaN`` compares false against FastMCP's ``exp < time.time()``, so a
+        token carrying one reads as never expiring."""
+        verifier = self._verifier()
+        assert verifier._temporal_claims_valid({"exp": value}) is False
+
+    def test_rejection_is_audited(self):
+        """A temporal rejection must travel the same audit path as every other
+        token rejection, not just return ``None``."""
+        verifier = self._verifier()
+        accepted = AccessToken(
+            token="t",
+            client_id="c",
+            scopes=[SCOPE_READ],
+            expires_at=None,
+            claims={"sub": "u"},
+        )
+        audit = MagicMock()
+        audit.active = True
+        with (
+            patch.object(JWTVerifier, "verify_token", return_value=accepted),
+            patch("cb_mcp.auth.get_audit_logger", return_value=audit),
+        ):
+            assert asyncio.run(verifier.verify_token("t")) is None
+
+        audit.emit_event.assert_called_once()
+        call = audit.emit_event.call_args
+        assert call.args[0] is AuditEvent.TOKEN_REJECTED
+        assert call.kwargs["outcome"] == OUTCOME_DENIED
+        assert call.kwargs["reason"] == REASON_TOKEN_INVALID
+
+    @pytest.mark.parametrize("value", ["NaN", 10**400])
+    def test_malformed_numeric_date_returns_none_not_raises(self, value):
+        """The rejection must travel the normal ``None`` path so the audit
+        record is still emitted."""
+        verifier = self._verifier()
+        accepted = AccessToken(
+            token="t",
+            client_id="c",
+            scopes=[SCOPE_READ],
+            expires_at=int(time.time()) + 3600,
+            claims={"exp": int(time.time()) + 3600, "nbf": value},
+        )
+        with patch.object(JWTVerifier, "verify_token", return_value=accepted):
+            assert asyncio.run(verifier.verify_token("t")) is None
+
+    def test_verify_token_rejects_token_upstream_accepted(self):
+        """End of the path: upstream returns a token with no ``exp``, the
+        override must turn it into a ``None`` (401)."""
+        verifier = self._verifier()
+        accepted = AccessToken(
+            token="t",
+            client_id="c",
+            scopes=[SCOPE_READ],
+            expires_at=None,
+            claims={"sub": "u", "iss": ISSUER, "aud": AUDIENCE},
+        )
+        with patch.object(JWTVerifier, "verify_token", return_value=accepted):
+            result = asyncio.run(verifier.verify_token("t"))
+        assert result is None
+
+    def test_upstream_overflow_becomes_a_rejection(self):
+        """FastMCP builds its ``AccessToken`` with ``int(exp)``, which raises
+        ``OverflowError`` on an infinite ``exp`` and is not in the ``except``
+        tuple upstream uses to return ``None``. It must not escape as a 500."""
+        verifier = self._verifier()
+        audit = MagicMock()
+        audit.active = True
+        with (
+            patch.object(JWTVerifier, "verify_token", side_effect=OverflowError),
+            patch("cb_mcp.auth.get_audit_logger", return_value=audit),
+        ):
+            assert asyncio.run(verifier.verify_token("t")) is None
+
+        audit.emit_event.assert_called_once()
+        assert audit.emit_event.call_args.args[0] is AuditEvent.TOKEN_REJECTED
+
+    def test_verify_token_passes_valid_token_through(self):
+        verifier = self._verifier()
+        now = int(time.time())
+        accepted = AccessToken(
+            token="t",
+            client_id="c",
+            scopes=[SCOPE_READ],
+            expires_at=now + 3600,
+            claims={"exp": now + 3600, "iat": now - 10, "nbf": now - 10},
+        )
+        with patch.object(JWTVerifier, "verify_token", return_value=accepted):
+            result = asyncio.run(verifier.verify_token("t"))
+        assert result is accepted

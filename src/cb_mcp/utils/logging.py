@@ -29,6 +29,7 @@ from .constants import (
     DEFAULT_LOG_MAX_BYTES,
     DEFAULT_LOG_SINKS,
     FALLBACK_LOG_FILE,
+    FASTMCP_LOGGER_ROOT,
     LOGGER_NAMESPACE,
     LOGGER_ROOT,
 )
@@ -308,6 +309,88 @@ class BoundedRotatingFileHandler(RotatingFileHandler):
             self.stream = self._open()
 
 
+class TracebackSuppressingFormatter(logging.Formatter):
+    """Formatter that renders tracebacks only when DEBUG logging is enabled.
+
+    ``include_tracebacks`` is resolved once per :func:`configure_logging` call from
+    the configured level, not from the level of an individual record: at
+    ``--log-level=debug`` an ERROR line keeps its traceback, which is the whole
+    point of re-running at debug.
+
+    The record is restored after formatting because handlers share it; suppressing
+    the traceback must not depend on which handler formats first.
+    """
+
+    def __init__(
+        self,
+        fmt: str | None = None,
+        datefmt: str | None = None,
+        *,
+        include_tracebacks: bool,
+    ) -> None:
+        super().__init__(fmt, datefmt=datefmt)
+        self.include_tracebacks = include_tracebacks
+
+    def format(self, record: logging.LogRecord) -> str:
+        if self.include_tracebacks or not (record.exc_info or record.exc_text):
+            return super().format(record)
+        exc_info, exc_text = record.exc_info, record.exc_text
+        record.exc_info, record.exc_text = None, None
+        try:
+            return super().format(record)
+        finally:
+            record.exc_info, record.exc_text = exc_info, exc_text
+
+
+class FastMCPTracebackFilter(logging.Filter):
+    """Strips the traceback from a FastMCP record before its handlers render it.
+
+    FastMCP configures its own logger tree at import time: ``propagate`` is
+    False, and two ``RichHandler``s are attached — one filtered to records
+    without ``exc_info``, one that exists to render tracebacks. None of it is
+    reachable from the ``couchbase`` tree, so a failing tool call emits a second
+    traceback from the framework layer even after ours is suppressed (DA-2450).
+
+    This is a filter rather than :class:`TracebackSuppressingFormatter` because a
+    ``RichHandler`` builds the traceback itself from ``record.exc_info`` during
+    ``emit`` and never routes it through ``Formatter.format`` — a formatter swap
+    would restyle the message line and leave the traceback in place.
+
+    Clearing ``exc_info`` is what makes FastMCP's own routing do the rest: with
+    the exception gone the record is accepted by the message handler and rejected
+    by the traceback handler, so the one-liner survives and nothing else is
+    emitted. The record is not restored afterwards, unlike in the formatter —
+    ``propagate`` is False on that tree, so these handlers are the only consumers.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.exc_info = None
+        record.exc_text = None
+        return True
+
+
+def _apply_fastmcp_traceback_policy(include_tracebacks: bool) -> None:
+    """Hold FastMCP's handlers to the same traceback rule as our own.
+
+    Called on every :func:`configure_logging`, so an existing filter is removed
+    first: reconfiguration (tests, reloads) must not stack duplicates, and a
+    later call at DEBUG has to be able to hand the tracebacks back.
+
+    The filter is inserted ahead of FastMCP's own so the handlers see a record
+    that already looks exception-free. Nothing is imported here — if FastMCP was
+    never imported the logger has no handlers and this is a no-op, which also
+    covers ``FASTMCP_LOG_ENABLED=false``.
+    """
+    fastmcp_logger = logging.getLogger(FASTMCP_LOGGER_ROOT)
+    for handler in fastmcp_logger.handlers:
+        for existing in [
+            f for f in handler.filters if isinstance(f, FastMCPTracebackFilter)
+        ]:
+            handler.removeFilter(existing)
+        if not include_tracebacks:
+            handler.filters.insert(0, FastMCPTracebackFilter())
+
+
 def _attach_per_level_file_handlers(
     root_logger: logging.Logger,
     formatter: logging.Formatter,
@@ -381,6 +464,26 @@ def _attach_per_level_file_handlers(
         attached[lvl_name] = path
         backup_counts[lvl_name] = backup_count
     return attached, backup_counts, errors
+
+
+def _resolve_traceback_policy(level_name: str) -> TracebackSuppressingFormatter:
+    """Apply one traceback rule to both logger trees for the configured level.
+
+    Returns the formatter for this server's own handlers and, as a side effect,
+    holds FastMCP's handlers to the same decision — the two trees are separate
+    and need different mechanisms (a formatter here, a filter there), but a
+    failure should not produce a traceback on one and not the other.
+
+    Only DEBUG and TRACE keep tracebacks; ``OFF`` is handled by the same rule,
+    so a silenced server does not leave FastMCP printing stack traces.
+    """
+    include_tracebacks = level_name in ("DEBUG", "TRACE")
+    _apply_fastmcp_traceback_policy(include_tracebacks)
+    return TracebackSuppressingFormatter(
+        DEFAULT_LOG_FORMAT,
+        datefmt=DEFAULT_LOG_DATEFMT,
+        include_tracebacks=include_tracebacks,
+    )
 
 
 class ParsedLogLevel(NamedTuple):
@@ -497,6 +600,12 @@ def configure_logging(
     not own the SDK must pass ``NO_SDK_LOG_HOOK`` rather than repeat the call.
 
     Setting ``level="OFF"`` suppresses output regardless of sinks.
+
+    Exception tracebacks attached with ``exc_info=True`` are rendered only when
+    ``level`` is DEBUG or TRACE; at every other level the record's message is
+    emitted on its own (see :class:`TracebackSuppressingFormatter`). The same
+    rule is applied to FastMCP's own handlers, which log outside this tree (see
+    :class:`FastMCPTracebackFilter`).
     """
     sdk_hook = sdk_log_hook if sdk_log_hook is not None else NO_SDK_LOG_HOOK
     # Both code paths below rebind the module-level snapshot.
@@ -510,6 +619,8 @@ def configure_logging(
         # uppercase here so ``root_logger.setLevel`` accepts it.
         invalid_level = level
         level_name = DEFAULT_LOG_LEVEL.upper()
+
+    formatter = _resolve_traceback_policy(level_name)
 
     root_logger = logging.getLogger(LOGGER_ROOT)
     for handler in list(root_logger.handlers):
@@ -537,8 +648,8 @@ def configure_logging(
 
     root_logger.setLevel(level_name)
 
-    formatter = logging.Formatter(DEFAULT_LOG_FORMAT, datefmt=DEFAULT_LOG_DATEFMT)
-
+    # Tracebacks are attached to records unconditionally by the tool error
+    # handlers; the formatter is what keeps them out of non-debug output.
     effective_sinks = set(sinks)
     file_sink_active = "file" in effective_sinks
 

@@ -17,6 +17,12 @@ LOGGER_ROOT = "couchbase"
 # ServerSpec.logger_namespace).
 LOGGER_NAMESPACE = f"{LOGGER_ROOT}.mcp"
 
+# Root of FastMCP's own logger tree. FastMCP configures it at import time with
+# its own handlers and propagate=False, so records there never reach the
+# handlers attached under LOGGER_ROOT; logging.py reaches it by name to hold it
+# to the same traceback rule.
+FASTMCP_LOGGER_ROOT = "fastmcp"
+
 # Default Configuration Values shared by every server. Anything that differs
 # per server — the default port and log file — belongs in that server's own
 # constants module (see ServerSpec.default_port / default_log_file), not here:
@@ -187,3 +193,9 @@ ALLOWED_OAUTH_ALGORITHMS = [
     "PS512",
 ]
 DEFAULT_OAUTH_ALGORITHM = "RS256"
+
+# Clock-skew tolerance applied to the nbf and iat checks in
+# CouchbaseJWTVerifier. Matches FastMCP 4.x's own nbf tolerance. Not operator-
+# configurable: a knob here would let a deployment widen the window in which a
+# not-yet-valid token is accepted. Host clocks are an NTP problem.
+OAUTH_CLOCK_SKEW_LEEWAY_SECONDS = 30
