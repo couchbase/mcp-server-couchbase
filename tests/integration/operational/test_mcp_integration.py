@@ -16,7 +16,12 @@ from conftest import (
 
 from cb_mcp.servers.operational.constants import FASTMCP_SERVER_NAME
 
-from ._census import EXPECTED_TOOLS, TOOL_REQUIRED_PARAMS, TOOLS_BY_CATEGORY
+from ._census import (
+    EXPECTED_TOOLS,
+    TOOL_REQUIRED_PARAMS,
+    TOOL_SINGLE_OR_BATCH_PARAMS,
+    TOOLS_BY_CATEGORY,
+)
 from ._deployment import expected_on_target
 
 
@@ -93,6 +98,20 @@ async def test_tools_have_required_parameters() -> None:
                     errors.append(f"{tool_name}: missing property '{param}'")
                 elif param not in required:
                     errors.append(f"{tool_name}: '{param}' should be required")
+
+        for tool_name, (
+            batch_param,
+            single_params,
+        ) in TOOL_SINGLE_OR_BATCH_PARAMS.items():
+            if tool_name not in expected:
+                continue
+            if tool_name not in tools_map:
+                errors.append(f"{tool_name}: tool not found")
+                continue
+            properties = (tools_map[tool_name].inputSchema or {}).get("properties", {})
+            for param in [*single_params, batch_param]:
+                if param not in properties:
+                    errors.append(f"{tool_name}: missing property '{param}'")
 
         assert not errors, "Parameter validation errors:\n" + "\n".join(errors)
 

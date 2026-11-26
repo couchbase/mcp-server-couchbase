@@ -18,6 +18,7 @@ import pytest
 
 from accuracy.sdk import (
     AccuracyCase,
+    AccuracyTestingClient,
     DiskResultStorage,
     Matcher,
     OpenAIAgent,
@@ -26,6 +27,7 @@ from accuracy.sdk import (
     run_accuracy_case,
     seed_document,
 )
+from accuracy.sdk.runner import SetupHook
 from accuracy.sdk.types import ExpectedToolCall
 
 # Local aliases keep the original call sites below unchanged while sourcing
@@ -434,6 +436,113 @@ def _build_cases(bucket: str, scope: str, collection: str) -> list[AccuracyCase]
         )
     )
 
+    cases.extend(_build_bulk_read_cases(bucket, scope, collection))
+    return cases
+
+
+def _seed_many(
+    bucket: str, scope: str, collection: str, docs: dict[str, dict]
+) -> SetupHook:
+    hooks = [_seed_doc(bucket, scope, collection, i, c) for i, c in docs.items()]
+
+    async def _hook(client: AccuracyTestingClient) -> None:
+        for hook in hooks:
+            await hook(client)
+
+    return _hook
+
+
+def _delete_many(bucket: str, scope: str, collection: str, ids: list[str]) -> SetupHook:
+    hooks = [_delete_doc(bucket, scope, collection, i) for i in ids]
+
+    async def _hook(client: AccuracyTestingClient) -> None:
+        for hook in hooks:
+            await hook(client)
+
+    return _hook
+
+
+def _build_bulk_read_cases(
+    bucket: str, scope: str, collection: str
+) -> list[AccuracyCase]:
+    """Cases for the batch form of get_document_by_id.
+
+    Three behaviours: several ids go in one call, one id still uses the single
+    form, and a result that reports truncation is followed by a second call for
+    the ids it listed in not_returned.
+    """
+    cases: list[AccuracyCase] = []
+    keyspace = {
+        "bucket_name": bucket,
+        "scope_name": scope,
+        "collection_name": collection,
+    }
+
+    many = {_doc_id(f"acc_bulkget_{n}"): {"n": n} for n in range(4)}
+    cases.append(
+        AccuracyCase(
+            test_id="get_document_by_id_batch_for_several",
+            prompt=(
+                f"Fetch these four documents from bucket '{bucket}', scope "
+                f"'{scope}', collection '{collection}': {', '.join(many)}."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_document_by_id",
+                    parameters={**keyspace, "document_ids": Matcher.any_value()},
+                ),
+            ],
+            seed=_seed_many(bucket, scope, collection, many),
+            cleanup=_delete_many(bucket, scope, collection, list(many)),
+        )
+    )
+
+    one_id = _doc_id("acc_bulkget_one")
+    cases.append(
+        AccuracyCase(
+            test_id="get_document_by_id_single_stays_single",
+            prompt=(
+                f"Fetch the document '{one_id}' from bucket '{bucket}', scope "
+                f"'{scope}', collection '{collection}'."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_document_by_id",
+                    parameters={**keyspace, "document_id": one_id},
+                ),
+            ],
+            seed=_seed_doc(bucket, scope, collection, one_id, {"n": 1}),
+            cleanup=_delete_doc(bucket, scope, collection, one_id),
+        )
+    )
+
+    # Two documents that each fit under the 64 KiB result bound but not together,
+    # so the first call returns one and lists the other in not_returned.
+    large = {
+        _doc_id(f"acc_bulkget_large_{n}"): {"blob": "x" * (40 * 1024)} for n in range(2)
+    }
+    cases.append(
+        AccuracyCase(
+            test_id="get_document_by_id_batch_follows_not_returned",
+            prompt=(
+                f"Get the full contents of both of these documents from bucket "
+                f"'{bucket}', scope '{scope}', collection '{collection}': "
+                f"{', '.join(large)}. I need both."
+            ),
+            expected_tools=[
+                ExpectedToolCall(
+                    tool_name="get_document_by_id",
+                    parameters={**keyspace, "document_ids": Matcher.any_value()},
+                ),
+                ExpectedToolCall(
+                    tool_name="get_document_by_id",
+                    parameters={**keyspace, "document_ids": Matcher.any_value()},
+                ),
+            ],
+            seed=_seed_many(bucket, scope, collection, large),
+            cleanup=_delete_many(bucket, scope, collection, list(large)),
+        )
+    )
     return cases
 
 
@@ -457,6 +566,9 @@ KV_CASE_IDS = [
     "mutate_subdocument_upsert_single_field",
     "mutate_subdocument_array_append",
     "mutate_subdocument_counter",
+    "get_document_by_id_batch_for_several",
+    "get_document_by_id_single_stays_single",
+    "get_document_by_id_batch_follows_not_returned",
 ]
 
 
