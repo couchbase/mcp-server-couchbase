@@ -9,8 +9,7 @@ Couchbase metrics reference changes.
 """
 
 import json
-import resource
-import sys
+import tracemalloc
 from collections.abc import Iterator
 
 import pytest
@@ -345,10 +344,23 @@ class TestChapterFilters:
 class TestStreamingInvariant:
     """The whole point of the JSONL format is that memory does not scale with dataset size."""
 
-    def _peak_rss_mb(self) -> float:
-        usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        # macOS reports bytes, Linux reports kilobytes.
-        return usage / (1024 * 1024) if sys.platform == "darwin" else usage / 1024
+    @staticmethod
+    def _peak_traced_mb() -> float:
+        """Peak Python allocation since the last reset, in MB.
+
+        This was peak RSS via ``resource``, which is Unix-only: importing it at
+        module scope made this file unimportable on Windows, and a collection
+        error is fatal, so one import took the whole unit suite down on that
+        platform.
+
+        ``tracemalloc`` is in the standard library on every platform, and it
+        measures the thing this test is actually about. Peak RSS is a proxy: it
+        counts pages the allocator has not returned to the operating system, so
+        it moves for reasons that have nothing to do with whether records were
+        materialised, and it can stay flat when they were. Allocation is the
+        quantity the streaming invariant is a claim about.
+        """
+        return tracemalloc.get_traced_memory()[1] / (1024 * 1024)
 
     def test_memory_stays_flat_as_the_dataset_grows(self, tmp_path, monkeypatch):
         envelope = {
@@ -384,22 +396,36 @@ class TestStreamingInvariant:
         large = build(tmp_path / "large.jsonl", 20_000)
 
         _point_registry_at(monkeypatch, small, "big_tool")
-        discover_tool_input_values("big_tool", ["disk", "queue"], max_results=25)
-        after_small = self._peak_rss_mb()
+        tracemalloc.start()
+        try:
+            tracemalloc.reset_peak()
+            discover_tool_input_values("big_tool", ["disk", "queue"], max_results=25)
+            after_small = self._peak_traced_mb()
 
-        reference_data.load_envelope.cache_clear()
-        reference_data.chapters.cache_clear()
-        _point_registry_at(monkeypatch, large, "big_tool")
-        result = discover_tool_input_values(
-            "big_tool", ["disk", "queue"], max_results=25
-        )
-        after_large = self._peak_rss_mb()
+            reference_data.load_envelope.cache_clear()
+            reference_data.chapters.cache_clear()
+            _point_registry_at(monkeypatch, large, "big_tool")
+            tracemalloc.reset_peak()
+            result = discover_tool_input_values(
+                "big_tool", ["disk", "queue"], max_results=25
+            )
+            after_large = self._peak_traced_mb()
+        finally:
+            tracemalloc.stop()
 
         assert result["matches"] == 20_000, (
             "the large dataset really was searched end to end"
         )
-        # 20x the records. Holding them would cost tens of MB; streaming costs ~nothing.
-        assert after_large - after_small < 10.0, (
-            f"peak RSS grew {after_large - after_small:.1f} MB when the dataset grew 20x -- "
+        # 20x the records. Holding them costs tens of MB; streaming costs
+        # almost nothing. Measured here: 0.007 MB when streaming, 11.8 MB with
+        # one list appended to in iter_records. The old bound of 10.0 MB was
+        # sized for peak RSS, which is noisy; against allocation it sat close
+        # enough to the broken value that a smaller dataset or a different
+        # interpreter could have slipped under it and the test would have gone
+        # quiet. 2.0 MB keeps two orders of magnitude of headroom on the
+        # passing side and still several times the margin on the failing one.
+        assert after_large - after_small < 2.0, (
+            f"peak allocation grew {after_large - after_small:.1f} MB when "
+            "the dataset grew 20x -- "
             "something is materialising records instead of streaming them"
         )

@@ -20,6 +20,7 @@ import.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -59,7 +60,14 @@ def _sdks_loaded_by(source: str) -> set[str]:
         [sys.executable, "-c", probe],
         capture_output=True,
         text=True,
-        env={"PYTHONPATH": str(SRC_DIR), "PATH": "/usr/bin:/bin"},
+        # Inherit the parent environment rather than hand-building one.
+        # The previous literal PATH of "/usr/bin:/bin" is not a valid PATH
+        # on Windows, so the probe interpreter could not start and all nine
+        # tests in this file failed there. What this probe actually needs to
+        # control is PYTHONPATH, and that is still set explicitly below, so
+        # the subprocess still imports from this repo's src/ and not from
+        # whatever the parent happened to have on its path.
+        env={**os.environ, "PYTHONPATH": str(SRC_DIR)},
         check=False,
     )
     if result.returncode != 0:

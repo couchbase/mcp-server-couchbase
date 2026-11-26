@@ -29,7 +29,12 @@ import asyncio
 import json
 import logging
 import os
-import pwd
+import sys
+
+try:  # `pwd` is Unix-only, and a collection error takes the whole suite
+    import pwd
+except ImportError:  # Windows
+    pwd = None  # type: ignore[assignment]
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -404,6 +409,13 @@ def test_stdio_resolves_to_the_local_process_owner():
     assert identity["user"]
 
 
+_POSIX_ONLY = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="asserts POSIX uid-to-passwd mapping; Windows has no pwd module",
+)
+
+
+@_POSIX_ONLY
 def test_local_identity_ignores_the_caller_controlled_environment():
     """``real_userid`` must not be settable by whoever launches the server.
 
@@ -429,6 +441,7 @@ def test_local_identity_ignores_the_caller_controlled_environment():
     assert identity["user"] != "alice"
 
 
+@_POSIX_ONLY
 def test_local_identity_falls_back_to_the_numeric_uid_without_a_passwd_entry():
     """Containers routinely run as a uid with no passwd entry.
 
