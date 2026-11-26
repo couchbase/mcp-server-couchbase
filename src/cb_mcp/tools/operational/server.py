@@ -31,8 +31,8 @@ from ...utils.operational.cluster_health import (
 )
 from ...utils.operational.connection import connect_to_bucket
 from ...utils.operational.connection_string import (
-    determine_ssl_verification,
     is_capella_connection,
+    rest_client_auth,
     validate_connection_settings,
 )
 from ...utils.operational.constants import ENDPOINT_PING_TIMEOUT_SECONDS
@@ -229,9 +229,7 @@ def get_bucket_config(
         protocol = (
             "https" if connection_string.lower().startswith("couchbases://") else "http"
         )
-        verify_ssl = determine_ssl_verification(
-            connection_string, settings.get("ca_cert_path")
-        )
+        verify_ssl, auth = rest_client_auth(settings)
         # Ask the SDK where management actually listens rather than appending the
         # default port to the connection string's hosts: the port it carries is a KV
         # one, and a port-mapped or NAT'd cluster serves management elsewhere. Same
@@ -266,7 +264,7 @@ def get_bucket_config(
                 try:
                     response = client.get(
                         f"{protocol}://{host}{path}",
-                        auth=(settings["username"], settings["password"]),
+                        auth=auth,
                     )
                     # A 4xx is this request being refused (unknown bucket, insufficient
                     # role), not the host being unreachable: every other node would
@@ -510,9 +508,7 @@ def get_cluster_metrics(
         protocol = (
             "https" if connection_string.lower().startswith("couchbases://") else "http"
         )
-        verify_ssl = determine_ssl_verification(
-            connection_string, settings.get("ca_cert_path")
-        )
+        verify_ssl, auth = rest_client_auth(settings)
         # Ask the SDK where management actually listens rather than appending the
         # default port to the connection string's hosts: the port it carries is a KV
         # one, and a port-mapped or NAT'd cluster serves management elsewhere. Same
@@ -535,7 +531,7 @@ def get_cluster_metrics(
                     response = client.post(
                         f"{protocol}://{host}/pools/default/stats/range",
                         json=metrics,
-                        auth=(settings["username"], settings["password"]),
+                        auth=auth,
                     )
                     response.raise_for_status()
                     data = response.json()
@@ -602,9 +598,7 @@ def get_cluster_tasks(ctx: Context, timeout: int = 30) -> list[dict[str, Any]]:
         protocol = (
             "https" if connection_string.lower().startswith("couchbases://") else "http"
         )
-        verify_ssl = determine_ssl_verification(
-            connection_string, settings.get("ca_cert_path")
-        )
+        verify_ssl, auth = rest_client_auth(settings)
         # Ask the SDK where management actually listens rather than appending the
         # default port to the connection string's hosts: the port it carries is a KV
         # one, and a port-mapped or NAT'd cluster serves management elsewhere. Same
@@ -629,7 +623,7 @@ def get_cluster_tasks(ctx: Context, timeout: int = 30) -> list[dict[str, Any]]:
                 try:
                     response = client.get(
                         f"{protocol}://{host}/pools/default/tasks",
-                        auth=(settings["username"], settings["password"]),
+                        auth=auth,
                     )
                     response.raise_for_status()
                     tasks = response.json()
@@ -695,9 +689,7 @@ def get_cluster_health_snapshot(ctx: Context, timeout: int = 30) -> dict[str, An
         protocol = (
             "https" if connection_string.lower().startswith("couchbases://") else "http"
         )
-        verify_ssl = determine_ssl_verification(
-            connection_string, settings.get("ca_cert_path")
-        )
+        verify_ssl, auth = rest_client_auth(settings)
         # Ask the SDK where management actually listens rather than appending the
         # default port to the connection string's hosts: the port it carries is a KV
         # one, and a port-mapped or NAT'd cluster serves management elsewhere. Same
@@ -726,7 +718,7 @@ def get_cluster_health_snapshot(ctx: Context, timeout: int = 30) -> dict[str, An
                     ):
                         response = client.get(
                             f"{protocol}://{host}{path}",
-                            auth=(settings["username"], settings["password"]),
+                            auth=auth,
                         )
                         response.raise_for_status()
                         payloads.append(response.json())
@@ -960,9 +952,7 @@ def get_cluster_system_events(
         protocol = (
             "https" if connection_string.lower().startswith("couchbases://") else "http"
         )
-        verify_ssl = determine_ssl_verification(
-            connection_string, settings.get("ca_cert_path")
-        )
+        verify_ssl, auth = rest_client_auth(settings)
         # Ask the SDK where management actually listens rather than appending the
         # default port to the connection string's hosts: the port it carries is a KV
         # one, and a port-mapped or NAT'd cluster serves management elsewhere. Same
@@ -984,7 +974,7 @@ def get_cluster_system_events(
                     response = client.get(
                         f"{protocol}://{host}/events",
                         params=params,
-                        auth=(settings["username"], settings["password"]),
+                        auth=auth,
                     )
                     # A 4xx is this request being refused, not the host being
                     # unreachable: every other node would refuse it identically,

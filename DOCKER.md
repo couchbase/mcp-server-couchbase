@@ -110,7 +110,7 @@ The most common variables are below. Every option — including logging rotation
 | --- | --- | --- |
 | `CB_CONNECTION_STRING` | Couchbase connection string | **Required** |
 | `CB_USERNAME` / `CB_PASSWORD` | Basic authentication | Required, unless using mTLS |
-| `CB_CLIENT_CERT_PATH` / `CB_CLIENT_KEY_PATH` | mTLS authentication (used instead of username/password when set) | |
+| `CB_CLIENT_CERT_PATH` / `CB_CLIENT_KEY_PATH` | mTLS authentication (used instead of username/password when set). Works for every tool, including those that call Couchbase's REST endpoints. Needs a `couchbases://` connection string | |
 | `CB_CA_CERT_PATH` | Root certificate for a self-signed/untrusted server certificate | |
 | `CB_MCP_READ_ONLY_MODE` | When `true`, write tools are not loaded and modifying SQL++ is blocked | `true` |
 | `CB_MCP_TRANSPORT` | `stdio` or `http` | `stdio` |
@@ -154,14 +154,16 @@ docker run --rm -i \
   couchbase/mcp-server:latest operational
 ```
 
-The `/logs` and `/audit` host directories must be writable by UID 1001.
+The `/logs` and `/audit` host directories must be writable by UID 1001, and the mounted certificate and key files must be readable by it: the container runs as a non-root user, so a key file that only your own user can read (mode `0600`) fails to load.
+
+**Certificate-only (mTLS) setups.** If your cluster accepts only client certificates, set the three certificate variables (`CB_CLIENT_CERT_PATH`, `CB_CLIENT_KEY_PATH`, and `CB_CA_CERT_PATH` for a private CA) and leave `CB_USERNAME` and `CB_PASSWORD` unset, as in the example above. The Couchbase user that the certificate maps to (by default, the certificate's common name) decides what each tool may do.
 
 **Audit files in containers.** The hostname and process id are inserted into the audit file name (`audit.log` → `audit.<hostname>.1.log`). Because the server is always PID 1, the container's hostname is what keeps files from different containers apart on a shared volume — Docker gives each container a distinct hostname by default. If you set the same `--hostname` on several containers that share one volume, give each its own subdirectory. Retention (`CB_MCP_AUDIT_LOG_RETENTION_MAX_BACKUPS`) applies per file, and nothing prunes the files of containers that have exited, so size the volume for the number of container starts or sweep old `audit.*.log*` files.
 
 ## Networking
 
 - If Couchbase runs on the Docker host, use `couchbase://host.docker.internal` as the connection string (see [Docker networking](https://docs.docker.com/desktop/features/networking/#i-want-to-connect-from-a-container-to-a-service-on-the-host)).
-- If Couchbase runs in another container, put both on the same network with `--network=<your_network>` and use the Couchbase container's name as the host.
+- If Couchbase runs in another container, put both on the same network with `--network=<your_network>` and use the Couchbase container's name as the host. With `couchbases://`, the node certificate must list the name or IP address you connect with in its subject alternative names, or certificate verification fails.
 - For Capella, make sure the cluster [allows connections](https://docs.couchbase.com/cloud/clusters/allow-ip-address.html) from the Docker host's IP address.
 
 ## Health Checks

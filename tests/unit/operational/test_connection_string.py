@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +15,7 @@ from cb_mcp.utils.operational.connection_string import (
     extract_hosts_from_connection_string,
     is_capella_connection,
     resolve_deployment,
+    rest_client_auth,
 )
 
 
@@ -166,6 +168,85 @@ class TestDetermineSSLVerification:
         """TLS connection with cert uses provided cert."""
         result = determine_ssl_verification("couchbases://localhost", "/path/to/ca.pem")
         assert result == "/path/to/ca.pem"
+
+
+class TestRestClientAuth:
+    """rest_client_auth: the REST equivalent of the SDK's authenticator choice."""
+
+    CERT_SETTINGS: ClassVar[dict[str, str]] = {
+        "connection_string": "couchbases://localhost",
+        "client_cert_path": "/path/to/client.pem",
+        "client_key_path": "/path/to/client.key",
+    }
+
+    def test_password_mode_is_unchanged(self) -> None:
+        settings = {
+            "connection_string": "couchbases://localhost",
+            "username": "admin",
+            "password": "secret",
+            "ca_cert_path": "/path/to/ca.pem",
+        }
+        verify, auth = rest_client_auth(settings)
+        assert verify == "/path/to/ca.pem"
+        assert auth == ("admin", "secret")
+
+    def test_cert_mode_loads_chain_and_drops_basic_auth(self) -> None:
+        context = MagicMock()
+        with (
+            patch("os.path.exists", return_value=True),
+            patch(
+                "cb_mcp.utils.operational.connection_string.httpx.create_ssl_context",
+                return_value=context,
+            ) as create_context,
+        ):
+            verify, auth = rest_client_auth(self.CERT_SETTINGS)
+
+        create_context.assert_called_once_with(verify=True)
+        context.load_cert_chain.assert_called_once_with(
+            "/path/to/client.pem", "/path/to/client.key"
+        )
+        assert verify is context
+        assert auth is None
+
+    def test_cert_mode_wins_over_password(self) -> None:
+        with (
+            patch("os.path.exists", return_value=True),
+            patch(
+                "cb_mcp.utils.operational.connection_string.httpx.create_ssl_context",
+                return_value=MagicMock(),
+            ),
+        ):
+            _, auth = rest_client_auth(
+                {**self.CERT_SETTINGS, "username": "admin", "password": "secret"}
+            )
+        assert auth is None
+
+    def test_cert_mode_trusts_the_given_ca(self) -> None:
+        context = MagicMock()
+        with (
+            patch("os.path.exists", return_value=True),
+            patch(
+                "cb_mcp.utils.operational.connection_string.ssl.create_default_context",
+                return_value=context,
+            ) as create_context,
+        ):
+            rest_client_auth({**self.CERT_SETTINGS, "ca_cert_path": "/path/to/ca.pem"})
+
+        create_context.assert_called_once_with(cafile="/path/to/ca.pem")
+        context.load_cert_chain.assert_called_once()
+
+    def test_missing_cert_files_report_basenames_only(self) -> None:
+        with (
+            patch("os.path.exists", return_value=False),
+            pytest.raises(ValueError, match=r"client\.pem or client\.key") as exc,
+        ):
+            rest_client_auth(self.CERT_SETTINGS)
+        assert "/path/to" not in str(exc.value)
+
+    def test_no_credentials_is_a_clear_error(self) -> None:
+        """Callable directly (not just via a tool), so it validates for itself."""
+        with pytest.raises(ValueError, match="username, password"):
+            rest_client_auth({"connection_string": "couchbases://localhost"})
 
 
 class TestDetermineSSLVerificationCapella:

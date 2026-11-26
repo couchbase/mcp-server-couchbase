@@ -330,6 +330,8 @@ Every PR runs both workflows:
   CB_VERSIONS="8.0.0" TRANSPORTS="stdio" SERVER_BINARIES="source" ./scripts/run_matrix_local.sh
   ```
 
+  `test.yml` also has an **mTLS job** (`mtls-integration-tests`). It runs the unit tests and the whole operational integration suite against a single-node cluster that accepts only client certificates, on Couchbase `8.0.0` and `7.6.11`, with `CB_USERNAME` and `CB_PASSWORD` removed from the environment, so a test that still needs a password fails there. `./scripts/setup_mtls_cluster.sh <out_dir>` builds that cluster and prints the `CB_CLIENT_CERT_PATH`, `CB_CLIENT_KEY_PATH` and `CB_CA_CERT_PATH` values to export before running the tests.
+
 - **`operational-insights-integration-tests.yml`** — the Operational Insights integration suite against a self-managed Operational Insights cluster (Enterprise Analytics 2.2.1 image) with an S3 mock. Reproduce locally with `./scripts/run_operational_insights_matrix_local.sh`.
 
 ### Evidence of testing

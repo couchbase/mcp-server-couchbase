@@ -30,11 +30,14 @@ from _test_env import (
     get_test_bucket,
     get_test_collection,
     get_test_scope,
+    missing_cluster_credentials,
     require_test_bucket,
 )
 from mcp import ClientSession, StdioServerParameters, stdio_client
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
+
+from cb_mcp.utils.operational.connection import connect_to_couchbase_cluster
 
 if TYPE_CHECKING:
     from typing import TextIO
@@ -44,6 +47,7 @@ __all__ = [
     "create_logging_test_session",
     "create_mcp_session",
     "create_session_for_subcommand",
+    "direct_cluster",
     "ensure_list",
     "extract_payload",
     "get_test_bucket",
@@ -61,6 +65,25 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TIMEOUT = int(os.getenv("CB_MCP_TEST_TIMEOUT", "120"))
 
 
+def direct_cluster() -> Any:
+    """Open a direct (non-MCP) SDK connection, for seeding/cleanup only.
+
+    Authenticates the way the server under test does: by client certificate when
+    ``CB_CLIENT_CERT_PATH`` and ``CB_CLIENT_KEY_PATH`` are set, otherwise by
+    ``CB_USERNAME``/``CB_PASSWORD``. Tests must not read the password variables
+    themselves, or they cannot run against a cluster that only accepts
+    certificates.
+    """
+    return connect_to_couchbase_cluster(
+        os.environ["CB_CONNECTION_STRING"],
+        os.environ.get("CB_USERNAME"),
+        os.environ.get("CB_PASSWORD"),
+        ca_cert_path=os.environ.get("CB_CA_CERT_PATH"),
+        client_cert_path=os.environ.get("CB_CLIENT_CERT_PATH"),
+        client_key_path=os.environ.get("CB_CLIENT_KEY_PATH"),
+    )
+
+
 def _build_stdio_subprocess_env() -> dict[str, str]:
     """Build the environment for a freshly-spawned ``mcp_server`` subprocess.
 
@@ -69,7 +92,7 @@ def _build_stdio_subprocess_env() -> dict[str, str]:
     at startup — the test runner doesn't get to override it per-test.
     """
     env = os.environ.copy()
-    missing = [var for var in REQUIRED_ENV_VARS if not env.get(var)]
+    missing = missing_cluster_credentials(env)
     if missing:
         pytest.skip(
             "Integration tests require demo cluster credentials. "

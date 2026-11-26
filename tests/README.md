@@ -53,9 +53,16 @@ applied automatically by directory — test files carry no `@pytest.mark.accurac
   registry, not this doc, when a third server is added.
 - **Integration (operational)** — spawn the real MCP server over stdio
   (`create_mcp_session`) and talk to a running Couchbase cluster. Requires
-  `CB_CONNECTION_STRING`, `CB_USERNAME`, `CB_PASSWORD`, plus `CB_MCP_TEST_BUCKET`
-  for tests that need a bucket. Missing env vars cause `pytest.skip(...)`
-  rather than a failure.
+  `CB_CONNECTION_STRING` and either `CB_USERNAME` and `CB_PASSWORD`, or a client
+  certificate (`CB_CLIENT_CERT_PATH` and `CB_CLIENT_KEY_PATH`, with
+  `CB_CA_CERT_PATH` for a private CA), plus `CB_MCP_TEST_BUCKET` for tests that
+  need a bucket. Missing env vars cause `pytest.skip(...)` rather than a failure.
+  A test that connects to the cluster itself, for seeding or cleanup, must use
+  `direct_cluster()` from `tests/integration/conftest.py` rather than reading
+  `CB_USERNAME`/`CB_PASSWORD`, so it also works on a cluster that only accepts
+  certificates. `operational/test_mtls_rest_tools.py` checks that the REST-backed
+  tools work with a certificate alone and is skipped unless the three certificate
+  variables are set; `scripts/setup_mtls_cluster.sh` builds a cluster for it.
 - **Integration (Operational Insights)** — spawn `mcp_server operational-insights`
   (stdio, the default), or connect to an already-running instance over HTTP
   when `CB_MCP_TRANSPORT=http`/`MCP_SERVER_URL` are set

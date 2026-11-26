@@ -122,6 +122,43 @@ class TestIndexUtilsFunctions:
         with pytest.raises(ValueError, match="connection_string"):
             validate_connection_settings({})
 
+    def test_validate_connection_settings_client_cert_without_password(self) -> None:
+        """A client certificate and key replace username/password."""
+        validate_connection_settings(
+            {
+                "connection_string": "couchbases://localhost",
+                "client_cert_path": "/path/to/client.pem",
+                "client_key_path": "/path/to/client.key",
+            }
+        )
+
+    def test_validate_connection_settings_half_cert_pair(self) -> None:
+        """A certificate without its key (or vice versa) is rejected."""
+        for half in (
+            {"client_cert_path": "/path/to/client.pem"},
+            {"client_key_path": "/path/to/client.key"},
+        ):
+            with pytest.raises(ValueError, match="provided together"):
+                validate_connection_settings(
+                    {
+                        "connection_string": "couchbases://localhost",
+                        "username": "admin",
+                        "password": "password",
+                        **half,
+                    }
+                )
+
+    def test_validate_connection_settings_client_cert_needs_tls(self) -> None:
+        """mTLS is negotiated in the TLS handshake, so couchbase:// cannot use it."""
+        with pytest.raises(ValueError, match="couchbases://"):
+            validate_connection_settings(
+                {
+                    "connection_string": "couchbase://localhost",
+                    "client_cert_path": "/path/to/client.pem",
+                    "client_key_path": "/path/to/client.key",
+                }
+            )
+
     def test_clean_index_definition_with_quotes(self) -> None:
         """Clean index definition with surrounding quotes."""
         definition = '"CREATE INDEX idx ON bucket(field)"'
@@ -1673,6 +1710,31 @@ class TestFetchIndexesFromRestApi:
             )
 
         assert mock_client.get.call_args[1]["auth"] == ("admin", "secret")
+
+    def test_client_cert_sends_no_basic_auth(self) -> None:
+        """With a client certificate, requests carry no basic-auth pair."""
+        client_patch, mock_client = self._patch_client(
+            [self._ok_response({"status": []})]
+        )
+        tls_context = MagicMock()
+
+        with (
+            client_patch as client_cls,
+            patch(
+                "cb_mcp.utils.operational.index_utils.rest_client_auth",
+                return_value=(tls_context, None),
+            ),
+        ):
+            fetch_indexes_from_rest_api(
+                "couchbases://host1",
+                None,
+                None,
+                client_cert_path="/path/to/client.pem",
+                client_key_path="/path/to/client.key",
+            )
+
+        assert client_cls.call_args.kwargs["verify"] is tls_context
+        assert mock_client.get.call_args[1]["auth"] is None
 
     def test_multi_host_failover(self) -> None:
         """If the first host fails, the second one should be tried."""

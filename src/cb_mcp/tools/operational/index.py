@@ -251,7 +251,8 @@ def list_indexes(
 
         # Fallback / pre-8.x path: Index Service REST API.
         # This path authenticates directly against the REST endpoint, so
-        # username/password (and connection_string) must be present.
+        # username/password or a client certificate (and connection_string)
+        # must be present.
         validate_connection_settings(settings)
 
         logger.info(
@@ -261,13 +262,15 @@ def list_indexes(
         )
         raw_indexes = fetch_indexes_from_rest_api(
             settings["connection_string"],
-            settings["username"],
-            settings["password"],
+            settings.get("username"),
+            settings.get("password"),
             bucket_name=bucket_name,
             scope_name=scope_name,
             collection_name=collection_name,
             index_name=index_name,
             ca_cert_path=settings.get("ca_cert_path"),
+            client_cert_path=settings.get("client_cert_path"),
+            client_key_path=settings.get("client_key_path"),
         )
 
         # Process and format the results
@@ -336,14 +339,16 @@ def get_index_stats(
         per_node, not_hosted, failures = fetch_index_stats_from_rest_api(
             get_cluster_connection(ctx),
             settings["connection_string"],
-            settings["username"],
-            settings["password"],
+            settings.get("username"),
+            settings.get("password"),
             bucket_name=bucket_name,
             scope_name=scope_name,
             collection_name=collection_name,
             index_name=index_name,
             skip_empty=skip_empty,
             ca_cert_path=settings.get("ca_cert_path"),
+            client_cert_path=settings.get("client_cert_path"),
+            client_key_path=settings.get("client_key_path"),
         )
 
         nodes = {
