@@ -220,11 +220,14 @@ Write tools (marked ✏️) are **not loaded** while [read-only mode](#read-only
 | --- | --- |
 | `get_document_by_id` | Get a document by ID |
 | `lookup_subdocument` | Read specific paths, existence checks or counts without fetching the whole document |
+| `document_exists_by_id` | Check whether a document exists without fetching its content; returns its CAS when it does |
 | `upsert_document_by_id` ✏️ | Upsert a document by ID |
 | `insert_document_by_id` ✏️ | Insert a new document (fails if it exists) |
 | `replace_document_by_id` ✏️ | Replace an existing document (fails if it doesn't exist) |
 | `delete_document_by_id` ✏️ | Delete a document by ID |
 | `mutate_subdocument` ✏️ | Modify paths in an existing document (upsert, insert, replace, remove, array ops, counters) |
+| `touch_document_by_id` ✏️ | Set or clear a document's expiry (TTL) without rewriting its content; returns the new CAS |
+| `get_and_touch_document_by_id` ✏️ | Get a document and set its expiry in one round trip; returns `{content, cas}` |
 
 #### Query and indexing
 

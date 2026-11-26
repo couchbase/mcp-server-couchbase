@@ -229,6 +229,24 @@ class TestRequiredScopesForTool:
             "some_future_tool", write_tool_names=set(), scopes=OPERATIONAL_SCOPES
         ) == {SCOPE_READ}
 
+    def test_dual_scope_tool_requires_both_scopes(self):
+        # A write tool that also returns content must not be reachable with a
+        # write-only token.
+        assert required_scopes_for_tool(
+            "get_and_touch_document_by_id",
+            write_tool_names={"get_and_touch_document_by_id"},
+            scopes=OPERATIONAL_SCOPES,
+            dual_scope_tool_names={"get_and_touch_document_by_id"},
+        ) == {SCOPE_READ, SCOPE_WRITE}
+
+    def test_dual_scope_names_do_not_widen_other_tools(self):
+        assert required_scopes_for_tool(
+            "touch_document_by_id",
+            write_tool_names={"touch_document_by_id"},
+            scopes=OPERATIONAL_SCOPES,
+            dual_scope_tool_names={"get_and_touch_document_by_id"},
+        ) == {SCOPE_WRITE}
+
     def test_a_servers_own_labels_are_honoured(self):
         """The reason ``scopes`` is required rather than defaulted.
 
@@ -321,6 +339,33 @@ class TestWrapWithScopeCheck:
         with _mock_token([SCOPE_READ, SCOPE_WRITE]):
             assert _run(wrapped_read()) == "read"
             assert _run(wrapped_write()) == "write"
+
+    def test_dual_scope_tool_rejects_a_write_only_token(self):
+        async def get_and_touch():
+            return "content"
+
+        wrapped = wrap_with_scope_check(get_and_touch, {SCOPE_READ, SCOPE_WRITE})
+
+        with _mock_token([SCOPE_WRITE]), pytest.raises(PermissionError):
+            _run(wrapped())
+
+    def test_dual_scope_tool_rejects_a_read_only_token(self):
+        async def get_and_touch():
+            return "content"
+
+        wrapped = wrap_with_scope_check(get_and_touch, {SCOPE_READ, SCOPE_WRITE})
+
+        with _mock_token([SCOPE_READ]), pytest.raises(PermissionError):
+            _run(wrapped())
+
+    def test_dual_scope_tool_accepts_a_combined_token(self):
+        async def get_and_touch():
+            return "content"
+
+        wrapped = wrap_with_scope_check(get_and_touch, {SCOPE_READ, SCOPE_WRITE})
+
+        with _mock_token([SCOPE_READ, SCOPE_WRITE]):
+            assert _run(wrapped()) == "content"
 
     def test_sync_function_is_supported(self):
         """The wrapper works on both sync and async tool functions."""

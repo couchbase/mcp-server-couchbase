@@ -216,3 +216,9 @@ class ServerSpec:
     #: the positional index of every field after it for any consumer
     #: constructing it positionally. Add future fields after this one.
     supports_multiple_workers: bool = True
+
+    #: Write tools that also return document content, so a caller must hold
+    #: BOTH the read and the write scope. Registered, audited and read-only
+    #: filtered as writes; the extra read requirement only stops a write-only
+    #: token from retrieving data through a tool it could not read with.
+    dual_scope_tool_names: frozenset[str] = frozenset()
