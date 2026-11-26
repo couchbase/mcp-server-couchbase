@@ -193,6 +193,19 @@ def _build_server(
         enforce_scopes=auth is not None,
         deployment=deployment,
     )
+    # After gating, because the posture is checked against the tool names that
+    # actually survived it, and before anything connects: a deployment whose
+    # declared posture contradicts its configuration should fail on the
+    # operator's terminal, not once it is serving.
+    posture = cli.resolve_posture(
+        # Only tools that will actually be registered, as the serving check
+        # below does. The configured set keeps names that were also disabled
+        # or withheld, and a tool that is not registered can never prompt, so
+        # following the error's own advice (``--disabled-tools``) must be able
+        # to clear it.
+        confirmation_required_tools=gated.confirmation_required - gated.disabled,
+        oauth_enabled=auth is not None,
+    )
     # After gating: the confirmation check needs the resolved tool names.
     try:
         serving = resolve_serving(
@@ -216,7 +229,11 @@ def _build_server(
     except ServingConfigError as e:
         raise click.UsageError(str(e)) from e
     settings = build_settings(
-        cli, gated=gated, oauth_enabled=auth is not None, serving=serving
+        cli,
+        gated=gated,
+        oauth_enabled=auth is not None,
+        serving=serving,
+        posture=posture,
     )
 
     # CLI-resolved configuration lives on AppContext, not in a module global,
