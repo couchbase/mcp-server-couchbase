@@ -28,7 +28,7 @@ from ...servers.operational_insights.constants import (
 )
 from ...utils.operational_insights.context import get_operational_insights_cluster
 from ...utils.operational_insights.sqlpp import keyspace
-from ...utils.responses import tool_error, tool_success
+from ...utils.responses import tool_success
 from ...utils.sqlpp import quote_literal, safe_field_path, safe_ident
 
 logger = logging.getLogger(f"{OPERATIONAL_INSIGHTS_LOGGER_NAMESPACE}.tools.index")
@@ -67,8 +67,8 @@ _VALID_INDEX_TYPES = frozenset(
 def _safe_type(field_type: str) -> str:
     """Validate a field's declared type against the documented grammar.
 
-    Raises ValueError, which operational_insights_create_index's caller catches and turns into a
-    clean tool_error — same as any other malformed-input failure here.
+    Raises ValueError, which operational_insights_create_index logs and re-raises
+    like any other failure.
     """
     if field_type not in _VALID_INDEX_TYPES:
         raise ValueError(
@@ -134,8 +134,8 @@ def operational_insights_create_index(
     CAST (DEFAULT NULL DATE "MM/DD/YYYY"). Accepted keys: date, time, datetime.
     CAST is B-Tree only and cannot be combined with an array index.
 
-    Returns {"success": True, "index_name": ..., "keyspace": ..., "statement": ...},
-    or {"success": False, "error": ...} on failure.
+    Returns {"success": True, "index_name": ..., "keyspace": ..., "statement": ...};
+    the call fails with an error otherwise.
     """
     ks = keyspace(database_name, scope_name, collection_name)
 
@@ -165,7 +165,7 @@ def operational_insights_create_index(
         return tool_success(index_name=index_name, keyspace=ks, statement=statement)
     except Exception as e:
         logger.error(f"Error creating index {index_name!r} on {ks}: {e}", exc_info=True)
-        return tool_error(e, index_name=index_name, keyspace=ks)
+        raise
 
 
 def operational_insights_list_indexes(

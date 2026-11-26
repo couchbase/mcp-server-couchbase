@@ -51,6 +51,7 @@ from conftest import (
     extract_payload,
     get_test_collection,
     get_test_scope,
+    is_error_response,
     require_test_bucket,
 )
 from couchbase.options import SearchOptions
@@ -397,7 +398,7 @@ async def test_run_vector_query_missing_provider_returns_error(
     seeded_gsi_vector_index: dict[str, Any],
 ) -> None:
     """A cluster reachable but a subprocess started with no CB_MCP_EMBEDDING_MODEL_PROVIDER
-    must return a tool_error, not raise or hang."""
+    must return an error result, not hang."""
     fixture = seeded_gsi_vector_index
     async with create_mcp_session(
         extra_env={"CB_MCP_EMBEDDING_MODEL_PROVIDER": ""}
@@ -415,9 +416,8 @@ async def test_run_vector_query_missing_provider_returns_error(
         )
         payload = extract_payload(response)
 
-    assert isinstance(payload, dict)
-    assert payload["success"] is False
-    assert "CB_MCP_EMBEDDING_MODEL_PROVIDER" in payload["error"]
+    assert is_error_response(response)
+    assert "CB_MCP_EMBEDDING_MODEL_PROVIDER" in str(payload)
 
 
 @pytest.mark.asyncio

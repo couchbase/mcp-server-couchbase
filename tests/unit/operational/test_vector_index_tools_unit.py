@@ -4,8 +4,8 @@ Covers: the index_type validation matrix (mutually-exclusive/required-together
 params per shape), the exact generated SQL++ DDL for each shape, the
 required-dimension/required-similarity/DOT_PRODUCT-rejection checks,
 with_options merge and reserved-key collision, the list(result)
-execution-forcing behavior, and the raise-vs-tool_error split (connection
-problems propagate uncaught, everything else is a tool_error).
+execution-forcing behavior, and error propagation (validation
+raises ValueError, SDK errors propagate raw).
 
 Follows tests/unit/operational/test_index_tools_unit.py and
 tests/unit/operational/test_vector_search_tools_unit.py's pattern: a fake
@@ -72,10 +72,10 @@ class TestCreateQueryIndexValidation:
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.connect_to_bucket", return_value=cluster.bucket()),
+            pytest.raises(ValueError) as excinfo,
         ):
-            result = create_query_index(ctx, "b", "s", "c", "idx1", "bogus")
-        assert result["success"] is False
-        assert "index_type" in result["error"]
+            create_query_index(ctx, "b", "s", "c", "idx1", "bogus")
+        assert "index_type" in str(excinfo.value)
 
     @pytest.mark.parametrize(
         ("field", "value"),
@@ -94,12 +94,19 @@ class TestCreateQueryIndexValidation:
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
+            pytest.raises(ValueError) as excinfo,
         ):
-            result = create_query_index(
-                ctx, "b", "s", "c", "idx1", "scalar", keys=["email"], **{field: value}
+            create_query_index(
+                ctx,
+                "b",
+                "s",
+                "c",
+                "idx1",
+                "scalar",
+                keys=["email"],
+                **{field: value},
             )
-        assert result["success"] is False
-        assert field in result["error"]
+        assert field in str(excinfo.value)
 
     def test_scalar_requires_nonempty_keys(self) -> None:
         ctx = _make_ctx()
@@ -107,10 +114,10 @@ class TestCreateQueryIndexValidation:
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
+            pytest.raises(ValueError) as excinfo,
         ):
-            result = create_query_index(ctx, "b", "s", "c", "idx1", "scalar")
-        assert result["success"] is False
-        assert "keys" in result["error"]
+            create_query_index(ctx, "b", "s", "c", "idx1", "scalar")
+        assert "keys" in str(excinfo.value)
 
     def test_hyperscale_rejects_keys_param(self) -> None:
         ctx = _make_ctx()
@@ -118,8 +125,9 @@ class TestCreateQueryIndexValidation:
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
+            pytest.raises(ValueError) as excinfo,
         ):
-            result = create_query_index(
+            create_query_index(
                 ctx,
                 "b",
                 "s",
@@ -131,8 +139,7 @@ class TestCreateQueryIndexValidation:
                 dimension=768,
                 similarity="COSINE",
             )
-        assert result["success"] is False
-        assert "keys" in result["error"]
+        assert "keys" in str(excinfo.value)
 
     def test_hyperscale_rejects_vector_index_position(self) -> None:
         ctx = _make_ctx()
@@ -140,8 +147,9 @@ class TestCreateQueryIndexValidation:
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
+            pytest.raises(ValueError) as excinfo,
         ):
-            result = create_query_index(
+            create_query_index(
                 ctx,
                 "b",
                 "s",
@@ -153,8 +161,7 @@ class TestCreateQueryIndexValidation:
                 similarity="COSINE",
                 vector_index_position=0,
             )
-        assert result["success"] is False
-        assert "vector_index_position" in result["error"]
+        assert "vector_index_position" in str(excinfo.value)
 
     def test_composite_rejects_include_param(self) -> None:
         ctx = _make_ctx()
@@ -162,8 +169,9 @@ class TestCreateQueryIndexValidation:
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
+            pytest.raises(ValueError) as excinfo,
         ):
-            result = create_query_index(
+            create_query_index(
                 ctx,
                 "b",
                 "s",
@@ -175,8 +183,7 @@ class TestCreateQueryIndexValidation:
                 similarity="COSINE",
                 include=["type"],
             )
-        assert result["success"] is False
-        assert "include" in result["error"]
+        assert "include" in str(excinfo.value)
 
     def test_composite_rejects_out_of_range_vector_index_position(self) -> None:
         ctx = _make_ctx()
@@ -184,8 +191,9 @@ class TestCreateQueryIndexValidation:
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
+            pytest.raises(ValueError) as excinfo,
         ):
-            result = create_query_index(
+            create_query_index(
                 ctx,
                 "b",
                 "s",
@@ -198,8 +206,7 @@ class TestCreateQueryIndexValidation:
                 similarity="COSINE",
                 vector_index_position=5,
             )
-        assert result["success"] is False
-        assert "vector_index_position" in result["error"]
+        assert "vector_index_position" in str(excinfo.value)
 
     @pytest.mark.parametrize("index_type", ["hyperscale_vector", "composite_vector"])
     def test_vector_requires_vector_field(self, index_type) -> None:
@@ -208,8 +215,9 @@ class TestCreateQueryIndexValidation:
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
+            pytest.raises(ValueError) as excinfo,
         ):
-            result = create_query_index(
+            create_query_index(
                 ctx,
                 "b",
                 "s",
@@ -219,8 +227,7 @@ class TestCreateQueryIndexValidation:
                 dimension=768,
                 similarity="COSINE",
             )
-        assert result["success"] is False
-        assert "vector_field" in result["error"]
+        assert "vector_field" in str(excinfo.value)
 
     @pytest.mark.parametrize("index_type", ["hyperscale_vector", "composite_vector"])
     def test_vector_requires_dimension(self, index_type) -> None:
@@ -229,8 +236,9 @@ class TestCreateQueryIndexValidation:
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
+            pytest.raises(ValueError) as excinfo,
         ):
-            result = create_query_index(
+            create_query_index(
                 ctx,
                 "b",
                 "s",
@@ -240,8 +248,7 @@ class TestCreateQueryIndexValidation:
                 vector_field="embedding",
                 similarity="COSINE",
             )
-        assert result["success"] is False
-        assert "dimension" in result["error"]
+        assert "dimension" in str(excinfo.value)
 
     @pytest.mark.parametrize("bad_dimension", [0, -5, 768.5, True])
     def test_vector_rejects_invalid_dimension(self, bad_dimension) -> None:
@@ -250,8 +257,9 @@ class TestCreateQueryIndexValidation:
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
+            pytest.raises(ValueError) as excinfo,
         ):
-            result = create_query_index(
+            create_query_index(
                 ctx,
                 "b",
                 "s",
@@ -262,8 +270,7 @@ class TestCreateQueryIndexValidation:
                 dimension=bad_dimension,
                 similarity="COSINE",
             )
-        assert result["success"] is False
-        assert "dimension" in result["error"]
+        assert "dimension" in str(excinfo.value)
 
     @pytest.mark.parametrize("index_type", ["hyperscale_vector", "composite_vector"])
     def test_vector_requires_similarity(self, index_type) -> None:
@@ -272,8 +279,9 @@ class TestCreateQueryIndexValidation:
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
+            pytest.raises(ValueError) as excinfo,
         ):
-            result = create_query_index(
+            create_query_index(
                 ctx,
                 "b",
                 "s",
@@ -283,8 +291,7 @@ class TestCreateQueryIndexValidation:
                 vector_field="embedding",
                 dimension=768,
             )
-        assert result["success"] is False
-        assert "similarity" in result["error"]
+        assert "similarity" in str(excinfo.value)
 
     def test_rejects_dot_product_with_clear_message(self) -> None:
         ctx = _make_ctx()
@@ -292,8 +299,9 @@ class TestCreateQueryIndexValidation:
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
+            pytest.raises(ValueError) as excinfo,
         ):
-            result = create_query_index(
+            create_query_index(
                 ctx,
                 "b",
                 "s",
@@ -304,9 +312,8 @@ class TestCreateQueryIndexValidation:
                 dimension=768,
                 similarity="DOT_PRODUCT",
             )
-        assert result["success"] is False
-        assert "DOT_PRODUCT" in result["error"]
-        assert "FTS" in result["error"]
+        assert "DOT_PRODUCT" in str(excinfo.value)
+        assert "FTS" in str(excinfo.value)
 
     def test_with_options_collision_with_reserved_key_is_error(self) -> None:
         ctx = _make_ctx()
@@ -314,8 +321,9 @@ class TestCreateQueryIndexValidation:
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
+            pytest.raises(ValueError) as excinfo,
         ):
-            result = create_query_index(
+            create_query_index(
                 ctx,
                 "b",
                 "s",
@@ -327,8 +335,7 @@ class TestCreateQueryIndexValidation:
                 similarity="COSINE",
                 with_options={"dimension": 1536},
             )
-        assert result["success"] is False
-        assert "with_options" in result["error"]
+        assert "with_options" in str(excinfo.value)
 
 
 class TestCreateQueryIndexScalarDDL:
@@ -583,7 +590,7 @@ class TestCreateQueryIndexExecution:
         assert result["success"] is True
         assert consumed == [True]
 
-    def test_sdk_error_returns_tool_error_not_raised(self) -> None:
+    def test_sdk_error_propagates(self) -> None:
         ctx = _make_ctx()
         cluster, bucket, scope = _cluster_with_scope_query()
         scope.query.side_effect = Exception("index already exists")
@@ -591,17 +598,9 @@ class TestCreateQueryIndexExecution:
         with (
             patch(f"{_MODULE}.get_cluster_connection", return_value=cluster),
             patch(f"{_MODULE}.connect_to_bucket", return_value=bucket),
+            pytest.raises(Exception, match="index already exists"),
         ):
-            result = create_query_index(
-                ctx, "b", "s", "c", "idx1", "scalar", keys=["email"]
-            )
-        assert result == {
-            "success": False,
-            "error": "index already exists",
-            "index_name": "idx1",
-            "keyspace": "b.s.c",
-            "index_type": "scalar",
-        }
+            create_query_index(ctx, "b", "s", "c", "idx1", "scalar", keys=["email"])
 
     def test_deferred_true_includes_next_step(self) -> None:
         ctx = _make_ctx()

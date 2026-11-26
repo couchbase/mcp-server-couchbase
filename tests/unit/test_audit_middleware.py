@@ -41,6 +41,7 @@ import uvicorn
 from fastmcp import Client, Context, FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.exceptions import ToolError
+from fastmcp.tools.tool import ToolResult
 
 from cb_mcp.audit import state as audit_state
 from cb_mcp.audit.catalog import AuditEvent
@@ -52,6 +53,7 @@ from cb_mcp.audit.identity import resolve_real_userid
 from cb_mcp.audit.middleware import AuditMiddleware, extract_keyspace
 from cb_mcp.audit.record import OUTCOME_ERROR
 from cb_mcp.audit.sink import AuditSink
+from cb_mcp.utils.error_handling import wrap_with_error_handling
 
 
 def _build_logger(tmp_path: Path, **overrides) -> AuditLogger:
@@ -318,6 +320,85 @@ async def test_execution_error_outcome(tmp_path):
     assert len(calls) == 1
     assert calls[0]["outcome"] == "error"
     assert calls[0]["reason"] == "execution_error"
+
+
+@pytest.mark.asyncio
+async def test_tool_error_is_audited_as_one_failed_call(tmp_path):
+    """A tool that raises ToolError is recorded once, as a failed execution."""
+    audit = _build_logger(tmp_path)
+    mcp = _server(audit)
+
+    @mcp.tool
+    def upsert_document_by_id(ctx: Context, bucket_name: str) -> dict:
+        """raises ToolError like a converted write tool"""
+        raise ToolError("DocumentExistsException: key already exists")
+
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="key already exists"):
+            await client.call_tool("upsert_document_by_id", {"bucket_name": "b"})
+
+    records = [
+        r for r in _records(audit) if r.get("tool_name") == "upsert_document_by_id"
+    ]
+    assert len(records) == 1
+    assert records[0]["outcome"] == "error"
+    assert records[0]["reason"] == "execution_error"
+
+
+@pytest.mark.asyncio
+async def test_result_reported_error_outcome(tmp_path):
+    """A result flagged is_error is audited as a failure even without a raise."""
+    audit = _build_logger(tmp_path)
+    mcp = _server(audit)
+
+    @mcp.tool
+    def get_document_by_id(ctx: Context, bucket_name: str) -> ToolResult:
+        """returns an error result"""
+        return ToolResult(content="boom", is_error=True)
+
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError):
+            await client.call_tool("get_document_by_id", {"bucket_name": "b"})
+
+    calls = [r for r in _records(audit) if r["id"] == 61490]
+    assert len(calls) == 1
+    assert calls[0]["outcome"] == "error"
+    assert calls[0]["reason"] == "execution_error"
+
+
+@pytest.mark.asyncio
+async def test_refusal_raised_inside_a_wrapped_tool_is_still_audited_as_a_refusal(
+    tmp_path,
+):
+    """The error wrapper turns the exception into a ToolError, but the refusal
+    the raising site recorded must still win: one refusal record, no
+    execution_error tool-call record."""
+    audit = _build_logger(tmp_path)
+    mcp = _server(audit)
+
+    def run_sql_plus_plus_query(ctx: Context, statement: str) -> list:
+        """refuses a write the way the read-only gate does"""
+        event = ReadOnlyWriteBlockedError.audit_event
+        audit_state.record_refusal(
+            event_id=event.id,
+            event_name=event.event_name,
+            outcome=ReadOnlyWriteBlockedError.audit_outcome,
+            reason=ReadOnlyWriteBlockedError.audit_reason,
+        )
+        raise ReadOnlyWriteBlockedError("writes are blocked")
+
+    mcp.tool(wrap_with_error_handling(run_sql_plus_plus_query))
+
+    async with Client(mcp) as client:
+        with pytest.raises(ToolError, match="writes are blocked"):
+            await client.call_tool("run_sql_plus_plus_query", {"statement": "UPDATE x"})
+
+    records = [
+        r for r in _records(audit) if r["id"] != AuditEvent.SESSION_INITIALIZED.id
+    ]
+    assert [r["id"] for r in records] == [ReadOnlyWriteBlockedError.audit_event.id]
+    assert records[0]["outcome"] == ReadOnlyWriteBlockedError.audit_outcome
+    assert records[0]["reason"] == ReadOnlyWriteBlockedError.audit_reason
 
 
 @pytest.mark.asyncio

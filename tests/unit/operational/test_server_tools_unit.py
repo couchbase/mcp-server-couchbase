@@ -4,15 +4,15 @@ The integration suite exercises the happy paths against a real cluster.
 These unit tests cover the failure branches that can't reasonably be
 reached against a live cluster:
 
-- test_cluster_connection returns an error envelope on connect failure.
+- test_cluster_connection lets connect failures propagate.
 - get_scopes_and_collections_in_bucket re-raises SDK errors.
 - get_scopes_in_bucket re-raises SDK errors.
-- get_cluster_health_and_services returns an error envelope on ping failure.
+- get_cluster_health_and_services lets ping failures propagate.
 - get_cluster_health_and_services translates service_types into PingOptions and
-  rejects unrecognized service type strings via the same error envelope.
+  rejects unrecognized service type strings via the same exception.
 - get_cluster_health_and_services bounds every ping — cluster or bucket, with or
   without service_types — by ENDPOINT_PING_TIMEOUT_SECONDS.
-- get_cluster_metrics returns error envelopes on REST
+- get_cluster_metrics raises on REST
   failures and success envelopes wrapping the raw REST response otherwise, and
   reject Capella connections up front without attempting the REST call.
 - get_cluster_metrics rejects malformed specs (non-object spec, non-integer
@@ -100,29 +100,22 @@ _CAPELLA_SETTINGS = {
 
 
 class TestTestClusterConnection:
-    """test_cluster_connection error envelope."""
+    """test_cluster_connection failure handling."""
 
-    def test_returns_error_envelope_on_failure(self) -> None:
-        """When get_cluster_connection raises, the tool must return a
-        structured error response rather than propagating the exception."""
+    def test_raises_on_failure(self) -> None:
+        """When get_cluster_connection raises, the tool lets the exception through."""
         ctx = _make_ctx(cluster=None)
 
         # Force get_cluster_connection to raise by patching it at the module
         # path the tool imports from.
-        with patch(
-            "cb_mcp.tools.operational.server.get_cluster_connection",
-            side_effect=Exception("auth failed"),
+        with (
+            patch(
+                "cb_mcp.tools.operational.server.get_cluster_connection",
+                side_effect=Exception("auth failed"),
+            ),
+            pytest.raises(Exception, match="auth failed"),
         ):
-            result = cluster_connection_tool(ctx)
-
-        assert result == {
-            "status": "error",
-            "cluster_connected": False,
-            "bucket_connected": False,
-            "bucket_name": None,
-            "error": "auth failed",
-            "message": "Failed to connect to Couchbase cluster",
-        }
+            cluster_connection_tool(ctx)
 
     def test_returns_success_envelope_on_connect(self) -> None:
         """Happy path returns success with bucket_connected=False when no
@@ -286,23 +279,22 @@ class TestGetScopesInBucket:
 
 
 class TestGetClusterHealthAndServices:
-    """get_cluster_health_and_services: error envelope and bucket-scoped path."""
+    """get_cluster_health_and_services: failure propagation and bucket-scoped path."""
 
-    def test_returns_error_envelope_on_failure(self) -> None:
-        """A ping failure must be reported as a structured error response."""
+    def test_raises_on_failure(self) -> None:
+        """A ping failure propagates the SDK exception."""
         cluster = MagicMock()
         cluster.ping.side_effect = Exception("ping timeout")
         ctx = _make_ctx(cluster=cluster)
 
-        with patch(
-            "cb_mcp.tools.operational.server.get_cluster_connection",
-            return_value=cluster,
+        with (
+            patch(
+                "cb_mcp.tools.operational.server.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(Exception, match="ping timeout"),
         ):
-            result = get_cluster_health_and_services(ctx)
-
-        assert result["status"] == "error"
-        assert "ping timeout" in result["error"]
-        assert "Failed to get cluster health" in result["message"]
+            get_cluster_health_and_services(ctx)
 
     def test_cluster_level_ping_when_no_bucket(self) -> None:
         """No bucket_name means we ping at the cluster level."""
@@ -514,24 +506,25 @@ class TestGetClusterHealthAndServices:
             assert list(ping_opts["service_types"]) == expected_services
         assert result["status"] == "success"
 
-    def test_invalid_service_type_returns_error_envelope(self) -> None:
-        """An unrecognized service type string must not raise past the tool boundary."""
+    def test_invalid_service_type_raises(self) -> None:
+        """An unrecognized service type string must raise."""
         cluster = MagicMock()
         ctx = _make_ctx(cluster=cluster)
 
-        with patch(
-            "cb_mcp.tools.operational.server.get_cluster_connection",
-            return_value=cluster,
+        with (
+            patch(
+                "cb_mcp.tools.operational.server.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(ValueError),
         ):
-            result = get_cluster_health_and_services(ctx, service_types=["bogus"])
+            get_cluster_health_and_services(ctx, service_types=["bogus"])
 
         cluster.ping.assert_not_called()
-        assert result["status"] == "error"
-        assert "Failed to get cluster health" in result["message"]
 
 
 class TestGetClusterMetrics:
-    """get_cluster_metrics: Capella rejection, REST call, and error/success envelopes."""
+    """get_cluster_metrics: Capella rejection, REST call, and raise/success payloads."""
 
     @staticmethod
     def _patch_endpoints(endpoints: list[str] | None = None):
@@ -572,26 +565,24 @@ class TestGetClusterMetrics:
         response.json.return_value = payload if payload is not None else []
         return response
 
-    def test_returns_error_envelope_on_missing_settings(self) -> None:
-        """Missing connection settings must not raise past the tool boundary."""
+    def test_raises_on_missing_settings(self) -> None:
+        """Missing connection settings must raise."""
         ctx = _make_ctx_with_settings({})
 
-        result = get_cluster_metrics(ctx, metrics=[{"metric": []}])
-
-        assert result["status"] == "error"
-        assert "Failed to get cluster metrics" in result["message"]
+        with pytest.raises(ValueError, match="Missing required connection settings"):
+            get_cluster_metrics(ctx, metrics=[{"metric": []}])
 
     def test_rejects_capella_connection_without_rest_call(self) -> None:
         """A Capella connection must be rejected up front, with no REST attempt."""
         ctx = _make_ctx_with_settings(_CAPELLA_SETTINGS)
 
-        with patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls:
-            result = get_cluster_metrics(ctx, metrics=[{"metric": []}])
+        with (
+            patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
+            pytest.raises(ValueError, match="Capella"),
+        ):
+            get_cluster_metrics(ctx, metrics=[{"metric": []}])
 
         mock_client_cls.assert_not_called()
-        assert result["status"] == "error"
-        assert "Capella" in result["error"]
-        assert "Failed to get cluster metrics" in result["message"]
 
     def test_rejects_unresolvable_endpoints_without_rest_call(self) -> None:
         """When the SDK resolves no management endpoint and the connection
@@ -604,13 +595,11 @@ class TestGetClusterMetrics:
         with (
             self._patch_endpoints([]),
             patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
+            pytest.raises(ValueError, match="No management endpoints found"),
         ):
-            result = get_cluster_metrics(ctx, metrics=metrics)
+            get_cluster_metrics(ctx, metrics=metrics)
 
         mock_client_cls.assert_not_called()
-        assert result["status"] == "error"
-        assert "No management endpoints found" in result["error"]
-        assert "Failed to get cluster metrics" in result["message"]
 
     def test_returns_success_envelope_with_rest_response(self) -> None:
         """Happy path wraps the raw stats-range response, per-spec errors and
@@ -654,19 +643,19 @@ class TestGetClusterMetrics:
         assert result == {"status": "success", "data": [{"data": []}]}
         assert mock_client.post.call_count == 2
 
-    def test_returns_error_envelope_when_all_hosts_fail(self) -> None:
-        """When every host fails, the tool returns a structured error response."""
+    def test_raises_when_all_hosts_fail(self) -> None:
+        """When every host fails, the tool raises."""
         settings = {**_VALID_SETTINGS, "connection_string": "couchbase://host1,host2"}
         ctx = _make_ctx_with_settings(settings)
         error = httpx.ConnectError("refused")
         client_patch, _ = self._patch_httpx_client("post", [error, error])
 
-        with client_patch, self._patch_endpoints(["host1:8091", "host2:8091"]):
-            result = get_cluster_metrics(ctx, metrics=[])
-
-        assert result["status"] == "error"
-        assert "host1" in result["error"] and "host2" in result["error"]
-        assert "Failed to get cluster metrics" in result["message"]
+        with (
+            client_patch,
+            self._patch_endpoints(["host1:8091", "host2:8091"]),
+            pytest.raises(RuntimeError, match=r"host1.*host2"),
+        ):
+            get_cluster_metrics(ctx, metrics=[])
 
     def test_rejects_non_dict_spec_without_rest_call(self) -> None:
         """A spec that isn't an object must be rejected up front, not raise
@@ -674,13 +663,13 @@ class TestGetClusterMetrics:
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         metrics = ["not-a-spec"]
 
-        with patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls:
-            result = get_cluster_metrics(ctx, metrics=metrics)
+        with (
+            patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
+            pytest.raises(ValueError, match="must be an object"),
+        ):
+            get_cluster_metrics(ctx, metrics=metrics)
 
         mock_client_cls.assert_not_called()
-        assert result["status"] == "error"
-        assert "must be an object" in result["error"]
-        assert "Failed to get cluster metrics" in result["message"]
 
     def test_rejects_non_integer_step_without_rest_call(self) -> None:
         """A string 'step' must be rejected up front, not raise TypeError from
@@ -688,13 +677,13 @@ class TestGetClusterMetrics:
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
         metrics = [{"metric": [], "step": "10", "nodes": ["host1:11210"]}]
 
-        with patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls:
-            result = get_cluster_metrics(ctx, metrics=metrics)
+        with (
+            patch("cb_mcp.tools.operational.server.httpx.Client") as mock_client_cls,
+            pytest.raises(ValueError, match="non-integer"),
+        ):
+            get_cluster_metrics(ctx, metrics=metrics)
 
         mock_client_cls.assert_not_called()
-        assert result["status"] == "error"
-        assert "non-integer" in result["error"]
-        assert "Failed to get cluster metrics" in result["message"]
 
     def test_accepts_spec_with_no_nodes(self) -> None:
         """A spec with no 'nodes' at all is passed straight through, unbounded."""
@@ -714,9 +703,9 @@ class TestGetClusterMetrics:
 class TestGetClusterTasks:
     """get_cluster_tasks: Capella rejection, host failover, and raw passthrough.
 
-    Unlike the enveloped tools above, this one returns the endpoint's array
+    Unlike the status-payload tools above, this one returns the endpoint's array
     unchanged and re-raises on failure (the get_index_stats convention), so
-    these tests assert on the raised exception rather than an error envelope.
+    these tests assert on the raised exception.
     """
 
     def test_raises_on_missing_settings(self) -> None:
@@ -897,7 +886,7 @@ class TestGetBucketConfig:
 
     Like get_cluster_tasks, this one returns the endpoint's response unchanged
     and re-raises on failure, so these tests assert on raw equality / the
-    raised exception rather than an error envelope or shaped fields.
+    raised exception rather than shaped fields.
     """
 
     _RAW_BUCKET: ClassVar[dict[str, Any]] = {

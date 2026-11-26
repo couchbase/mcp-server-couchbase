@@ -5,7 +5,7 @@ Covers:
 - get_index_advisor_recommendations error propagation.
 - list_indexes REST-API path with return_raw_index_stats=True.
 - list_indexes top-level error propagation.
-- create_index / build_index / drop_index happy paths and log-and-return error handling.
+- create_index / build_index / drop_index happy paths and error propagation on failure.
 """
 
 from __future__ import annotations
@@ -297,7 +297,7 @@ class TestListIndexesErrorPropagation:
 
 
 class TestCreateIndex:
-    """create_index happy path and log-and-return error handling."""
+    """create_index happy path and error propagation on failure."""
 
     def test_creates_deferred_by_default(self) -> None:
         """deferred defaults to True and is threaded through to the SDK options."""
@@ -363,27 +363,23 @@ class TestCreateIndex:
             ignore_if_exists=True,
         )
 
-    def test_sdk_error_returns_error_dict_not_raised(self) -> None:
-        """An existing-index error must be caught, logged, and returned — not raised."""
+    def test_sdk_error_propagates(self) -> None:
+        """An existing-index error must propagate raw."""
         ctx, cluster, index_manager = _make_ctx_with_index_manager()
         index_manager.create_index.side_effect = Exception("index already exists")
 
-        with patch(
-            "cb_mcp.tools.operational.index.get_cluster_connection",
-            return_value=cluster,
+        with (
+            patch(
+                "cb_mcp.tools.operational.index.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(Exception, match="index already exists"),
         ):
-            result = create_index(ctx, "b", "s", "c", "idx1", ["email"])
-
-        assert result == {
-            "success": False,
-            "error": "index already exists",
-            "index_name": "idx1",
-            "keyspace": "b.s.c",
-        }
+            create_index(ctx, "b", "s", "c", "idx1", ["email"])
 
 
 class TestBuildIndex:
-    """build_index happy path and log-and-return error handling.
+    """build_index happy path and error propagation on failure.
 
     build_index does not pre-check for deferred indexes — it just calls
     build_deferred_indexes() and lets the SDK decide whether there's
@@ -404,26 +400,23 @@ class TestBuildIndex:
         index_manager.build_deferred_indexes.assert_called_once()
         index_manager.get_all_indexes.assert_not_called()
 
-    def test_sdk_error_returns_error_dict_not_raised(self) -> None:
-        """An SDK failure building indexes must be caught and returned."""
+    def test_sdk_error_propagates(self) -> None:
+        """An SDK failure building indexes must propagate raw."""
         ctx, cluster, index_manager = _make_ctx_with_index_manager()
         index_manager.build_deferred_indexes.side_effect = Exception("connection reset")
 
-        with patch(
-            "cb_mcp.tools.operational.index.get_cluster_connection",
-            return_value=cluster,
+        with (
+            patch(
+                "cb_mcp.tools.operational.index.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(Exception, match="connection reset"),
         ):
-            result = build_index(ctx, "b", "s", "c")
-
-        assert result == {
-            "success": False,
-            "error": "connection reset",
-            "keyspace": "b.s.c",
-        }
+            build_index(ctx, "b", "s", "c")
 
 
 class TestDropIndex:
-    """drop_index happy path and log-and-return error handling."""
+    """drop_index happy path and error propagation on failure."""
 
     def test_drops_index(self) -> None:
         """Happy path forwards index_name and ignore_if_not_exists to the SDK."""
@@ -445,20 +438,16 @@ class TestDropIndex:
         assert args[0] == "idx1"
         mock_options.assert_called_once_with(ignore_if_not_exists=True)
 
-    def test_sdk_error_returns_error_dict_not_raised(self) -> None:
-        """A not-found error (without ignore_if_not_exists) must be caught and returned."""
+    def test_sdk_error_propagates(self) -> None:
+        """A not-found error (without ignore_if_not_exists) must propagate raw."""
         ctx, cluster, index_manager = _make_ctx_with_index_manager()
         index_manager.drop_index.side_effect = Exception("index not found")
 
-        with patch(
-            "cb_mcp.tools.operational.index.get_cluster_connection",
-            return_value=cluster,
+        with (
+            patch(
+                "cb_mcp.tools.operational.index.get_cluster_connection",
+                return_value=cluster,
+            ),
+            pytest.raises(Exception, match="index not found"),
         ):
-            result = drop_index(ctx, "b", "s", "c", "idx1")
-
-        assert result == {
-            "success": False,
-            "error": "index not found",
-            "index_name": "idx1",
-            "keyspace": "b.s.c",
-        }
+            drop_index(ctx, "b", "s", "c", "idx1")

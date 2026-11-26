@@ -2,14 +2,16 @@
 
 Ported from the ``analytics-mcp`` prototype (branch
 ``DA-2027/Add-enterprise-tools``). Mocks the cluster's ``execute_query()`` so
-these tests can verify CREATE INDEX statement construction and the
-write-tool error envelope without a live Operational Insights cluster.
+these tests can verify CREATE INDEX statement construction and
+error propagation without a live Operational Insights cluster.
 
 Identifiers are backtick-quoted, but input *validation* is still deliberately
 absent from index.py, so there are no tests here for malformed input --
-bad input either raises out of the formatter into the error envelope, or is
+bad input either raises out of the formatter as a ValueError, or is
 forwarded to the server to reject.
 """
+
+import re
 
 import pytest
 from _operational_insights_fakes import make_operational_insights_ctx
@@ -148,15 +150,12 @@ class TestCreateIndex:
 
         assert result["keyspace"] == "`travel-sample`.`inventory`.`airline`"
 
-    def test_returns_error_envelope_on_sdk_error(self) -> None:
+    def test_propagates_sdk_error(self) -> None:
         ctx, cluster = make_operational_insights_ctx()
         cluster.execute_query.side_effect = Exception("index already exists")
 
-        result = _create(ctx, cluster)
-
-        assert result["success"] is False
-        assert "index already exists" in result["error"]
-        assert result["index_name"] == "song_title_idx"
+        with pytest.raises(Exception, match=re.escape("index already exists")):
+            _create(ctx, cluster)
 
     def test_rejects_unrecognised_type_without_querying_the_server(self) -> None:
         """An unknown type is a client-side validation error, never reaches the server.
@@ -167,39 +166,31 @@ class TestCreateIndex:
         """
         ctx, cluster = make_operational_insights_ctx()
 
-        result = _create(ctx, cluster, fields=[{"name": "title", "type": "float"}])
-
-        assert result["success"] is False
-        assert "float" in result["error"]
+        with pytest.raises(ValueError, match=re.escape("float")):
+            _create(ctx, cluster, fields=[{"name": "title", "type": "float"}])
         cluster.execute_query.assert_not_called()
 
     def test_rejects_unrecognised_type_on_unnest_field(self) -> None:
         ctx, cluster = make_operational_insights_ctx()
 
-        result = _create(
-            ctx, cluster, fields=[{"unnest": "public_likes", "type": "float"}]
-        )
-
-        assert result["success"] is False
-        assert "float" in result["error"]
+        with pytest.raises(ValueError, match=re.escape("float")):
+            _create(ctx, cluster, fields=[{"unnest": "public_likes", "type": "float"}])
         cluster.execute_query.assert_not_called()
 
     def test_rejects_unrecognised_type_on_select_subfield(self) -> None:
         ctx, cluster = make_operational_insights_ctx()
 
-        result = _create(
-            ctx,
-            cluster,
-            fields=[
-                {
-                    "unnest": "reviews",
-                    "select": [{"name": "ratings.Lyrics", "type": "float"}],
-                }
-            ],
-        )
-
-        assert result["success"] is False
-        assert "float" in result["error"]
+        with pytest.raises(ValueError, match=re.escape("float")):
+            _create(
+                ctx,
+                cluster,
+                fields=[
+                    {
+                        "unnest": "reviews",
+                        "select": [{"name": "ratings.Lyrics", "type": "float"}],
+                    }
+                ],
+            )
         cluster.execute_query.assert_not_called()
 
 

@@ -17,6 +17,7 @@ from conftest import (
     create_logging_test_session,
     create_mcp_session,
     extract_payload,
+    is_error_response,
 )
 
 from ._deployment import skip_if_capella
@@ -101,10 +102,9 @@ async def test_unknown_tool_name_reports_what_is_registered() -> None:
         response = await session.call_tool(
             "discover_tool_input_values", arguments={"tool_name": "not_a_real_tool"}
         )
-        payload = extract_payload(response)
 
-        assert payload.get("success") is False
-        assert METRICS_TOOL in payload.get("available_tool_names", [])
+        assert is_error_response(response)
+        assert METRICS_TOOL in response.content[0].text
 
 
 @pytest.mark.asyncio

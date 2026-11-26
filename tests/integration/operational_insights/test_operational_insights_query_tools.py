@@ -9,7 +9,7 @@ unless credentials are configured.
 from __future__ import annotations
 
 import pytest
-from conftest import extract_payload
+from conftest import extract_payload, is_error_response
 
 from .conftest import create_operational_insights_mcp_session
 
@@ -28,15 +28,13 @@ async def test_run_query_sync_select_one():
 
 
 @pytest.mark.asyncio
-async def test_run_query_sync_invalid_statement_returns_error_envelope():
+async def test_run_query_sync_invalid_statement_is_an_error():
     async with create_operational_insights_mcp_session() as session:
         response = await session.call_tool(
             "operational_insights_run_query_sync", {"statement": "SELECT bad("}
         )
-        payload = extract_payload(response)
 
-    assert payload["success"] is False
-    assert "error" in payload
+    assert is_error_response(response)
 
 
 @pytest.mark.asyncio
@@ -65,12 +63,10 @@ async def test_explain_query_does_not_execute_the_statement():
 
 
 @pytest.mark.asyncio
-async def test_explain_query_invalid_statement_returns_error_envelope():
+async def test_explain_query_invalid_statement_is_an_error():
     async with create_operational_insights_mcp_session() as session:
         response = await session.call_tool(
             "operational_insights_explain_query", {"statement": "SELECT bad("}
         )
-        payload = extract_payload(response)
 
-    assert payload["success"] is False
-    assert "error" in payload
+    assert is_error_response(response)

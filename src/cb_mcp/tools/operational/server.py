@@ -118,14 +118,7 @@ def test_cluster_connection(
         }
     except Exception as e:
         logger.error(f"Connection test failed: {e}", exc_info=True)
-        return {
-            "status": "error",
-            "cluster_connected": False,
-            "bucket_connected": False,
-            "bucket_name": bucket_name,
-            "error": str(e),
-            "message": "Failed to connect to Couchbase cluster",
-        }
+        raise
 
 
 def get_scopes_and_collections_in_bucket(
@@ -402,11 +395,7 @@ def get_cluster_health_and_services(
         }
     except Exception as e:
         logger.error(f"Error getting cluster health: {e}", exc_info=True)
-        return {
-            "status": "error",
-            "error": str(e),
-            "message": "Failed to get cluster health and services information",
-        }
+        raise
 
 
 def get_client_connectivity_report(ctx: Context) -> dict[str, Any]:
@@ -444,11 +433,7 @@ def get_client_connectivity_report(ctx: Context) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Error getting cluster diagnostics: {e}", exc_info=True)
-        return {
-            "status": "error",
-            "error": str(e),
-            "message": "Failed to get cluster diagnostics information",
-        }
+        raise
 
 
 def get_cluster_metrics(
@@ -481,7 +466,7 @@ def get_cluster_metrics(
     large response.
 
     Returns {"status": "success", "data": [...]} (one entry per spec, each with "data" and any
-    per-spec "errors") or {"status": "error", "error": "..."}.
+    per-spec "errors"), or fails with an error.
     """
     try:
         settings = get_settings(ctx)
@@ -546,18 +531,10 @@ def get_cluster_metrics(
         # Up-front, documented rejections (bad input, Capella, no hosts) — not a
         # system fault, so no traceback noise in the logs.
         logger.warning(f"Rejected get_cluster_metrics request: {e}")
-        return {
-            "status": "error",
-            "error": str(e),
-            "message": "Failed to get cluster metrics",
-        }
+        raise
     except Exception as e:
         logger.error(f"Error getting cluster metrics: {e}", exc_info=True)
-        return {
-            "status": "error",
-            "error": str(e),
-            "message": "Failed to get cluster metrics",
-        }
+        raise
 
 
 def get_cluster_tasks(ctx: Context, timeout: int = 30) -> list[dict[str, Any]]:
