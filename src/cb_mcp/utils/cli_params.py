@@ -218,6 +218,8 @@ class GatingParams:
     max_query_result_size: int | None
     #: The value as the operator gave it, before clamping; only used to warn.
     max_query_result_size_requested: int | None = None
+    tool_sets: str | None = None
+    enable_tool_set_selection: bool = False
 
     def warn_if_clamped(self) -> None:
         """Log the clamp warning through the configured sinks.
@@ -240,6 +242,10 @@ class GatingParams:
                 else clamp_max_query_result_size(requested, warn=False)
             ),
             max_query_result_size_requested=requested,
+            tool_sets=params.get("tool_sets"),
+            enable_tool_set_selection=bool(
+                params.get("enable_tool_set_selection", False)
+            ),
         )
 
 
@@ -580,6 +586,8 @@ def gate_tools(
             confirmation_required_tools=gating.confirmation_required_tools,
             enforce_scopes=enforce_scopes,
             deployment=deployment,
+            tool_sets=gating.tool_sets,
+            enable_tool_set_selection=gating.enable_tool_set_selection,
         )
     )
 

@@ -30,6 +30,22 @@ def _resolve(**overrides) -> ServingConfig:
     return resolve_serving(**kwargs)
 
 
+class TestToolSetSelectionNeedsASession:
+    def test_selection_with_a_single_stateful_worker_is_fine(self):
+        assert _resolve(tool_set_selection=True).stateless_http is False
+
+    def test_selection_with_multiple_workers_is_refused(self):
+        with pytest.raises(ServingConfigError, match="enable-tool-set-selection"):
+            _resolve(workers=2, tool_set_selection=True)
+
+    def test_selection_with_explicit_stateless_is_refused(self):
+        with pytest.raises(ServingConfigError, match="enable-tool-set-selection"):
+            _resolve(stateless_http=True, tool_set_selection=True)
+
+    def test_stateless_without_selection_is_unchanged(self):
+        assert _resolve(workers=2).stateless_http is True
+
+
 class TestStatelessDefault:
     def test_single_worker_keeps_sessions(self):
         assert _resolve().stateless_http is False

@@ -192,8 +192,98 @@ READ_ONLY_TOOLS = list(TOOL_SET.read_only)
 WRITE_TOOLS = list(TOOL_SET.write)
 ALL_TOOLS = TOOL_SET.all_tools
 
+
+# Named tool sets: job-shaped groupings, not module boundaries. An agent doing
+# one job is handed one or two of these rather than the whole catalogue.
+#
+# Declared from the function objects rather than from string literals so a
+# rename is an ImportError here, not a set that silently loses a tool. The
+# cross-server invariant test also checks every name against the spec.
+#
+# Sets may overlap: a tool belongs wherever a job would reach for it.
+def _names(*tools: Callable) -> frozenset[str]:
+    return frozenset(fn.__name__ for fn in tools)
+
+
+TOOL_SETS: dict[str, frozenset[str]] = {
+    "kv": _names(
+        get_document_by_id,
+        lookup_subdocument,
+        upsert_document_by_id,
+        insert_document_by_id,
+        replace_document_by_id,
+        delete_document_by_id,
+        mutate_subdocument,
+    ),
+    "query": _names(
+        get_schema_for_collection,
+        run_sql_plus_plus_query,
+        explain_sql_plus_plus_query,
+    ),
+    "search": _names(
+        list_search_indexes,
+        get_search_index_definition,
+        run_search,
+        upsert_search_index,
+        drop_search_index,
+    ),
+    "vector": _names(
+        run_vector_search,
+        run_vector_query,
+        # Also in "indexes": a vector workflow has to create its own index, and
+        # an index workflow should not have a hole where vector indexes are.
+        create_query_index,
+    ),
+    "indexes": _names(
+        list_indexes,
+        get_index_stats,
+        get_index_advisor_recommendations,
+        create_index,
+        build_index,
+        drop_index,
+        create_query_index,
+    ),
+    "diagnostics": _names(
+        get_server_configuration_status,
+        test_cluster_connection,
+        get_cluster_health_and_services,
+        get_cluster_health_snapshot,
+        get_cluster_metrics,
+        get_cluster_system_events,
+        get_cluster_tasks,
+        get_client_connectivity_report,
+        get_cluster_query_vitals,
+        get_active_queries,
+        delete_active_query,
+        get_queries_not_selective,
+        get_queries_not_using_covering_index,
+        get_queries_using_primary_index,
+        get_queries_with_large_result_count,
+        get_queries_with_largest_response_sizes,
+        get_longest_running_queries,
+        get_most_frequent_queries,
+    ),
+    "provisioning": _names(
+        get_buckets_in_cluster,
+        get_bucket_config,
+        get_scopes_in_bucket,
+        get_collections_in_scope,
+        get_scopes_and_collections_in_bucket,
+        create_scope,
+        create_collection,
+        delete_scope,
+        delete_collection,
+    ),
+    "reference": _names(discover_tool_input_values),
+}
+
 # Tool annotations for MCP clients (readOnlyHint, destructiveHint, etc.)
 TOOL_ANNOTATIONS: dict[str, ToolAnnotations] = {
+    # Registered only under --enable-tool-set-selection, so it is not in
+    # TOOL_SET. The annotation lives here so that when it is registered it
+    # carries one, and the spec invariant (every tool in TOOL_SET has an
+    # annotation) is a subset check that this extra key does not disturb.
+    "select_tool_sets": ToolAnnotations(readOnlyHint=True),
     # Server/Cluster management tools (read-only)
     "get_server_configuration_status": ToolAnnotations(readOnlyHint=True),
     "test_cluster_connection": ToolAnnotations(readOnlyHint=True),
@@ -394,6 +484,7 @@ __all__ = [
     # Tool annotations
     "TOOL_ANNOTATIONS",
     "TOOL_SCOPE_HINTS",
+    "TOOL_SETS",
     # Convenience
     "ALL_TOOLS",
     "get_tools",
