@@ -242,11 +242,8 @@ class TestGetActiveQueries:
 
     def test_merges_active_requests_across_nodes(self) -> None:
         ctx = _make_ctx_with_settings(_VALID_SETTINGS)
-        node1_requests = [{"requestId": "r1", "node": "node1:8093"}]
-        node2_requests = [
-            {"requestId": "r2", "node": "node2:8093"},
-            {"requestId": "r3", "node": "node2:8093"},
-        ]
+        node1_requests = [{"requestId": "r1"}]
+        node2_requests = [{"requestId": "r2"}, {"requestId": "r3"}]
         client_patch, mock_client = _patch_httpx_client(
             "get", [_ok_response(node1_requests), _ok_response(node2_requests)]
         )
@@ -256,8 +253,26 @@ class TestGetActiveQueries:
 
         assert mock_client.get.call_count == 2
         assert result["status"] == "success"
-        assert result["active_requests"] == node1_requests + node2_requests
+        assert result["active_requests"] == [
+            {"requestId": "r1", "node": "node1:8093"},
+            {"requestId": "r2", "node": "node2:8093"},
+            {"requestId": "r3", "node": "node2:8093"},
+        ]
         assert "unreachable_nodes" not in result
+
+    def test_keeps_node_field_already_supplied_by_server(self) -> None:
+        """Servers that already tag entries with "node" keep their own value."""
+        ctx = _make_ctx_with_settings(_VALID_SETTINGS)
+        client_patch, _ = _patch_httpx_client(
+            "get", [_ok_response([{"requestId": "r1", "node": "server-says:8093"}])]
+        )
+
+        with _patch_endpoints(["node1:8093"]), client_patch:
+            result = get_active_queries(ctx)
+
+        assert result["active_requests"] == [
+            {"requestId": "r1", "node": "server-says:8093"}
+        ]
 
     def test_empty_result_is_still_a_success_when_a_node_answers(self) -> None:
         """A node reporting no active requests is a valid, empty answer — not a failure."""

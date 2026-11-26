@@ -135,8 +135,9 @@ def get_active_queries(ctx: Context, timeout: int = 30) -> dict[str, Any]:
 
     /admin/active_requests answers per node — a request only shows up when
     the node running it is asked — so every query-service node is queried and
-    the lists are merged into one. Each entry already carries its own "node"
-    field, so there is no need to tag entries by which endpoint answered.
+    the lists are merged into one. Each entry is tagged with a "node" field
+    ("host:port" of the query node running it) when the server did not already
+    supply one — Couchbase Server 8.5 does not.
 
     Returns {"status": "success", "active_requests": [...merged...],
     "unreachable_nodes": [{"node", "error"}]} (the last key omitted when every
@@ -180,6 +181,8 @@ def get_active_queries(ctx: Context, timeout: int = 30) -> dict[str, Any]:
                             f"/admin/active_requests on {endpoint} returned "
                             f"{type(items).__name__}, expected a list"
                         )
+                    for item in items:
+                        item.setdefault("node", endpoint)
                     active_requests.extend(items)
                     any_success = True
                 except Exception as e:
